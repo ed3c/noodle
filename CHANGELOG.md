@@ -1,3 +1,9 @@
+## [0.1.8](https://github.com/ed3c/noodle/compare/v0.1.7...v0.1.8) (2026-09-10)
+
+### Bug Fixes
+
+* **loop:** require explicit typed outcomes for opted-in agent providers ([5026fca](https://github.com/ed3c/noodle/commit/5026fca1fcec99c52706aafa62ed34cf5880b80e))
+
 ## [0.1.7](https://github.com/poteto/noodle/compare/v0.1.6...v0.1.7) (2026-09-10)
 
 ### Bug Fixes
