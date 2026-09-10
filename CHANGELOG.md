@@ -1,3 +1,9 @@
+## [0.1.9](https://github.com/ed3c/noodle/compare/v0.1.8...v0.1.9) (2026-09-11)
+
+### Bug Fixes
+
+* **start:** permit a process-local manual hold before dispatch ([9a44e45](https://github.com/ed3c/noodle/commit/9a44e45d494da43b50183d22a72e4a3f218f18b7))
+
 ## [0.1.8](https://github.com/ed3c/noodle/compare/v0.1.7...v0.1.8) (2026-09-10)
 
 ### Bug Fixes
