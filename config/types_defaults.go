@@ -46,8 +46,9 @@ type ConcurrencyConfig struct {
 }
 
 type ProviderConfig struct {
-	Path string   `toml:"path"`
-	Args []string `toml:"args"`
+	Path                string   `toml:"path"`
+	Args                []string `toml:"args"`
+	RequireTypedOutcome bool     `toml:"require_typed_outcome"`
 }
 
 type AgentsConfig struct {

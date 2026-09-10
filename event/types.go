@@ -45,8 +45,31 @@ type Event struct {
 
 // StageMessagePayload is the payload for stage_message events.
 type StageMessagePayload struct {
-	Message  string `json:"message"`
-	Blocking *bool  `json:"blocking,omitempty"`
+	Message    string       `json:"message"`
+	Blocking   *bool        `json:"blocking,omitempty"`
+	Outcome    StageOutcome `json:"outcome,omitempty"`
+	OrderID    string       `json:"order_id,omitempty"`
+	StageIndex *int         `json:"stage_index,omitempty"`
+}
+
+// StageOutcome is an agent's explicit semantic result. It is optional for
+// backwards compatibility; projects opt in to requiring it per provider.
+type StageOutcome string
+
+const (
+	StageOutcomeCompleted StageOutcome = "completed"
+	StageOutcomeBlocked   StageOutcome = "blocked"
+	StageOutcomeFailed    StageOutcome = "failed"
+)
+
+// IsValid reports whether the outcome is one of the closed protocol values.
+func (o StageOutcome) IsValid() bool {
+	switch o {
+	case StageOutcomeCompleted, StageOutcomeBlocked, StageOutcomeFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 // IsBlocking returns whether the message blocks auto-advance.

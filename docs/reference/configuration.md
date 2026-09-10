@@ -92,6 +92,7 @@ Configures paths and arguments for agent CLI binaries. Each sub-table names a pr
 |-------|------|---------|-------------|
 | `path` | string | `""` | Path to the Claude CLI binary or directory |
 | `args` | string[] | `[]` | Additional CLI arguments passed on every invocation |
+| `require_typed_outcome` | bool | `false` | Require the final `stage_message` from each non-scheduler cook to carry an exact `completed`, `blocked`, or `failed` outcome |
 
 ```toml
 [agents.claude]
@@ -105,6 +106,7 @@ args = ["--dangerously-skip-permissions", "--verbose"]
 |-------|------|---------|-------------|
 | `path` | string | `""` | Path to the Codex CLI binary or directory |
 | `args` | string[] | `[]` | Additional CLI arguments passed on every invocation |
+| `require_typed_outcome` | bool | `false` | Require the final `stage_message` from each non-scheduler cook to carry an exact `completed`, `blocked`, or `failed` outcome |
 
 ```toml
 [agents.codex]

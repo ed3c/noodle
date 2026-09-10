@@ -2,7 +2,6 @@ package loop
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -118,14 +117,37 @@ func (l *Loop) handleCompletion(ctx context.Context, cook *cookHandle, resultSta
 	if status == "" {
 		status = stringx.Normalize(cook.session.Outcome().Status.String())
 	}
+	var typedMessage *string
+	if l.requiresTypedOutcome(cook) && !isScheduleStage(cook.stage) {
+		outcome, err := l.readRequiredStageOutcome(cook)
+		if err != nil {
+			return l.parkPendingReview(cook, "typed stage outcome refused: "+err.Error())
+		}
+		message := outcome.Message
+		switch outcome.Outcome {
+		case event.StageOutcomeBlocked:
+			l.forwardToScheduler(cook, "stage_message_blocked", outcome.Message, nil)
+			return l.parkPendingReview(cook, "blocked by typed stage outcome: "+outcome.Message)
+		case event.StageOutcomeFailed:
+			return l.failStage(ctx, cook, "cook reported failed outcome: "+outcome.Message)
+		case event.StageOutcomeCompleted:
+			resultStatus = StageResultCompleted
+			status = string(StageResultCompleted)
+			typedMessage = &message
+		}
+	}
 
 	if resultStatus == StageResultCompleted {
 		if isScheduleStage(cook.stage) {
 			return l.handleScheduleCompletion(cook)
 		}
-		blocked, msg := l.processStageMessage(cook)
-		if blocked {
-			return nil
+		msg := typedMessage
+		if msg == nil {
+			blocked, legacyMessage := l.processStageMessage(cook)
+			if blocked {
+				return nil
+			}
+			msg = legacyMessage
 		}
 		canMerge, err := l.worktreeHasChanges(cook)
 		if err != nil {
@@ -422,42 +444,6 @@ func (l *Loop) collectAdoptedCompletions(ctx context.Context) error {
 		l.dropAdoptedTarget(targetID, sessionID)
 	}
 	return nil
-}
-
-// readStageMessage reads the most recent stage_message event from a session's
-// event log. Returns nil if no stage_message was emitted.
-func (l *Loop) readStageMessage(sessionID string) *event.StageMessagePayload {
-	reader := event.NewEventReader(l.runtimeDir)
-	events, err := reader.ReadSession(sessionID, event.EventFilter{
-		Types: map[event.EventType]struct{}{event.EventStageMessage: {}},
-	})
-	if err != nil || len(events) == 0 {
-		return nil
-	}
-	last := events[len(events)-1]
-	var payload event.StageMessagePayload
-	if err := json.Unmarshal(last.Payload, &payload); err != nil {
-		return nil
-	}
-	return &payload
-}
-
-// readStageYield reads the most recent stage_yield event from a session's
-// event log. Returns nil if no stage_yield was emitted.
-func (l *Loop) readStageYield(sessionID string) *event.StageYieldPayload {
-	reader := event.NewEventReader(l.runtimeDir)
-	events, err := reader.ReadSession(sessionID, event.EventFilter{
-		Types: map[event.EventType]struct{}{event.EventStageYield: {}},
-	})
-	if err != nil || len(events) == 0 {
-		return nil
-	}
-	last := events[len(events)-1]
-	var payload event.StageYieldPayload
-	if err := json.Unmarshal(last.Payload, &payload); err != nil {
-		return nil
-	}
-	return &payload
 }
 
 // removeOrder removes an order from orders.json by ID.
