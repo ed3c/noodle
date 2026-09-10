@@ -13,6 +13,7 @@ import (
 
 	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/internal/failure"
+	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/internal/statever"
 	"github.com/poteto/noodle/loop"
 )
@@ -96,9 +97,11 @@ func TestRunStartModeOverrideReachesRuntimeWithoutChangingConfiguredMode(t *test
 
 	fakeLoop := &fakeStartLoop{}
 	var captured config.Config
+	var capturedDeps loop.Dependencies
 	originalFactory := newStartRuntimeLoop
-	newStartRuntimeLoop = func(_ string, _ string, cfg config.Config, _ loop.Dependencies) startRuntimeLoop {
+	newStartRuntimeLoop = func(_ string, _ string, cfg config.Config, deps loop.Dependencies) startRuntimeLoop {
 		captured = cfg
+		capturedDeps = deps
 		return fakeLoop
 	}
 	t.Cleanup(func() { newStartRuntimeLoop = originalFactory })
@@ -110,6 +113,9 @@ func TestRunStartModeOverrideReachesRuntimeWithoutChangingConfiguredMode(t *test
 	}
 	if captured.Mode != "manual" {
 		t.Fatalf("runtime mode = %q, want manual", captured.Mode)
+	}
+	if capturedDeps.ModeOverride != state.RunModeManual {
+		t.Fatalf("process mode override = %q, want manual", capturedDeps.ModeOverride)
 	}
 	if app.Config.Mode != originalMode {
 		t.Fatalf("configured mode mutated to %q, want %q", app.Config.Mode, originalMode)

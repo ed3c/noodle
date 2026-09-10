@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/poteto/noodle/internal/dispatch"
+	"github.com/poteto/noodle/internal/mode"
 	"github.com/poteto/noodle/mise"
 )
 
@@ -386,6 +387,9 @@ func (l *Loop) planCycleSpawns(orders OrdersFile, brief mise.Brief, capacity int
 		if err := l.loadOrBootstrapCanonical(); err != nil {
 			return nil, err
 		}
+	}
+	if !((mode.ModeGate{}).CanDispatch(l.effectiveMode())) {
+		return nil, nil
 	}
 	if l.mergeQueue != nil {
 		if l.mergeQueue.Pending()+l.mergeQueue.InFlight() > mergeBackpressureLimit {

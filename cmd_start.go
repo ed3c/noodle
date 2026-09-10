@@ -112,8 +112,9 @@ func runStart(ctx context.Context, app *App, opts startOptions) error {
 		return err
 	}
 	runtimeLoop := newStartRuntimeLoop(cwd, noodleBin, runtimeConfig, loop.Dependencies{
-		EventSink: broker,
-		Logger:    slog.New(apiLogger),
+		ModeOverride: state.RunMode(strings.TrimSpace(opts.mode)),
+		EventSink:    broker,
+		Logger:       slog.New(apiLogger),
 	})
 	startServer := shouldStartServer(runtimeConfig.Server)
 

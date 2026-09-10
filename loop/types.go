@@ -156,12 +156,20 @@ type Dependencies struct {
 	Mise           MiseBuilder
 	Monitor        Monitor
 	Registry       taskreg.Registry
+	ModeOverride   state.RunMode
 	EventSink      dispatcher.SessionEventSink
 	Logger         *slog.Logger
 	Now            func() time.Time
 	OrdersFile     string
 	OrdersNextFile string
 	StatusFile     string
+}
+
+func (l *Loop) effectiveMode() state.RunMode {
+	if l.deps.ModeOverride != "" {
+		return l.deps.ModeOverride
+	}
+	return l.canonical.Mode
 }
 
 type Loop struct {
@@ -192,10 +200,10 @@ type Loop struct {
 	bootstrapExhausted bool
 	bootstrapInFlight  *cookHandle
 
-	orders               OrdersFile
-	ordersLoaded         bool
-	schedulePromoted     bool   // set when consumeOrdersNext promotes after a schedule dispatch
-	lastPromotionError   string // latest scheduler-output validation issue to inject into next schedule prompt
+	orders             OrdersFile
+	ordersLoaded       bool
+	schedulePromoted   bool   // set when consumeOrdersNext promotes after a schedule dispatch
+	lastPromotionError string // latest scheduler-output validation issue to inject into next schedule prompt
 
 	activeSummary  mise.ActiveSummary
 	recentHistory  []mise.HistoryItem
@@ -205,10 +213,10 @@ type Loop struct {
 	lastStatus statusfile.Status
 
 	// V2 canonical state — event-sourced pipeline.
-	canonical    state.State
+	canonical       state.State
 	canonicalLoaded bool
-	effectLedger *reducer.EffectLedger
-	eventCounter atomic.Uint64
+	effectLedger    *reducer.EffectLedger
+	eventCounter    atomic.Uint64
 
 	reconciledFailures []reconciledFailure
 	lastMiseWarnings   []string
