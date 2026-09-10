@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/poteto/noodle/config"
+	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/mise"
 	loopruntime "github.com/poteto/noodle/runtime"
 )
@@ -210,5 +211,41 @@ func TestPlanCycleSpawnsSkipsPendingReviewTargets(t *testing.T) {
 	}
 	if len(plan) != 1 || plan[0].OrderID != "43" {
 		t.Fatalf("spawn plan = %#v, want only 43", plan)
+	}
+}
+
+func TestPlanCycleSpawnsHonorsProcessLocalManualMode(t *testing.T) {
+	projectDir := t.TempDir()
+	runtimeDir := filepath.Join(projectDir, ".noodle")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatalf("mkdir runtime: %v", err)
+	}
+	ordersPath := filepath.Join(runtimeDir, "orders.json")
+	orders := OrdersFile{Orders: []Order{
+		{ID: "42", Status: OrderStatusActive, Stages: []Stage{{TaskKey: "execute", Skill: "execute", Provider: "claude", Model: "claude-opus-4-6", Status: StageStatusPending}}},
+	}}
+	if err := writeOrdersAtomic(ordersPath, orders); err != nil {
+		t.Fatalf("write orders: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	l := New(projectDir, "noodle", cfg, Dependencies{
+		Runtimes:     map[string]loopruntime.Runtime{"process": newMockRuntime()},
+		Worktree:     &fakeWorktree{},
+		Adapter:      &fakeAdapterRunner{},
+		Mise:         &fakeMise{},
+		Monitor:      fakeMonitor{},
+		Registry:     testLoopRegistry(),
+		ModeOverride: state.RunModeManual,
+		Now:          time.Now,
+		OrdersFile:   ordersPath,
+	})
+
+	plan, err := l.planCycleSpawns(orders, mise.Brief{}, l.config.Concurrency.MaxConcurrency)
+	if err != nil {
+		t.Fatalf("planCycleSpawns: %v", err)
+	}
+	if len(plan) != 0 {
+		t.Fatalf("manual-mode spawn plan = %#v, want none", plan)
 	}
 }
