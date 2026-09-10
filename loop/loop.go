@@ -538,7 +538,7 @@ func (l *Loop) Cycle(ctx context.Context) error {
 			err,
 		)
 	}
-	if err := l.spawnPlannedCandidates(ctx, candidates, orders); err != nil {
+	if err := l.spawnPlannedCandidates(ctx, candidates, orders, brief); err != nil {
 		return l.classifySystemHard(
 			"cycle.spawn",
 			formatCycleFailureMessage("cycle.spawn", "spawn cooks"),

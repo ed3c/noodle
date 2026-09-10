@@ -190,6 +190,10 @@ func (l *Loop) writeScheduleEmptyMemo(brief mise.Brief, orders OrdersFile) error
 	if err != nil {
 		return err
 	}
+	return l.writeScheduleEmptyMemoDigest(digest)
+}
+
+func (l *Loop) writeScheduleEmptyMemoDigest(digest string) error {
 	payload, err := json.Marshal(scheduleEmptyMemo{Version: scheduleEmptyMemoVersion, Digest: digest})
 	if err != nil {
 		return fmt.Errorf("encode empty schedule memo: %w", err)
