@@ -80,6 +80,74 @@ func TestRunStartOnceUsesLoopCycle(t *testing.T) {
 	}
 }
 
+func TestRunStartModeOverrideReachesRuntimeWithoutChangingConfiguredMode(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectDir, ".noodle"), 0o755); err != nil {
+		t.Fatalf("mkdir .noodle: %v", err)
+	}
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatalf("chdir project dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(originalDir) })
+
+	fakeLoop := &fakeStartLoop{}
+	var captured config.Config
+	originalFactory := newStartRuntimeLoop
+	newStartRuntimeLoop = func(_ string, _ string, cfg config.Config, _ loop.Dependencies) startRuntimeLoop {
+		captured = cfg
+		return fakeLoop
+	}
+	t.Cleanup(func() { newStartRuntimeLoop = originalFactory })
+
+	app := &App{Config: config.DefaultConfig()}
+	originalMode := app.Config.Mode
+	if err := runStart(context.Background(), app, startOptions{once: true, mode: "manual"}); err != nil {
+		t.Fatalf("runStart --mode manual: %v", err)
+	}
+	if captured.Mode != "manual" {
+		t.Fatalf("runtime mode = %q, want manual", captured.Mode)
+	}
+	if app.Config.Mode != originalMode {
+		t.Fatalf("configured mode mutated to %q, want %q", app.Config.Mode, originalMode)
+	}
+}
+
+func TestRunStartRejectsUnsupportedModeBeforeCreatingLoop(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectDir, ".noodle"), 0o755); err != nil {
+		t.Fatalf("mkdir .noodle: %v", err)
+	}
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatalf("chdir project dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(originalDir) })
+
+	created := false
+	originalFactory := newStartRuntimeLoop
+	newStartRuntimeLoop = func(_ string, _ string, _ config.Config, _ loop.Dependencies) startRuntimeLoop {
+		created = true
+		return &fakeStartLoop{}
+	}
+	t.Cleanup(func() { newStartRuntimeLoop = originalFactory })
+
+	app := &App{Config: config.DefaultConfig()}
+	err = runStart(context.Background(), app, startOptions{once: true, mode: "guess"})
+	if err == nil || !strings.Contains(err.Error(), `unsupported start mode "guess"`) {
+		t.Fatalf("error = %v, want unsupported start mode", err)
+	}
+	if created {
+		t.Fatal("loop created for unsupported start mode")
+	}
+}
+
 func TestRunStartRefusesFutureStateVersion(t *testing.T) {
 	projectDir := t.TempDir()
 	runtimeDir := filepath.Join(projectDir, ".noodle")

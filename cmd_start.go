@@ -20,6 +20,7 @@ import (
 	"github.com/poteto/noodle/cmdmeta"
 	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/internal/lockfile"
+	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/internal/statever"
 	"github.com/poteto/noodle/loop"
 	"github.com/poteto/noodle/server"
@@ -42,6 +43,7 @@ var launchBrowserCommandFunc = launchBrowserCommand
 
 type startOptions struct {
 	once bool
+	mode string
 }
 
 func newStartCmd(app *App) *cobra.Command {
@@ -55,7 +57,22 @@ func newStartCmd(app *App) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&opts.once, "once", false, "Run one scheduling cycle and exit")
+	cmd.Flags().StringVar(&opts.mode, "mode", "", "Override the configured run mode for this process (auto, supervised, or manual)")
 	return cmd
+}
+
+func startConfig(configured config.Config, modeOverride string) (config.Config, error) {
+	modeOverride = strings.TrimSpace(modeOverride)
+	if modeOverride == "" {
+		return configured, nil
+	}
+	switch state.RunMode(modeOverride) {
+	case state.RunModeAuto, state.RunModeSupervised, state.RunModeManual:
+		configured.Mode = modeOverride
+		return configured, nil
+	default:
+		return config.Config{}, fmt.Errorf("unsupported start mode %q", modeOverride)
+	}
 }
 
 func runStart(ctx context.Context, app *App, opts startOptions) error {
@@ -90,11 +107,15 @@ func runStart(ctx context.Context, app *App, opts startOptions) error {
 	broker := server.NewSessionEventBroker()
 	apiLogger := newAPILogger(os.Stderr)
 
-	runtimeLoop := newStartRuntimeLoop(cwd, noodleBin, app.Config, loop.Dependencies{
+	runtimeConfig, err := startConfig(app.Config, opts.mode)
+	if err != nil {
+		return err
+	}
+	runtimeLoop := newStartRuntimeLoop(cwd, noodleBin, runtimeConfig, loop.Dependencies{
 		EventSink: broker,
 		Logger:    slog.New(apiLogger),
 	})
-	startServer := shouldStartServer(app.Config.Server)
+	startServer := shouldStartServer(runtimeConfig.Server)
 
 	apiLogger.Info("start initialized",
 		"project", cwd,
@@ -118,7 +139,7 @@ func runStart(ctx context.Context, app *App, opts startOptions) error {
 
 	if startServer {
 		go func() {
-			if err := runWebServer(ctx, runtimeDir, app.Config, runtimeLoop, warnings, broker, apiLogger.With("component", "server")); err != nil {
+			if err := runWebServer(ctx, runtimeDir, runtimeConfig, runtimeLoop, warnings, broker, apiLogger.With("component", "server")); err != nil {
 				apiLogger.Error("web server exited", "error", err)
 			}
 		}()
