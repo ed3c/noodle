@@ -1,3 +1,9 @@
+## [0.1.12](https://github.com/ed3c/noodle/compare/v0.1.11...v0.1.12) (2026-09-11)
+
+### Bug Fixes
+
+* **loop:** memoize scheduler dispatch state ([153aff9](https://github.com/ed3c/noodle/commit/153aff92ad51e4d791d9abbde8b5ca395a9b0da4))
+
 ## [0.1.11](https://github.com/ed3c/noodle/compare/v0.1.10...v0.1.11) (2026-09-11)
 
 ### Bug Fixes
