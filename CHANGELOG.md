@@ -1,3 +1,37 @@
+## [0.1.6](https://github.com/poteto/noodle/compare/v0.1.5...v0.1.6) (2026-09-10)
+
+### Features
+
+* **canonical:** cut over dispatch planning ([1a95cc5](https://github.com/poteto/noodle/commit/1a95cc5a0e0916c76ddf1f16c0a6c71db869808d))
+* **canonical:** cut over projected snapshot state ([db6c42a](https://github.com/poteto/noodle/commit/db6c42ab86b8c4b9453e2ca796ff1109046d7c4a))
+* **canonical:** harden merge recovery ([871055d](https://github.com/poteto/noodle/commit/871055d1cdb9830864882121ce501b48d3a022d7))
+* **canonical:** persist checkpoint foundation ([cdaae29](https://github.com/poteto/noodle/commit/cdaae297d4d5899180f8b8664c8d0c8455d831a3))
+* **canonical:** route review and completion flow ([a3f47d4](https://github.com/poteto/noodle/commit/a3f47d4193d21fde8330b006e12d78a15230bf72))
+* **loop:** inject adapter warnings into scheduler prompt ([895031d](https://github.com/poteto/noodle/commit/895031d2af0f7abc8a76064728c5257f89c6b99b))
+* **loop:** surface adapter warnings in UI via LoopState ([68fb69e](https://github.com/poteto/noodle/commit/68fb69e266d8c34f76b6703a98316b68913adcff))
+* **skills:** Add make-interfaces-feel-better skill ([82d2921](https://github.com/poteto/noodle/commit/82d2921c52370f23f29086de81ccfb600939c037))
+* **skills:** Add self-check step to plan skill ([0601221](https://github.com/poteto/noodle/commit/0601221948cb68c98dead7712b5e4e777e1dca4b))
+* **skills:** add skill-creator from upstream anthropics/skills ([090b49c](https://github.com/poteto/noodle/commit/090b49ca233baf96aa03d78e1be7b0eed4bb0296))
+
+### Bug Fixes
+
+* **codex:** Update non-spark model refs to gpt-5.4 ([45adcbd](https://github.com/poteto/noodle/commit/45adcbd6c15daa5dac1b07f2b78346b24a56d38c))
+* **dispatcher:** write heartbeat on delta events, remove EventError terminalization ([244e9cd](https://github.com/poteto/noodle/commit/244e9cd160bf5896e3df7645d29dfee1e784d159))
+* **docs:** add lang="ts" to HomePage.vue script tag ([4b2312a](https://github.com/poteto/noodle/commit/4b2312abdb14e432bca653c2df9c949abe2cb0dc))
+* **loop:** coalesce runtime watcher triggers ([a9f64e2](https://github.com/poteto/noodle/commit/a9f64e24a37b3b9c4ebd41846596d418cb4ef19c))
+* **loop:** Park supervised merges for review ([b032657](https://github.com/poteto/noodle/commit/b03265715d17d34dcd780bd691424f67c0cd28cf))
+* make schedule skill the prompt policy owner ([2acfb0c](https://github.com/poteto/noodle/commit/2acfb0c5e294dad292a3c6c75b85c1947600fe5c))
+* **monitor:** detect Claude completion via EventResult and fix ForceKill race ([0f87fc5](https://github.com/poteto/noodle/commit/0f87fc5903c4ae3e62a12e4141d2c85c92a2113b))
+* move default adapter path from .noodle/adapters/ to adapters/ ([6c03a15](https://github.com/poteto/noodle/commit/6c03a15242352f59238ae55663b932d4d28b2692))
+* **parse:** route controlresponse variants to claude ([6a67559](https://github.com/poteto/noodle/commit/6a675591af88a6df65dc01cd277f6fb9fe7d8b96))
+* persist empty scheduler decisions ([06df163](https://github.com/poteto/noodle/commit/06df163f6850a14ee626c92a64b5bfb6257c7f58))
+* **reconcile:** preserve task keys in merge recovery ([bf7f44a](https://github.com/poteto/noodle/commit/bf7f44a7a97643a51805155e548d702dc91ffb10))
+* **release:** keep fork publishing scoped to its repository ([1f7aead](https://github.com/poteto/noodle/commit/1f7aead097b41fc9f4bcc2a9a817aa5638f494d6))
+* **schemadoc:** add schema metadata for status warnings field ([a5b785b](https://github.com/poteto/noodle/commit/a5b785bae879f768319fbd3e7664842acb1e1cb4))
+* **sidebar:** Use stable stage keys for repeated stages ([50ca3a9](https://github.com/poteto/noodle/commit/50ca3a99473dc559c511dc10be519844ce7a13bd))
+* **skills:** Restore upstream frontend-design skill ([ba64b87](https://github.com/poteto/noodle/commit/ba64b8742487053f4d6f6e39b326b42cc2daafe1))
+* **ui:** clarify sidebar stage list state ([e2c1460](https://github.com/poteto/noodle/commit/e2c146058d60ed79bb818c47ee0eab0e0c31e2c3))
+
 ## [0.1.5](https://github.com/poteto/noodle/compare/v0.1.4...v0.1.5) (2026-03-03)
 
 ### Bug Fixes
