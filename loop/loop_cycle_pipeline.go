@@ -94,6 +94,12 @@ func (l *Loop) cancelSupersededActiveCooks(orders OrdersFile) error {
 	}
 
 	for orderID, cook := range l.cooks.activeCooksByOrder {
+		// The scheduler's own promotion intentionally omits the synthetic schedule order.
+		// Keep its cook tracked until the session actually exits so another scheduler
+		// cannot be dispatched while this one is still finishing its publish command.
+		if isScheduleStage(cook.stage) {
+			continue
+		}
 		order, ok := orderByID[orderID]
 		if !ok {
 			if err := l.cancelSupersededCook(orderID, cook, false); err != nil {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/poteto/noodle/config"
+	"github.com/poteto/noodle/mise"
 	loopruntime "github.com/poteto/noodle/runtime"
 )
 
@@ -130,5 +131,67 @@ func TestCancelSupersededActiveCooksKeepsMatchingStage(t *testing.T) {
 	}
 	if len(worktree.cleaned) != 0 {
 		t.Fatalf("expected no worktree cleanup, got %v", worktree.cleaned)
+	}
+}
+
+func TestCancelSupersededActiveCooksKeepsSchedulerUntilSessionExit(t *testing.T) {
+	projectDir := t.TempDir()
+	runtimeDir := filepath.Join(projectDir, ".noodle")
+	ordersPath := filepath.Join(runtimeDir, "orders.json")
+	if err := writeOrdersAtomic(ordersPath, OrdersFile{}); err != nil {
+		t.Fatalf("write orders: %v", err)
+	}
+
+	worktree := &fakeWorktree{}
+	l := New(projectDir, "noodle", config.DefaultConfig(), Dependencies{
+		Runtimes:   map[string]loopruntime.Runtime{"process": newMockRuntime()},
+		Worktree:   worktree,
+		Adapter:    &fakeAdapterRunner{},
+		Mise:       &fakeMise{},
+		Monitor:    fakeMonitor{},
+		Registry:   testLoopRegistry(),
+		Now:        time.Now,
+		OrdersFile: ordersPath,
+	})
+
+	session := &mockSession{id: "schedule-session", status: "running", done: make(chan struct{})}
+	l.cooks.activeCooksByOrder[scheduleOrderID] = &cookHandle{
+		cookIdentity: cookIdentity{
+			orderID:    scheduleOrderID,
+			stageIndex: 0,
+			stage: Stage{
+				TaskKey: scheduleOrderID,
+				Skill:   scheduleOrderID,
+				Status:  StageStatusActive,
+			},
+		},
+		session:      session,
+		worktreePath: projectDir,
+	}
+
+	// A promoted scheduler proposal contains product orders, not the synthetic
+	// schedule order that produced it.
+	promotedOrders := OrdersFile{Orders: []Order{{
+		ID:     "product-order",
+		Status: OrderStatusActive,
+		Stages: []Stage{{TaskKey: "execute", Status: StageStatusPending}},
+	}}}
+	l.cancelSupersededActiveCooks(promotedOrders)
+
+	if _, ok := l.cooks.activeCooksByOrder[scheduleOrderID]; !ok {
+		t.Fatal("expected active scheduler to remain tracked until its session exits")
+	}
+	if got := session.Status(); got != "running" {
+		t.Fatalf("scheduler session status = %q, want running", got)
+	}
+	if len(worktree.cleaned) != 0 {
+		t.Fatalf("scheduler promotion must not clean a worktree, got %v", worktree.cleaned)
+	}
+
+	if _, err := l.ensureScheduleIfNeeded(mise.Brief{}, &promotedOrders, true); err != nil {
+		t.Fatalf("ensure schedule: %v", err)
+	}
+	if hasScheduleOrder(promotedOrders) {
+		t.Fatal("must not dispatch a second scheduler while the promoted scheduler session is still active")
 	}
 }
