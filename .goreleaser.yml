@@ -20,19 +20,6 @@ archives:
       - goos: windows
         format: zip
 
-brews:
-  - skip_upload: auto
-    directory: Formula
-    repository:
-      owner: poteto
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    name: noodle
-    homepage: https://github.com/poteto/noodle
-    description: AI agent orchestration powered by skills
-    install: |
-      bin.install "noodle"
-
 checksum:
   name_template: "checksums.txt"
 
