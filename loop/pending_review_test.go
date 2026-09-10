@@ -248,4 +248,15 @@ func TestPlanCycleSpawnsHonorsProcessLocalManualMode(t *testing.T) {
 	if len(plan) != 0 {
 		t.Fatalf("manual-mode spawn plan = %#v, want none", plan)
 	}
+
+	if err := l.controlMode(string(state.RunModeSupervised)); err != nil {
+		t.Fatalf("controlMode supervised: %v", err)
+	}
+	plan, err = l.planCycleSpawns(orders, mise.Brief{}, l.config.Concurrency.MaxConcurrency)
+	if err != nil {
+		t.Fatalf("planCycleSpawns after explicit mode control: %v", err)
+	}
+	if len(plan) != 1 || plan[0].OrderID != "42" {
+		t.Fatalf("post-control spawn plan = %#v, want only 42", plan)
+	}
 }
