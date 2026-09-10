@@ -60,7 +60,16 @@ func (l *Loop) handlePromotionResult(result mergeResult, brief mise.Brief, err e
 		return nil
 	}
 	if result.EmptyPromotion {
-		if err := l.writeScheduleEmptyMemo(brief, result.Orders); err != nil {
+		digest := l.scheduleDispatchDigest
+		if digest == "" {
+			var err error
+			digest, err = l.scheduleDecisionDigest(brief, result.Orders)
+			if err != nil {
+				l.handlePromotionError(err)
+				return nil
+			}
+		}
+		if err := l.writeScheduleEmptyMemoDigest(digest); err != nil {
 			l.handlePromotionError(err)
 			return nil
 		}
@@ -433,7 +442,7 @@ func (l *Loop) planCycleSpawns(orders OrdersFile, brief mise.Brief, capacity int
 	return candidates, nil
 }
 
-func (l *Loop) spawnPlannedCandidates(ctx context.Context, candidates []dispatchCandidate, orders OrdersFile) error {
+func (l *Loop) spawnPlannedCandidates(ctx context.Context, candidates []dispatchCandidate, orders OrdersFile, brief mise.Brief) error {
 	// Build order lookup for candidate dispatch.
 	orderMap := make(map[string]Order, len(orders.Orders))
 	for _, o := range orders.Orders {
@@ -447,8 +456,19 @@ func (l *Loop) spawnPlannedCandidates(ctx context.Context, candidates []dispatch
 		if !ok {
 			continue
 		}
+		var scheduleDigest string
+		if isScheduleStage(cand.Stage) {
+			digest, err := l.scheduleDecisionDigest(brief, orders)
+			if err != nil {
+				return err
+			}
+			scheduleDigest = digest
+		}
 		if err := l.spawnCook(ctx, cand, order, spawnOptions{}); err != nil {
 			return err
+		}
+		if scheduleDigest != "" {
+			l.scheduleDispatchDigest = scheduleDigest
 		}
 	}
 	return nil

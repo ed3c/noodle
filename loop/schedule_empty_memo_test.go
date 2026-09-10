@@ -182,6 +182,60 @@ func TestEmptyScheduleMemoSuppressesUnchangedCyclesAndAdmitsBacklogChange(t *tes
 	}
 }
 
+func TestEmptyScheduleMemoUsesSchedulerDispatchState(t *testing.T) {
+	logger, handler := newTestLogger()
+	dispatchedBrief := mise.Brief{
+		Backlog:   []adapter.BacklogItem{{ID: "1", Title: "first", Status: adapter.BacklogStatusOpen}},
+		Resources: mise.ResourceSnapshot{MaxConcurrency: 1},
+	}
+	tc := newTestLoop(t, logger, func(opts *testLoopOpts) { opts.brief = &dispatchedBrief })
+	if err := writeOrdersAtomic(tc.ordersPath, bootstrapScheduleOrder(tc.loop.config)); err != nil {
+		t.Fatalf("seed schedule order: %v", err)
+	}
+
+	if err := tc.loop.Cycle(context.Background()); err != nil {
+		t.Fatalf("dispatch scheduler: %v", err)
+	}
+	if got := len(tc.runtime.calls); got != 1 {
+		t.Fatalf("initial scheduler dispatches = %d, want 1", got)
+	}
+
+	changedBrief := dispatchedBrief
+	changedBrief.Backlog = append(changedBrief.Backlog,
+		adapter.BacklogItem{ID: "2", Title: "new ready work", Status: adapter.BacklogStatusOpen},
+	)
+	tc.mise.brief = changedBrief
+	if err := os.WriteFile(tc.loop.deps.OrdersNextFile, []byte(`{"orders":[]}`), 0o644); err != nil {
+		t.Fatalf("write empty proposal: %v", err)
+	}
+	defer tc.runtime.sessions[0].ForceKill()
+	delete(tc.loop.cooks.activeCooksByOrder, scheduleOrderID)
+	if err := tc.loop.writeOrdersState(OrdersFile{}); err != nil {
+		t.Fatalf("simulate schedule completion: %v", err)
+	}
+
+	orders, shouldContinue, err := tc.loop.prepareOrdersForCycle(changedBrief, nil, true)
+	if err != nil {
+		t.Fatalf("promote stale empty decision: %v", err)
+	}
+	if !shouldContinue || len(orders.Orders) != 1 || !isScheduleOrder(orders.Orders[0]) {
+		t.Fatalf("changed backlog orders = %#v continue=%v, want one schedule order", orders.Orders, shouldContinue)
+	}
+	if got := handler.countMessage("orders empty, bootstrapping schedule"); got != 1 {
+		t.Fatalf("changed backlog spawned %d replacement schedules, want exactly 1", got)
+	}
+	candidates, err := tc.loop.planCycleSpawns(orders, changedBrief, tc.loop.config.Concurrency.MaxConcurrency)
+	if err != nil {
+		t.Fatalf("plan replacement scheduler: %v", err)
+	}
+	if err := tc.loop.spawnPlannedCandidates(context.Background(), candidates, orders, changedBrief); err != nil {
+		t.Fatalf("spawn replacement scheduler: %v", err)
+	}
+	if got := len(tc.runtime.calls); got != 2 {
+		t.Fatalf("total scheduler dispatches = %d, want initial plus exactly one replacement", got)
+	}
+}
+
 func TestRestartDefersScheduleUntilMemoCanBeComparedWithProviderState(t *testing.T) {
 	logger, _ := newTestLogger()
 	brief := mise.Brief{
@@ -261,5 +315,15 @@ func TestChefSteerBypassesMatchingEmptyDecisionMemo(t *testing.T) {
 	}
 	if _, exists, err := tc.loop.readScheduleEmptyMemo(); err != nil || exists {
 		t.Fatalf("chef steer left empty memo exists=%v err=%v", exists, err)
+	}
+	candidates, err := tc.loop.planCycleSpawns(orders, brief, tc.loop.config.Concurrency.MaxConcurrency)
+	if err != nil {
+		t.Fatalf("plan steered scheduler: %v", err)
+	}
+	if err := tc.loop.spawnPlannedCandidates(context.Background(), candidates, orders, brief); err != nil {
+		t.Fatalf("spawn steered scheduler: %v", err)
+	}
+	if got := len(tc.runtime.calls); got != 1 {
+		t.Fatalf("steered scheduler dispatches = %d, want exactly 1", got)
 	}
 }

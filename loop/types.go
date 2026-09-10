@@ -200,10 +200,11 @@ type Loop struct {
 	bootstrapExhausted bool
 	bootstrapInFlight  *cookHandle
 
-	orders             OrdersFile
-	ordersLoaded       bool
-	schedulePromoted   bool   // set when consumeOrdersNext promotes after a schedule dispatch
-	lastPromotionError string // latest scheduler-output validation issue to inject into next schedule prompt
+	orders                 OrdersFile
+	ordersLoaded           bool
+	schedulePromoted       bool   // set when consumeOrdersNext promotes after a schedule dispatch
+	scheduleDispatchDigest string // decision state seen by the in-flight scheduler
+	lastPromotionError     string // latest scheduler-output validation issue to inject into next schedule prompt
 
 	activeSummary  mise.ActiveSummary
 	recentHistory  []mise.HistoryItem
