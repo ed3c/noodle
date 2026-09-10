@@ -1,3 +1,9 @@
+## [0.1.11](https://github.com/ed3c/noodle/compare/v0.1.10...v0.1.11) (2026-09-11)
+
+### Bug Fixes
+
+* **runtime:** let explicit mode control release the startup hold ([0b54608](https://github.com/ed3c/noodle/commit/0b54608cdfae6a132dd9a7353c237ee1f58e03c9))
+
 ## [0.1.10](https://github.com/ed3c/noodle/compare/v0.1.9...v0.1.10) (2026-09-11)
 
 ### Bug Fixes
