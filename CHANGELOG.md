@@ -1,3 +1,9 @@
+## [0.1.10](https://github.com/ed3c/noodle/compare/v0.1.9...v0.1.10) (2026-09-11)
+
+### Bug Fixes
+
+* **runtime:** enforce the process-local manual dispatch gate ([78470ce](https://github.com/ed3c/noodle/commit/78470ce7970092f0f4ed1d4442cd6bb1da5532df))
+
 ## [0.1.9](https://github.com/ed3c/noodle/compare/v0.1.8...v0.1.9) (2026-09-11)
 
 ### Bug Fixes
