@@ -15,6 +15,10 @@ func (l *Loop) controlMode(value string) error {
 	switch value {
 	case string(state.RunModeAuto), string(state.RunModeSupervised), string(state.RunModeManual):
 		l.config.Mode = value
+		// An explicit runtime control supersedes the process-start hold. This lets a
+		// caller start safely in manual mode, perform recovery, and resume the same
+		// daemon without a second process or a config-file mutation.
+		l.deps.ModeOverride = ""
 
 		// Emit V2 canonical state event for mode change.
 		l.emitEvent(ingest.EventModeChanged, map[string]any{
