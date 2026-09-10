@@ -1,3 +1,9 @@
+## [0.1.7](https://github.com/poteto/noodle/compare/v0.1.6...v0.1.7) (2026-09-10)
+
+### Bug Fixes
+
+* **loop:** keep scheduler tracked through promotion ([facb656](https://github.com/poteto/noodle/commit/facb65637629052b7f310eeabeb8c3aedf38f24e))
+
 ## [0.1.6](https://github.com/poteto/noodle/compare/v0.1.5...v0.1.6) (2026-09-10)
 
 ### Features
