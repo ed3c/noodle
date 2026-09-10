@@ -216,6 +216,12 @@ func TestCycleSpawnsCookFromOrders(t *testing.T) {
 	if len(wt.created) != 1 {
 		t.Fatalf("worktree creates = %d", len(wt.created))
 	}
+	if got := rt.calls[0].EnvVars["NOODLE_ORDER_ID"]; got != "42" {
+		t.Fatalf("NOODLE_ORDER_ID = %q, want 42", got)
+	}
+	if got := rt.calls[0].EnvVars["NOODLE_STAGE_INDEX"]; got != "0" {
+		t.Fatalf("NOODLE_STAGE_INDEX = %q, want 0", got)
+	}
 }
 
 func TestCycleReusesExistingWorktree(t *testing.T) {

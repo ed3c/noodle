@@ -75,6 +75,9 @@ paths = [".agents/skills"]
 [concurrency]
 max_concurrency = 2
 
+[agents.codex]
+require_typed_outcome = true
+
 [adapters.backlog]
 skill = "my-backlog"
 
@@ -99,6 +102,9 @@ edit = "gh issue edit"
 	}
 	if config.Concurrency.MaxConcurrency != 2 {
 		t.Fatalf("concurrency.max_concurrency = %d", config.Concurrency.MaxConcurrency)
+	}
+	if !config.Agents.Codex.RequireTypedOutcome {
+		t.Fatal("agents.codex.require_typed_outcome = false, want true")
 	}
 }
 

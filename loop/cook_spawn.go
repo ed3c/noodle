@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/poteto/noodle/internal/ingest"
@@ -92,6 +93,10 @@ func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Orde
 		DisplayName:  opts.displayName,
 		Title:        order.Title,
 		RetryCount:   opts.attempt,
+		EnvVars: map[string]string{
+			"NOODLE_ORDER_ID":    cand.OrderID,
+			"NOODLE_STAGE_INDEX": strconv.Itoa(cand.StageIndex),
+		},
 	}
 	attemptID := dispatchAttemptID(cand.OrderID, cand.StageIndex, opts.attempt)
 	l.emitEvent(ingest.EventDispatchRequested, map[string]any{
@@ -227,11 +232,11 @@ func (l *Loop) handleCookDispatchFailure(cand dispatchCandidate, stage Stage, wo
 	}
 	l.recordStageFailure(cook, reason, OrderFailureClassStageTerminal, nil)
 	l.emitEvent(ingest.EventStageFailed, map[string]any{
-		"order_id":    cand.OrderID,
-		"stage_index": cand.StageIndex,
-		"attempt_id":  attemptID,
+		"order_id":      cand.OrderID,
+		"stage_index":   cand.StageIndex,
+		"attempt_id":    attemptID,
 		"worktree_name": worktreeName,
-		"error":       reason,
+		"error":         reason,
 	})
 	l.forwardToScheduler(cook, "dispatch_failed", reason, nil)
 	l.classifyOrderHard(

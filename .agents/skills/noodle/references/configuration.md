@@ -46,6 +46,7 @@ mode = "supervised"
 |-------|------|---------|-------------|
 | `path` | string | `""` | Path to Claude CLI binary |
 | `args` | string[] | `[]` | Extra CLI arguments for every invocation |
+| `require_typed_outcome` | bool | `false` | Require the final `stage_message` from each non-scheduler cook to carry an exact `completed`, `blocked`, or `failed` outcome |
 
 ## `[agents.codex]`
 
@@ -53,6 +54,7 @@ mode = "supervised"
 |-------|------|---------|-------------|
 | `path` | string | `""` | Path to Codex CLI binary |
 | `args` | string[] | `[]` | Extra CLI arguments for every invocation |
+| `require_typed_outcome` | bool | `false` | Require the final `stage_message` from each non-scheduler cook to carry an exact `completed`, `blocked`, or `failed` outcome |
 
 ## `[runtime]`
 
