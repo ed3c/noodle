@@ -276,6 +276,37 @@ func (l *Loop) syncCanonicalOrderFromLegacy(order Order) {
 	l.syncCanonicalOrderFromLegacyAt(order, -1)
 }
 
+// renewTerminalCanonicalSchedule makes a runnable legacy schedule order a new
+// canonical attempt after the prior order with the same public ID completed.
+// Historical attempts stay attached so the next dispatch receives a distinct
+// attempt identity.
+func (l *Loop) renewTerminalCanonicalSchedule(order Order) (bool, error) {
+	if !isScheduleOrder(order) || legacyOrderStatusToCanonical(order.Status).IsTerminal() {
+		return false, nil
+	}
+	if _, stage := activeStageForOrder(order); stage == nil {
+		return false, nil
+	}
+	node, exists := l.canonical.Orders[order.ID]
+	if !exists || !node.Status.IsTerminal() {
+		return false, nil
+	}
+
+	l.syncCanonicalOrderFromLegacy(order)
+	if err := l.persistCanonicalCheckpoint(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (l *Loop) canonicalAttemptOrdinal(orderID string, stageIndex int) int {
+	order, ok := l.canonical.Orders[orderID]
+	if !ok || stageIndex < 0 || stageIndex >= len(order.Stages) {
+		return 0
+	}
+	return len(order.Stages[stageIndex].Attempts)
+}
+
 func (l *Loop) syncCanonicalOrderFromLegacyAt(order Order, sequence int) {
 	if _, exists := l.canonical.Orders[order.ID]; !exists {
 		stages := make([]map[string]any, 0, len(order.Stages))
