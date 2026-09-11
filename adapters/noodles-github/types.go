@@ -69,21 +69,61 @@ type Issue struct {
 	Number      int             `json:"number"`
 	Title       string          `json:"title"`
 	State       string          `json:"state"`
+	StateReason string          `json:"state_reason"`
 	Body        string          `json:"body"`
 	PullRequest json.RawMessage `json:"pull_request,omitempty"`
 }
 
 type PullRequest struct {
-	Number int    `json:"number"`
-	State  string `json:"state"`
-	Body   string `json:"body"`
-	Base   struct {
+	Number         int    `json:"number"`
+	State          string `json:"state"`
+	Body           string `json:"body"`
+	Merged         bool   `json:"merged"`
+	MergeCommitSHA string `json:"merge_commit_sha"`
+	Base           struct {
 		Ref string `json:"ref"`
 	} `json:"base"`
 	Head struct {
 		Ref string `json:"ref"`
 		SHA string `json:"sha"`
 	} `json:"head"`
+}
+
+type WorkflowRunEvent struct {
+	Action      string      `json:"action"`
+	Repository  Repository  `json:"repository"`
+	WorkflowRun WorkflowRun `json:"workflow_run"`
+}
+
+type WorkflowRun struct {
+	Name         string            `json:"name"`
+	Event        string            `json:"event"`
+	Status       string            `json:"status"`
+	Conclusion   string            `json:"conclusion"`
+	HeadSHA      string            `json:"head_sha"`
+	PullRequests []PullRequestLink `json:"pull_requests"`
+}
+
+type PullRequestLink struct {
+	Number int `json:"number"`
+}
+
+type PullRequestFile struct {
+	Filename string `json:"filename"`
+}
+
+type MergeResult struct {
+	SHA     string `json:"sha"`
+	Merged  bool   `json:"merged"`
+	Message string `json:"message"`
+}
+
+type LandResult struct {
+	Status string `json:"status"`
+	Head   string `json:"head"`
+	Merge  string `json:"merge"`
+	PR     int    `json:"pr"`
+	Issue  int    `json:"issue"`
 }
 
 type HandoffResult struct {

@@ -17,7 +17,7 @@ func main() {
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: noodles-github receive|sync|handoff|done|refuse")
+		return fmt.Errorf("usage: noodles-github receive|sync|handoff|land|done|refuse")
 	}
 	policyPath := envOrDefault("NOODLES_GITHUB_POLICY", "policy/github.json")
 	capabilitiesPath := envOrDefault("NOODLES_REPO_CAPABILITIES", "policy/repo-capabilities.json")
@@ -31,6 +31,23 @@ func run(ctx context.Context, args []string) error {
 	}
 	client := NewGitHubClient(envOrDefault("GITHUB_API_URL", "https://api.github.com"), os.Getenv("GITHUB_TOKEN"))
 	switch args[0] {
+	case "land":
+		if len(args) != 1 {
+			return fmt.Errorf("land accepts no arguments")
+		}
+		eventPath := strings.TrimSpace(os.Getenv("GITHUB_EVENT_PATH"))
+		if eventPath == "" {
+			return fmt.Errorf("GITHUB_EVENT_PATH is required")
+		}
+		event, err := os.ReadFile(eventPath)
+		if err != nil {
+			return fmt.Errorf("read GITHUB_EVENT_PATH: %w", err)
+		}
+		result, err := Land(ctx, client, policy, capabilities, event)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(result)
 	case "handoff":
 		if len(args) != 2 {
 			return fmt.Errorf("handoff requires one target Issue subject")

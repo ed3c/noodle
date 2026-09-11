@@ -35,8 +35,8 @@
       "carrier": "go run ./adapters/noodles-github handoff ed3c/noodle#N"
     },
     "exact-head-merge": {
-      "available": false,
-      "carrier": null
+      "available": true,
+      "carrier": ".github/workflows/noodles-land.yml"
     }
   }
 }

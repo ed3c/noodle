@@ -161,8 +161,37 @@ func (c *GitHubClient) PullRequest(ctx context.Context, number int) (PullRequest
 	return pull, err
 }
 
+func (c *GitHubClient) PullRequestFiles(ctx context.Context, number int) ([]PullRequestFile, error) {
+	var all []PullRequestFile
+	for page := 1; ; page++ {
+		var files []PullRequestFile
+		path := fmt.Sprintf("/repos/%s/pulls/%d/files?per_page=100&page=%d", targetRepository, number, page)
+		if err := c.request(ctx, http.MethodGet, path, nil, &files); err != nil {
+			return nil, err
+		}
+		all = append(all, files...)
+		if len(files) < 100 {
+			return all, nil
+		}
+	}
+}
+
+func (c *GitHubClient) MergePullRequest(ctx context.Context, number int, head string) (MergeResult, error) {
+	var result MergeResult
+	input := map[string]string{"sha": head, "merge_method": "merge"}
+	err := c.request(ctx, http.MethodPut, fmt.Sprintf("/repos/%s/pulls/%d/merge", targetRepository, number), input, &result)
+	return result, err
+}
+
 func (c *GitHubClient) UpdateIssueBody(ctx context.Context, number int, body string) (Issue, error) {
 	var issue Issue
 	err := c.request(ctx, http.MethodPatch, fmt.Sprintf("/repos/%s/issues/%d", targetRepository, number), map[string]string{"body": body}, &issue)
+	return issue, err
+}
+
+func (c *GitHubClient) CloseIssue(ctx context.Context, number int) (Issue, error) {
+	var issue Issue
+	input := map[string]string{"state": "closed", "state_reason": "completed"}
+	err := c.request(ctx, http.MethodPatch, fmt.Sprintf("/repos/%s/issues/%d", targetRepository, number), input, &issue)
 	return issue, err
 }
