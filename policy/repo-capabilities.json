@@ -30,6 +30,10 @@
       "available": true,
       "carrier": ".github/workflows/test.yml"
     },
+    "provider-handoff": {
+      "available": true,
+      "carrier": "go run ./adapters/noodles-github handoff ed3c/noodle#N"
+    },
     "exact-head-merge": {
       "available": false,
       "carrier": null

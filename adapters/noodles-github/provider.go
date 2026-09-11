@@ -131,3 +131,38 @@ func (c *GitHubClient) CreateComment(ctx context.Context, number int, body strin
 	err := c.request(ctx, http.MethodPost, path, map[string]string{"body": body}, &comment)
 	return comment, err
 }
+
+func (c *GitHubClient) Branch(ctx context.Context, branch string) (GitRef, bool, error) {
+	var ref GitRef
+	path := "/repos/" + targetRepository + "/git/ref/heads/" + url.PathEscape(branch)
+	err := c.request(ctx, http.MethodGet, path, nil, &ref)
+	if err != nil && strings.Contains(err.Error(), "returned 404") {
+		return GitRef{}, false, nil
+	}
+	return ref, err == nil, err
+}
+
+func (c *GitHubClient) OpenPullRequests(ctx context.Context) ([]PullRequest, error) {
+	var pulls []PullRequest
+	err := c.request(ctx, http.MethodGet, "/repos/"+targetRepository+"/pulls?state=open&per_page=100", nil, &pulls)
+	return pulls, err
+}
+
+func (c *GitHubClient) CreatePullRequest(ctx context.Context, title, branch, body, base string) (PullRequest, error) {
+	var pull PullRequest
+	input := map[string]string{"title": title, "head": branch, "body": body, "base": base}
+	err := c.request(ctx, http.MethodPost, "/repos/"+targetRepository+"/pulls", input, &pull)
+	return pull, err
+}
+
+func (c *GitHubClient) PullRequest(ctx context.Context, number int) (PullRequest, error) {
+	var pull PullRequest
+	err := c.request(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/pulls/%d", targetRepository, number), nil, &pull)
+	return pull, err
+}
+
+func (c *GitHubClient) UpdateIssueBody(ctx context.Context, number int, body string) (Issue, error) {
+	var issue Issue
+	err := c.request(ctx, http.MethodPatch, fmt.Sprintf("/repos/%s/issues/%d", targetRepository, number), map[string]string{"body": body}, &issue)
+	return issue, err
+}

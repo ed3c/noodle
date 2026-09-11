@@ -23,6 +23,7 @@ var requiredCapabilities = map[string]requiredCapability{
 	"runtime-oracle":              {available: true, carrier: "go test ./... -run 'TestNoodlesGitHubTargetConsumer|TestNoodlesDispatchAdmission'"},
 	"worktree-execution":          {available: true, carrier: "noodle-ed3c-v0.1.12 worktree create"},
 	"github-actions-verification": {available: true, carrier: ".github/workflows/test.yml"},
+	"provider-handoff":            {available: true, carrier: "go run ./adapters/noodles-github handoff ed3c/noodle#N"},
 	"exact-head-merge":            {available: false},
 }
 

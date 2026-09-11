@@ -34,6 +34,12 @@ type fakeGitHub struct {
 	unreadable       map[int]bool
 	issueReads       map[int]int
 	mutateOnRead     map[int]func(*Issue)
+	baseSHA          string
+	branches         map[string]string
+	branchReads      map[string]int
+	pulls            map[int]PullRequest
+	nextPullNumber   int
+	pullPosts        int
 }
 
 func newFakeGitHub(t *testing.T, issues ...Issue) *fakeGitHub {
@@ -45,6 +51,8 @@ func newFakeGitHub(t *testing.T, issues ...Issue) *fakeGitHub {
 		unreadable:    make(map[int]bool),
 		issueReads:    make(map[int]int),
 		mutateOnRead:  make(map[int]func(*Issue)),
+		baseSHA:       testBaseSHA, branches: make(map[string]string), branchReads: make(map[string]int),
+		pulls: make(map[int]PullRequest), nextPullNumber: 1,
 	}
 	for _, issue := range issues {
 		f.issues[issue.Number] = issue
@@ -77,7 +85,48 @@ func (f *fakeGitHub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && path == "/repos/ed3c/noodle":
 		writeJSON(w, Repository{FullName: targetRepository, DefaultBranch: defaultBranch})
 	case r.Method == http.MethodGet && path == "/repos/ed3c/noodle/git/ref/heads/main":
-		writeJSON(w, GitRef{Object: GitObject{SHA: testBaseSHA}})
+		writeJSON(w, GitRef{Object: GitObject{SHA: f.baseSHA}})
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/repos/ed3c/noodle/git/ref/heads/"):
+		branch := strings.TrimPrefix(path, "/repos/ed3c/noodle/git/ref/heads/")
+		f.branchReads[branch]++
+		sha, ok := f.branches[branch]
+		if !ok || f.branchReads[branch] == 1 {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, GitRef{Ref: "refs/heads/" + branch, Object: GitObject{SHA: sha}})
+	case r.Method == http.MethodGet && path == "/repos/ed3c/noodle/pulls":
+		out := make([]PullRequest, 0, len(f.pulls))
+		for _, pull := range f.pulls {
+			if pull.State == "open" {
+				out = append(out, pull)
+			}
+		}
+		writeJSON(w, out)
+	case r.Method == http.MethodPost && path == "/repos/ed3c/noodle/pulls":
+		var input struct{ Title, Head, Body, Base string }
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		pull := PullRequest{Number: f.nextPullNumber, State: "open", Body: input.Body}
+		pull.Head.Ref = input.Head
+		pull.Head.SHA = f.branches[input.Head]
+		pull.Base.Ref = input.Base
+		f.nextPullNumber++
+		f.pullPosts++
+		f.pulls[pull.Number] = pull
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(w, pull)
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/repos/ed3c/noodle/pulls/"):
+		var number int
+		_, _ = fmt.Sscanf(strings.TrimPrefix(path, "/repos/ed3c/noodle/pulls/"), "%d", &number)
+		pull, ok := f.pulls[number]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, pull)
 	case r.Method == http.MethodGet && path == "/repos/ed3c/noodle/issues":
 		out := make([]Issue, 0, len(f.issues))
 		for _, issue := range f.issues {
@@ -122,8 +171,19 @@ func (f *fakeGitHub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, issue)
 	case r.Method == http.MethodPatch && strings.Contains(path, "/issues/"):
+		var input struct {
+			Body string `json:"body"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		number := issueNumberFromPath(path)
+		issue := f.issues[number]
+		issue.Body = input.Body
+		f.issues[number] = issue
 		f.issueEdits++
-		writeJSON(w, map[string]any{})
+		writeJSON(w, issue)
 	case r.Method == http.MethodPost && strings.HasSuffix(path, "/dispatches"):
 		f.dispatchPosts++
 		w.WriteHeader(http.StatusNoContent)
@@ -488,6 +548,7 @@ func testCapabilities() Capabilities {
 			"runtime-oracle":              {Available: true, Carrier: stringPointer("go test ./... -run 'TestNoodlesGitHubTargetConsumer|TestNoodlesDispatchAdmission'")},
 			"worktree-execution":          {Available: true, Carrier: stringPointer("noodle-ed3c-v0.1.12 worktree create")},
 			"github-actions-verification": {Available: true, Carrier: stringPointer(".github/workflows/test.yml")},
+			"provider-handoff":            {Available: true, Carrier: stringPointer("go run ./adapters/noodles-github handoff ed3c/noodle#N")},
 			"exact-head-merge":            {Available: false},
 		},
 	}
