@@ -323,6 +323,13 @@ func TestCreate(t *testing.T) {
 	if err := exec.Command("git", "-C", dir, "check-ignore", "-q", ".worktrees").Run(); err != nil {
 		t.Error(".worktrees/ not gitignored")
 	}
+	gitignore, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	if string(gitignore) != ".worktrees/\n" {
+		t.Fatalf(".gitignore = %q, want exactly one .worktrees/ rule", gitignore)
+	}
 }
 
 func TestCreateDoesNotDuplicateExistingWorktreeIgnore(t *testing.T) {
