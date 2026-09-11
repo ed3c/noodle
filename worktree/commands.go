@@ -21,7 +21,7 @@ func (a *App) Create(name string, opts ...CreateOpts) error {
 	}
 	wtPath := WorktreePath(a.Root, name)
 
-	if a.git("check-ignore", "-q", ".worktrees").Run() != nil {
+	if a.git("check-ignore", "-q", ".worktrees/").Run() != nil {
 		f, err := os.OpenFile(
 			filepath.Join(a.Root, ".gitignore"),
 			os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644,

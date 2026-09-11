@@ -323,6 +323,41 @@ func TestCreate(t *testing.T) {
 	if err := exec.Command("git", "-C", dir, "check-ignore", "-q", ".worktrees").Run(); err != nil {
 		t.Error(".worktrees/ not gitignored")
 	}
+	gitignore, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	if string(gitignore) != ".worktrees/\n" {
+		t.Fatalf(".gitignore = %q, want exactly one .worktrees/ rule", gitignore)
+	}
+}
+
+func TestCreateDoesNotDuplicateExistingWorktreeIgnore(t *testing.T) {
+	t.Parallel()
+	skipWorktreeIntegrationShort(t)
+
+	dir := setupTestRepo(t)
+	gitignorePath := filepath.Join(dir, ".gitignore")
+	wantGitignore := []byte(".worktrees/\n")
+	if err := os.WriteFile(gitignorePath, wantGitignore, 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+
+	app := &App{Root: dir}
+	if err := app.Create("existing-ignore"); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	if !fileExists(WorktreePath(dir, "existing-ignore")) {
+		t.Fatal("worktree directory not created")
+	}
+	gotGitignore, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	if string(gotGitignore) != string(wantGitignore) {
+		t.Fatalf(".gitignore changed during worktree creation: got %q, want %q", gotGitignore, wantGitignore)
+	}
 }
 
 func TestCreateDuplicate(t *testing.T) {
