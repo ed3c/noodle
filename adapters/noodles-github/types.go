@@ -9,6 +9,7 @@ const (
 	dispatchEventType       = "noodles-execution"
 	crossRepositoryAdmitted = "TARGET_INSTALLATION_AND_TOKEN_READBACK_RECORDED"
 	authorizationMarker     = "<!-- noodles-execution-authorization:v1 -->\n"
+	targetExecutionSkill    = "noodles-issue-execute"
 )
 
 type DispatchPayload struct {

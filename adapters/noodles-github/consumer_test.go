@@ -336,7 +336,7 @@ func TestNoodlesGitHubTargetConsumer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].ID != "ed3c/noodle#17" || items[0].ExecutionSkill != "execute" {
+	if len(items) != 1 || items[0].ID != "ed3c/noodle#17" || items[0].ExecutionSkill != "noodles-issue-execute" {
 		t.Fatalf("items = %#v", items)
 	}
 	if len(diagnostics) != 1 || diagnostics[0].Subject != "ed3c/noodle#18" || diagnostics[0].Code != "missing_receipt" {

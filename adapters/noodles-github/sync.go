@@ -126,7 +126,7 @@ func Sync(ctx context.Context, client *GitHubClient, policy Policy, capabilities
 			items = append(items, BacklogItem{
 				ID: subject, Title: latestIssue.Title, Status: "open", Body: latestIssue.Body,
 				Repository: targetRepository, IssueNumber: issue.Number,
-				Authorization: current[0], ExecutionSkill: "execute",
+				Authorization: current[0], ExecutionSkill: targetExecutionSkill,
 			})
 		}
 	}
