@@ -21,7 +21,7 @@ path = "~/.codex"
 args = ["--ignore-user-config"]
 
 [adapters.backlog]
-skill = "execute"
+skill = "noodles-issue-execute"
 
 [adapters.backlog.scripts]
 sync = "go run ./adapters/noodles-github sync"
