@@ -40,6 +40,12 @@ type fakeGitHub struct {
 	pulls            map[int]PullRequest
 	nextPullNumber   int
 	pullPosts        int
+	pullFiles        map[int][]PullRequestFile
+	mergePosts       int
+	closePosts       int
+	mergeHead        string
+	wrongMergeHead   bool
+	closeBeforeMerge bool
 }
 
 func newFakeGitHub(t *testing.T, issues ...Issue) *fakeGitHub {
@@ -52,7 +58,7 @@ func newFakeGitHub(t *testing.T, issues ...Issue) *fakeGitHub {
 		issueReads:    make(map[int]int),
 		mutateOnRead:  make(map[int]func(*Issue)),
 		baseSHA:       testBaseSHA, branches: make(map[string]string), branchReads: make(map[string]int),
-		pulls: make(map[int]PullRequest), nextPullNumber: 1,
+		pulls: make(map[int]PullRequest), pullFiles: make(map[int][]PullRequestFile), nextPullNumber: 1,
 	}
 	for _, issue := range issues {
 		f.issues[issue.Number] = issue
@@ -119,6 +125,12 @@ func (f *fakeGitHub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		writeJSON(w, pull)
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/repos/ed3c/noodle/pulls/"):
+		if strings.HasSuffix(path, "/files") {
+			var number int
+			_, _ = fmt.Sscanf(strings.TrimSuffix(strings.TrimPrefix(path, "/repos/ed3c/noodle/pulls/"), "/files"), "%d", &number)
+			writeJSON(w, f.pullFiles[number])
+			return
+		}
 		var number int
 		_, _ = fmt.Sscanf(strings.TrimPrefix(path, "/repos/ed3c/noodle/pulls/"), "%d", &number)
 		pull, ok := f.pulls[number]
@@ -127,6 +139,28 @@ func (f *fakeGitHub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, pull)
+	case r.Method == http.MethodPut && strings.HasSuffix(path, "/merge"):
+		var number int
+		_, _ = fmt.Sscanf(strings.TrimSuffix(strings.TrimPrefix(path, "/repos/ed3c/noodle/pulls/"), "/merge"), "%d", &number)
+		var input struct {
+			SHA string `json:"sha"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		f.mergePosts++
+		f.mergeHead = input.SHA
+		pull := f.pulls[number]
+		pull.Merged = true
+		pull.State = "closed"
+		pull.MergeCommitSHA = "2222222222222222222222222222222222222222"
+		if f.wrongMergeHead {
+			pull.Head.SHA = strings.Repeat("4", 40)
+		}
+		f.pulls[number] = pull
+		f.baseSHA = pull.MergeCommitSHA
+		writeJSON(w, MergeResult{Merged: true, SHA: pull.MergeCommitSHA})
 	case r.Method == http.MethodGet && path == "/repos/ed3c/noodle/issues":
 		out := make([]Issue, 0, len(f.issues))
 		for _, issue := range f.issues {
@@ -172,7 +206,8 @@ func (f *fakeGitHub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, issue)
 	case r.Method == http.MethodPatch && strings.Contains(path, "/issues/"):
 		var input struct {
-			Body string `json:"body"`
+			Body  string `json:"body"`
+			State string `json:"state"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 			http.Error(w, err.Error(), 400)
@@ -180,9 +215,19 @@ func (f *fakeGitHub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		number := issueNumberFromPath(path)
 		issue := f.issues[number]
-		issue.Body = input.Body
+		if input.Body != "" {
+			issue.Body = input.Body
+			f.issueEdits++
+		}
+		if input.State == "closed" {
+			if f.mergePosts == 0 {
+				f.closeBeforeMerge = true
+			}
+			issue.State = "closed"
+			issue.StateReason = "completed"
+			f.closePosts++
+		}
 		f.issues[number] = issue
-		f.issueEdits++
 		writeJSON(w, issue)
 	case r.Method == http.MethodPost && strings.HasSuffix(path, "/dispatches"):
 		f.dispatchPosts++
@@ -549,7 +594,7 @@ func testCapabilities() Capabilities {
 			"worktree-execution":          {Available: true, Carrier: stringPointer("noodle-ed3c-v0.1.12 worktree create")},
 			"github-actions-verification": {Available: true, Carrier: stringPointer(".github/workflows/test.yml")},
 			"provider-handoff":            {Available: true, Carrier: stringPointer("go run ./adapters/noodles-github handoff ed3c/noodle#N")},
-			"exact-head-merge":            {Available: false},
+			"exact-head-merge":            {Available: true, Carrier: stringPointer(".github/workflows/noodles-land.yml")},
 		},
 	}
 }
