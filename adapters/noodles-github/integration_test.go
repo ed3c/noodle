@@ -205,6 +205,7 @@ func TestNoodlesGitHubTargetConsumerCreatesOneTargetWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	prepareAgentHome(t)
 	cfg, configDiagnostics, err := config.Load(filepath.Join(repositoryRoot, ".noodle.toml"))
 	if err != nil || len(configDiagnostics.Fatals()) != 0 {
 		t.Fatalf("load target config: diagnostics=%#v err=%v", configDiagnostics, err)

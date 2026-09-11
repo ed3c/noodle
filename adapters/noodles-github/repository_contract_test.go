@@ -12,6 +12,7 @@ import (
 
 func TestNoodlesGitHubRepositoryContract(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
+	prepareAgentHome(t)
 	policy, err := loadStrictJSON[Policy](filepath.Join(root, "policy", "github.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -61,6 +62,17 @@ func TestNoodlesGitHubRepositoryContract(t *testing.T) {
 			t.Fatalf("target-owned %s route is missing: %v", skillName, err)
 		}
 	}
+}
+
+func prepareAgentHome(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	for _, name := range []string{".claude", ".codex"} {
+		if err := os.Mkdir(filepath.Join(home, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", home)
 }
 
 func TestNoodlesDispatchWorkflowHasNoExecutionAuthority(t *testing.T) {
