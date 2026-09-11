@@ -1,3 +1,17 @@
+## [0.1.13](https://github.com/poteto/noodle/compare/v0.1.12...v0.1.13) (2026-09-11)
+
+### Features
+
+* **adapter:** admit target-owned cross-repo execution ([6c3cae1](https://github.com/poteto/noodle/commit/6c3cae12b41b027b91d699c047017a6c8b0e25a0))
+* **github:** land trusted exact heads ([6283220](https://github.com/poteto/noodle/commit/6283220027d6d6d1c8fd0814ef6bc680844cc564))
+* **github:** make candidate handoff retry-safe ([63e85d1](https://github.com/poteto/noodle/commit/63e85d144bcb476cfd54007d18129fa2db249f36))
+* **ui:** expose matched stage invocation context ([1df5130](https://github.com/poteto/noodle/commit/1df5130883934c8f3e9fdd0b998f22ad1e230666))
+
+### Bug Fixes
+
+* **loop:** re-arm restarted scheduler attempts ([4f1bdeb](https://github.com/poteto/noodle/commit/4f1bdebba9df0e72f9b3901f79627d92099afb00))
+* **worktree:** honor directory-only ignore rules ([48e5027](https://github.com/poteto/noodle/commit/48e50279e4e12d78f36494495fe966d543a7e6eb))
+
 ## [0.1.12](https://github.com/ed3c/noodle/compare/v0.1.11...v0.1.12) (2026-09-11)
 
 ### Bug Fixes
