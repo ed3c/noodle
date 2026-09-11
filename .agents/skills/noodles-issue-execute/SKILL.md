@@ -1,6 +1,6 @@
 ---
 name: noodles-issue-execute
-description: Implement one source-authorized ed3c/noodle Issue in an existing Noodle worktree and stop at supervised handoff. Do not use for ad-hoc work or provider landing.
+description: Implement one source-authorized ed3c/noodle Issue and hand its verified commit to the exact provider PR. Do not use for ad-hoc work or provider landing.
 schedule: "Only when the target schedule selects an authorized ed3c/noodle Issue"
 ---
 
@@ -14,10 +14,16 @@ The stage prompt is the exact JSON backlog row selected by the target schedule. 
 
 Implement only the smallest independently useful behavior inside the declared boundary. Read the nearest source and test, run focused RED/GREEN verification, then run the repository's required check once at the exact candidate head. Do not weaken checks or modify unrelated files.
 
-Commit the candidate in the current worktree. Emit the supported handoff event, then stop:
+Commit the candidate in the current worktree. Recheck that the committed candidate is clean and exact, then invoke the target-owned carrier with the exact subject:
+
+```bash
+go run ./adapters/noodles-github handoff 'ed3c/noodle#N'
+```
+
+The carrier must successfully read back the deterministic provider branch, exact PR, and the Issue at `awaiting_land`. Only then emit the supported handoff event and stop:
 
 ```bash
 noodle event emit --session "$NOODLE_SESSION_ID" stage_yield --payload '{"message":"Implemented and verified the exact target Issue; candidate committed for supervised provider handoff."}'
 ```
 
-This route does not merge locally, close the Issue, mutate provider lifecycle state, or grant landing authority. Provider PR creation, exact-head verification, merge, closure, and reconciliation remain outside this route until target-owned carriers provide them.
+This route does not merge locally, merge the provider PR, close the Issue, or grant landing authority. Exact-head landing, closure, and reconciliation remain outside this route.

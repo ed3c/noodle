@@ -69,7 +69,7 @@ func TestNoodlesGitHubOperationalSkillsEncodeSingleStagePolicy(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
 	required := map[string][]string{
 		"schedule":              {"exactly one stage", "execution_skill", "entire row", ".noodle/orders.json", "owned_ids", "`id` is not in `owned_ids`"},
-		"noodles-issue-execute": {"source-authorized", "declared write boundary", "stage_yield"},
+		"noodles-issue-execute": {"source-authorized", "declared write boundary", "handoff", "awaiting_land", "stage_yield"},
 	}
 	for _, name := range []string{"schedule", "noodles-issue-execute"} {
 		t.Run(name, func(t *testing.T) {

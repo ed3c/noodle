@@ -57,6 +57,7 @@ type Repository struct {
 }
 
 type GitRef struct {
+	Ref    string    `json:"ref"`
 	Object GitObject `json:"object"`
 }
 
@@ -70,6 +71,26 @@ type Issue struct {
 	State       string          `json:"state"`
 	Body        string          `json:"body"`
 	PullRequest json.RawMessage `json:"pull_request,omitempty"`
+}
+
+type PullRequest struct {
+	Number int    `json:"number"`
+	State  string `json:"state"`
+	Body   string `json:"body"`
+	Base   struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
+	Head struct {
+		Ref string `json:"ref"`
+		SHA string `json:"sha"`
+	} `json:"head"`
+}
+
+type HandoffResult struct {
+	Status string `json:"status"`
+	Branch string `json:"branch"`
+	Head   string `json:"head"`
+	PR     int    `json:"pr"`
 }
 
 type Comment struct {
