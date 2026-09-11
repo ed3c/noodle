@@ -1,6 +1,8 @@
+mode = "supervised"
+
 [routing.defaults]
-provider = "claude"
-model = "claude-opus-4-6"
+provider = "codex"
+model = "gpt-5.6-sol"
 
 # Tag-specific routing overrides. Example:
 # [routing.tags.urgent]
@@ -16,15 +18,16 @@ args = ["--dangerously-skip-permissions", "--verbose"]
 
 [agents.codex]
 path = "~/.codex"
+args = ["--ignore-user-config"]
 
 [adapters.backlog]
-skill = "todo"
+skill = "execute"
 
 [adapters.backlog.scripts]
-sync = "go run adapters/main.go backlog-sync"
-add = "go run adapters/main.go backlog-add"
-done = "go run adapters/main.go backlog-done"
-edit = "go run adapters/main.go backlog-edit"
+sync = "go run ./adapters/noodles-github sync"
+add = "go run ./adapters/noodles-github refuse"
+done = "go run ./adapters/noodles-github done"
+edit = "go run ./adapters/noodles-github refuse"
 
 [runtime]
 # "process" | "sprites"

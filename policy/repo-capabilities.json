@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "repository": "ed3c/noodle",
+  "verification_surfaces": {
+    "static-analysis": {
+      "available": true,
+      "carrier": "go vet ./..."
+    },
+    "unit-test": {
+      "available": true,
+      "carrier": "go test ./...; pnpm --filter noodle-ui test"
+    },
+    "structural": {
+      "available": true,
+      "carrier": "pnpm generate; git diff --exit-code; sh scripts/lint-arch.sh"
+    },
+    "security-advisory": {
+      "available": false,
+      "carrier": null
+    },
+    "runtime-oracle": {
+      "available": true,
+      "carrier": "go test ./... -run 'TestNoodlesGitHubTargetConsumer|TestNoodlesDispatchAdmission'"
+    },
+    "worktree-execution": {
+      "available": true,
+      "carrier": "noodle-ed3c-v0.1.12 worktree create"
+    },
+    "github-actions-verification": {
+      "available": true,
+      "carrier": ".github/workflows/test.yml"
+    },
+    "exact-head-merge": {
+      "available": false,
+      "carrier": null
+    }
+  }
+}
