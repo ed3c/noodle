@@ -93,7 +93,23 @@ func (l *Loop) handlePromotionResult(result mergeResult, brief mise.Brief, err e
 		l.handlePromotionError(err)
 		return nil
 	}
+	if err := l.stopPromotedScheduleWriter(); err != nil {
+		l.handlePromotionError(err)
+		return nil
+	}
 	l.emitPromotedOrders()
+	return nil
+}
+
+func (l *Loop) stopPromotedScheduleWriter() error {
+	cook := l.cooks.activeCooksByOrder[scheduleOrderID]
+	if cook == nil || cook.session == nil || !isScheduleStage(cook.stage) {
+		return nil
+	}
+	l.logger.Info("schedule output promoted, stopping single-use writer", "session", cook.session.ID())
+	if err := cook.session.ForceKill(); err != nil {
+		return fmt.Errorf("stop promoted schedule writer %s: %w", cook.session.ID(), err)
+	}
 	return nil
 }
 

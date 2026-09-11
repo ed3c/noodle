@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -9,6 +10,103 @@ import (
 	"github.com/poteto/noodle/mise"
 	loopruntime "github.com/poteto/noodle/runtime"
 )
+
+func TestPromotedScheduleTerminatesWriter(t *testing.T) {
+	projectDir := t.TempDir()
+	runtimeDir := filepath.Join(projectDir, ".noodle")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ordersPath := filepath.Join(runtimeDir, "orders.json")
+	if err := writeOrdersAtomic(ordersPath, OrdersFile{}); err != nil {
+		t.Fatalf("write orders: %v", err)
+	}
+
+	l := New(projectDir, "noodle", config.DefaultConfig(), Dependencies{
+		Runtimes:       map[string]loopruntime.Runtime{"process": newMockRuntime()},
+		Worktree:       &fakeWorktree{},
+		Adapter:        &fakeAdapterRunner{},
+		Mise:           &fakeMise{},
+		Monitor:        fakeMonitor{},
+		Registry:       testLoopRegistry(),
+		Now:            time.Now,
+		OrdersFile:     ordersPath,
+		OrdersNextFile: filepath.Join(runtimeDir, "orders-next.json"),
+	})
+	scheduler := &mockSession{id: "schedule-session", status: "running", done: make(chan struct{})}
+	l.cooks.activeCooksByOrder[scheduleOrderID] = &cookHandle{
+		cookIdentity: cookIdentity{
+			orderID:    scheduleOrderID,
+			stageIndex: 0,
+			stage:      Stage{TaskKey: scheduleOrderID, Skill: scheduleOrderID, Status: StageStatusActive},
+		},
+		session: scheduler,
+	}
+	nonScheduler := &mockSession{id: "worker-session", status: "running", done: make(chan struct{})}
+	l.cooks.activeCooksByOrder["42"] = &cookHandle{
+		cookIdentity: cookIdentity{
+			orderID:    "42",
+			stageIndex: 0,
+			stage:      Stage{TaskKey: "execute", Skill: "execute", Status: StageStatusActive},
+		},
+		session: nonScheduler,
+	}
+	promoted := OrdersFile{Orders: []Order{{
+		ID: "42", Status: OrderStatusActive,
+		Stages: []Stage{{TaskKey: "execute", Skill: "execute", Status: StageStatusPending}},
+	}}}
+
+	if err := l.handlePromotionResult(mergeResult{Orders: promoted, Promoted: true}, mise.Brief{}, nil); err != nil {
+		t.Fatalf("handle promotion: %v", err)
+	}
+	if got := scheduler.Status(); got != "killed" {
+		t.Fatalf("promoted scheduler status = %q, want killed", got)
+	}
+	if got := nonScheduler.Status(); got != "running" {
+		t.Fatalf("non-scheduler status = %q, want running", got)
+	}
+	if _, ok := l.cooks.activeCooksByOrder[scheduleOrderID]; !ok {
+		t.Fatal("scheduler must remain tracked until its watcher observes exit")
+	}
+	readback, err := readOrders(ordersPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(readback.Orders) != 1 || readback.Orders[0].ID != "42" {
+		t.Fatalf("promoted order readback = %#v", readback.Orders)
+	}
+
+	unpromoted := &mockSession{id: "unpromoted-schedule", status: "running", done: make(chan struct{})}
+	l.cooks.activeCooksByOrder[scheduleOrderID] = &cookHandle{
+		cookIdentity: cookIdentity{
+			orderID: scheduleOrderID,
+			stage:   Stage{TaskKey: scheduleOrderID, Skill: scheduleOrderID, Status: StageStatusActive},
+		},
+		session: unpromoted,
+	}
+	if err := l.handlePromotionResult(mergeResult{}, mise.Brief{}, nil); err != nil {
+		t.Fatalf("handle absent promotion: %v", err)
+	}
+	if got := unpromoted.Status(); got != "running" {
+		t.Fatalf("unpromoted scheduler status = %q, want running", got)
+	}
+
+	empty := &mockSession{id: "empty-schedule", status: "running", done: make(chan struct{})}
+	l.cooks.activeCooksByOrder[scheduleOrderID] = &cookHandle{
+		cookIdentity: cookIdentity{
+			orderID: scheduleOrderID,
+			stage:   Stage{TaskKey: scheduleOrderID, Skill: scheduleOrderID, Status: StageStatusActive},
+		},
+		session: empty,
+	}
+	l.scheduleDispatchDigest = "0000000000000000000000000000000000000000000000000000000000000000"
+	if err := l.handlePromotionResult(mergeResult{Orders: OrdersFile{}, Promoted: true, EmptyPromotion: true}, mise.Brief{}, nil); err != nil {
+		t.Fatalf("handle empty promotion: %v", err)
+	}
+	if got := empty.Status(); got != "killed" {
+		t.Fatalf("empty promoted scheduler status = %q, want killed", got)
+	}
+}
 
 func TestCancelSupersededActiveCooksCancelsChangedStage(t *testing.T) {
 	projectDir := t.TempDir()
