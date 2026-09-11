@@ -1,0 +1,32 @@
+name: Noodles dispatch admission
+
+on:
+  repository_dispatch:
+    types: [noodles-execution]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: noodles-dispatch-${{ github.event.client_payload.subject }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Validate and record target authorization
+        run: go run ./adapters/noodles-github receive
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
