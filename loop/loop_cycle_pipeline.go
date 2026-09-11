@@ -237,6 +237,22 @@ func (l *Loop) ensureScheduleIfNeeded(brief mise.Brief, orders *OrdersFile, mise
 		}
 		l.logger.Info("mise changed, injecting schedule order")
 	}
+	if l.hasActiveScheduleCook() {
+		return false, nil
+	}
+	if _, adopted := l.cooks.adoptedTargets[scheduleOrderID]; adopted {
+		return false, nil
+	}
+	for _, order := range orders.Orders {
+		renewed, err := l.renewTerminalCanonicalSchedule(order)
+		if err != nil {
+			return false, err
+		}
+		if renewed {
+			l.logger.Info("renewed terminal canonical schedule attempt")
+			break
+		}
+	}
 	return false, nil
 }
 
@@ -464,7 +480,11 @@ func (l *Loop) spawnPlannedCandidates(ctx context.Context, candidates []dispatch
 			}
 			scheduleDigest = digest
 		}
-		if err := l.spawnCook(ctx, cand, order, spawnOptions{}); err != nil {
+		options := spawnOptions{}
+		if isScheduleStage(cand.Stage) {
+			options.attempt = l.canonicalAttemptOrdinal(cand.OrderID, cand.StageIndex)
+		}
+		if err := l.spawnCook(ctx, cand, order, options); err != nil {
 			return err
 		}
 		if scheduleDigest != "" {

@@ -9,6 +9,8 @@ import (
 
 	"github.com/poteto/noodle/adapter"
 	"github.com/poteto/noodle/event"
+	"github.com/poteto/noodle/internal/ingest"
+	"github.com/poteto/noodle/internal/reducer"
 	"github.com/poteto/noodle/mise"
 )
 
@@ -283,6 +285,88 @@ func TestRestartDefersScheduleUntilMemoCanBeComparedWithProviderState(t *testing
 	}
 	if _, err := os.Stat(filepath.Join(tc.runtimeDir, "schedule-empty-decision.json")); err != nil {
 		t.Fatalf("memo not preserved across restart: %v", err)
+	}
+}
+
+func TestScheduleEmptyMemoRestartDispatchesPendingScheduleAfterPriorCanonicalAttemptCompleted(t *testing.T) {
+	logger, _ := newTestLogger()
+	brief := mise.Brief{
+		Backlog:   []adapter.BacklogItem{{ID: "1", Title: "new ready work", Status: adapter.BacklogStatusOpen}},
+		Resources: mise.ResourceSnapshot{MaxConcurrency: 1},
+	}
+	tc := newTestLoop(t, logger, func(opts *testLoopOpts) { opts.brief = &brief })
+	prior := bootstrapScheduleOrder(tc.loop.config).Orders[0]
+	if err := tc.loop.writeOrdersState(OrdersFile{Orders: []Order{prior}}); err != nil {
+		t.Fatalf("seed prior schedule: %v", err)
+	}
+	tc.loop.emitEvent(ingest.EventDispatchRequested, map[string]any{
+		"order_id": scheduleOrderID, "stage_index": 0,
+		"attempt_id": "schedule-0-attempt-0",
+	})
+	tc.loop.emitEvent(ingest.EventDispatchCompleted, map[string]any{
+		"order_id": scheduleOrderID, "stage_index": 0,
+		"attempt_id": "schedule-0-attempt-0", "session_id": "schedule-prior",
+	})
+	tc.loop.emitEvent(ingest.EventStageCompleted, map[string]any{
+		"order_id": scheduleOrderID, "stage_index": 0,
+		"attempt_id": "schedule-0-attempt-0", "session_id": "schedule-prior",
+	})
+	tc.loop.emitEvent(ingest.EventOrderCompleted, map[string]any{"order_id": scheduleOrderID})
+
+	// Reproduce the replay shape: the public schedule ID is pending in the
+	// legacy projection while its prior canonical incarnation is terminal.
+	replacement := bootstrapScheduleOrder(tc.loop.config)
+	if err := writeOrdersAtomic(tc.ordersPath, replacement); err != nil {
+		t.Fatalf("write replacement schedule: %v", err)
+	}
+
+	restarted := New(tc.projectDir, "noodle", tc.loop.config, Dependencies{
+		Runtimes:   tc.loop.deps.Runtimes,
+		Worktree:   tc.worktree,
+		Adapter:    tc.adapter,
+		Mise:       tc.mise,
+		Monitor:    fakeMonitor{},
+		Registry:   tc.loop.registry,
+		Logger:     logger,
+		Now:        time.Now,
+		OrdersFile: tc.ordersPath,
+	})
+	if err := restarted.loadOrdersState(); err != nil {
+		t.Fatalf("load replacement orders: %v", err)
+	}
+	if err := restarted.reconcile(context.Background()); err != nil {
+		t.Fatalf("reconcile restart: %v", err)
+	}
+	if err := restarted.Cycle(context.Background()); err != nil {
+		t.Fatalf("restart cycle: %v", err)
+	}
+	t.Cleanup(restarted.Shutdown)
+
+	if got := len(tc.runtime.calls); got != 1 {
+		t.Fatalf("replacement scheduler dispatches = %d, want exactly 1", got)
+	}
+	stage := restarted.canonical.Orders[scheduleOrderID].Stages[0]
+	if len(stage.Attempts) != 2 || stage.Attempts[1].SessionID == "schedule-prior" {
+		t.Fatalf("replacement canonical attempt was not distinct: %#v", stage.Attempts)
+	}
+	if stage.Attempts[1].AttemptID == "schedule-0-attempt-0" {
+		t.Fatalf("replacement canonical attempt identity was reused: %#v", stage.Attempts)
+	}
+	dispatchEffectIDs := make([]string, 0, 2)
+	for _, record := range restarted.effectLedger.All() {
+		if record.Effect.Type == reducer.EffectDispatch {
+			dispatchEffectIDs = append(dispatchEffectIDs, record.EffectID)
+		}
+	}
+	if len(dispatchEffectIDs) != 2 || dispatchEffectIDs[0] == dispatchEffectIDs[1] {
+		t.Fatalf("dispatch effect identities = %#v, want two distinct effects", dispatchEffectIDs)
+	}
+
+	if err := restarted.Cycle(context.Background()); err != nil {
+		t.Fatalf("live scheduler control cycle: %v", err)
+	}
+	if got := len(tc.runtime.calls); got != 1 {
+		t.Fatalf("live scheduler dispatches = %d, want exactly 1", got)
 	}
 }
 
