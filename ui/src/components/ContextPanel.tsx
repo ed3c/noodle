@@ -5,7 +5,7 @@ import {
   formatCost,
   formatDuration,
 } from "~/client";
-import type { Snapshot, Session, Order, PendingReviewItem } from "~/client";
+import type { Snapshot, Session, Order, Stage, PendingReviewItem } from "~/client";
 import { MetricCard } from "./MetricCard";
 import { StageRail } from "./StageRail";
 import { DiffViewer } from "./DiffViewer";
@@ -29,10 +29,17 @@ function contextFillColor(cwPct: number): string {
   return "var(--color-green)";
 }
 
-function findOrderForSession(sessionId: string, snapshot: Snapshot): Order | undefined {
-  return snapshot.orders.find((order) =>
-    order.stages.some((stage) => stage.session_id === sessionId),
-  );
+function findExecutionForSession(
+  sessionId: string,
+  snapshot: Snapshot,
+): { order: Order; stage: Stage } | undefined {
+  for (const order of snapshot.orders) {
+    const stage = order.stages.find((candidate) => candidate.session_id === sessionId);
+    if (stage) {
+      return { order, stage };
+    }
+  }
+  return undefined;
 }
 
 function SystemFooter({ snapshot }: { snapshot: Snapshot }) {
@@ -138,7 +145,9 @@ function SchedulerContext({ snapshot }: { snapshot: Snapshot }) {
 }
 
 function AgentContext({ session, snapshot }: { session: Session; snapshot: Snapshot }) {
-  const order = findOrderForSession(session.id, snapshot);
+  const execution = findExecutionForSession(session.id, snapshot);
+  const order = execution?.order;
+  const stage = execution?.stage;
 
   const completedStages = order ? order.stages.filter((s) => s.status === "completed").length : 0;
   const totalStages = order ? order.stages.length : 0;
@@ -163,6 +172,42 @@ function AgentContext({ session, snapshot }: { session: Session; snapshot: Snaps
           {worktreeName}
         </span>
       </div>
+
+      {stage && (
+        <>
+          <div className="ctx-section-label">Invocation</div>
+          {[
+            ["Task", stage.task_key],
+            ["Skill", stage.skill],
+            ["Provider", stage.provider],
+            ["Model", stage.model],
+          ].map(([label, value]) => (
+            <div key={label} className="ctx-inline-stat">
+              <span className="ctx-inline-stat-label">{label}</span>
+              <span className="ctx-inline-stat-value" title={value}>
+                {value}
+              </span>
+            </div>
+          ))}
+          {stage.prompt && (
+            <details style={{ margin: "8px 16px 0" }}>
+              <summary className="ctx-inline-stat-label" style={{ cursor: "pointer" }}>
+                Prompt
+              </summary>
+              <pre
+                style={{
+                  margin: "8px 0 0",
+                  overflowX: "auto",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}
+              >
+                {stage.prompt}
+              </pre>
+            </details>
+          )}
+        </>
+      )}
 
       {/* Context window bar */}
       <div className="ctx-progress">
