@@ -6,7 +6,9 @@ schedule: "When an authorized ed3c/noodle Issue is ready and no current order ow
 
 # Target Issue Schedule
 
-Read `.noodle/mise.json` and write only `.noodle/orders-next.json`. Noodle owns promotion into canonical orders, worktrees, and process lifecycle.
+Read `.noodle/mise.json` and the read-only canonical `.noodle/orders.json`; write only `.noodle/orders-next.json`. Noodle owns promotion into canonical orders, worktrees, and process lifecycle.
+
+Before selecting a backlog row, derive `owned_ids` from every canonical non-`schedule` order ID. A row is actionable only when its exact `id` is not in `owned_ids`. The transient presence or absence of `.noodle/orders-next.json` is never ownership evidence. If every eligible backlog row is already owned, write `{"orders":[]}`; do not copy canonical orders into the promotion.
 
 Each eligible backlog row is the target adapter's current provider and authorization projection. For one actionable row:
 
