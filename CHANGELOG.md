@@ -1,3 +1,9 @@
+## [0.1.15](https://github.com/poteto/noodle/compare/v0.1.14...v0.1.15) (2026-09-13)
+
+### Bug Fixes
+
+* **loop:** validate typed outcome before repair ([02dc2bb](https://github.com/poteto/noodle/commit/02dc2bb5fb810ee88619292d63c7b22a24ccd1a2))
+
 ## [0.1.14](https://github.com/poteto/noodle/compare/v0.1.13...v0.1.14) (2026-09-13)
 
 ### Bug Fixes
