@@ -4,10 +4,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/poteto/noodle/config"
+	"github.com/poteto/noodle/event"
 	loopruntime "github.com/poteto/noodle/runtime"
 )
 
@@ -75,8 +77,10 @@ func TestEnqueueTerminalActiveCompletionsFromMeta(t *testing.T) {
 		t.Fatalf("write meta.json: %v", err)
 	}
 
+	cfg := config.DefaultConfig()
+	cfg.Agents.Claude.RequireTypedOutcome = true
 	rt := newMockRuntime()
-	l := New(projectDir, "noodle", config.DefaultConfig(), Dependencies{
+	l := New(projectDir, "noodle", cfg, Dependencies{
 		Runtimes:   map[string]loopruntime.Runtime{"process": rt},
 		Worktree:   &fakeWorktree{},
 		Adapter:    &fakeAdapterRunner{},
@@ -102,6 +106,25 @@ func TestEnqueueTerminalActiveCompletionsFromMeta(t *testing.T) {
 		generation:   7,
 	}
 	l.cooks.activeCooksByOrder["42"] = cook
+	schedulerController := &mockController{steerable: true}
+	l.cooks.activeCooksByOrder[scheduleOrderID] = &cookHandle{
+		cookIdentity: cookIdentity{
+			orderID:    scheduleOrderID,
+			stageIndex: 0,
+			stage: Stage{
+				TaskKey: scheduleOrderID,
+				Skill:   scheduleOrderID,
+			},
+		},
+		session: &steerableSession{
+			mockSession: &mockSession{
+				id:     "schedule-session",
+				status: "running",
+				done:   make(chan struct{}),
+			},
+			ctrl: schedulerController,
+		},
+	}
 
 	if err := l.enqueueTerminalActiveCompletions(context.Background()); err != nil {
 		t.Fatalf("enqueueTerminalActiveCompletions: %v", err)
@@ -122,8 +145,90 @@ func TestEnqueueTerminalActiveCompletionsFromMeta(t *testing.T) {
 		if result.Generation != 7 {
 			t.Fatalf("result generation = %d, want 7", result.Generation)
 		}
+		if err := l.applyStageResult(context.Background(), result); err != nil {
+			t.Fatalf("applyStageResult: %v", err)
+		}
 	default:
 		t.Fatal("expected completion to be enqueued")
+	}
+
+	reviews, err := ReadPendingReview(l.runtimeDir)
+	if err != nil {
+		t.Fatalf("read pending review: %v", err)
+	}
+	if len(reviews) != 1 || !strings.Contains(reviews[0].Reason, "missing stage_message") {
+		t.Fatalf("pending reviews = %#v, want missing typed-outcome refusal", reviews)
+	}
+	time.Sleep(50 * time.Millisecond)
+	schedulerController.mu.Lock()
+	sendCalls := schedulerController.sendCalls
+	lastMessage := schedulerController.lastSentMessage
+	schedulerController.mu.Unlock()
+	if sendCalls != 0 {
+		t.Fatalf("scheduler received %d message(s), last = %q; want none before typed outcome admission", sendCalls, lastMessage)
+	}
+}
+
+func TestEnqueueTerminalActiveCompletionsRoutesTypedOutcome(t *testing.T) {
+	tests := []struct {
+		name          string
+		outcome       event.StageOutcome
+		blocking      bool
+		wantFailed    bool
+		wantLoopEvent string
+	}{
+		{
+			name:          "failed",
+			outcome:       event.StageOutcomeFailed,
+			blocking:      true,
+			wantFailed:    true,
+			wantLoopEvent: `"type":"stage.failed"`,
+		},
+		{
+			name:          "completed",
+			outcome:       event.StageOutcomeCompleted,
+			blocking:      false,
+			wantLoopEvent: `"type":"stage.completed"`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			l, _, cook := newTypedOutcomeTestLoop(t)
+			cook.session = &mockSession{
+				id:     cook.session.ID(),
+				status: "running",
+				done:   make(chan struct{}),
+			}
+			appendTypedOutcome(t, l, cook, test.outcome, test.blocking, cook.orderID, cook.stageIndex)
+			sessionDir := filepath.Join(l.runtimeDir, "sessions", cook.session.ID())
+			if err := os.WriteFile(filepath.Join(sessionDir, "meta.json"), []byte(`{"status":"exited"}`), 0o644); err != nil {
+				t.Fatalf("write meta.json: %v", err)
+			}
+			l.cooks.activeCooksByOrder[cook.orderID] = cook
+
+			if err := l.enqueueTerminalActiveCompletions(context.Background()); err != nil {
+				t.Fatalf("enqueueTerminalActiveCompletions: %v", err)
+			}
+			if err := l.drainCompletions(context.Background()); err != nil {
+				t.Fatalf("drainCompletions: %v", err)
+			}
+
+			orders, err := readOrders(l.deps.OrdersFile)
+			if err != nil {
+				t.Fatalf("read orders: %v", err)
+			}
+			if test.wantFailed && (len(orders.Orders) != 1 || orders.Orders[0].Status != OrderStatusFailed) {
+				t.Fatalf("orders = %#v, want status %q", orders.Orders, OrderStatusFailed)
+			}
+			loopEvents, err := os.ReadFile(filepath.Join(l.runtimeDir, "loop-events.ndjson"))
+			if err != nil {
+				t.Fatalf("read loop events: %v", err)
+			}
+			if !strings.Contains(string(loopEvents), test.wantLoopEvent) {
+				t.Fatalf("loop events = %s, want %s", loopEvents, test.wantLoopEvent)
+			}
+		})
 	}
 }
 
