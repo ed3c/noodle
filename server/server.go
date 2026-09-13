@@ -166,6 +166,10 @@ func (s *Server) WaitReady() { <-s.ready }
 
 func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	loopState := s.provider.State()
+	if !loopState.StartupReady {
+		http.Error(w, "Noodle startup initialization incomplete; retry snapshot", http.StatusServiceUnavailable)
+		return
+	}
 	snap, err := snapshot.LoadSnapshot(s.runtimeDir, s.now(), loopState)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

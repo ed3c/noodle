@@ -188,6 +188,7 @@ type Loop struct {
 	completionBuf completionBuffer
 
 	state             State
+	startupReady      bool
 	registryStale     atomic.Bool
 	registryFailCount int
 

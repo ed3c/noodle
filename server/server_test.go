@@ -35,7 +35,7 @@ func testServer(t *testing.T) (*Server, string) {
 		RuntimeDir:        dir,
 		Addr:              "127.0.0.1:0",
 		Now:               func() time.Time { return fixed },
-		LoopStateProvider: &staticProvider{state: loop.LoopState{Status: "running"}},
+		LoopStateProvider: &staticProvider{state: loop.LoopState{StartupReady: true, Status: "running"}},
 		Broker:            broker,
 	})
 	return s, dir
@@ -320,7 +320,7 @@ func TestWSHubDiffGating(t *testing.T) {
 	fixed := time.Date(2026, 2, 25, 12, 0, 0, 0, time.UTC)
 	now := func() time.Time { return fixed }
 
-	provider := &staticProvider{state: loop.LoopState{Status: "running"}}
+	provider := &staticProvider{state: loop.LoopState{StartupReady: true, Status: "running"}}
 
 	sub := &mockSubscriber{}
 	// Wrap mock as a wsClient-like subscriber via the hub's broadcast path.
@@ -367,7 +367,8 @@ func TestWSHubDiffGatingIgnoresActiveSessionClockDrift(t *testing.T) {
 
 	provider := &staticProvider{
 		state: loop.LoopState{
-			Status: "running",
+			StartupReady: true,
+			Status:       "running",
 			ActiveCooks: []loop.CookSummary{
 				{
 					SessionID:   "s-1",
@@ -711,7 +712,7 @@ func TestSnapshotIncludesWarnings(t *testing.T) {
 		RuntimeDir:        dir,
 		Addr:              "127.0.0.1:0",
 		Now:               func() time.Time { return fixed },
-		LoopStateProvider: &staticProvider{state: loop.LoopState{Status: "running"}},
+		LoopStateProvider: &staticProvider{state: loop.LoopState{StartupReady: true, Status: "running"}},
 		Warnings:          []string{"unknown runtime \"tmux\" (valid: process, sprites, cursor)"},
 	})
 

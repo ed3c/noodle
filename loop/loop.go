@@ -357,6 +357,8 @@ func (l *Loop) Run(ctx context.Context) error {
 	if err := watcher.Add(l.runtimeDir); err != nil {
 		return fmt.Errorf("watch runtime directory: %w", err)
 	}
+	l.startupReady = true
+	l.publishState()
 
 	ticker := time.NewTicker(l.pollInterval())
 	defer ticker.Stop()
