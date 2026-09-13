@@ -1,3 +1,9 @@
+## [0.1.14](https://github.com/poteto/noodle/compare/v0.1.13...v0.1.14) (2026-09-13)
+
+### Bug Fixes
+
+* **server:** withhold snapshots until startup recovery completes ([72dd8a5](https://github.com/poteto/noodle/commit/72dd8a5cfe7c542b7c3e8b34e1eb8c8a48c5ff82))
+
 ## [0.1.13](https://github.com/poteto/noodle/compare/v0.1.12...v0.1.13) (2026-09-11)
 
 ### Features
