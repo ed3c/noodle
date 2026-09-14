@@ -54,6 +54,9 @@ func validatePolicy(policy Policy) error {
 	if policy.DefaultBranch != defaultBranch {
 		return fmt.Errorf("target policy default branch %q is not %q", policy.DefaultBranch, defaultBranch)
 	}
+	if strings.TrimSpace(policy.PushRemote) == "" {
+		return fmt.Errorf("policy/github.json push_remote must name one target push remote")
+	}
 	if policy.RepositoryDispatchSender == "" {
 		return fmt.Errorf("target policy repository_dispatch_sender is empty")
 	}

@@ -28,6 +28,16 @@ func TestNoodlesGitHubRepositoryContract(t *testing.T) {
 	if err := validatePolicy(policy); err != nil {
 		t.Fatal(err)
 	}
+	if policy.PushRemote != "fork" {
+		t.Fatalf("policy push_remote = %q, want fork", policy.PushRemote)
+	}
+	mainSource, err := os.ReadFile(filepath.Join(root, "adapters", "noodles-github", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(mainSource), "NOODLES_GITHUB_REMOTE") {
+		t.Fatal("production CLI still reads NOODLES_GITHUB_REMOTE")
+	}
 
 	cfg, diagnostics, err := config.Load(filepath.Join(root, ".noodle.toml"))
 	if err != nil {

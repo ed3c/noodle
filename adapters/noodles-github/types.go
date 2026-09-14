@@ -35,6 +35,7 @@ type Policy struct {
 	Repository                 string   `json:"repository"`
 	AllowedRepositories        []string `json:"allowed_repositories"`
 	DefaultBranch              string   `json:"default_branch"`
+	PushRemote                 string   `json:"push_remote"`
 	CrossRepositoryStatus      string   `json:"cross_repository_status"`
 	RepositoryDispatchSender   string   `json:"repository_dispatch_sender"`
 	AuthorizationCommentAuthor string   `json:"authorization_comment_author"`

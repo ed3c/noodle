@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-func Handoff(ctx context.Context, client *GitHubClient, policy Policy, capabilities Capabilities, subject, remote, worktree string) (HandoffResult, error) {
+func Handoff(ctx context.Context, client *GitHubClient, policy Policy, capabilities Capabilities, subject, worktree string) (HandoffResult, error) {
 	if err := validatePolicy(policy); err != nil {
 		return HandoffResult{}, err
 	}
@@ -24,9 +24,6 @@ func Handoff(ctx context.Context, client *GitHubClient, policy Policy, capabilit
 	}
 	if client.token == "" {
 		return HandoffResult{}, fmt.Errorf("GITHUB_TOKEN is required for handoff")
-	}
-	if remote == "" {
-		return HandoffResult{}, fmt.Errorf("NOODLES_GITHUB_REMOTE is required for handoff")
 	}
 	branch, err := gitValue(worktree, "branch", "--show-current")
 	if err != nil || branch == "" {
@@ -46,8 +43,8 @@ func Handoff(ctx context.Context, client *GitHubClient, policy Policy, capabilit
 	if err != nil || !sha40Pattern.MatchString(head) {
 		return HandoffResult{}, fmt.Errorf("candidate HEAD is not exact")
 	}
-	if _, err := gitValue(worktree, "remote", "get-url", "--push", remote); err != nil {
-		return HandoffResult{}, fmt.Errorf("configured push remote %q is unavailable: %w", remote, err)
+	if _, err := gitValue(worktree, "remote", "get-url", "--push", policy.PushRemote); err != nil {
+		return HandoffResult{}, fmt.Errorf("policy/github.json push_remote %q is unavailable: %w", policy.PushRemote, err)
 	}
 
 	repository, err := client.Repository(ctx)
@@ -111,7 +108,7 @@ func Handoff(ctx context.Context, client *GitHubClient, policy Policy, capabilit
 		return HandoffResult{}, fmt.Errorf("provider branch %q names %s, want %s", handoffBranch, ref.Object.SHA, head)
 	}
 	if !exists {
-		if err := gitCommand(worktree, "push", remote, head+":refs/heads/"+handoffBranch); err != nil {
+		if err := gitCommand(worktree, "push", policy.PushRemote, head+":refs/heads/"+handoffBranch); err != nil {
 			return HandoffResult{}, fmt.Errorf("push handoff branch: %w", err)
 		}
 		ref, exists, err = client.Branch(ctx, handoffBranch)
