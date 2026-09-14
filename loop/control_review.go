@@ -171,8 +171,5 @@ func (l *Loop) controlRequestChanges(orderID, feedback string) error {
 		mistake.CookReason,
 	)
 	l.forwardToScheduler(cook, "request_changes", reason, &mistake)
-
-	// Clean up the worktree for the failed stage.
-	l.cleanupCookWorktree(cook)
 	return nil
 }

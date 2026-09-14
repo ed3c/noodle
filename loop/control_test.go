@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/poteto/noodle/event"
 	"github.com/poteto/noodle/internal/failure"
 	loopruntime "github.com/poteto/noodle/runtime"
+	"github.com/poteto/noodle/worktree"
 )
 
 func newControlTestLoop(t *testing.T, wt *fakeWorktree, rt *mockRuntime) *Loop {
@@ -235,6 +237,107 @@ func TestControlRequestChangesMarksOrderFailed(t *testing.T) {
 	if stagePayload.Failure.Class != failure.FailureClassAgentMistake {
 		t.Fatalf("failure class = %q, want %q", stagePayload.Failure.Class, failure.FailureClassAgentMistake)
 	}
+}
+
+func TestControlRequestChangesPreservesWorktreeCustody(t *testing.T) {
+	projectDir := t.TempDir()
+	runGitInRepo(t, projectDir, "init", "-b", "main")
+	runGitInRepo(t, projectDir, "config", "user.email", "test@noodle.dev")
+	runGitInRepo(t, projectDir, "config", "user.name", "Noodle Test")
+	if err := os.WriteFile(filepath.Join(projectDir, "README.md"), []byte("base\n"), 0o644); err != nil {
+		t.Fatalf("write base file: %v", err)
+	}
+	runGitInRepo(t, projectDir, "add", "README.md")
+	runGitInRepo(t, projectDir, "commit", "-m", "base")
+	baseHead := gitOutputInRepo(t, projectDir, "rev-parse", "HEAD")
+
+	const worktreeName = "42-0-execute"
+	worktrees := &worktree.App{Root: projectDir, Quiet: true, IntegrationBranch: "main"}
+	if err := worktrees.Create(worktreeName); err != nil {
+		t.Fatalf("create review worktree: %v", err)
+	}
+	worktreePath := worktree.WorktreePath(projectDir, worktreeName)
+	t.Cleanup(func() { _ = worktrees.Cleanup(worktreeName, worktree.CleanupOpts{Force: true}) })
+
+	candidatePath := filepath.Join(worktreePath, "candidate.txt")
+	if err := os.WriteFile(candidatePath, []byte("accepted candidate\n"), 0o644); err != nil {
+		t.Fatalf("write candidate: %v", err)
+	}
+	runGitInRepo(t, worktreePath, "add", "candidate.txt")
+	runGitInRepo(t, worktreePath, "commit", "-m", "candidate")
+	candidateHead := gitOutputInRepo(t, worktreePath, "rev-parse", "HEAD")
+	if candidateHead == baseHead {
+		t.Fatal("fixture candidate must be unmerged")
+	}
+	receiptPath := filepath.Join(worktreePath, "acceptance-evidence.json")
+	if err := os.WriteFile(receiptPath, []byte(`{"head":"`+candidateHead+`"}`), 0o644); err != nil {
+		t.Fatalf("write acceptance receipt: %v", err)
+	}
+
+	runtimeDir := filepath.Join(projectDir, ".noodle")
+	ordersPath := filepath.Join(runtimeDir, "orders.json")
+	if err := writeOrdersAtomic(ordersPath, OrdersFile{Orders: []Order{{
+		ID: "42", Title: "test", Status: OrderStatusActive,
+		Stages: []Stage{{TaskKey: "execute", Skill: "execute", Provider: "claude", Model: "claude-opus-4-6", Status: StageStatusActive}},
+	}}}); err != nil {
+		t.Fatalf("write orders: %v", err)
+	}
+	runtime := newMockRuntime()
+	l := New(projectDir, "noodle", config.DefaultConfig(), Dependencies{
+		Runtimes: map[string]loopruntime.Runtime{"process": runtime}, Worktree: worktrees,
+		Adapter: &fakeAdapterRunner{}, Mise: &fakeMise{}, Monitor: fakeMonitor{},
+		Registry: testLoopRegistry(), Now: time.Now, OrdersFile: ordersPath,
+	})
+	l.cooks.pendingReview["42"] = &pendingReviewCook{
+		cookIdentity: cookIdentity{orderID: "42", stageIndex: 0, stage: Stage{TaskKey: "execute", Skill: "execute", Provider: "claude", Model: "claude-opus-4-6"}},
+		worktreeName: worktreeName, worktreePath: worktreePath, sessionID: "terminal-session",
+	}
+	if err := l.writePendingReview(); err != nil {
+		t.Fatalf("write pending review: %v", err)
+	}
+
+	if err := l.controlRequestChanges("42", "preserve exact candidate"); err != nil {
+		t.Fatalf("controlRequestChanges: %v", err)
+	}
+	if got := gitOutputInRepo(t, worktreePath, "rev-parse", "HEAD"); got != candidateHead {
+		t.Fatalf("preserved HEAD = %q, want %q", got, candidateHead)
+	}
+	if got := gitOutputInRepo(t, worktreePath, "branch", "--show-current"); got != worktreeName {
+		t.Fatalf("preserved branch = %q, want %q", got, worktreeName)
+	}
+	for path, want := range map[string]string{candidatePath: "accepted candidate\n", receiptPath: `{"head":"` + candidateHead + `"}`} {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read preserved custody %s: %v", filepath.Base(path), err)
+		}
+		if string(got) != want {
+			t.Fatalf("preserved custody %s = %q, want %q", filepath.Base(path), got, want)
+		}
+	}
+
+	if err := l.controlRequeue("42"); err != nil {
+		t.Fatalf("controlRequeue: %v", err)
+	}
+	if err := l.Cycle(context.Background()); err != nil {
+		t.Fatalf("dispatch requeued order: %v", err)
+	}
+	if len(runtime.calls) != 1 || runtime.calls[0].WorktreePath != worktreePath {
+		t.Fatalf("requeue dispatch = %#v, want existing worktree %q", runtime.calls, worktreePath)
+	}
+	next := l.cooks.activeCooksByOrder["42"]
+	if next == nil || next.session == nil || next.session.ID() == "terminal-session" {
+		t.Fatalf("requeue attempt = %#v, want a new session", next)
+	}
+}
+
+func gitOutputInRepo(t *testing.T, repo string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func TestControlRequestChangesAllowsEmptyFeedback(t *testing.T) {
