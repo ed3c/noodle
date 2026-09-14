@@ -496,9 +496,8 @@ func (l *Loop) spawnPlannedCandidates(ctx context.Context, candidates []dispatch
 			}
 			scheduleDigest = digest
 		}
-		options := spawnOptions{}
-		if isScheduleStage(cand.Stage) {
-			options.attempt = l.canonicalAttemptOrdinal(cand.OrderID, cand.StageIndex)
+		options := spawnOptions{
+			attempt: l.canonicalAttemptOrdinal(cand.OrderID, cand.StageIndex),
 		}
 		if err := l.spawnCook(ctx, cand, order, options); err != nil {
 			return err
