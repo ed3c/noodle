@@ -19,6 +19,7 @@ args = ["--dangerously-skip-permissions", "--verbose"]
 [agents.codex]
 path = "~/.codex"
 args = ["--ignore-user-config"]
+require_typed_outcome = true
 
 [adapters.backlog]
 skill = "noodles-issue-execute"
