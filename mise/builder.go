@@ -16,14 +16,19 @@ import (
 	"github.com/poteto/noodle/event"
 )
 
+const backlogSyncInterval = time.Minute
+
 type Builder struct {
-	projectDir  string
-	runtimeDir  string
-	config      config.Config
-	runner      *adapter.Runner
-	now         func() time.Time
-	TaskTypes   []TaskTypeSummary
-	lastContent []byte // JSON sans GeneratedAt for change detection
+	projectDir        string
+	runtimeDir        string
+	config            config.Config
+	runner            *adapter.Runner
+	now               func() time.Time
+	TaskTypes         []TaskTypeSummary
+	lastContent       []byte // JSON sans GeneratedAt for change detection
+	lastBacklogSyncAt time.Time
+	lastBacklog       []adapter.BacklogItem
+	lastSyncWarnings  []string
 }
 
 func NewBuilder(projectDir string, cfg config.Config) *Builder {
@@ -38,24 +43,32 @@ func NewBuilder(projectDir string, cfg config.Config) *Builder {
 }
 
 func (b *Builder) Build(ctx context.Context, activeSummary ActiveSummary, recentHistory []HistoryItem) (Brief, []string, bool, error) {
-	warnings := make([]string, 0)
-	backlog := make([]adapter.BacklogItem, 0)
+	now := b.now().UTC()
+	warnings := append([]string(nil), b.lastSyncWarnings...)
+	backlog := append([]adapter.BacklogItem(nil), b.lastBacklog...)
 
 	if _, ok := b.config.Adapters["backlog"]; ok {
-		if strings.TrimSpace(b.config.Adapters["backlog"].Scripts["sync"]) == "" {
-			warnings = append(warnings, "backlog sync script missing; returning empty backlog")
-		} else {
-			items, parseWarnings, err := b.runner.SyncBacklog(ctx)
-			if err != nil {
-				if isMissingSyncScriptError(err) {
-					warnings = append(warnings, "backlog sync script missing; returning empty backlog")
-				} else {
-					return Brief{}, warnings, false, err
-				}
+		if b.lastBacklogSyncAt.IsZero() || !now.Before(b.lastBacklogSyncAt.Add(backlogSyncInterval)) {
+			warnings = make([]string, 0)
+			backlog = make([]adapter.BacklogItem, 0)
+			if strings.TrimSpace(b.config.Adapters["backlog"].Scripts["sync"]) == "" {
+				warnings = append(warnings, "backlog sync script missing; returning empty backlog")
 			} else {
-				warnings = append(warnings, parseWarnings...)
-				backlog = filterActiveBacklog(items)
+				items, parseWarnings, err := b.runner.SyncBacklog(ctx)
+				if err != nil {
+					if isMissingSyncScriptError(err) {
+						warnings = append(warnings, "backlog sync script missing; returning empty backlog")
+					} else {
+						return Brief{}, warnings, false, err
+					}
+				} else {
+					warnings = append(warnings, parseWarnings...)
+					backlog = filterActiveBacklog(items)
+				}
 			}
+			b.lastBacklogSyncAt = now
+			b.lastBacklog = append([]adapter.BacklogItem(nil), backlog...)
+			b.lastSyncWarnings = append([]string(nil), warnings...)
 		}
 	}
 
@@ -94,7 +107,7 @@ func (b *Builder) Build(ctx context.Context, activeSummary ActiveSummary, recent
 	recentEvents := readRecentEvents(b.runtimeDir)
 
 	brief := Brief{
-		GeneratedAt:   b.now().UTC(),
+		GeneratedAt:   now,
 		Backlog:       backlog,
 		ActiveSummary: activeSummary,
 		Tickets:       tickets,
