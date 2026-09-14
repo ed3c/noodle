@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/poteto/noodle/config"
+	"github.com/poteto/noodle/event"
 	"github.com/poteto/noodle/internal/failure"
 	loopruntime "github.com/poteto/noodle/runtime"
 )
@@ -515,6 +517,159 @@ func TestControlRequeueOrderNotInOrdersFile(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `order "42" not found`) {
 		t.Fatalf("error = %q, want order not found", err.Error())
+	}
+}
+
+func TestControlRequeueTypedBlockedReviewPreservesWorktree(t *testing.T) {
+	l, _, cook := newTypedOutcomeTestLoop(t)
+	worktree := l.deps.Worktree.(*fakeWorktree)
+	if err := os.MkdirAll(cook.worktreePath, 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	appendTypedOutcome(t, l, cook, event.StageOutcomeBlocked, true, cook.orderID, cook.stageIndex)
+	if err := l.parkPendingReview(cook, "blocked by typed stage outcome: bounded result"); err != nil {
+		t.Fatalf("park pending review: %v", err)
+	}
+	if err := l.mutateOrdersState(func(orders *OrdersFile) (bool, error) {
+		orders.Orders[0].Stages[0].Prompt = "current admitted prompt"
+		return true, nil
+	}); err != nil {
+		t.Fatalf("update current order prompt: %v", err)
+	}
+	eventsPath := filepath.Join(l.runtimeDir, "sessions", cook.session.ID(), "events.ndjson")
+	eventsBefore, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatalf("read typed outcome before requeue: %v", err)
+	}
+
+	if err := l.controlRequeue(cook.orderID); err != nil {
+		t.Fatalf("controlRequeue: %v", err)
+	}
+
+	if _, ok := l.cooks.pendingReview[cook.orderID]; ok {
+		t.Fatal("typed-blocked review should be removed after requeue")
+	}
+	reviews, err := ReadPendingReview(l.runtimeDir)
+	if err != nil {
+		t.Fatalf("read pending reviews: %v", err)
+	}
+	if len(reviews) != 0 {
+		t.Fatalf("pending reviews = %#v, want empty", reviews)
+	}
+	orders, err := readOrders(l.deps.OrdersFile)
+	if err != nil {
+		t.Fatalf("read orders: %v", err)
+	}
+	if got := orders.Orders[0].Status; got != OrderStatusActive {
+		t.Fatalf("order status = %q, want %q", got, OrderStatusActive)
+	}
+	if got := orders.Orders[0].Stages[0].Status; got != StageStatusPending {
+		t.Fatalf("stage status = %q, want %q", got, StageStatusPending)
+	}
+	if got := orders.Orders[0].Stages[0].Prompt; got != "current admitted prompt" {
+		t.Fatalf("stage prompt = %q, want current admitted prompt", got)
+	}
+	if len(worktree.cleaned) != 0 {
+		t.Fatalf("worktree cleanup calls = %v, want none", worktree.cleaned)
+	}
+	eventsAfter, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatalf("read typed outcome after requeue: %v", err)
+	}
+	if string(eventsAfter) != string(eventsBefore) {
+		t.Fatal("requeue rewrote the prior terminal session events")
+	}
+	runtime := l.deps.Runtimes["process"].(*mockRuntime)
+	if err := l.Cycle(context.Background()); err != nil {
+		t.Fatalf("dispatch requeued order: %v", err)
+	}
+	if len(runtime.calls) != 1 {
+		t.Fatalf("dispatch calls = %d, want 1", len(runtime.calls))
+	}
+	if got := runtime.calls[0].WorktreePath; got != cook.worktreePath {
+		t.Fatalf("dispatch worktree = %q, want %q", got, cook.worktreePath)
+	}
+	if len(worktree.created) != 0 {
+		t.Fatalf("worktree create calls = %v, want reuse", worktree.created)
+	}
+	next := l.cooks.activeCooksByOrder[cook.orderID]
+	if next == nil || next.session == nil {
+		t.Fatal("requeued order did not create a new active attempt")
+	}
+	if next.session.ID() == cook.session.ID() {
+		t.Fatalf("requeued session reused terminal identity %q", next.session.ID())
+	}
+	if next.attempt != 1 {
+		t.Fatalf("requeued attempt = %d, want 1", next.attempt)
+	}
+}
+
+func TestControlRequeueRefusesReviewWithoutExactTypedBlockedOutcome(t *testing.T) {
+	tests := []struct {
+		name         string
+		outcome      event.StageOutcome
+		blocking     bool
+		orderID      string
+		activeCook   bool
+		missingOrder bool
+		want         string
+	}{
+		{name: "missing outcome", want: "missing stage_message"},
+		{name: "completed outcome", outcome: event.StageOutcomeCompleted, orderID: "order-1", want: `requires typed outcome "blocked"`},
+		{name: "failed outcome", outcome: event.StageOutcomeFailed, blocking: true, orderID: "order-1", want: `requires typed outcome "blocked"`},
+		{name: "mismatched identity", outcome: event.StageOutcomeBlocked, blocking: true, orderID: "other-order", want: "does not match"},
+		{name: "active cook", outcome: event.StageOutcomeBlocked, blocking: true, orderID: "order-1", activeCook: true, want: "currently cooking"},
+		{name: "missing order", outcome: event.StageOutcomeBlocked, blocking: true, orderID: "order-1", missingOrder: true, want: `order "order-1" not found`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			l, _, cook := newTypedOutcomeTestLoop(t)
+			worktree := l.deps.Worktree.(*fakeWorktree)
+			if test.outcome != "" {
+				appendTypedOutcome(t, l, cook, test.outcome, test.blocking, test.orderID, cook.stageIndex)
+			}
+			if err := l.parkPendingReview(cook, "review reason is not requeue authority"); err != nil {
+				t.Fatalf("park pending review: %v", err)
+			}
+			if test.activeCook {
+				l.cooks.activeCooksByOrder[cook.orderID] = cook
+			}
+			if test.missingOrder {
+				l.setOrdersState(OrdersFile{})
+			}
+			ordersBefore, err := os.ReadFile(l.deps.OrdersFile)
+			if err != nil {
+				t.Fatalf("read orders before requeue: %v", err)
+			}
+			reviewsPath := pendingReviewFilePath(l.runtimeDir)
+			reviewsBefore, err := os.ReadFile(reviewsPath)
+			if err != nil {
+				t.Fatalf("read pending reviews before requeue: %v", err)
+			}
+
+			err = l.controlRequeue(cook.orderID)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("controlRequeue error = %v, want containing %q", err, test.want)
+			}
+
+			ordersAfter, err := os.ReadFile(l.deps.OrdersFile)
+			if err != nil {
+				t.Fatalf("read orders after requeue: %v", err)
+			}
+			if string(ordersAfter) != string(ordersBefore) {
+				t.Fatal("rejected requeue mutated orders")
+			}
+			reviewsAfter, err := os.ReadFile(reviewsPath)
+			if err != nil {
+				t.Fatalf("read pending reviews after requeue: %v", err)
+			}
+			if string(reviewsAfter) != string(reviewsBefore) {
+				t.Fatal("rejected requeue mutated pending reviews")
+			}
+			if len(worktree.cleaned) != 0 {
+				t.Fatalf("rejected requeue cleaned worktree: %v", worktree.cleaned)
+			}
+		})
 	}
 }
 

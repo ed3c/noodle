@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/poteto/noodle/event"
 	"github.com/poteto/noodle/internal/ingest"
 	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/internal/stringx"
@@ -157,6 +158,9 @@ func (l *Loop) controlRequeue(orderID string) error {
 	if orderID == "" {
 		return fmt.Errorf("requeue requires order_id")
 	}
+	if err := l.releaseTypedBlockedReviewForRequeue(orderID); err != nil {
+		return err
+	}
 
 	// Reset failed/cancelled stages to pending and reactivate the order.
 	if err := l.mutateOrdersState(func(orders *OrdersFile) (bool, error) {
@@ -195,6 +199,59 @@ func (l *Loop) controlRequeue(orderID string) error {
 		OrderID: orderID,
 	})
 	return nil
+}
+
+func (l *Loop) releaseTypedBlockedReviewForRequeue(orderID string) error {
+	pending, ok := l.cooks.pendingReview[orderID]
+	if !ok {
+		return nil
+	}
+	if active := l.cooks.activeCooksByOrder[orderID]; active != nil {
+		return fmt.Errorf("order %q is currently cooking", orderID)
+	}
+	if strings.TrimSpace(pending.sessionID) == "" {
+		return fmt.Errorf("requeue pending review for %q has no session identity", orderID)
+	}
+	orders, err := l.currentOrders()
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, order := range orders.Orders {
+		if order.ID != orderID {
+			continue
+		}
+		found = true
+		if pending.stageIndex < 0 || pending.stageIndex >= len(order.Stages) {
+			return fmt.Errorf("requeue pending review for %q has invalid stage index %d", orderID, pending.stageIndex)
+		}
+		break
+	}
+	if !found {
+		return fmt.Errorf("order %q not found", orderID)
+	}
+	cook := &cookHandle{
+		cookIdentity: pending.cookIdentity,
+		session:      &adoptedSession{id: pending.sessionID, status: "completed"},
+	}
+	outcome, err := l.readRequiredStageOutcome(cook)
+	if err != nil {
+		return fmt.Errorf("requeue pending review for %q requires an exact typed blocked outcome: %w", orderID, err)
+	}
+	if outcome.Outcome != event.StageOutcomeBlocked {
+		return fmt.Errorf("requeue pending review for %q requires typed outcome %q, got %q", orderID, event.StageOutcomeBlocked, outcome.Outcome)
+	}
+	if err := l.emitEventChecked(ingest.EventStageReviewChangesRequested, map[string]any{
+		"order_id":    orderID,
+		"stage_index": pending.stageIndex,
+		"reason":      "requeue typed blocked outcome",
+	}); err != nil {
+		return err
+	}
+	if err := l.mirrorLegacyOrderFromCanonical(orderID); err != nil {
+		return err
+	}
+	return l.syncPendingReviewProjection()
 }
 
 // resetStages resets all failed/cancelled stages to pending and reports whether
