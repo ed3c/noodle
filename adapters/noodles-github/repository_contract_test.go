@@ -71,7 +71,7 @@ func TestNoodlesGitHubRepositoryContract(t *testing.T) {
 func TestNoodlesGitHubOperationalSkillsEncodeSingleStagePolicy(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
 	required := map[string][]string{
-		"schedule": {"exactly one stage", "execution_skill", "entire row", ".noodle/orders.json", "owned_ids", "`id` is not in `owned_ids`"},
+		"schedule": {"go run ./adapters/noodles-github schedule", "exactly one stage", "execution_skill", "entire row", ".noodle/orders.json", "owned_ids", "`id` is not in `owned_ids`"},
 		"noodles-issue-execute": {
 			"source-authorized", "declared write boundary", "handoff", "awaiting_land", "stage_yield",
 			"stage_message", "noodle_session_id", "noodle_order_id", "noodle_stage_index",

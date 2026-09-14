@@ -96,11 +96,12 @@ func (w *trackingWorktree) HasUnmergedCommits(name string) (bool, error) {
 }
 
 type scriptedRuntime struct {
-	mu             sync.Mutex
-	ordersNextPath string
-	item           BacklogItem
-	requests       []loopruntime.DispatchRequest
-	sessions       []*scriptedSession
+	mu          sync.Mutex
+	projectDir  string
+	item        BacklogItem
+	requests    []loopruntime.DispatchRequest
+	sessions    []*scriptedSession
+	scheduleErr error
 }
 
 func (r *scriptedRuntime) Dispatch(_ context.Context, request loopruntime.DispatchRequest) (loopruntime.SessionHandle, error) {
@@ -110,19 +111,19 @@ func (r *scriptedRuntime) Dispatch(_ context.Context, request loopruntime.Dispat
 	session := newScriptedSession(request.Name)
 	r.sessions = append(r.sessions, session)
 	if request.Skill == "schedule" {
-		contextBytes, err := json.Marshal(r.item)
+		miseData, err := json.Marshal(map[string]any{"backlog": []BacklogItem{r.item}})
 		if err != nil {
 			return nil, err
 		}
-		orders := map[string]any{"orders": []any{map[string]any{
-			"id": r.item.ID, "title": r.item.Title, "rationale": "target-authorized provider Issue",
-			"stages": []any{map[string]any{"do": r.item.ExecutionSkill, "with": "codex", "model": "gpt-test", "runtime": "process", "prompt": string(contextBytes)}},
-		}}}
-		data, err := json.Marshal(orders)
-		if err != nil {
+		runtimeDir := filepath.Join(r.projectDir, ".noodle")
+		if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(r.ordersNextPath, append(data, '\n'), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(runtimeDir, "mise.json"), miseData, 0o600); err != nil {
+			return nil, err
+		}
+		if err := scheduleTargetOrder(r.projectDir); err != nil {
+			r.scheduleErr = err
 			return nil, err
 		}
 		session.complete(loopruntime.StatusCompleted)
@@ -212,7 +213,7 @@ func TestNoodlesGitHubTargetConsumerCreatesOneTargetWorktree(t *testing.T) {
 	projectDir, commonDir := setupTargetGitRepository(t)
 	runtimeDir := filepath.Join(projectDir, ".noodle")
 	tracked := &trackingWorktree{app: &worktree.App{Root: projectDir, Quiet: true}}
-	runtime := &scriptedRuntime{ordersNextPath: filepath.Join(runtimeDir, "orders-next.json"), item: items[0]}
+	runtime := &scriptedRuntime{projectDir: projectDir, item: items[0]}
 	repositoryRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
@@ -249,10 +250,11 @@ func TestNoodlesGitHubTargetConsumerCreatesOneTargetWorktree(t *testing.T) {
 	if !runtime.sawTargetExecute() {
 		runtime.mu.Lock()
 		requests := append([]loopruntime.DispatchRequest(nil), runtime.requests...)
+		scheduleErr := runtime.scheduleErr
 		runtime.mu.Unlock()
 		orders, ordersErr := orderx.ReadOrders(filepath.Join(runtimeDir, "orders.json"))
 		next, nextErr := orderx.ReadOrders(filepath.Join(runtimeDir, "orders-next.json"))
-		t.Fatalf("target Issue execute stage was not dispatched; requests=%#v orders=%#v ordersErr=%v next=%#v nextErr=%v state=%#v", requests, orders, ordersErr, next, nextErr, noodleLoop.State())
+		t.Fatalf("target Issue execute stage was not dispatched; scheduleErr=%v requests=%#v orders=%#v ordersErr=%v next=%#v nextErr=%v state=%#v", scheduleErr, requests, orders, ordersErr, next, nextErr, noodleLoop.State())
 	}
 	orders, err := orderx.ReadOrders(filepath.Join(runtimeDir, "orders.json"))
 	if err != nil || len(orders.Orders) != 1 || orders.Orders[0].ID != items[0].ID || len(orders.Orders[0].Stages) != 1 {

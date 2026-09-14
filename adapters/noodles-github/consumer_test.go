@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/poteto/noodle/internal/orderx"
 )
 
 const (
@@ -454,6 +456,177 @@ func TestNoodlesGitHubTargetConsumer(t *testing.T) {
 	}
 	if !reflect.DeepEqual(restartedItems, items) || !reflect.DeepEqual(restartedDiagnostics, diagnostics) {
 		t.Fatalf("restart drifted: items=%#v diagnostics=%#v", restartedItems, restartedDiagnostics)
+	}
+}
+
+func TestTargetScheduleMaterializesExactAuthorizedRow(t *testing.T) {
+	root := t.TempDir()
+	item := testBacklogItem(t, 17)
+	writeTargetScheduleInputs(t, root, []BacklogItem{item}, orderx.OrdersFile{Orders: []orderx.Order{{ID: "schedule"}}})
+	t.Chdir(root)
+
+	if err := run(context.Background(), []string{"schedule"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".noodle", "orders-next.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact, err := orderx.ParseCompactOrders(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(compact.Orders) != 1 || compact.Orders[0].ID != item.ID || len(compact.Orders[0].Stages) != 1 {
+		t.Fatalf("orders-next = %#v", compact)
+	}
+	stage := compact.Orders[0].Stages[0]
+	if stage.Do != item.ExecutionSkill || stage.Runtime != "process" {
+		t.Fatalf("stage = %#v", stage)
+	}
+	var got BacklogItem
+	if err := json.Unmarshal([]byte(stage.Prompt), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, item) {
+		t.Fatalf("prompt row = %#v, want %#v", got, item)
+	}
+}
+
+func TestTargetScheduleWritesEmptyWhenAuthorizedRowsAreOwned(t *testing.T) {
+	root := t.TempDir()
+	item := testBacklogItem(t, 17)
+	writeTargetScheduleInputs(t, root, []BacklogItem{item}, orderx.OrdersFile{Orders: []orderx.Order{{ID: item.ID}}})
+	if err := scheduleTargetOrder(root); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".noodle", "orders-next.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "{\"orders\":[]}\n" {
+		t.Fatalf("orders-next = %q, want empty compact orders", data)
+	}
+}
+
+func TestTargetScheduleRefusesInvalidRowsBeforeReplacement(t *testing.T) {
+	valid := testBacklogItem(t, 17)
+	tests := []struct {
+		name    string
+		backlog any
+	}{
+		{name: "literal row placeholder", backlog: []any{"__ROW__"}},
+		{name: "foreign row", backlog: []BacklogItem{func() BacklogItem { item := valid; item.ID = "ed3c/noodles#17"; return item }()}},
+		{name: "missing execution skill", backlog: []BacklogItem{func() BacklogItem { item := valid; item.ExecutionSkill = ""; return item }()}},
+		{name: "authorization mismatch", backlog: []BacklogItem{func() BacklogItem {
+			item := valid
+			item.Authorization.Declaration.Subject = "ed3c/noodle#18"
+			return item
+		}()}},
+		{name: "duplicate target id", backlog: []BacklogItem{valid, valid}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			runtimeDir := filepath.Join(root, ".noodle")
+			if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			mise, err := json.Marshal(map[string]any{"backlog": tc.backlog})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(runtimeDir, "mise.json"), mise, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := orderx.WriteOrdersAtomic(filepath.Join(runtimeDir, "orders.json"), orderx.OrdersFile{}); err != nil {
+				t.Fatal(err)
+			}
+			const sentinel = "existing-output\n"
+			nextPath := filepath.Join(runtimeDir, "orders-next.json")
+			if err := os.WriteFile(nextPath, []byte(sentinel), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := scheduleTargetOrder(root); err == nil {
+				t.Fatal("invalid target row must be rejected")
+			}
+			got, err := os.ReadFile(nextPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != sentinel {
+				t.Fatalf("orders-next changed on refusal: %q", got)
+			}
+		})
+	}
+}
+
+func TestTargetScheduleRejectsArgumentsBeforeHandler(t *testing.T) {
+	if err := run(context.Background(), []string{"schedule", "--row", "__ROW__"}); err == nil || !strings.Contains(err.Error(), "schedule accepts no arguments") {
+		t.Fatalf("unexpected argument refusal = %v", err)
+	}
+}
+
+func TestTargetScheduleRejectsMalformedMiseBeforeReplacement(t *testing.T) {
+	root := t.TempDir()
+	runtimeDir := filepath.Join(root, ".noodle")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runtimeDir, "mise.json"), []byte(`{"backlog":[`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := orderx.WriteOrdersAtomic(filepath.Join(runtimeDir, "orders.json"), orderx.OrdersFile{}); err != nil {
+		t.Fatal(err)
+	}
+	const sentinel = "existing-output\n"
+	nextPath := filepath.Join(runtimeDir, "orders-next.json")
+	if err := os.WriteFile(nextPath, []byte(sentinel), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := scheduleTargetOrder(root); err == nil || !strings.Contains(err.Error(), "decode target mise") {
+		t.Fatalf("malformed mise refusal = %v", err)
+	}
+	got, err := os.ReadFile(nextPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != sentinel {
+		t.Fatalf("orders-next changed on malformed mise: %q", got)
+	}
+}
+
+func testBacklogItem(t *testing.T, number int) BacklogItem {
+	t.Helper()
+	body := issueBody(number)
+	payload := testPayload(number, body)
+	authorization := Authorization{SchemaVersion: 1, Sender: testSender, Declaration: payload}
+	identity, err := DispatchIdentity(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorization.DispatchIdentity = identity
+	return BacklogItem{
+		ID: fmt.Sprintf("ed3c/noodle#%d", number), Title: "Authorized", Status: "open", Body: body,
+		Repository: targetRepository, IssueNumber: number, Authorization: authorization,
+		ExecutionSkill: targetExecutionSkill,
+	}
+}
+
+func writeTargetScheduleInputs(t *testing.T, root string, backlog []BacklogItem, orders orderx.OrdersFile) {
+	t.Helper()
+	runtimeDir := filepath.Join(root, ".noodle")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(map[string]any{"backlog": backlog})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runtimeDir, "mise.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := orderx.WriteOrdersAtomic(filepath.Join(runtimeDir, "orders.json"), orders); err != nil {
+		t.Fatal(err)
 	}
 }
 
