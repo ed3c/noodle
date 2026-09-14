@@ -171,6 +171,107 @@ func TestBuilderBacklogParseWarningsAreRecoverable(t *testing.T) {
 	}
 }
 
+func TestBuilderBoundsBacklogSyncCadence(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectDir, ".noodle"), 0o755); err != nil {
+		t.Fatalf("mkdir runtime: %v", err)
+	}
+
+	counterPath := filepath.Join(projectDir, "sync-count")
+	scriptPath := filepath.Join(projectDir, "backlog-sync")
+	script := fmt.Sprintf(`#!/bin/sh
+count=0
+if test -f %q; then count=$(cat %q); fi
+count=$((count + 1))
+printf '%%s' "$count" > %q
+printf '{"id":"%%s","title":"refresh %%s","status":"open"}\n' "$count" "$count"
+`, counterPath, counterPath, counterPath)
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write sync script: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Adapters = map[string]config.AdapterConfig{
+		"backlog": {Scripts: map[string]string{"sync": fmt.Sprintf("%q", scriptPath)}},
+	}
+	builder := NewBuilder(projectDir, cfg)
+	base := time.Date(2026, 9, 14, 15, 0, 0, 0, time.UTC)
+	current := base
+	builder.now = func() time.Time { return current }
+
+	var brief Brief
+	for second := 0; second < 120; second++ {
+		current = base.Add(time.Duration(second) * time.Second)
+		active := ActiveSummary{}
+		if second == 1 {
+			active.Total = 1
+		}
+		var err error
+		brief, _, _, err = builder.Build(context.Background(), active, nil)
+		if err != nil {
+			t.Fatalf("build at second %d: %v", second, err)
+		}
+		if second == 1 && brief.ActiveSummary.Total != 1 {
+			t.Fatalf("local state did not refresh inside backlog interval: %#v", brief.ActiveSummary)
+		}
+	}
+
+	count, err := os.ReadFile(counterPath)
+	if err != nil {
+		t.Fatalf("read sync count: %v", err)
+	}
+	if got := strings.TrimSpace(string(count)); got != "2" {
+		t.Fatalf("120 one-second builds ran backlog sync %s times, want 2", got)
+	}
+	if len(brief.Backlog) != 1 || brief.Backlog[0].ID != "2" {
+		t.Fatalf("refreshed backlog = %#v, want id 2", brief.Backlog)
+	}
+
+	restarted := NewBuilder(projectDir, cfg)
+	restarted.now = func() time.Time { return current }
+	if _, _, _, err := restarted.Build(context.Background(), ActiveSummary{}, nil); err != nil {
+		t.Fatalf("restart build: %v", err)
+	}
+	count, err = os.ReadFile(counterPath)
+	if err != nil {
+		t.Fatalf("read restarted sync count: %v", err)
+	}
+	if got := strings.TrimSpace(string(count)); got != "3" {
+		t.Fatalf("new builder did not sync immediately: count=%s", got)
+	}
+}
+
+func TestBuilderDueBacklogSyncFailureRemainsExplicit(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectDir, ".noodle"), 0o755); err != nil {
+		t.Fatalf("mkdir runtime: %v", err)
+	}
+
+	scriptPath := filepath.Join(projectDir, "backlog-sync")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nprintf '%s\\n' '{\"id\":\"1\",\"title\":\"first\",\"status\":\"open\"}'\n"), 0o755); err != nil {
+		t.Fatalf("write initial sync script: %v", err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Adapters = map[string]config.AdapterConfig{
+		"backlog": {Scripts: map[string]string{"sync": fmt.Sprintf("%q", scriptPath)}},
+	}
+	builder := NewBuilder(projectDir, cfg)
+	base := time.Date(2026, 9, 14, 15, 0, 0, 0, time.UTC)
+	current := base
+	builder.now = func() time.Time { return current }
+	if _, _, _, err := builder.Build(context.Background(), ActiveSummary{}, nil); err != nil {
+		t.Fatalf("initial build: %v", err)
+	}
+
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\necho provider unavailable >&2\nexit 42\n"), 0o755); err != nil {
+		t.Fatalf("write failing sync script: %v", err)
+	}
+	current = base.Add(backlogSyncInterval)
+	if _, _, _, err := builder.Build(context.Background(), ActiveSummary{}, nil); err == nil || !strings.Contains(err.Error(), "provider unavailable") {
+		t.Fatalf("due sync failure = %v, want explicit provider error", err)
+	}
+}
+
 func TestReadRecentEventsWatermark(t *testing.T) {
 	dir := t.TempDir()
 	eventsPath := filepath.Join(dir, "loop-events.ndjson")
