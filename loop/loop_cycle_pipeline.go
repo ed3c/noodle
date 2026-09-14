@@ -60,20 +60,15 @@ func (l *Loop) handlePromotionResult(result mergeResult, brief mise.Brief, err e
 		return nil
 	}
 	if result.EmptyPromotion {
-		digest := l.scheduleDispatchDigest
-		if digest == "" {
-			var err error
-			digest, err = l.scheduleDecisionDigest(brief, result.Orders)
-			if err != nil {
+		if l.scheduleDispatchDigest != "" {
+			if err := l.writeScheduleEmptyMemoDigest(l.scheduleDispatchDigest); err != nil {
 				l.handlePromotionError(err)
 				return nil
 			}
+			l.logger.Info("schedule produced no orders, memoized decision state")
+		} else {
+			l.logger.Info("unbound empty schedule output consumed without memoizing decision state")
 		}
-		if err := l.writeScheduleEmptyMemoDigest(digest); err != nil {
-			l.handlePromotionError(err)
-			return nil
-		}
-		l.logger.Info("schedule produced no orders, memoized decision state")
 	} else if err := l.clearScheduleEmptyMemo(); err != nil {
 		l.handlePromotionError(err)
 		return nil

@@ -130,6 +130,11 @@ func TestEmptyScheduleMemoSuppressesUnchangedCyclesAndAdmitsBacklogChange(t *tes
 	if err := writeOrdersAtomic(tc.ordersPath, bootstrapScheduleOrder(tc.loop.config)); err != nil {
 		t.Fatalf("seed schedule order: %v", err)
 	}
+	digest, err := tc.loop.scheduleDecisionDigest(brief, bootstrapScheduleOrder(tc.loop.config))
+	if err != nil {
+		t.Fatalf("capture dispatch digest: %v", err)
+	}
+	tc.loop.scheduleDispatchDigest = digest
 	if err := os.WriteFile(tc.loop.deps.OrdersNextFile, []byte(`{"orders":[]}`), 0o644); err != nil {
 		t.Fatalf("write empty proposal: %v", err)
 	}
@@ -235,6 +240,46 @@ func TestEmptyScheduleMemoUsesSchedulerDispatchState(t *testing.T) {
 	}
 	if got := len(tc.runtime.calls); got != 2 {
 		t.Fatalf("total scheduler dispatches = %d, want initial plus exactly one replacement", got)
+	}
+}
+
+func TestStaleEmptyScheduleOutputDoesNotMemoizeCurrentDecision(t *testing.T) {
+	logger, _ := newTestLogger()
+	brief := mise.Brief{
+		Backlog:   []adapter.BacklogItem{{ID: "1", Title: "new ready work", Status: adapter.BacklogStatusOpen}},
+		Resources: mise.ResourceSnapshot{MaxConcurrency: 1},
+	}
+	tc := newTestLoop(t, logger, func(opts *testLoopOpts) { opts.brief = &brief })
+	if err := writeOrdersAtomic(tc.ordersPath, OrdersFile{}); err != nil {
+		t.Fatalf("seed empty orders: %v", err)
+	}
+	if err := os.WriteFile(tc.loop.deps.OrdersNextFile, []byte(`{"orders":[]}`), 0o644); err != nil {
+		t.Fatalf("write stale empty output: %v", err)
+	}
+
+	orders, shouldContinue, err := tc.loop.prepareOrdersForCycle(brief, nil, true)
+	if err != nil {
+		t.Fatalf("promote stale empty output: %v", err)
+	}
+	if !shouldContinue || len(orders.Orders) != 1 || !isScheduleOrder(orders.Orders[0]) {
+		t.Fatalf("current decision orders = %#v continue=%v, want one schedule order", orders.Orders, shouldContinue)
+	}
+	if _, exists, err := tc.loop.readScheduleEmptyMemo(); err != nil || exists {
+		t.Fatalf("stale output memo exists=%v err=%v, want absent", exists, err)
+	}
+	if _, err := os.Stat(tc.loop.deps.OrdersNextFile); !os.IsNotExist(err) {
+		t.Fatalf("stale output was not consumed: %v", err)
+	}
+	if len(brief.Backlog) != 1 || brief.Backlog[0].ID != "1" {
+		t.Fatalf("current backlog changed during promotion: %#v", brief.Backlog)
+	}
+	if got := len(tc.runtime.calls); got != 0 {
+		t.Fatalf("promotion produced %d provider effects, want 0", got)
+	}
+	for _, order := range orders.Orders {
+		if !isScheduleOrder(order) {
+			t.Fatalf("promotion produced duplicate non-schedule order: %#v", order)
+		}
 	}
 }
 
