@@ -222,6 +222,9 @@ func TestCycleSpawnsCookFromOrders(t *testing.T) {
 	if got := rt.calls[0].EnvVars["NOODLE_STAGE_INDEX"]; got != "0" {
 		t.Fatalf("NOODLE_STAGE_INDEX = %q, want 0", got)
 	}
+	if got := rt.calls[0].EnvVars["NOODLE_PROJECT_DIR"]; got != projectDir {
+		t.Fatalf("NOODLE_PROJECT_DIR = %q, want primary project %q", got, projectDir)
+	}
 }
 
 func TestCycleReusesExistingWorktree(t *testing.T) {

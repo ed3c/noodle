@@ -94,6 +94,7 @@ func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Orde
 		Title:        order.Title,
 		RetryCount:   opts.attempt,
 		EnvVars: map[string]string{
+			"NOODLE_PROJECT_DIR": l.projectDir,
 			"NOODLE_ORDER_ID":    cand.OrderID,
 			"NOODLE_STAGE_INDEX": strconv.Itoa(cand.StageIndex),
 		},
