@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/poteto/noodle/event"
 	"github.com/poteto/noodle/internal/ingest"
 	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/internal/stringx"
@@ -52,6 +53,13 @@ func (l *Loop) reconcile(ctx context.Context) error {
 	if err := l.recoverAdoptedSessions(ctx); err != nil {
 		return err
 	}
+	if err := l.reconcileLateTypedFailed(ctx); err != nil {
+		return l.classifySystemHard(
+			"reconcile.late_typed_failed",
+			"reconcile late typed failed outcome failed",
+			err,
+		)
+	}
 
 	if err := l.ensureScheduleOrderPresent(); err != nil {
 		return l.classifySystemHard(
@@ -90,6 +98,54 @@ func (l *Loop) reconcile(ctx context.Context) error {
 		)
 	}
 
+	return nil
+}
+
+// reconcileLateTypedFailed consumes terminal failure evidence that arrived
+// after a completed cook was parked for review. Live sessions and every other
+// typed outcome remain owned by their existing reconciliation/control paths.
+func (l *Loop) reconcileLateTypedFailed(ctx context.Context) error {
+	for orderID, pending := range l.cooks.pendingReview {
+		if _, adopted := l.cooks.adoptedTargets[orderID]; adopted {
+			continue
+		}
+		order, ok := l.canonical.Orders[orderID]
+		if !ok || pending.stageIndex < 0 || pending.stageIndex >= len(order.Stages) {
+			continue
+		}
+		stage := order.Stages[pending.stageIndex]
+		attempt := -1
+		for i := range stage.Attempts {
+			if stage.Attempts[i].Status == state.AttemptCompleted && stage.Attempts[i].SessionID == pending.sessionID {
+				attempt = i
+				break
+			}
+		}
+		if strings.TrimSpace(pending.sessionID) == "" || attempt < 0 {
+			continue
+		}
+		cook := &cookHandle{
+			cookIdentity: pending.cookIdentity,
+			session:      &adoptedSession{id: pending.sessionID, status: "completed"},
+			worktreeName: pending.worktreeName,
+			worktreePath: pending.worktreePath,
+			attempt:      attempt,
+		}
+		outcome, err := l.readRequiredStageOutcome(cook)
+		if err != nil || outcome.Outcome != event.StageOutcomeFailed {
+			continue
+		}
+		if err := l.failStage(ctx, cook, "cook reported failed outcome: "+outcome.Message); err != nil {
+			return err
+		}
+		delete(l.canonical.PendingReviews, orderID)
+		if err := l.persistCanonicalCheckpoint(); err != nil {
+			return err
+		}
+		if err := l.syncPendingReviewProjection(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -289,10 +345,18 @@ func (l *Loop) reconcileFailedOrders() error {
 			OrderID: order.ID,
 			Title:   order.Title,
 		}
-		for _, stage := range order.Stages {
+		for stageIndex, stage := range order.Stages {
 			if stage.Status == StageStatusFailed {
 				f.TaskKey = stage.TaskKey
 				f.Reason = extraString(stage.Extra, "failure_reason")
+				if f.Reason == "" {
+					if canonicalOrder, ok := l.canonical.Orders[order.ID]; ok && stageIndex < len(canonicalOrder.Stages) {
+						attempts := canonicalOrder.Stages[stageIndex].Attempts
+						if len(attempts) > 0 {
+							f.Reason = strings.TrimSpace(attempts[len(attempts)-1].Error)
+						}
+					}
+				}
 				break
 			}
 		}
