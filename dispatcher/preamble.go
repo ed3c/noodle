@@ -5,37 +5,18 @@ import (
 	"strings"
 )
 
-const noodlePreamble = `# Noodle Context
-
-You are running inside a Noodle cook session — an autonomous coding agent managed by the Noodle framework.
-
-## Available Files
-
-Your working directory is a git worktree (an isolated checkout). It contains committed project files:
-
-- ` + "`" + `todos.md` + "`" + ` — Project backlog items
-
-The ` + "`" + `.noodle/` + "`" + ` directory (mise.json, orders.json, tickets.json) is in the main checkout, not in your worktree. Your task context is provided in the prompt — do not try to read .noodle state files.
-
-## Conventions
-
-- Work in your assigned worktree — do not modify the primary checkout
-- Commit with conventional commit messages
-- Run verification before finishing (tests, lint, build)
-- Write learnings to brain/ files when you discover something notable
-`
-
 func buildSessionPreamble(req DispatchRequest) string {
-	if !req.AllowPrimaryCheckout {
-		return noodlePreamble
+	checkoutMode := "isolated-worktree"
+	if req.AllowPrimaryCheckout {
+		checkoutMode = "primary-checkout"
 	}
 	return fmt.Sprintf(`# Noodle Runtime Context
 
 This session is managed by Noodle. The following are runtime facts, not project workflow policy:
 
 - working_directory: %s
-- checkout_mode: primary-checkout
+- checkout_mode: %s
 - selected_skill: %s
 
-Project workflow policy comes from the selected skill or explicit system prompt.`, strings.TrimSpace(req.WorktreePath), strings.TrimSpace(req.Skill))
+Project workflow policy comes from the selected skill or explicit system prompt.`, strings.TrimSpace(req.WorktreePath), checkoutMode, strings.TrimSpace(req.Skill))
 }
