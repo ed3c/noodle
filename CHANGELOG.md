@@ -1,3 +1,9 @@
+## [0.1.17](https://github.com/poteto/noodle/compare/v0.1.16...v0.1.17) (2026-09-14)
+
+### Bug Fixes
+
+* keep cook preamble runtime-only ([102e4d6](https://github.com/poteto/noodle/commit/102e4d6765846c418c709414dfdb08efbe430a96))
+
 ## [0.1.16](https://github.com/poteto/noodle/compare/v0.1.15...v0.1.16) (2026-09-14)
 
 ### Bug Fixes
