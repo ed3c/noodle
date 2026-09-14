@@ -42,6 +42,9 @@ func TestNoodlesGitHubRepositoryContract(t *testing.T) {
 	if !reflect.DeepEqual(cfg.Agents.Codex.Args, []string{"--ignore-user-config"}) {
 		t.Fatalf("codex args = %#v, want --ignore-user-config", cfg.Agents.Codex.Args)
 	}
+	if !cfg.Agents.Codex.RequireTypedOutcome {
+		t.Fatal("agents.codex.require_typed_outcome = false, want true")
+	}
 	backlog := cfg.Adapters["backlog"]
 	wantScripts := map[string]string{
 		"sync": "go run ./adapters/noodles-github sync",
@@ -68,8 +71,12 @@ func TestNoodlesGitHubRepositoryContract(t *testing.T) {
 func TestNoodlesGitHubOperationalSkillsEncodeSingleStagePolicy(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
 	required := map[string][]string{
-		"schedule":              {"exactly one stage", "execution_skill", "entire row", ".noodle/orders.json", "owned_ids", "`id` is not in `owned_ids`"},
-		"noodles-issue-execute": {"source-authorized", "declared write boundary", "handoff", "awaiting_land", "stage_yield"},
+		"schedule": {"exactly one stage", "execution_skill", "entire row", ".noodle/orders.json", "owned_ids", "`id` is not in `owned_ids`"},
+		"noodles-issue-execute": {
+			"source-authorized", "declared write boundary", "handoff", "awaiting_land", "stage_yield",
+			"stage_message", "noodle_session_id", "noodle_order_id", "noodle_stage_index",
+			`"outcome":"completed"`, `"outcome":"blocked"`, `"outcome":"failed"`,
+		},
 	}
 	for _, name := range []string{"schedule", "noodles-issue-execute"} {
 		t.Run(name, func(t *testing.T) {

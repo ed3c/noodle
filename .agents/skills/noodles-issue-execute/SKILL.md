@@ -20,10 +20,14 @@ Commit the candidate in the current worktree. Recheck that the committed candida
 go run ./adapters/noodles-github handoff 'ed3c/noodle#N'
 ```
 
-The carrier must successfully read back the deterministic provider branch, exact PR, and the Issue at `awaiting_land`. Only then emit the supported handoff event and stop:
+The carrier must successfully read back the deterministic provider branch, exact PR, and the Issue at `awaiting_land`. Only then emit the completed typed outcome and the supported handoff event, then stop:
 
 ```bash
+payload="$(printf '{"message":"Implemented and verified the exact target Issue; candidate committed for supervised provider handoff.","blocking":false,"outcome":"completed","order_id":"%s","stage_index":%s}' "$NOODLE_ORDER_ID" "$NOODLE_STAGE_INDEX")"
+noodle event emit --session "$NOODLE_SESSION_ID" stage_message --payload "$payload"
 noodle event emit --session "$NOODLE_SESSION_ID" stage_yield --payload '{"message":"Implemented and verified the exact target Issue; candidate committed for supervised provider handoff."}'
 ```
+
+Every terminal path emits exactly one final typed `stage_message` bound to the existing `NOODLE_SESSION_ID`, `NOODLE_ORDER_ID`, and `NOODLE_STAGE_INDEX` values. Use `{"outcome":"blocked"}` with `"blocking":true` when exact input, authorization, or a required capability is unavailable. Use `{"outcome":"failed"}` with `"blocking":true` when implementation or verification fails. Emit the non-blocking `{"outcome":"completed"}` shape above only after the verified provider handoff. Do not infer any identity value, emit more than one typed outcome, or treat final prose or process exit as completion.
 
 This route does not merge locally, merge the provider PR, close the Issue, or grant landing authority. Exact-head landing, closure, and reconciliation remain outside this route.
