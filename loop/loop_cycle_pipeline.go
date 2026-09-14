@@ -123,6 +123,10 @@ func (l *Loop) cancelSupersededActiveCooks(orders OrdersFile) error {
 		}
 		order, ok := orderByID[orderID]
 		if !ok {
+			if adoptedSessionID, adopted := l.cooks.adoptedTargets[orderID]; adopted &&
+				cook != nil && cook.session != nil && adoptedSessionID == cook.session.ID() {
+				continue
+			}
 			if err := l.cancelSupersededCook(orderID, cook, false); err != nil {
 				return err
 			}

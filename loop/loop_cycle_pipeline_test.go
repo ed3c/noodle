@@ -108,6 +108,72 @@ func TestPromotedScheduleTerminatesWriter(t *testing.T) {
 	}
 }
 
+func TestPromotionPreservesActiveAdoptedCook(t *testing.T) {
+	projectDir := t.TempDir()
+	runtimeDir := filepath.Join(projectDir, ".noodle")
+	ordersPath := filepath.Join(runtimeDir, "orders.json")
+	if err := writeOrdersAtomic(ordersPath, OrdersFile{}); err != nil {
+		t.Fatalf("write orders: %v", err)
+	}
+
+	worktree := &fakeWorktree{}
+	l := New(projectDir, "noodle", config.DefaultConfig(), Dependencies{
+		Runtimes:       map[string]loopruntime.Runtime{"process": newMockRuntime()},
+		Worktree:       worktree,
+		Adapter:        &fakeAdapterRunner{},
+		Mise:           &fakeMise{},
+		Monitor:        fakeMonitor{},
+		Registry:       testLoopRegistry(),
+		Now:            time.Now,
+		OrdersFile:     ordersPath,
+		OrdersNextFile: filepath.Join(runtimeDir, "orders-next.json"),
+	})
+
+	const orderID = "ed3c/noodles#395"
+	const sessionID = "adopted-execute-session"
+	worktreePath := filepath.Join(projectDir, ".worktrees", "395-0-execute")
+	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+		t.Fatalf("create adopted worktree: %v", err)
+	}
+	markerPath := filepath.Join(worktreePath, "candidate.txt")
+	if err := os.WriteFile(markerPath, []byte("candidate bytes"), 0o644); err != nil {
+		t.Fatalf("write adopted worktree marker: %v", err)
+	}
+
+	session := &mockSession{id: sessionID, status: "running", done: make(chan struct{})}
+	l.cooks.activeCooksByOrder[orderID] = &cookHandle{
+		cookIdentity: cookIdentity{
+			orderID:    orderID,
+			stageIndex: 0,
+			stage:      Stage{TaskKey: "execute", Skill: "noodles-issue-execute", Status: StageStatusActive},
+		},
+		session:      session,
+		worktreeName: "395-0-execute",
+		worktreePath: worktreePath,
+	}
+	l.cooks.adoptedTargets[orderID] = sessionID
+	l.cooks.adoptedSessions = append(l.cooks.adoptedSessions, sessionID)
+
+	// The schedule can publish while the adopted cook is still running and omit
+	// its subject because the adopted-target set already owns that exact session.
+	if err := l.handlePromotionResult(mergeResult{Orders: OrdersFile{}, Promoted: true, EmptyPromotion: true}, mise.Brief{}, nil); err != nil {
+		t.Fatalf("handle empty promotion: %v", err)
+	}
+
+	if got := session.Status(); got != "running" {
+		t.Fatalf("active adopted cook was force-killed: status = %q", got)
+	}
+	if _, ok := l.cooks.activeCooksByOrder[orderID]; !ok {
+		t.Fatal("active adopted cook tracking entry was removed")
+	}
+	if len(worktree.cleaned) != 0 {
+		t.Fatalf("active adopted cook worktree was cleaned: %v", worktree.cleaned)
+	}
+	if data, err := os.ReadFile(markerPath); err != nil || string(data) != "candidate bytes" {
+		t.Fatalf("active adopted cook worktree bytes are not readable: data=%q err=%v", data, err)
+	}
+}
+
 func TestCancelSupersededActiveCooksCancelsChangedStage(t *testing.T) {
 	projectDir := t.TempDir()
 	runtimeDir := filepath.Join(projectDir, ".noodle")
@@ -145,6 +211,8 @@ func TestCancelSupersededActiveCooksCancelsChangedStage(t *testing.T) {
 		worktreeName: "97-0-execute",
 		worktreePath: filepath.Join(projectDir, ".worktrees", "97-0-execute"),
 	}
+	// Exact adopted ownership protects omission, not a real stage amendment.
+	l.cooks.adoptedTargets["97"] = session.ID()
 
 	orders := OrdersFile{
 		Orders: []Order{{
