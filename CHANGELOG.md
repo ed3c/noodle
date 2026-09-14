@@ -1,3 +1,9 @@
+## [0.1.16](https://github.com/poteto/noodle/compare/v0.1.15...v0.1.16) (2026-09-14)
+
+### Bug Fixes
+
+* preserve blocked worktree on requeue ([bd8d904](https://github.com/poteto/noodle/commit/bd8d904e170041f4677398a4afc18ef0c27b444a))
+
 ## [0.1.15](https://github.com/poteto/noodle/compare/v0.1.14...v0.1.15) (2026-09-13)
 
 ### Bug Fixes
