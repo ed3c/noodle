@@ -1,3 +1,18 @@
+## [0.1.18](https://github.com/poteto/noodle/compare/v0.1.17...v0.1.18) (2026-09-14)
+
+### Bug Fixes
+
+* bound external backlog refresh cadence ([7308a38](https://github.com/poteto/noodle/commit/7308a38e5907c373b415fd4657bb41d8fb4c444c))
+* **github:** source handoff remote from policy ([8fc2d88](https://github.com/poteto/noodle/commit/8fc2d8826ecc6a966a90653408d89152709a29cc))
+* **loop:** preserve adopted cook during promotion ([4f93472](https://github.com/poteto/noodle/commit/4f9347241bd7df5108ccbc404f891ec5a2d1dc32))
+* **loop:** preserve request-changes worktree custody ([0930ec8](https://github.com/poteto/noodle/commit/0930ec818e746de17e1d2a6fcd9aa9f609a16ba0))
+* **runtime:** bind cook events to primary project ([be8ac79](https://github.com/poteto/noodle/commit/be8ac79672052d31fb53083c11a17efcdddb7398))
+* **runtime:** replay late typed failures on startup ([ab15032](https://github.com/poteto/noodle/commit/ab15032ed687d69a54e77a6584236c9c92783e2a))
+* **runtime:** require typed target outcomes ([2eeadfd](https://github.com/poteto/noodle/commit/2eeadfd93b8455dff4787deead15e0ebb7395f13))
+* **schedule:** materialize target issue rows ([9bc991f](https://github.com/poteto/noodle/commit/9bc991f18218aced832454764cc2a80f45743a1d))
+* **schedule:** require provenance for empty memo ([d5f87cc](https://github.com/poteto/noodle/commit/d5f87cc0338ccd3f5187be6a74258d03220e4957))
+* stop empty control wake loops ([c2a0ee2](https://github.com/poteto/noodle/commit/c2a0ee248dc68258ce49de28e9092793c29fec6f))
+
 ## [0.1.17](https://github.com/poteto/noodle/compare/v0.1.16...v0.1.17) (2026-09-14)
 
 ### Bug Fixes
