@@ -66,7 +66,7 @@ func run(ctx context.Context, args []string) error {
 		if len(args) != 2 {
 			return fmt.Errorf("handoff requires one target Issue subject")
 		}
-		result, err := Handoff(ctx, client, policy, capabilities, args[1], strings.TrimSpace(os.Getenv("NOODLES_GITHUB_REMOTE")), ".")
+		result, err := Handoff(ctx, client, policy, capabilities, args[1], ".")
 		if err != nil {
 			return err
 		}

@@ -307,6 +307,7 @@ func testPolicy() Policy {
 		Repository:                 targetRepository,
 		AllowedRepositories:        []string{targetRepository, sourceRepository},
 		DefaultBranch:              defaultBranch,
+		PushRemote:                 "provider",
 		CrossRepositoryStatus:      crossRepositoryAdmitted,
 		RepositoryDispatchSender:   testSender,
 		AuthorizationCommentAuthor: testCommentAuthor,

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestNoodlesGitHubHandoff(t *testing.T) {
+func TestHandoffUsesPolicyPushRemote(t *testing.T) {
 	root := t.TempDir()
 	remote := filepath.Join(root, "remote.git")
 	repo := filepath.Join(root, "candidate")
@@ -49,8 +49,11 @@ func TestNoodlesGitHubHandoff(t *testing.T) {
 	fake.comments[17] = []Comment{trustedComment(1, FormatAuthorization(receipt))}
 	branch := "noodles/issue-17-" + head[:12]
 	fake.branches[branch] = head
+	t.Setenv("NOODLES_GITHUB_REMOTE", "conflicting-environment-remote")
 
-	result, err := Handoff(context.Background(), fake.client(), testPolicy(), testCapabilities(), "ed3c/noodle#17", "provider", repo)
+	policy := testPolicy()
+	policy.PushRemote = "provider"
+	result, err := Handoff(context.Background(), fake.client(), policy, testCapabilities(), "ed3c/noodle#17", repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,17 +63,20 @@ func TestNoodlesGitHubHandoff(t *testing.T) {
 	if fake.pullPosts != 1 || fake.issueEdits != 1 || !strings.Contains(fake.issues[17].Body, "noodles-state: awaiting_land") {
 		t.Fatalf("provider residue: pulls=%d edits=%d issue=%q", fake.pullPosts, fake.issueEdits, fake.issues[17].Body)
 	}
+	if got := gitOutput(t, remote, "rev-parse", "refs/heads/"+branch); got != head {
+		t.Fatalf("remote branch head=%q, want %q", got, head)
+	}
 	items, _, err := Sync(context.Background(), fake.client(), testPolicy(), testCapabilities())
 	if err != nil || len(items) != 0 {
 		t.Fatalf("sync items=%#v err=%v", items, err)
 	}
-	result, err = Handoff(context.Background(), fake.client(), testPolicy(), testCapabilities(), "ed3c/noodle#17", "provider", repo)
+	result, err = Handoff(context.Background(), fake.client(), policy, testCapabilities(), "ed3c/noodle#17", repo)
 	if err != nil || result.Status != "reused" || fake.pullPosts != 1 || fake.issueEdits != 1 {
 		t.Fatalf("retry result=%#v err=%v pulls=%d edits=%d", result, err, fake.pullPosts, fake.issueEdits)
 	}
 }
 
-func TestNoodlesGitHubHandoffRejectsDirtyCandidateBeforeMutation(t *testing.T) {
+func TestHandoffRejectsDirtyCandidateBeforeMutation(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "--initial-branch=candidate")
 	runGit(t, repo, "config", "user.name", "Test")
@@ -85,8 +91,41 @@ func TestNoodlesGitHubHandoffRejectsDirtyCandidateBeforeMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := newFakeGitHub(t)
-	_, err := Handoff(context.Background(), fake.client(), testPolicy(), testCapabilities(), "ed3c/noodle#17", "provider", repo)
+	policy := testPolicy()
+	policy.PushRemote = "provider"
+	_, err := Handoff(context.Background(), fake.client(), policy, testCapabilities(), "ed3c/noodle#17", repo)
 	if err == nil || fake.pullPosts != 0 || fake.issueEdits != 0 {
+		t.Fatalf("err=%v pulls=%d edits=%d", err, fake.pullPosts, fake.issueEdits)
+	}
+}
+
+func TestHandoffRejectsEmptyPolicyPushRemoteBeforeEffects(t *testing.T) {
+	policy := testPolicy()
+	policy.PushRemote = ""
+	fake := newFakeGitHub(t)
+
+	_, err := Handoff(context.Background(), fake.client(), policy, testCapabilities(), "ed3c/noodle#17", t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "policy/github.json") || fake.pullPosts != 0 || fake.issueEdits != 0 {
+		t.Fatalf("err=%v pulls=%d edits=%d", err, fake.pullPosts, fake.issueEdits)
+	}
+}
+
+func TestHandoffRejectsUnavailablePolicyPushRemoteBeforeEffects(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "--initial-branch=candidate")
+	runGit(t, repo, "config", "user.name", "Test")
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	if err := os.WriteFile(filepath.Join(repo, "tracked"), []byte("candidate"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "candidate")
+	policy := testPolicy()
+	policy.PushRemote = "missing"
+	fake := newFakeGitHub(t)
+
+	_, err := Handoff(context.Background(), fake.client(), policy, testCapabilities(), "ed3c/noodle#17", repo)
+	if err == nil || !strings.Contains(err.Error(), "policy/github.json") || fake.pullPosts != 0 || fake.issueEdits != 0 {
 		t.Fatalf("err=%v pulls=%d edits=%d", err, fake.pullPosts, fake.issueEdits)
 	}
 }
