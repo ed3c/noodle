@@ -211,8 +211,8 @@ func TestCancelSupersededActiveCooksCancelsChangedStage(t *testing.T) {
 		worktreeName: "97-0-execute",
 		worktreePath: filepath.Join(projectDir, ".worktrees", "97-0-execute"),
 	}
-	// Stale ownership for the same order must not protect a different session.
-	l.cooks.adoptedTargets["97"] = "older-session"
+	// Exact adopted ownership protects omission, not a real stage amendment.
+	l.cooks.adoptedTargets["97"] = session.ID()
 
 	orders := OrdersFile{
 		Orders: []Order{{
