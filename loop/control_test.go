@@ -727,6 +727,54 @@ func TestControlOrderIDFieldDecodedCorrectly(t *testing.T) {
 
 // --- Monotonic sequence tests ---
 
+func TestEmptyControlFileIsReadOnly(t *testing.T) {
+	projectDir := t.TempDir()
+	runtimeDir := filepath.Join(projectDir, ".noodle")
+	ordersPath := filepath.Join(runtimeDir, "orders.json")
+	if err := writeOrdersAtomic(ordersPath, OrdersFile{}); err != nil {
+		t.Fatalf("write orders: %v", err)
+	}
+	l := New(projectDir, "noodle", config.DefaultConfig(), Dependencies{
+		Runtimes:   map[string]loopruntime.Runtime{"process": newMockRuntime()},
+		Worktree:   &fakeWorktree{},
+		Adapter:    &fakeAdapterRunner{},
+		Mise:       &fakeMise{},
+		Monitor:    fakeMonitor{},
+		Registry:   testLoopRegistry(),
+		Now:        time.Now,
+		OrdersFile: ordersPath,
+	})
+
+	controlPath := filepath.Join(runtimeDir, "control.ndjson")
+	if err := os.WriteFile(controlPath, []byte{}, 0o644); err != nil {
+		t.Fatalf("write empty control: %v", err)
+	}
+	plantedTime := time.Date(2026, 9, 14, 15, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(controlPath, plantedTime, plantedTime); err != nil {
+		t.Fatalf("plant control modification time: %v", err)
+	}
+
+	if err := l.processControlCommands(); err != nil {
+		t.Fatalf("process empty control: %v", err)
+	}
+	info, err := os.Stat(controlPath)
+	if err != nil {
+		t.Fatalf("stat empty control: %v", err)
+	}
+	if !info.ModTime().Equal(plantedTime) {
+		t.Fatalf("empty control modification time changed from %s to %s", plantedTime, info.ModTime())
+	}
+	if data, err := os.ReadFile(controlPath); err != nil || len(data) != 0 {
+		t.Fatalf("empty control readback = %q, %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(runtimeDir, "control-ack.ndjson")); !os.IsNotExist(err) {
+		t.Fatalf("empty control created ack residue: %v", err)
+	}
+	if l.cmds.lastAppliedSeq != 0 {
+		t.Fatalf("empty control advanced sequence to %d", l.cmds.lastAppliedSeq)
+	}
+}
+
 func TestCommandSequenceAssignment(t *testing.T) {
 	projectDir := t.TempDir()
 	runtimeDir := filepath.Join(projectDir, ".noodle")

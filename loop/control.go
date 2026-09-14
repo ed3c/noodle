@@ -99,6 +99,9 @@ func (l *Loop) processControlCommands() error {
 		}
 		return fmt.Errorf("read control file: %w", err)
 	}
+	if len(data) == 0 {
+		return nil
+	}
 
 	acks := l.processControlLines(data)
 	if l.TestControlAckBarrier != nil {
