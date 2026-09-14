@@ -6,17 +6,22 @@ import (
 )
 
 func TestBuildSessionPreambleForIsolatedCook(t *testing.T) {
-	preamble := buildSessionPreamble(DispatchRequest{})
-	if !strings.HasPrefix(preamble, "# Noodle Context") {
-		t.Fatal("preamble should start with # Noodle Context")
-	}
+	preamble := buildSessionPreamble(DispatchRequest{
+		WorktreePath: "/tmp/project-worktree",
+		Skill:        "execute",
+	})
 	for _, expected := range []string{
-		"todos.md",
-		".noodle/",
-		"conventional commit",
+		"working_directory: /tmp/project-worktree",
+		"checkout_mode: isolated-worktree",
+		"selected_skill: execute",
 	} {
 		if !strings.Contains(preamble, expected) {
-			t.Fatalf("preamble missing %q", expected)
+			t.Fatalf("isolated preamble missing %q: %q", expected, preamble)
+		}
+	}
+	for _, forbidden := range []string{"todos.md", "brain/", "conventional commit", "run verification"} {
+		if strings.Contains(strings.ToLower(preamble), forbidden) {
+			t.Fatalf("isolated preamble contains project policy %q: %q", forbidden, preamble)
 		}
 	}
 }
@@ -36,8 +41,8 @@ func TestBuildSessionPreambleForPrimaryCheckoutContainsOnlyRuntimeFacts(t *testi
 			t.Fatalf("primary preamble missing %q: %q", expected, preamble)
 		}
 	}
-	for _, forbidden := range []string{"todos.md", "isolated checkout", "assigned worktree", "conventional commit"} {
-		if strings.Contains(preamble, forbidden) {
+	for _, forbidden := range []string{"todos.md", "brain/", "isolated checkout", "assigned worktree", "conventional commit", "run verification"} {
+		if strings.Contains(strings.ToLower(preamble), forbidden) {
 			t.Fatalf("primary preamble contains project policy %q: %q", forbidden, preamble)
 		}
 	}
