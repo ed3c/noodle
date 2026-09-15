@@ -324,6 +324,7 @@ func TestSteerSchedulePreservesActiveNonScheduleOrders(t *testing.T) {
 	original := testOrder("74", "execute", "execute", "codex", "gpt-5")
 	original.Title = "Preserve me"
 	original.Rationale = "target-authorized provider Issue"
+	original.Stages[0].Runtime = "process"
 	orders := OrdersFile{Orders: []Order{
 		original,
 		scheduleOrder(l.config, "old rationale"),
