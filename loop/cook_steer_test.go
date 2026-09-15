@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -314,6 +315,59 @@ func TestSteerScheduleNonSteerableReschedulesWithoutRespawn(t *testing.T) {
 	}
 	if orders.Orders[0].Rationale != "Chef steer: prioritize auth hardening" {
 		t.Fatalf("rationale = %q", orders.Orders[0].Rationale)
+	}
+}
+
+func TestSteerSchedulePreservesActiveNonScheduleOrders(t *testing.T) {
+	rt := newMockRuntime()
+	l := newSteerTestLoop(t, rt)
+	original := testOrder("74", "execute", "execute", "codex", "gpt-5")
+	original.Title = "Preserve me"
+	original.Rationale = "target-authorized provider Issue"
+	original.Stages[0].Runtime = "process"
+	orders := OrdersFile{Orders: []Order{
+		original,
+		scheduleOrder(l.config, "old rationale"),
+	}}
+	if err := writeOrdersAtomic(filepath.Join(l.runtimeDir, "orders.json"), orders); err != nil {
+		t.Fatalf("write orders: %v", err)
+	}
+
+	sess := &mockSession{id: "sess-active", status: "running", done: make(chan struct{})}
+	l.cooks.activeCooksByOrder[original.ID] = &cookHandle{
+		cookIdentity: cookIdentity{orderID: original.ID, stage: original.Stages[0]},
+		session:      sess,
+		worktreeName: "wt-active",
+		orderStatus:  OrderStatusActive,
+	}
+
+	for range 2 {
+		if err := l.steer(ScheduleTaskKey(), "prioritize lifecycle safety"); err != nil {
+			t.Fatalf("steer schedule: %v", err)
+		}
+	}
+
+	current, err := readOrders(filepath.Join(l.runtimeDir, "orders.json"))
+	if err != nil {
+		t.Fatalf("read orders: %v", err)
+	}
+	if len(current.Orders) != 2 {
+		t.Fatalf("orders count = %d, want 2", len(current.Orders))
+	}
+	if !reflect.DeepEqual(current.Orders[0], original) {
+		t.Fatalf("non-schedule order changed:\n got: %#v\nwant: %#v", current.Orders[0], original)
+	}
+	if current.Orders[1].ID != ScheduleTaskKey() {
+		t.Fatalf("second order id = %q, want %q", current.Orders[1].ID, ScheduleTaskKey())
+	}
+	if current.Orders[1].Rationale != "Chef steer: prioritize lifecycle safety" {
+		t.Fatalf("schedule rationale = %q", current.Orders[1].Rationale)
+	}
+	if l.cooks.activeCooksByOrder[original.ID] == nil {
+		t.Fatal("non-schedule cook is no longer tracked")
+	}
+	if sess.status == "killed" {
+		t.Fatal("non-schedule session was killed by schedule steer")
 	}
 }
 

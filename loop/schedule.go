@@ -366,12 +366,23 @@ func buildOrderTaskTypesPrompt(taskTypes []TaskType) string {
 }
 
 func (l *Loop) rescheduleForChefPrompt(prompt string) error {
-	next := OrdersFile{
-		Orders: []Order{
-			scheduleOrder(l.config, prompt),
-		},
-	}
 	return l.mutateOrdersState(func(orders *OrdersFile) (bool, error) {
+		next := OrdersFile{Orders: make([]Order, 0, len(orders.Orders)+1)}
+		replacement := scheduleOrder(l.config, prompt)
+		replaced := false
+		for _, order := range orders.Orders {
+			if !isScheduleOrder(order) {
+				next.Orders = append(next.Orders, order)
+				continue
+			}
+			if !replaced {
+				next.Orders = append(next.Orders, replacement)
+				replaced = true
+			}
+		}
+		if !replaced {
+			next.Orders = append(next.Orders, replacement)
+		}
 		if reflect.DeepEqual(*orders, next) {
 			return false, nil
 		}
