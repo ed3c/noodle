@@ -1,3 +1,9 @@
+## [0.1.19](https://github.com/poteto/noodle/compare/v0.1.18...v0.1.19) (2026-09-15)
+
+### Bug Fixes
+
+* **loop:** preserve orders during schedule steer ([2ba3a98](https://github.com/poteto/noodle/commit/2ba3a985a32af5af247f9530765125d24948cf59))
+
 ## [0.1.18](https://github.com/poteto/noodle/compare/v0.1.17...v0.1.18) (2026-09-14)
 
 ### Bug Fixes
