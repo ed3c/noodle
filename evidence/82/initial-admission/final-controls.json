@@ -1,0 +1,30 @@
+[
+  {
+    "name": "final-cure",
+    "exit": 0
+  },
+  {
+    "name": "final-remove-revision-match",
+    "exit": 1
+  },
+  {
+    "name": "final-remove-owned-guard",
+    "exit": 1
+  },
+  {
+    "name": "final-remove-ledger-record",
+    "exit": 1
+  },
+  {
+    "name": "final-remove-revision-change",
+    "exit": 1
+  },
+  {
+    "name": "final-remove-projection-guard",
+    "exit": 1
+  },
+  {
+    "name": "final-remove-persist-stop",
+    "exit": 1
+  }
+]

@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "pnpm",
+    "check"
+  ],
+  "head": "75ae4f12808004cfc83d39b8306234e94d9e3ef3",
+  "tree": "b66dfbbba4cdf015e988b17e8babdc45c3aade2d",
+  "exit": 0,
+  "elapsed": 15.031484749983065,
+  "source_after": "",
+  "authorizes_landing": false,
+  "reason": "Commit metadata changed to verified public noreply identity after provider email-privacy refusal; source tree unchanged."
+}

@@ -1,0 +1,83 @@
+{
+  "issue": 82,
+  "head": "75ae4f12808004cfc83d39b8306234e94d9e3ef3",
+  "tree": "b66dfbbba4cdf015e988b17e8babdc45c3aade2d",
+  "classification": "LOCAL_VERIFIED",
+  "authorizes_landing": false,
+  "canonical": {
+    "argv": [
+      "pnpm",
+      "check"
+    ],
+    "head": "75ae4f12808004cfc83d39b8306234e94d9e3ef3",
+    "tree": "b66dfbbba4cdf015e988b17e8babdc45c3aade2d",
+    "exit": 0,
+    "elapsed": 15.031484749983065,
+    "source_after": "",
+    "authorizes_landing": false,
+    "reason": "Commit metadata changed to verified public noreply identity after provider email-privacy refusal; source tree unchanged."
+  },
+  "controls": [
+    {
+      "name": "final-cure",
+      "exit": 0
+    },
+    {
+      "name": "final-remove-revision-match",
+      "exit": 1
+    },
+    {
+      "name": "final-remove-owned-guard",
+      "exit": 1
+    },
+    {
+      "name": "final-remove-ledger-record",
+      "exit": 1
+    },
+    {
+      "name": "final-remove-revision-change",
+      "exit": 1
+    },
+    {
+      "name": "final-remove-projection-guard",
+      "exit": 1
+    },
+    {
+      "name": "final-remove-persist-stop",
+      "exit": 1
+    }
+  ],
+  "physical_interruption": "actual test child killed after initial-admission checkpoint before proposal deletion; owner reloaded from disk",
+  "runtime_binary_sha256": "c299d2bce4e33ddd0b1c6295bd3cbeb1d29b32782fdcc9bcc9ffac2cf87ab35c",
+  "limits": [
+    "Go controls use the real owner over temporary local state; provider/worker adapters are fakes. No real nested Agent or GitHub delivery is claimed by these controls.",
+    "Soodles #18 producer and worker integration remains incomplete."
+  ],
+  "files": {
+    "final-remove-revision-match.json": "72c53d88850f393b1c265a8d54e4ced08235a9ac4210ad272a0b792212a7ea52",
+    "final-remove-projection-guard.overlay.json": "6639fa9a0e3ab6abca83bdb625273516a39a8854dbd34b9b25fe17cf90a64f25",
+    "observer-final-selection.json": "286179a9b8fc175420d05e213ba18896856391b7643405516613219dbea61c06",
+    "final-remove-revision-change.overlay.json": "fff2ed28fcf7944664d9f83bb25424de9dccf35d2a86c9c493853927650806aa",
+    "final-remove-revision-match.overlay.json": "e7619afaf63003352f622879aca8ecadf1fe02db827e902ec4a5ce55f762e733",
+    "final-remove-projection-guard.json": "b7411a8283cb6feafc2fbd9ee184977e01f07c9fe11c6b843737b7ca1395588d",
+    "final-remove-persist-stop.overlay.json": "c80e7b4adb4a3c1423d120ffaf3bfcda6746c419f3bd4e537ae0d4f5263d2ff5",
+    "final-remove-ledger-record.overlay.json": "4d5f11ad3bbdc70e3f6ebc3418b849bec6e76dc0e82bc200c4f2de6534d5eb2d",
+    "canonical-public-head.json": "fc323615964bb18cb6cea8eb0fd1d8c3e0cd5fc3ff12aa6744ff4c7d04e8a1d8",
+    "final-remove-revision-change.json": "568c9343b749f4f63d9005c7153a410e79962a90b965a5f230f8104653485753",
+    "final-remove-revision-change.go": "bfd04f1d45edeb28b26d63d4ad73915d7bea9c20f1a5be7ed3580a96c0fdd1a3",
+    "final-remove-revision-match.go": "c4ebf8e8db0d9f430b40fad9b0b66a354f12ee4914dc33ffdfec42ee6e800f39",
+    "canonical-public-head.log": "fbfbd2aee65c4d01a23c977b28c581b3b1f9e83cb9b4b809df5a9db1623221af",
+    "final-remove-ledger-record.go": "286d4ddf33f00262c25f15e4150057cc5806bd574d56f902cea3d85b2db50977",
+    "final-remove-persist-stop.json": "44bac67e0a3475b4073d7622ebcd2b12170c1038bacb704405b446a5e2640382",
+    "final-remove-owned-guard.go": "07929277bda75bba8f10d90ebfc6e06c4ab907f77928b0f4a921e33dfc076c18",
+    "final-remove-persist-stop.go": "0b31d345facaeb12e11baae90cb74a2b9718a92cefcbb1aadb95d8d2687f08f5",
+    "final-remove-owned-guard.overlay.json": "ba57d2f5f42728b1b7efe6940e4db102f53f011e434c7884d0e1ff4bf6906eab",
+    "final-remove-projection-guard.go": "a21b8a05db00b879c884ca0faaf696c7cde3a3b021544c9099c25ed5c02ccb2e",
+    "final-cure.overlay.json": "f3f3bec7687bfb724ee47a3c3d5b1b41124bebacbb6f77afb679a8915c26ac02",
+    "frozen-final-observer_test.go": "42f29792895b253032fc1957ce0eb35e01a784760d2057d81a3ef604c255c7d3",
+    "final-remove-ledger-record.json": "f86ffd25e8544ef861a2c01a29b2aa17c81b787dc5b502f19e401858935f8295",
+    "final-remove-owned-guard.json": "b87ef0fa98f0f213067c0f1d6efe949efa1c3c452b5a21e34dc0fbce9e6363f9",
+    "final-controls.json": "a06446e458df8a2c8f08899dc744228aacc3069abe827d688a2429b12a03c382",
+    "final-cure.json": "118b5f60c60eab4363633a7d9d820cdb432acfa3b148c4e969e53cfe40a5638e"
+  }
+}

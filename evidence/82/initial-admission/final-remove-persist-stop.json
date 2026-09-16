@@ -1,0 +1,18 @@
+{
+  "name": "final-remove-persist-stop",
+  "argv": [
+    "go",
+    "test",
+    "-overlay",
+    "/Users/neon/.codex/experiments/noodle82-20260916/final-remove-persist-stop.overlay.json",
+    "./loop",
+    "-run",
+    "^TestInitialAdmission|^TestConsumeOrdersNext",
+    "-count=1",
+    "-v"
+  ],
+  "exit": 1,
+  "stdout": "=== RUN   TestInitialAdmissionCrashChild\n--- PASS: TestInitialAdmissionCrashChild (0.00s)\n=== RUN   TestInitialAdmissionPhysicalCrashBeforeProposalRemoval\n--- PASS: TestInitialAdmissionPhysicalCrashBeforeProposalRemoval (0.01s)\n=== RUN   TestInitialAdmissionReplayAcrossOwnershipLifecycle\n--- PASS: TestInitialAdmissionReplayAcrossOwnershipLifecycle (0.01s)\n=== RUN   TestInitialAdmissionRecoveryBeforeProposalRemoval\n--- PASS: TestInitialAdmissionRecoveryBeforeProposalRemoval (0.00s)\n=== RUN   TestInitialAdmissionLegacySnapshotAndScheduleNoncase\n--- PASS: TestInitialAdmissionLegacySnapshotAndScheduleNoncase (0.00s)\n=== RUN   TestInitialAdmissionMalformedRevision\n=== RUN   TestInitialAdmissionMalformedRevision/null\n=== RUN   TestInitialAdmissionMalformedRevision/\"\"\n=== RUN   TestInitialAdmissionMalformedRevision/\"bad\"\n=== RUN   TestInitialAdmissionMalformedRevision/\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n=== RUN   TestInitialAdmissionMalformedRevision/42\n--- PASS: TestInitialAdmissionMalformedRevision (0.01s)\n    --- PASS: TestInitialAdmissionMalformedRevision/null (0.00s)\n    --- PASS: TestInitialAdmissionMalformedRevision/\"\" (0.00s)\n    --- PASS: TestInitialAdmissionMalformedRevision/\"bad\" (0.00s)\n    --- PASS: TestInitialAdmissionMalformedRevision/\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\" (0.00s)\n    --- PASS: TestInitialAdmissionMalformedRevision/42 (0.00s)\n=== RUN   TestInitialAdmissionFailedCheckpointDoesNotPublishRevision\n    initial_admission_test.go:359: failed initial checkpoint did not stop the cycle before dispatch\n--- FAIL: TestInitialAdmissionFailedCheckpointDoesNotPublishRevision (0.00s)\n=== RUN   TestConsumeOrdersNextPromotesFile\n--- PASS: TestConsumeOrdersNextPromotesFile (0.00s)\n=== RUN   TestConsumeOrdersNextDefaultsMissingLifecycleStatuses\n--- PASS: TestConsumeOrdersNextDefaultsMissingLifecycleStatuses (0.00s)\n=== RUN   TestConsumeOrdersNextMissingReturnsNoop\n--- PASS: TestConsumeOrdersNextMissingReturnsNoop (0.00s)\n=== RUN   TestConsumeOrdersNextDuplicateIDsSkipped\n--- PASS: TestConsumeOrdersNextDuplicateIDsSkipped (0.00s)\n=== RUN   TestConsumeOrdersNextDuplicateFailedIDReplaced\n--- PASS: TestConsumeOrdersNextDuplicateFailedIDReplaced (0.00s)\n=== RUN   TestConsumeOrdersNextDuplicateActiveIDAmendsPendingTail\n--- PASS: TestConsumeOrdersNextDuplicateActiveIDAmendsPendingTail (0.00s)\n=== RUN   TestConsumeOrdersNextDuplicateActiveIDAmendsCurrentStage\n--- PASS: TestConsumeOrdersNextDuplicateActiveIDAmendsCurrentStage (0.00s)\n=== RUN   TestConsumeOrdersNextCrashSafety\n--- PASS: TestConsumeOrdersNextCrashSafety (0.00s)\n=== RUN   TestConsumeOrdersNextInvalidNextJSON\n--- PASS: TestConsumeOrdersNextInvalidNextJSON (0.00s)\n=== RUN   TestConsumeOrdersNextNoExistingOrders\n--- PASS: TestConsumeOrdersNextNoExistingOrders (0.00s)\nFAIL\nFAIL\tgithub.com/poteto/noodle/loop\t4.205s\nFAIL\n",
+  "stderr": "",
+  "elapsed": 6.048563207965344
+}
