@@ -2,6 +2,9 @@ package dispatcher
 
 import (
 	"context"
+	"io"
+	"os"
+	"strings"
 
 	"github.com/poteto/noodle/event"
 	"github.com/poteto/noodle/parse"
@@ -15,6 +18,10 @@ type processSession struct {
 	process    *ProcessHandle
 	controller *claudeController // nil for non-steerable sessions
 	warnings   []string
+	provider   string
+	stderrPath string
+	stderrDone <-chan struct{}
+	startup    *codexStartup
 }
 
 type processSessionConfig struct {
@@ -27,6 +34,10 @@ type processSessionConfig struct {
 	warnings      []string
 	controller    *claudeController // nil for non-steerable sessions
 	sink          SessionEventSink
+	provider      string
+	stderrPath    string
+	stderrDone    <-chan struct{}
+	startup       *codexStartup
 }
 
 func newProcessSession(cfg processSessionConfig) *processSession {
@@ -42,7 +53,41 @@ func newProcessSession(cfg processSessionConfig) *processSession {
 		process:    cfg.process,
 		controller: cfg.controller,
 		warnings:   append([]string(nil), cfg.warnings...),
+		provider:   cfg.provider,
+		stderrPath: cfg.stderrPath,
+		stderrDone: cfg.stderrDone,
+		startup:    cfg.startup,
 	}
+}
+
+// Outcome retains Codex's own pre-event launch diagnostic. Codex owns config
+// validation; Noodle must not guess a replacement permission policy or hide the
+// invalid field behind "no events emitted".
+func (s *processSession) Outcome() SessionOutcome {
+	outcome := s.sessionBase.Outcome()
+	if !strings.EqualFold(strings.TrimSpace(s.provider), "codex") || outcome.Status != StatusFailed || outcome.Reason != "no events emitted" {
+		return outcome
+	}
+	if s.stderrDone != nil {
+		<-s.stderrDone
+	}
+	f, err := os.Open(s.stderrPath)
+	if err != nil {
+		return outcome
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, 8192))
+	if err != nil {
+		return outcome
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(line), "error:") {
+			outcome.Reason = "Codex process launch failed: " + line + "; owner: Codex exec configuration; next: codex exec --help"
+			break
+		}
+	}
+	return outcome
 }
 
 func (s *processSession) start(ctx context.Context) {
@@ -56,7 +101,7 @@ func (s *processSession) start(ctx context.Context) {
 		interceptor := &canonicalLineInterceptor{onLine: func(line []byte) {
 			s.consumeCanonicalLine(line, s.processHook)
 		}}
-		s.processStream(ctx, s.process.Stdout(), interceptor)
+		s.processStream(ctx, s.startup.reader(s.process.Stdout(), false), interceptor)
 	}()
 
 	go func() {
@@ -76,6 +121,7 @@ func (s *processSession) start(ctx context.Context) {
 }
 
 func (s *processSession) processHook(ce parse.CanonicalEvent) {
+	s.startup.observeInit(ce.Type)
 	s.observeCanonicalEvent(ce)
 	if s.controller != nil {
 		s.controller.NotifyEvent(string(ce.Type))

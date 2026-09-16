@@ -90,7 +90,15 @@ func (d *ProcessDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 		return nil, err
 	}
 
-	controller, process, err := d.startSessionProcess(ctx, req, systemPrompt, composedPrompt, sessionID, sessionDir, stderrPath)
+	var startup *codexStartup
+	if stringx.Normalize(req.Provider) == "codex" {
+		startup, err = newCodexStartup(sessionDir, sessionID, len(composedPrompt))
+		if err != nil {
+			return nil, err
+		}
+	}
+	stderrDone := make(chan struct{})
+	controller, process, err := d.startSessionProcess(ctx, req, systemPrompt, composedPrompt, sessionID, sessionDir, stderrPath, stderrDone, startup)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +113,10 @@ func (d *ProcessDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 		warnings:      skillBundle.Warnings,
 		controller:    controller,
 		sink:          d.sink,
+		provider:      req.Provider,
+		stderrPath:    stderrPath,
+		stderrDone:    stderrDone,
+		startup:       startup,
 	})
 	session.start(ctx)
 	return session, nil
@@ -164,6 +176,8 @@ func (d *ProcessDispatcher) prepareSessionDir(
 func (d *ProcessDispatcher) startSessionProcess(
 	ctx context.Context, req DispatchRequest,
 	systemPrompt, composedPrompt, sessionID, sessionDir, stderrPath string,
+	stderrDone chan struct{},
+	startup *codexStartup,
 ) (*claudeController, *ProcessHandle, error) {
 	cmd, err := d.buildCmd(req, systemPrompt)
 	if err != nil {
@@ -177,7 +191,7 @@ func (d *ProcessDispatcher) startSessionProcess(
 		return nil, nil, fmt.Errorf("start process: %w", err)
 	}
 
-	controller, err := d.configureStdin(ctx, process, req.Provider, composedPrompt)
+	controller, err := d.configureStdin(ctx, process, req.Provider, composedPrompt, startup)
 	if err != nil {
 		_ = process.ForceKill()
 		_ = process.Stdout().Close()
@@ -185,7 +199,10 @@ func (d *ProcessDispatcher) startSessionProcess(
 		return nil, nil, err
 	}
 
-	go drainToFile(process.Stderr(), stderrPath)
+	go func() {
+		defer close(stderrDone)
+		drainToFile(startup.reader(process.Stderr(), true), stderrPath)
+	}()
 
 	if err := WriteProcessMetadata(sessionDir, sessionID, process.PID(), nowUTC()); err != nil {
 		_ = process.ForceKill()
@@ -208,12 +225,10 @@ func (d *ProcessDispatcher) startSessionProcess(
 // the prompt to stdin and closes it.
 func (d *ProcessDispatcher) configureStdin(
 	ctx context.Context, process *ProcessHandle, provider, composedPrompt string,
+	startup *codexStartup,
 ) (*claudeController, error) {
 	if stringx.Normalize(provider) == "codex" {
-		go func() {
-			_, _ = io.WriteString(process.Stdin(), composedPrompt)
-			_ = process.Stdin().Close()
-		}()
+		go startup.writeInput(process.Stdin(), composedPrompt)
 		return nil, nil
 	}
 	controller := newClaudeController(process.Stdin())

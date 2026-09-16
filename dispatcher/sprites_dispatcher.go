@@ -341,7 +341,10 @@ func uploadFileToSprite(ctx context.Context, sprite spriteHandle, localPath, rem
 }
 
 func buildSpriteCodexArgs(req DispatchRequest) []string {
-	return append([]string{"codex"}, codexBaseArgs(req)...)
+	// Preserve the existing externally sandboxed Sprite contract here. Local
+	// process dispatch inherits host policy and must not acquire this override.
+	args := codexBaseArgs(req)
+	return append([]string{"codex", args[0], "--dangerously-bypass-approvals-and-sandbox"}, args[1:]...)
 }
 
 func buildSpriteClaudeArgs(req DispatchRequest, systemPrompt string) []string {
