@@ -42,22 +42,49 @@ type processMetadata struct {
 func StartProcess(cmd *exec.Cmd) (*ProcessHandle, error) {
 	configureChildProcess(cmd)
 
+	if cmd.Stdout != nil || cmd.Stderr != nil {
+		return nil, fmt.Errorf("output streams already configured")
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("create stdin pipe: %w", err)
 	}
-	stdout, err := cmd.StdoutPipe()
+	// Wait owns StdinPipe, but consumers own the output readers. exec.Cmd's
+	// StdoutPipe/StderrPipe readers are closed by Wait, which can beat a delayed
+	// consumer after a fast exit. Native pipes keep kernel backpressure and let
+	// consumers drain through EOF independently of process reaping.
+	started := false
+	defer func() {
+		if !started {
+			_ = stdin.Close()
+			_ = cmd.Stdin.(io.Closer).Close()
+		}
+	}()
+	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
 		return nil, fmt.Errorf("create stdout pipe: %w", err)
 	}
-	stderr, err := cmd.StderrPipe()
+	defer stdoutWriter.Close()
+	defer func() {
+		if !started {
+			_ = stdout.Close()
+		}
+	}()
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
 		return nil, fmt.Errorf("create stderr pipe: %w", err)
 	}
-
+	defer stderrWriter.Close()
+	defer func() {
+		if !started {
+			_ = stderr.Close()
+		}
+	}()
+	cmd.Stdout, cmd.Stderr = stdoutWriter, stderrWriter
 	if err := cmd.Start(); err != nil {
 		return nil, ProcessStartError{Cause: err}
 	}
+	started = true
 
 	h := &ProcessHandle{
 		cmd:    cmd,
@@ -74,10 +101,10 @@ func StartProcess(cmd *exec.Cmd) (*ProcessHandle, error) {
 // Stdin returns the write end of the child's stdin pipe.
 func (h *ProcessHandle) Stdin() io.WriteCloser { return h.stdin }
 
-// Stdout returns the read end of the child's stdout pipe.
+// Stdout returns the child stdout reader. The consumer must close it after draining.
 func (h *ProcessHandle) Stdout() io.ReadCloser { return h.stdout }
 
-// Stderr returns the read end of the child's stderr pipe.
+// Stderr returns the child stderr reader. The consumer must close it after draining.
 func (h *ProcessHandle) Stderr() io.ReadCloser { return h.stderr }
 
 // Done returns a channel that is closed when the process exits.
