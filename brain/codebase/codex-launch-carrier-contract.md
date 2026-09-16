@@ -33,6 +33,22 @@ ChatGPT GitHub connector transport plus ordinary Actions runtime tests is a
 different path from starting another Codex process inside a runner. Each actual
 Agent carrier requires its own successful launch and typed-outcome receipt.
 
+The process owner writes `sessions/<id>/codex-startup.json` to distinguish
+stdin write start, completed byte count/error, and close completion/error.
+First stdout/stderr read and first canonical `init` are separate observations;
+raw stderr is not initialization. Null timestamps/counts mean not observed.
+Successful write/close proves only the parent's pipe operations returned, not
+that Codex consumed the prompt or completed work. The receipt contains no prompt
+content, is not replayed, and cannot authorize retry or change session outcome.
+Persistence errors are logged and retained on a later successful receipt write.
+
+`dispatcher/codex_startup_test.go` exercises the actual child-process stdin/EOF
+and output consumers, blocked-input cancellation, independent write/close
+failures, pending operations and initialization discrimination. Planted lost
+byte counts, close diagnostics and initialization consumption are rejected.
+These controls observe the process boundary; they do not expose Codex's internal
+MCP/network initialization steps or establish authenticated Agent execution.
+
 An Actions preflight incorrectly required `secrets.OPENAI_API_KEY` before any
 Noodle runtime execution. Its missing-input result was not a runtime failure.
 API keys are not required for the supervised connector plus Actions path, and

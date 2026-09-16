@@ -21,6 +21,7 @@ type processSession struct {
 	provider   string
 	stderrPath string
 	stderrDone <-chan struct{}
+	startup    *codexStartup
 }
 
 type processSessionConfig struct {
@@ -36,6 +37,7 @@ type processSessionConfig struct {
 	provider      string
 	stderrPath    string
 	stderrDone    <-chan struct{}
+	startup       *codexStartup
 }
 
 func newProcessSession(cfg processSessionConfig) *processSession {
@@ -54,6 +56,7 @@ func newProcessSession(cfg processSessionConfig) *processSession {
 		provider:   cfg.provider,
 		stderrPath: cfg.stderrPath,
 		stderrDone: cfg.stderrDone,
+		startup:    cfg.startup,
 	}
 }
 
@@ -98,7 +101,7 @@ func (s *processSession) start(ctx context.Context) {
 		interceptor := &canonicalLineInterceptor{onLine: func(line []byte) {
 			s.consumeCanonicalLine(line, s.processHook)
 		}}
-		s.processStream(ctx, s.process.Stdout(), interceptor)
+		s.processStream(ctx, s.startup.reader(s.process.Stdout(), false), interceptor)
 	}()
 
 	go func() {
@@ -118,6 +121,7 @@ func (s *processSession) start(ctx context.Context) {
 }
 
 func (s *processSession) processHook(ce parse.CanonicalEvent) {
+	s.startup.observeInit(ce.Type)
 	s.observeCanonicalEvent(ce)
 	if s.controller != nil {
 		s.controller.NotifyEvent(string(ce.Type))
