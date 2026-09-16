@@ -215,10 +215,12 @@ type Loop struct {
 	lastStatus statusfile.Status
 
 	// V2 canonical state — event-sourced pipeline.
-	canonical       state.State
-	canonicalLoaded bool
-	effectLedger    *reducer.EffectLedger
-	eventCounter    atomic.Uint64
+	canonical          state.State
+	canonicalLoaded    bool
+	orderRevision      string
+	checkpointOrderIDs map[string]struct{}
+	effectLedger       *reducer.EffectLedger
+	eventCounter       atomic.Uint64
 
 	reconciledFailures []reconciledFailure
 	lastMiseWarnings   []string
@@ -227,6 +229,7 @@ type Loop struct {
 
 	// Test hooks — nil in production. These allow tests to simulate crashes
 	// at specific points in the state-persistence pipeline.
-	TestFlushBarrier      func() // called between file writes in flushState()
-	TestControlAckBarrier func() // called between command processing and ack write in processControlCommands()
+	TestFlushBarrier            func() // called between file writes in flushState()
+	TestInitialAdmissionBarrier func() // after initial admission checkpoint, before proposal removal
+	TestControlAckBarrier       func() // called between command processing and ack write in processControlCommands()
 }

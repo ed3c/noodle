@@ -1,8 +1,10 @@
 package loop
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -50,7 +52,12 @@ func (l *Loop) loadCanonicalSnapshot() (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if snapshot.OrderRevision != "" && !orderx.ValidOrderRevision(snapshot.OrderRevision) {
+		return false, fmt.Errorf("invalid canonical order_revision=%q; owner: Noodle canonical checkpoint", snapshot.OrderRevision)
+	}
 	l.canonical = snapshot.State.Clone()
+	l.orderRevision = snapshot.OrderRevision
+	l.checkpointOrderIDs = nonScheduleOrderIDs(l.canonical)
 	l.effectLedger = restoreEffectLedger(snapshot.EffectLedger)
 
 	lastEventID, err := parseLastEventID(l.canonical.LastEventID)
@@ -97,7 +104,32 @@ func (l *Loop) persistCanonicalCheckpoint() error {
 		now = l.deps.Now().UTC()
 	}
 	snapshot := reducer.BuildSnapshot(l.canonical, l.effectLedger, now)
-	return reducer.WriteSnapshotAtomic(path, snapshot)
+	owned := nonScheduleOrderIDs(l.canonical)
+	revision := l.orderRevision
+	if revision == "" || !maps.Equal(owned, l.checkpointOrderIDs) {
+		var nonce [16]byte
+		if _, err := rand.Read(nonce[:]); err != nil {
+			return fmt.Errorf("create canonical order_revision: %w", err)
+		}
+		revision = fmt.Sprintf("%x", nonce)
+	}
+	snapshot.OrderRevision = revision
+	if err := reducer.WriteSnapshotAtomic(path, snapshot); err != nil {
+		return err
+	}
+	l.orderRevision = revision
+	l.checkpointOrderIDs = owned
+	return nil
+}
+
+func nonScheduleOrderIDs(canonical state.State) map[string]struct{} {
+	ids := make(map[string]struct{}, len(canonical.Orders))
+	for id := range canonical.Orders {
+		if id != scheduleOrderID {
+			ids[id] = struct{}{}
+		}
+	}
+	return ids
 }
 
 func synthesizeCanonicalState(

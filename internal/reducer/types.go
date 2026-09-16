@@ -19,6 +19,10 @@ type Reducer func(state.State, ingest.StateEvent) (state.State, []Effect, error)
 type EffectType string
 
 const (
+	// EffectInitialAdmission records initial order ownership in the existing
+	// ledger. It commits with the order and survives removal of active work.
+	EffectInitialAdmission EffectType = "initial_admission"
+
 	// EffectDispatch dispatches/launches a session.
 	// STUB: concrete launch semantics depend on Phase 4 two-phase launch.
 	EffectDispatch EffectType = "dispatch"

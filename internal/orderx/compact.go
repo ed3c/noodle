@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -30,8 +31,11 @@ type CompactOrder struct {
 
 // CompactOrdersFile is the top-level scheduler wire format.
 type CompactOrdersFile struct {
-	Orders       []CompactOrder `json:"orders"`
-	ActionNeeded []string       `json:"action_needed,omitempty"`
+	// InitialRevision requests only first admission against owner readback.
+	// It is a concurrency precondition, not execution authorization.
+	InitialRevision *string        `json:"initial_revision,omitempty"`
+	Orders          []CompactOrder `json:"orders"`
+	ActionNeeded    []string       `json:"action_needed,omitempty"`
 }
 
 // ParseCompactOrders parses compact orders JSON with strict unknown-field
@@ -49,6 +53,16 @@ func ParseCompactOrders(data []byte) (CompactOrdersFile, error) {
 		return CompactOrdersFile{}, fmt.Errorf("parse compact orders: %w", err)
 	}
 
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return CompactOrdersFile{}, fmt.Errorf("parse compact orders: %w", err)
+	}
+	if _, present := fields["initial_revision"]; present {
+		if compact.InitialRevision == nil || !ValidOrderRevision(*compact.InitialRevision) {
+			return CompactOrdersFile{}, fmt.Errorf("invalid initial_revision=%s; owner: Noodle canonical checkpoint; read order_revision from state.snapshot.json", fields["initial_revision"])
+		}
+	}
+
 	for i, order := range compact.Orders {
 		for j, stage := range order.Stages {
 			if err := validateCompactStage(stage, i, j); err != nil {
@@ -62,6 +76,12 @@ func ParseCompactOrders(data []byte) (CompactOrdersFile, error) {
 	}
 
 	return compact, nil
+}
+
+var orderRevisionPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+func ValidOrderRevision(value string) bool {
+	return orderRevisionPattern.MatchString(value)
 }
 
 // ExpandCompactOrders expands compact wire-format orders into internal
