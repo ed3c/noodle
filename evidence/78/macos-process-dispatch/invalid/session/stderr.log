@@ -1,0 +1,4 @@
+error: invalid value 'invalid-mode' for '--sandbox <SANDBOX_MODE>'
+  [possible values: read-only, workspace-write, danger-full-access]
+
+For more information, try '--help'.

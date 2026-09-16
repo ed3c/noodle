@@ -1,0 +1,31 @@
+Scope: all 4 workspace projects
+Lockfile is up to date, resolution step is skipped
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +613
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+   ╭──────────────────────────────────────────────╮
+   │                                              │
+   │     Update available! 10.30.3 → 12.4.2.      │
+   │     Changelog: https://pnpm.io/v/12.4.2      │
+   │   To update, run: corepack use pnpm@12.4.2   │
+   │                                              │
+   ╰──────────────────────────────────────────────╯
+
+Progress: resolved 613, reused 613, downloaded 0, added 273
+Progress: resolved 613, reused 613, downloaded 0, added 609
+Progress: resolved 613, reused 613, downloaded 0, added 613, done
+
+devDependencies:
++ concurrently 9.2.1
++ conventional-changelog 7.2.0
++ conventional-changelog-conventionalcommits 9.2.0
+
+╭ Warning ─────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│   Ignored build scripts: esbuild@0.21.5, esbuild@0.27.3.                     │
+│   Run "pnpm approve-builds" to pick which dependencies should be allowed     │
+│   to run scripts.                                                            │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Done in 3.1s using pnpm v10.30.3

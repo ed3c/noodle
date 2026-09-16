@@ -1,0 +1,19 @@
+{
+  "argv": [
+    "/private/tmp/noodle78-macos-feqjw78c/source/bin/noodle",
+    "--project-dir",
+    "/private/tmp/noodle78-macos-feqjw78c/fixture",
+    "worktree",
+    "cleanup",
+    "launch"
+  ],
+  "exit_code": 0,
+  "stdout": "  Removing worktree...\n  Deleting branch launch...\nDone. launch removed.\n",
+  "stderr": "config repairable: 4 adapter script path(s) are missing.\n  backlog:\n    - add -> adapters/backlog-add (adapters.backlog.scripts.add)\n    - done -> adapters/backlog-done (adapters.backlog.scripts.done)\n    - edit -> adapters/backlog-edit (adapters.backlog.scripts.edit)\n    - sync -> adapters/backlog-sync (adapters.backlog.scripts.sync)\nconfig repair prompt:\n-----\nRepair Noodle adapter script configuration so `noodle start` no longer reports missing script paths.\nFix each missing entry by either creating an executable script at that path or updating .noodle.toml to a valid executable path.\nKeep the fix minimal and avoid broad refactors.\n\nMissing adapter scripts:\n- adapters.backlog.scripts.add (backlog): adapters/backlog-add\n- adapters.backlog.scripts.done (backlog): adapters/backlog-done\n- adapters.backlog.scripts.edit (backlog): adapters/backlog-edit\n- adapters.backlog.scripts.sync (backlog): adapters/backlog-sync\n\nRequired verification:\n- Re-run `noodle start` and confirm these repairable diagnostics are gone.\n- If Go files changed, run `go test ./...`.\n\nReturn a short summary of files changed and the verification results.\n-----\n",
+  "worktree_absent": true,
+  "branch_listing": "",
+  "source_status": "",
+  "git_worktrees": "worktree /private/tmp/noodle78-macos-feqjw78c/fixture\nHEAD 6a712b5474207a0e03289266fddb58894dc13435\nbranch refs/heads/main\n\n",
+  "fixture_status": "",
+  "fixture_root_removed": true
+}

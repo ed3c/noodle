@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "git",
+    "clone",
+    "--branch",
+    "issue-78-codex-launch",
+    "--single-branch",
+    "https://github.com/ed3c/noodle.git",
+    "/private/tmp/noodle78-macos-feqjw78c/source"
+  ],
+  "exit_code": 0,
+  "stdout": "",
+  "stderr": "Cloning into '/private/tmp/noodle78-macos-feqjw78c/source'...\n"
+}

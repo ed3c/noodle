@@ -1,0 +1,125 @@
+
+> @ check /private/tmp/noodle78-macos-feqjw78c/source
+> pnpm run build && pnpm run test && pnpm run vet && pnpm run lint:arch && pnpm run fixtures:loop && pnpm run fixtures:hash
+
+
+> @ build /private/tmp/noodle78-macos-feqjw78c/source
+> pnpm --filter noodle-ui build && go build -o ./bin/noodle .
+
+
+> noodle-ui@ build /private/tmp/noodle78-macos-feqjw78c/source/ui
+> vite build
+
+vite v7.3.1 building client environment for production...
+transforming...
+✓ 3220 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/client/index.html                     0.85 kB │ gzip:   0.45 kB
+dist/client/assets/index-BjOVM1mD.css     54.21 kB │ gzip:  10.51 kB
+dist/client/assets/index-CnvJVP-F.js      31.85 kB │ gzip:  11.46 kB
+dist/client/assets/d3-xKNfCkBH.js         51.62 kB │ gzip:  17.62 kB
+dist/client/assets/router-BPmgOIxi.js     94.36 kB │ gzip:  30.83 kB
+dist/client/assets/index-BzrgpmJZ.js     334.99 kB │ gzip: 105.38 kB
+dist/client/assets/index-wNhTF6hF.js   1,330.95 kB │ gzip: 268.73 kB
+✓ built in 4.11s
+
+> @ test /private/tmp/noodle78-macos-feqjw78c/source
+> go test ./...
+
+ok  	github.com/poteto/noodle	44.071s
+ok  	github.com/poteto/noodle/adapter	1.111s
+?   	github.com/poteto/noodle/adapters	[no test files]
+ok  	github.com/poteto/noodle/adapters/noodles-github	3.283s
+?   	github.com/poteto/noodle/cmdmeta	[no test files]
+ok  	github.com/poteto/noodle/config	1.750s
+ok  	github.com/poteto/noodle/dispatcher	2.450s
+ok  	github.com/poteto/noodle/event	2.860s
+ok  	github.com/poteto/noodle/generate	2.804s
+?   	github.com/poteto/noodle/generate/cmd/gen-skill	[no test files]
+ok  	github.com/poteto/noodle/internal/dispatch	3.153s
+ok  	github.com/poteto/noodle/internal/failure	3.465s
+ok  	github.com/poteto/noodle/internal/filex	3.714s
+ok  	github.com/poteto/noodle/internal/ingest	3.648s
+ok  	github.com/poteto/noodle/internal/integration	3.441s
+ok  	github.com/poteto/noodle/internal/jsonx	2.968s
+ok  	github.com/poteto/noodle/internal/lockfile	3.045s
+ok  	github.com/poteto/noodle/internal/mode	3.254s
+ok  	github.com/poteto/noodle/internal/orderx	3.355s
+?   	github.com/poteto/noodle/internal/procx	[no test files]
+ok  	github.com/poteto/noodle/internal/projection	3.720s
+ok  	github.com/poteto/noodle/internal/reducer	3.797s
+ok  	github.com/poteto/noodle/internal/rtcap	3.722s
+ok  	github.com/poteto/noodle/internal/schemadoc	3.686s
+ok  	github.com/poteto/noodle/internal/shellx	3.602s
+ok  	github.com/poteto/noodle/internal/snapshot	4.262s
+ok  	github.com/poteto/noodle/internal/state	3.710s
+ok  	github.com/poteto/noodle/internal/statever	3.772s
+?   	github.com/poteto/noodle/internal/statusfile	[no test files]
+ok  	github.com/poteto/noodle/internal/stringx	3.750s
+ok  	github.com/poteto/noodle/internal/taskreg	3.588s
+ok  	github.com/poteto/noodle/internal/testutil/fixturedir	4.040s
+ok  	github.com/poteto/noodle/loop	27.950s
+ok  	github.com/poteto/noodle/mise	9.022s
+ok  	github.com/poteto/noodle/monitor	4.123s
+ok  	github.com/poteto/noodle/parse	3.851s
+ok  	github.com/poteto/noodle/runtime	3.377s
+?   	github.com/poteto/noodle/scripts	[no test files]
+?   	github.com/poteto/noodle/scripts/fixturehash	[no test files]
+ok  	github.com/poteto/noodle/server	3.483s
+ok  	github.com/poteto/noodle/skill	6.381s
+ok  	github.com/poteto/noodle/stamp	4.217s
+ok  	github.com/poteto/noodle/startup	13.688s
+ok  	github.com/poteto/noodle/worktree	8.466s
+
+> @ vet /private/tmp/noodle78-macos-feqjw78c/source
+> go vet ./...
+
+
+> @ lint:arch /private/tmp/noodle78-macos-feqjw78c/source
+> sh scripts/lint-arch.sh
+
+[ARCH][WARN] internal/reducer/reducer.go:867
+  Violation: File exceeds 500 lines (867 lines).
+  Fix: Consider splitting by concern to improve readability.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] loop/loop.go:668
+  Violation: File exceeds 500 lines (668 lines).
+  Fix: Consider splitting by concern to improve readability.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] loop/loop_cycle_pipeline.go:509
+  Violation: File exceeds 500 lines (509 lines).
+  Fix: Consider splitting by concern to improve readability.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] loop/reconcile.go:773
+  Violation: File exceeds 500 lines (773 lines).
+  Fix: Consider splitting by concern to improve readability.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] internal/integration/resilience_test.go:1233
+  Violation: Go test file exceeds 1200 lines (1233 lines).
+  Fix: Consider splitting by feature and extracting shared fixtures/helpers.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] loop/control_test.go:1222
+  Violation: Go test file exceeds 1200 lines (1222 lines).
+  Fix: Consider splitting by feature and extracting shared fixtures/helpers.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] loop/loop_test.go:1318
+  Violation: Go test file exceeds 1200 lines (1318 lines).
+  Fix: Consider splitting by feature and extracting shared fixtures/helpers.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] worktree/worktree_test.go:1234
+  Violation: Go test file exceeds 1200 lines (1234 lines).
+  Fix: Consider splitting by feature and extracting shared fixtures/helpers.
+  See brain/principles/boundary-discipline.md
+[ARCH] Passed with 8 warning(s).
+
+> @ fixtures:loop /private/tmp/noodle78-macos-feqjw78c/source
+> NOODLE_LOOP_FIXTURE_MODE=check go test ./loop -run TestLoopDirectoryFixtures -count=1 && go run ./scripts/fixturehash check --root loop/testdata
+
+ok  	github.com/poteto/noodle/loop	1.859s
+fixture hash check: up to date
+
+> @ fixtures:hash /private/tmp/noodle78-macos-feqjw78c/source
+> go run ./scripts/fixturehash check
+
+fixture hash check: up to date

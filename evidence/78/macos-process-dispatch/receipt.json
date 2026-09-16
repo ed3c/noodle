@@ -1,0 +1,147 @@
+{
+  "schema": 1,
+  "created_at": "2026-09-16T14:25:09.528136+00:00",
+  "classification": "VERIFIED",
+  "scope": "Noodle #79 exact candidate ProcessDispatcher to local macOS arm64 Codex CLI; real Agent tool execution and matching typed outcome",
+  "repository": "ed3c/noodle",
+  "issue": 78,
+  "pr": 79,
+  "head": "e6d712a2512547cdf78a85c1ee218e1ba52e3b27",
+  "tree": "87c23adcc96b1bf10a1fd8983409cd80e3713310",
+  "cli_version": "0.153.4",
+  "model": "gpt-5.6-sol",
+  "auth": "existing ChatGPT login",
+  "deadline_seconds": 90,
+  "elapsed_seconds": 21.300518833,
+  "identities_sha256": {
+    "codex": "b973d440acac501fd2594a43e7ca9ce41e0a65b9dfb28d0d7a7837c99e1261e3",
+    "noodle": "d7a8a8de88d37a396e9441b7dc0ab4ea140415674354a96ac7716d9753b9ffd3",
+    "observer_source": "90ce4882899622166044d456b23228712256bc8a1e44bdfc795df2ec34413073",
+    "observer_binary": "4c9d38d12bf9eb27cd14a39bb6086f1efc1365fe3ca855df3ea1971029917a47"
+  },
+  "physical_checks": {
+    "checks": {
+      "invalid_pid_and_group_absent": true,
+      "permitted_pid_and_group_absent": true,
+      "one_agent_tool_completed": true,
+      "one_matching_typed_outcome": true,
+      "session_completed": true,
+      "observer_no_event_emit": true,
+      "canonical_init_observed": true,
+      "invalid_no_agent_events": true,
+      "invalid_actionable": true,
+      "worktree_clean": true
+    },
+    "sessions": {
+      "invalid": {
+        "session_id": "launch-probe-20260916-142217-1ed980",
+        "pid": 80345,
+        "startup": {
+          "session_id": "launch-probe-20260916-142217-1ed980",
+          "stdin": {
+            "expected_bytes": 1144,
+            "write_started_at": "2026-09-16T14:22:17.689571Z",
+            "write_completed_at": "2026-09-16T14:22:17.690113Z",
+            "written_bytes": 1144,
+            "write_error": "",
+            "close_completed_at": "2026-09-16T14:22:17.690386Z",
+            "close_error": ""
+          },
+          "first_stdout": null,
+          "first_stderr": {
+            "at": "2026-09-16T14:22:17.700033Z",
+            "bytes": 172
+          },
+          "first_init_at": null,
+          "persistence_error": ""
+        }
+      },
+      "permitted": {
+        "session_id": "launch-probe-20260916-142217-4fc5f5",
+        "pid": 80349,
+        "startup": {
+          "session_id": "launch-probe-20260916-142217-4fc5f5",
+          "stdin": {
+            "expected_bytes": 1144,
+            "write_started_at": "2026-09-16T14:22:17.783912Z",
+            "write_completed_at": "2026-09-16T14:22:17.784387Z",
+            "written_bytes": 1144,
+            "write_error": "",
+            "close_completed_at": "2026-09-16T14:22:17.784742Z",
+            "close_error": ""
+          },
+          "first_stdout": {
+            "at": "2026-09-16T14:22:18.516167Z",
+            "bytes": 77
+          },
+          "first_stderr": {
+            "at": "2026-09-16T14:22:17.87772Z",
+            "bytes": 29
+          },
+          "first_init_at": "2026-09-16T14:22:18.517118Z",
+          "persistence_error": ""
+        }
+      }
+    },
+    "usage": [
+      {
+        "input_tokens": 35190,
+        "cached_input_tokens": 28544,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 275,
+        "reasoning_output_tokens": 82
+      }
+    ]
+  },
+  "canonical_acceptance": {
+    "argv": [
+      "pnpm",
+      "check"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 61.028987666999456,
+    "head": "e6d712a2512547cdf78a85c1ee218e1ba52e3b27",
+    "status": "",
+    "carrier": "macOS arm64",
+    "authorizes_landing": false
+  },
+  "cleanup": {
+    "argv": [
+      "/private/tmp/noodle78-macos-feqjw78c/source/bin/noodle",
+      "--project-dir",
+      "/private/tmp/noodle78-macos-feqjw78c/fixture",
+      "worktree",
+      "cleanup",
+      "launch"
+    ],
+    "exit_code": 0,
+    "stdout": "  Removing worktree...\n  Deleting branch launch...\nDone. launch removed.\n",
+    "stderr": "config repairable: 4 adapter script path(s) are missing.\n  backlog:\n    - add -> adapters/backlog-add (adapters.backlog.scripts.add)\n    - done -> adapters/backlog-done (adapters.backlog.scripts.done)\n    - edit -> adapters/backlog-edit (adapters.backlog.scripts.edit)\n    - sync -> adapters/backlog-sync (adapters.backlog.scripts.sync)\nconfig repair prompt:\n-----\nRepair Noodle adapter script configuration so `noodle start` no longer reports missing script paths.\nFix each missing entry by either creating an executable script at that path or updating .noodle.toml to a valid executable path.\nKeep the fix minimal and avoid broad refactors.\n\nMissing adapter scripts:\n- adapters.backlog.scripts.add (backlog): adapters/backlog-add\n- adapters.backlog.scripts.done (backlog): adapters/backlog-done\n- adapters.backlog.scripts.edit (backlog): adapters/backlog-edit\n- adapters.backlog.scripts.sync (backlog): adapters/backlog-sync\n\nRequired verification:\n- Re-run `noodle start` and confirm these repairable diagnostics are gone.\n- If Go files changed, run `go test ./...`.\n\nReturn a short summary of files changed and the verification results.\n-----\n",
+    "worktree_absent": true,
+    "branch_listing": "",
+    "source_status": "",
+    "git_worktrees": "worktree /private/tmp/noodle78-macos-feqjw78c/fixture\nHEAD 6a712b5474207a0e03289266fddb58894dc13435\nbranch refs/heads/main\n\n",
+    "fixture_status": "",
+    "fixture_root_removed": true
+  },
+  "provider_checks_readback": {
+    "Test": {
+      "id": 35080572639,
+      "conclusion": "success"
+    },
+    "Noodle Actions runtime": {
+      "id": 35080572554,
+      "conclusion": "success"
+    }
+  },
+  "authorizes_landing": false,
+  "next_owner_input": "Explicit carrier selection against #78 original Work Mode acceptance; then existing delivery owner/checkpoint and #18 execution envelope",
+  "non_claims": [
+    "Original Work Mode timeout root cause or cure",
+    "Production order admission or automatic scheduling",
+    "Provider merge, Issue closure or original worktree reconciliation",
+    "Soodles runtime-lock admission for native candidate binary",
+    "Authority to replace fixed external verifier",
+    "Noodle normalized zero token counters are not measured zero cost; raw Codex usage retained"
+  ]
+}

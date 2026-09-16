@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "/private/tmp/noodle78-macos-feqjw78c/process-probe",
+    "/private/tmp/noodle78-macos-feqjw78c/fixture",
+    "/Users/neon/.local/bin",
+    "invalid"
+  ],
+  "exit_code": 0,
+  "elapsed": 0.6757742080371827
+}

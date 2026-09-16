@@ -1,0 +1,6 @@
+{"provider":"codex","type":"init","message":"codex session started","timestamp":"2026-09-16T14:22:18.516957Z"}
+{"provider":"codex","type":"action","message":"text:turn started","timestamp":"2026-09-16T14:22:18.525942Z"}
+{"provider":"codex","type":"action","message":"text:我現在只執行指定的單次事件發送命令，不檢查或修改其他內容。","timestamp":"2026-09-16T14:22:26.513897Z"}
+{"provider":"codex","type":"action","message":"$ /private/tmp/noodle78-macos-feqjw78c/source/bin/noodle --project-dir /private/tmp/noodle78-macos-feqjw78c/fixture event emit --session \"$NOODLE_SESSION_ID\" stage_message --payload '\"'{\\\"message\\\":\\\"Real Codex launch capability completed\\\",\\\"blocking\\\":false,\\\"outcome\\\":\\\"completed\\\",\\\"order_id\\\":\\\"launch-capability-78\\\",\\\"stage_index\\\":0}","timestamp":"2026-09-16T14:22:29.375743Z"}
+{"provider":"codex","type":"action","message":"text:NOODLE_CODEX_READY","timestamp":"2026-09-16T14:22:33.699037Z"}
+{"provider":"codex","type":"result","message":"turn complete","timestamp":"2026-09-16T14:22:33.960058Z"}

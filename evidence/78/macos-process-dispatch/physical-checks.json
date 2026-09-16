@@ -1,0 +1,74 @@
+{
+  "checks": {
+    "invalid_pid_and_group_absent": true,
+    "permitted_pid_and_group_absent": true,
+    "one_agent_tool_completed": true,
+    "one_matching_typed_outcome": true,
+    "session_completed": true,
+    "observer_no_event_emit": true,
+    "canonical_init_observed": true,
+    "invalid_no_agent_events": true,
+    "invalid_actionable": true,
+    "worktree_clean": true
+  },
+  "sessions": {
+    "invalid": {
+      "session_id": "launch-probe-20260916-142217-1ed980",
+      "pid": 80345,
+      "startup": {
+        "session_id": "launch-probe-20260916-142217-1ed980",
+        "stdin": {
+          "expected_bytes": 1144,
+          "write_started_at": "2026-09-16T14:22:17.689571Z",
+          "write_completed_at": "2026-09-16T14:22:17.690113Z",
+          "written_bytes": 1144,
+          "write_error": "",
+          "close_completed_at": "2026-09-16T14:22:17.690386Z",
+          "close_error": ""
+        },
+        "first_stdout": null,
+        "first_stderr": {
+          "at": "2026-09-16T14:22:17.700033Z",
+          "bytes": 172
+        },
+        "first_init_at": null,
+        "persistence_error": ""
+      }
+    },
+    "permitted": {
+      "session_id": "launch-probe-20260916-142217-4fc5f5",
+      "pid": 80349,
+      "startup": {
+        "session_id": "launch-probe-20260916-142217-4fc5f5",
+        "stdin": {
+          "expected_bytes": 1144,
+          "write_started_at": "2026-09-16T14:22:17.783912Z",
+          "write_completed_at": "2026-09-16T14:22:17.784387Z",
+          "written_bytes": 1144,
+          "write_error": "",
+          "close_completed_at": "2026-09-16T14:22:17.784742Z",
+          "close_error": ""
+        },
+        "first_stdout": {
+          "at": "2026-09-16T14:22:18.516167Z",
+          "bytes": 77
+        },
+        "first_stderr": {
+          "at": "2026-09-16T14:22:17.87772Z",
+          "bytes": 29
+        },
+        "first_init_at": "2026-09-16T14:22:18.517118Z",
+        "persistence_error": ""
+      }
+    }
+  },
+  "usage": [
+    {
+      "input_tokens": 35190,
+      "cached_input_tokens": 28544,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 275,
+      "reasoning_output_tokens": 82
+    }
+  ]
+}
