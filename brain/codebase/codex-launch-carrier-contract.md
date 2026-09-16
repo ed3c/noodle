@@ -32,3 +32,16 @@ established from these timeouts. Do not infer that removing the flag completes
 ChatGPT GitHub connector transport plus ordinary Actions runtime tests is a
 different path from starting another Codex process inside a runner. Each actual
 Agent carrier requires its own successful launch and typed-outcome receipt.
+
+An Actions preflight incorrectly required `secrets.OPENAI_API_KEY` before any
+Noodle runtime execution. Its missing-input result was not a runtime failure.
+API keys are not required for the supervised connector plus Actions path, and
+must not become an admission rule for Noodle worktree operations. The corrected
+workflow builds the exact candidate and reuses the fixed external Soodles
+worktree control at `0256f2923e978b989e25df07c74db4370d343312`, checking its bytes
+before execution. That control strips inherited credentials from subprocesses
+and verifies real create/exec, absent-target refusal before side effects, and
+cleanup with Git readback. It emits separate runtime and nested-Agent verdicts.
+This is non-authorizing runtime evidence, not the full Soodles acceptance or an
+isolated landing judge. A successful worktree probe cannot establish successful
+Codex inference, scheduling, or resolution of the managed carrier timeout.
