@@ -13,9 +13,12 @@ import (
 // DurableSnapshot is the canonical persisted form used by the reducer loop
 // checkpoint step in the crash-consistency protocol.
 type DurableSnapshot struct {
-	State        state.State          `json:"state"`
-	EffectLedger []EffectLedgerRecord `json:"effect_ledger"`
-	GeneratedAt  time.Time            `json:"generated_at"`
+	// OrderRevision binds conditional initial proposals to the ownership set.
+	// Old snapshots without it remain readable, but cannot admit those proposals.
+	OrderRevision string               `json:"order_revision,omitempty"`
+	State         state.State          `json:"state"`
+	EffectLedger  []EffectLedgerRecord `json:"effect_ledger"`
+	GeneratedAt   time.Time            `json:"generated_at"`
 }
 
 // BuildSnapshot materializes state + embedded effect ledger into one payload.

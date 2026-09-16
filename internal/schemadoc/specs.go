@@ -87,6 +87,7 @@ var schemaTargets = []targetSpec{
 		},
 		RootType: reflect.TypeOf(orderx.CompactOrdersFile{}),
 		FieldDocs: map[string]FieldDoc{
+			"initial_revision":               {Description: "optional current order_revision from Noodle state.snapshot.json; requires every proposed ID to be absent. Stale/replayed proposals refuse before promotion. This is not execution authorization; omit only for the existing legacy scheduling contract."},
 			"orders[].id":                    {Description: "order ID (plan ID as string, or unique slug)"},
 			"orders[].title":                 {Description: "brief order description"},
 			"orders[].plan[]":                {Description: "linked plan path(s), e.g. plans/15-bootstrap-onboarding/overview"},

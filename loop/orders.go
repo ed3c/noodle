@@ -1,8 +1,10 @@
 package loop
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
 	"slices"
@@ -291,6 +293,7 @@ type mergeResult struct {
 	Orders         OrdersFile
 	Promoted       bool
 	EmptyPromotion bool
+	InitialIDs     []string
 }
 
 // Reads and validates orders-next.json, merges into the provided orders, and
@@ -300,6 +303,10 @@ type mergeResult struct {
 // skipped (not rejected), except when replacing a failed order with a new
 // active proposal for explicit restart.
 func consumeOrdersNext(nextPath string, existing OrdersFile) (mergeResult, error) {
+	return consumeOrdersNextAtRevision(nextPath, existing, "", nil, nil)
+}
+
+func consumeOrdersNextAtRevision(nextPath string, existing OrdersFile, revision string, ownedIDs, admittedEffects map[string]struct{}) (mergeResult, error) {
 	nextData, err := os.ReadFile(nextPath)
 	if os.IsNotExist(err) {
 		return mergeResult{}, nil
@@ -331,6 +338,32 @@ func consumeOrdersNext(nextPath string, existing OrdersFile) (mergeResult, error
 		existingIndex[order.ID] = i
 	}
 
+	var initialIDs []string
+	if compact.InitialRevision != nil {
+		if revision == "" || *compact.InitialRevision != revision {
+			return mergeResult{}, ordersNextRejectedError{fmt.Errorf("invalid initial_revision=%q; owner: Noodle canonical checkpoint; read current order_revision from state.snapshot.json before initial admission", *compact.InitialRevision)}
+		}
+		projectedIDs := make(map[string]struct{})
+		for id := range existingIndex {
+			if id != scheduleOrderID {
+				projectedIDs[id] = struct{}{}
+			}
+		}
+		if !maps.Equal(projectedIDs, ownedIDs) {
+			return mergeResult{}, ordersNextRejectedError{fmt.Errorf("invalid initial admission orders projection: differs from canonical ownership; owner: Noodle canonical checkpoint; reconcile owner state before initial admission")}
+		}
+		seen := make(map[string]bool, len(incoming.Orders))
+		for _, order := range incoming.Orders {
+			_, owned := existingIndex[order.ID]
+			_, admitted := admittedEffects[initialAdmissionEffectID(order.ID)]
+			if owned || admitted || seen[order.ID] || strings.TrimSpace(order.ID) == "" || order.ID == scheduleOrderID {
+				return mergeResult{}, ordersNextRejectedError{fmt.Errorf("invalid initial order.id=%q: already owned, duplicate or reserved; owner: Noodle canonical orders; read existing order and use its explicit control for recovery", order.ID)}
+			}
+			seen[order.ID] = true
+			initialIDs = append(initialIDs, order.ID)
+		}
+	}
+
 	// Merge incoming orders. Duplicates are skipped for crash-safe idempotency,
 	// except:
 	// 1) a failed existing order can be replaced by a new active proposal
@@ -356,7 +389,12 @@ func consumeOrdersNext(nextPath string, existing OrdersFile) (mergeResult, error
 		Orders:         existing,
 		Promoted:       true,
 		EmptyPromotion: emptyPromotion,
+		InitialIDs:     initialIDs,
 	}, nil
+}
+
+func initialAdmissionEffectID(orderID string) string {
+	return fmt.Sprintf("initial-admission-%x", sha256.Sum256([]byte(orderID)))
 }
 
 func shouldReplaceFailedOrder(existing Order, incoming Order) bool {

@@ -2,12 +2,14 @@ package loop
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/poteto/noodle/internal/dispatch"
 	"github.com/poteto/noodle/internal/mode"
+	"github.com/poteto/noodle/internal/reducer"
 	"github.com/poteto/noodle/mise"
 )
 
@@ -37,7 +39,15 @@ func (l *Loop) mergeOrdersNext() (mergeResult, error) {
 	if err != nil {
 		return mergeResult{}, err
 	}
-	return consumeOrdersNext(l.deps.OrdersNextFile, orders)
+	admitted := make(map[string]struct{})
+	if l.effectLedger != nil {
+		for _, record := range l.effectLedger.All() {
+			if record.Effect.Type == reducer.EffectInitialAdmission {
+				admitted[record.EffectID] = struct{}{}
+			}
+		}
+	}
+	return consumeOrdersNextAtRevision(l.deps.OrdersNextFile, orders, l.orderRevision, nonScheduleOrderIDs(l.canonical), admitted)
 }
 
 // handlePromotionResult processes the side effects of an orders-next
@@ -55,9 +65,18 @@ func (l *Loop) handlePromotionResult(result mergeResult, brief mise.Brief, err e
 	l.logger.Info("orders-next promoted")
 	l.schedulePromoted = true
 	l.lastPromotionError = ""
+	if err := l.recordInitialAdmissions(result.InitialIDs); err != nil {
+		return l.classifySystemHard("orders.initial_admission", "record initial admission", err)
+	}
 	if err := l.writeOrdersState(result.Orders); err != nil {
+		if len(result.InitialIDs) > 0 {
+			return l.classifySystemHard("orders.initial_admission", "persist initial admission before dispatch", err)
+		}
 		l.handlePromotionError(err)
 		return nil
+	}
+	if len(result.InitialIDs) > 0 && l.TestInitialAdmissionBarrier != nil {
+		l.TestInitialAdmissionBarrier()
 	}
 	if result.EmptyPromotion {
 		if l.scheduleDispatchDigest != "" {
@@ -93,6 +112,31 @@ func (l *Loop) handlePromotionResult(result mergeResult, brief mise.Brief, err e
 		return nil
 	}
 	l.emitPromotedOrders()
+	return nil
+}
+
+func (l *Loop) recordInitialAdmissions(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if l.effectLedger == nil {
+		return fmt.Errorf("missing canonical effect ledger; owner: Noodle canonical checkpoint")
+	}
+	for _, id := range ids {
+		effectID := initialAdmissionEffectID(id)
+		payload, err := json.Marshal(map[string]string{"order_id": id, "initial_revision": l.orderRevision})
+		if err != nil {
+			return err
+		}
+		now := timeNowUTC(l.deps.Now)
+		l.effectLedger.Record(reducer.Effect{EffectID: effectID, Type: reducer.EffectInitialAdmission, Payload: payload, CreatedAt: now})
+		if err := l.effectLedger.MarkRunning(effectID); err != nil {
+			return err
+		}
+		if err := l.effectLedger.MarkDone(effectID, reducer.EffectResult{EffectID: effectID, Status: reducer.EffectResultCompleted, Timestamp: now}); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
