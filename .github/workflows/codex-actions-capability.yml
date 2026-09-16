@@ -1,0 +1,75 @@
+name: Codex Actions capability
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/codex-actions-capability.yml
+
+permissions:
+  contents: read
+
+jobs:
+  authentication-input:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      # No checkout, candidate code, model request or secret value is used.
+      - name: Record cloud authentication input availability
+        env:
+          AUTH_INPUT_AVAILABLE: ${{ secrets.OPENAI_API_KEY != '' }}
+          CANDIDATE_HEAD: ${{ github.event.pull_request.head.sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          available = os.environ["AUTH_INPUT_AVAILABLE"] == "true"
+          receipt = {
+              "schema_version": 1,
+              "carrier": "github-actions",
+              "repository": os.environ["TARGET_REPOSITORY"],
+              "candidate_head": os.environ["CANDIDATE_HEAD"],
+              "workflow_sha": os.environ["WORKFLOW_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "classification": "AUTH_INPUT_AVAILABLE" if available else "BLOCKED",
+              "field": "secrets.OPENAI_API_KEY.available",
+              "value": available,
+              "owner": "Actions Codex authentication",
+              "next_action": "admit the authenticated Noodle probe" if available else "provide the existing workflow authentication input before a fresh run",
+              "help": "https://learn.chatgpt.com/docs/github-action",
+              "agent_execution_attempted": False,
+              "typed_outcome_observed": False,
+              "authorizes_landing": False,
+              "local_carrier_verdict": "not evaluated",
+          }
+          path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "codex-cloud-capability.json"
+          path.write_text(json.dumps(receipt, indent=2) + "\n")
+          print(json.dumps(receipt))
+          PY
+
+      - name: Preserve cloud capability receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: codex-cloud-capability-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codex-cloud-capability.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Refuse absent authentication input before Agent dispatch
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          receipt = json.loads((pathlib.Path(os.environ["RUNNER_TEMP"]) / "codex-cloud-capability.json").read_text())
+          if not receipt["value"]:
+              raise SystemExit("BLOCKED: secrets.OPENAI_API_KEY.available=false; owner: Actions Codex authentication; help: https://learn.chatgpt.com/docs/github-action")
+          print("Authentication input available; credential validity and Agent execution are still unverified.")
+          PY
