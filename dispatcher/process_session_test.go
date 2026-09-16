@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ func TestProcessSessionClosesEventsAfterDone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}
+	t.Cleanup(func() { _ = process.Stdout().Close(); _ = process.Stderr().Close() })
 
 	dir := t.TempDir()
 	session := newProcessSession(processSessionConfig{
@@ -64,6 +66,7 @@ func TestProcessSessionWritesEventLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}
+	t.Cleanup(func() { _ = process.Stdout().Close(); _ = process.Stderr().Close() })
 	<-process.Done()
 
 	session := newProcessSession(processSessionConfig{
@@ -112,6 +115,7 @@ func TestProcessSessionWritesHeartbeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}
+	t.Cleanup(func() { _ = process.Stdout().Close(); _ = process.Stderr().Close() })
 	<-process.Done()
 
 	session := newProcessSession(processSessionConfig{
@@ -153,6 +157,7 @@ func TestProcessSessionKillMarksKilled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}
+	t.Cleanup(func() { _ = process.Stdout().Close(); _ = process.Stderr().Close() })
 
 	session := newProcessSession(processSessionConfig{
 		id:            "session-a",
@@ -182,6 +187,7 @@ func TestProcessSessionResolveAndMarkDoneCompletedFromResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}
+	t.Cleanup(func() { _ = process.Stdout().Close(); _ = process.Stderr().Close() })
 	<-process.Done()
 
 	session := newProcessSession(processSessionConfig{
@@ -216,6 +222,7 @@ func TestProcessSessionResolveAndMarkDoneCancellationWithoutCompletion(t *testin
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}
+	t.Cleanup(func() { _ = process.Stdout().Close(); _ = process.Stderr().Close() })
 	<-process.Done()
 
 	session := newProcessSession(processSessionConfig{
@@ -243,6 +250,7 @@ func TestProcessSessionResolveAndMarkDoneCompletionWinsOverCancellation(t *testi
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}
+	t.Cleanup(func() { _ = process.Stdout().Close(); _ = process.Stderr().Close() })
 	<-process.Done()
 
 	session := newProcessSession(processSessionConfig{
@@ -271,6 +279,7 @@ func TestProcessSessionResolveAndMarkDoneActionWithoutCompletionFails(t *testing
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}
+	t.Cleanup(func() { _ = process.Stdout().Close(); _ = process.Stderr().Close() })
 	<-process.Done()
 
 	session := newProcessSession(processSessionConfig{
@@ -302,6 +311,7 @@ func TestProcessSessionResolveAndMarkDoneSignalExitKilled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}
+	t.Cleanup(func() { _ = process.Stdout().Close(); _ = process.Stderr().Close() })
 	<-process.Done()
 
 	session := newProcessSession(processSessionConfig{
@@ -328,6 +338,7 @@ func TestProcessSessionCostAccumulation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}
+	t.Cleanup(func() { _ = process.Stdout().Close(); _ = process.Stderr().Close() })
 	<-process.Done()
 
 	session := newProcessSession(processSessionConfig{
@@ -367,6 +378,7 @@ func TestProcessSessionEmitsPromptOnInit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}
+	t.Cleanup(func() { _ = process.Stdout().Close(); _ = process.Stderr().Close() })
 	<-process.Done()
 
 	session := newProcessSession(processSessionConfig{
@@ -431,6 +443,7 @@ func TestProcessSessionDoesNotEmitSpawnedOnSubsequentInits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}
+	t.Cleanup(func() { _ = process.Stdout().Close(); _ = process.Stderr().Close() })
 	<-process.Done()
 
 	session := newProcessSession(processSessionConfig{
@@ -479,6 +492,7 @@ func TestProcessSessionDroppedEventSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}
+	t.Cleanup(func() { _ = process.Stdout().Close(); _ = process.Stderr().Close() })
 	<-process.Done()
 
 	session := newProcessSession(processSessionConfig{
@@ -517,6 +531,7 @@ func TestHeartbeatThrottling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}
+	t.Cleanup(func() { _ = process.Stdout().Close(); _ = process.Stderr().Close() })
 	<-process.Done()
 
 	session := newProcessSession(processSessionConfig{
@@ -600,4 +615,44 @@ func marshalCanonical(t *testing.T, ce parse.CanonicalEvent) []byte {
 		t.Fatalf("marshal canonical: %v", err)
 	}
 	return data
+}
+
+func TestProcessSessionCancellationAfterParentExitUnblocksReader(t *testing.T) {
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "descendant.pid")
+	cmd := exec.Command("sh", "-c", `sleep 60 & echo $! > "$1"`, "sh", pidPath)
+	process, err := StartProcess(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { process.Stdout().Close(); process.Stderr().Close() })
+	select {
+	case <-process.Done():
+	case <-time.After(5 * time.Second):
+		process.ForceKill()
+		t.Fatal("parent did not exit")
+	}
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := os.FindProcess(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = child.Kill() })
+	session := newProcessSession(processSessionConfig{id: "cancel-exited", process: process, canonicalPath: filepath.Join(dir, "canonical"), stampedPath: filepath.Join(dir, "raw")})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session.start(ctx)
+	cancel()
+	select {
+	case <-session.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled session retained blocked stream")
+	}
 }
