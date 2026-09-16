@@ -1,0 +1,14 @@
+{
+  "repository": "ed3c/noodle",
+  "issue": 82,
+  "pr": 83,
+  "phase": "close_offered",
+  "merge": "656e9ec73689c523058750e8b0a2388a15bb84fa",
+  "head": "75ae4f12808004cfc83d39b8306234e94d9e3ef3",
+  "request": {
+    "repository_full_name": "ed3c/noodle",
+    "issue_number": 82,
+    "state": "closed",
+    "state_reason": "completed"
+  }
+}

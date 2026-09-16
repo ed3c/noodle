@@ -1,0 +1,84 @@
+[
+  {
+    "argv": [
+      "git",
+      "fetch",
+      "origin",
+      "main"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "From https://github.com/ed3c/noodle\n * branch            main       -> FETCH_HEAD\n   9cdb919..656e9ec  main       -> origin/main\n",
+    "elapsed": 0.9143577910144813
+  },
+  {
+    "argv": [
+      "git",
+      "merge",
+      "--ff-only",
+      "origin/main"
+    ],
+    "exit": 0,
+    "stdout": "Updating 9cdb919..656e9ec\nFast-forward\n internal/orderx/compact.go     |  24 ++-\n internal/reducer/snapshot.go   |   9 +-\n internal/reducer/types.go      |   4 +\n internal/schemadoc/specs.go    |   1 +\n loop/canonical_checkpoint.go   |  34 +++-\n loop/initial_admission_test.go | 364 +++++++++++++++++++++++++++++++++++++++++\n loop/loop_cycle_pipeline.go    |  46 +++++-\n loop/orders.go                 |  38 +++++\n loop/types.go                  |  15 +-\n 9 files changed, 522 insertions(+), 13 deletions(-)\n create mode 100644 loop/initial_admission_test.go\n",
+    "stderr": "",
+    "elapsed": 0.03912424994632602
+  },
+  {
+    "argv": [
+      "/private/tmp/noodle78-macos-feqjw78c/source/bin/noodle",
+      "worktree",
+      "cleanup",
+      "codex/issue82-order-admission"
+    ],
+    "exit": 0,
+    "stdout": "  Removing worktree...\n  Deleting branch codex/issue82-order-admission...\nDone. codex/issue82-order-admission removed.\n",
+    "stderr": "",
+    "elapsed": 3.7829227920155972
+  },
+  {
+    "argv": [
+      "git",
+      "rev-parse",
+      "HEAD"
+    ],
+    "exit": 0,
+    "stdout": "656e9ec73689c523058750e8b0a2388a15bb84fa\n",
+    "stderr": "",
+    "elapsed": 0.015218959015328437
+  },
+  {
+    "argv": [
+      "git",
+      "status",
+      "--porcelain=v1"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "",
+    "elapsed": 0.04744333296548575
+  },
+  {
+    "argv": [
+      "git",
+      "worktree",
+      "list",
+      "--porcelain"
+    ],
+    "exit": 0,
+    "stdout": "worktree /Users/neon/.codex/experiments/noodle78-delivery-20260916/control\nHEAD 656e9ec73689c523058750e8b0a2388a15bb84fa\nbranch refs/heads/main\n\n",
+    "stderr": "",
+    "elapsed": 0.015538208012003452
+  },
+  {
+    "argv": [
+      "git",
+      "branch",
+      "--list",
+      "codex/issue82-order-admission"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "",
+    "elapsed": 0.015879042039159685
+  }
+]

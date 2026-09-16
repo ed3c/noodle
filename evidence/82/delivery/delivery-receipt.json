@@ -1,0 +1,16 @@
+{
+  "classification": "RESOLVED",
+  "repository": "ed3c/noodle",
+  "issue": 82,
+  "pr": 83,
+  "head": "75ae4f12808004cfc83d39b8306234e94d9e3ef3",
+  "merge": "656e9ec73689c523058750e8b0a2388a15bb84fa",
+  "local_reconciliation": {
+    "control_root": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control",
+    "main_at_merge": true,
+    "worktree_and_branch_absent": true,
+    "clean": true
+  },
+  "evidence_commit": "e7d37d4bf5dc6005f5d1eb5e342c4b97e4749442",
+  "scope": "conditional initial admission owner only; Soodles #18 remains incomplete"
+}
