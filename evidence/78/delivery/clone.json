@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "git",
+    "clone",
+    "--branch",
+    "main",
+    "--single-branch",
+    "https://github.com/ed3c/noodle.git",
+    "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control"
+  ],
+  "exit_code": 0,
+  "stdout": "",
+  "stderr": "Cloning into '/Users/neon/.codex/experiments/noodle78-delivery-20260916/control'...\n"
+}

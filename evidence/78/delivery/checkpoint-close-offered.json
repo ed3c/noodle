@@ -1,0 +1,23 @@
+{
+  "repository": "ed3c/noodle",
+  "issue": 78,
+  "pr": 79,
+  "route": "owner-authorized supervised GitHub transport",
+  "base": "1ba241abb68333b5c53d9d23955f538b2cb63877",
+  "head": "e6d712a2512547cdf78a85c1ee218e1ba52e3b27",
+  "tree": "87c23adcc96b1bf10a1fd8983409cd80e3713310",
+  "phase": "close_offered",
+  "writes_offered": 2,
+  "classification": "PENDING",
+  "evidence_commit": "2e166473c4939f88fc55db3b78d96b85459ff728",
+  "control_root": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control",
+  "worktree": "issue-78-codex-launch",
+  "historical_opt_carrier": "unresolved, outside selected carrier",
+  "request": {
+    "repository_full_name": "ed3c/noodle",
+    "issue_number": 78,
+    "state": "closed",
+    "state_reason": "completed"
+  },
+  "merge_sha": "9cdb919826eb6ef25bbb47978ae4d398332cb9ed"
+}

@@ -1,0 +1,38 @@
+{
+  "classification": "RESOLVED",
+  "scope": "owner-selected macOS carrier and supervised PR #79 delivery",
+  "issue": 78,
+  "pr": 79,
+  "head": "e6d712a2512547cdf78a85c1ee218e1ba52e3b27",
+  "merge": "9cdb919826eb6ef25bbb47978ae4d398332cb9ed",
+  "tree": "87c23adcc96b1bf10a1fd8983409cd80e3713310",
+  "parents": [
+    "1ba241abb68333b5c53d9d23955f538b2cb63877",
+    "e6d712a2512547cdf78a85c1ee218e1ba52e3b27"
+  ],
+  "capability_commit": "2e166473c4939f88fc55db3b78d96b85459ff728",
+  "reconciliation": {
+    "control_root": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control",
+    "noodle_owned_worktree": "issue-78-codex-launch",
+    "main_fast_forwarded": true,
+    "worktree_removed": true,
+    "branch_removed": true,
+    "clean": true
+  },
+  "limits": [
+    "Original /opt carrier initialization failure remains unresolved.",
+    "Historical /opt worktree is inaccessible here; its cleanup is not claimed.",
+    "Soodles #18 integration remains separate and incomplete.",
+    "Native Noodle used here is the exact capability binary, not the Soodles Linux-only runtime lock."
+  ],
+  "files": {
+    "reconciliation.json": "cf24587f0169ca8881441d6262e54c5c85e74aa6afda9fda0aeb169d975f1f8a",
+    "provider-before.json": "29a0294c4852eb80b68020822a8fa8dda937252d5806a73284a7c2e0ba1ccdf4",
+    "clone.json": "f2d47c0c925fd5e4c83f7f97fef382b6c8ccac664341c5a0856d467e09f9adde",
+    "fetch.json": "26b5e88467d4a19ee03844f7c2da7e0bbbe32c07213373601a997bf780aa2b68",
+    "provider-after.json": "ac19b5234009f7ce069f6c8ae344e5393b68659095c6b83b2086923ab4239cd9",
+    "worktree-create.json": "e7c3a7865cab06399cd89c2dcc4b490bcfc379a9a00313627cbdaed8af752fa1",
+    "checkpoint-close-offered.json": "fa5803d1e7efa08986a946f883f964a24c55f7a0750844ef898056b3e5a1db4e",
+    "checkpoint-merge-offered.json": "d50ec0c39b13ca5a1568c166f2cf3e09b99a7f98f95b5a3573ee9b6036937307"
+  }
+}

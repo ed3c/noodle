@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "git",
+    "-C",
+    "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control",
+    "fetch",
+    "origin",
+    "issue-78-codex-launch"
+  ],
+  "exit_code": 0,
+  "stdout": "",
+  "stderr": "From https://github.com/ed3c/noodle\n * branch            issue-78-codex-launch -> FETCH_HEAD\n"
+}

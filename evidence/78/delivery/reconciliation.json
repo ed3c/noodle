@@ -1,0 +1,84 @@
+[
+  {
+    "argv": [
+      "git",
+      "fetch",
+      "origin",
+      "main"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "From https://github.com/ed3c/noodle\n * branch            main       -> FETCH_HEAD\n   1ba241a..9cdb919  main       -> origin/main\n",
+    "elapsed": 4.0300398339750245
+  },
+  {
+    "argv": [
+      "git",
+      "merge",
+      "--ff-only",
+      "origin/main"
+    ],
+    "exit": 0,
+    "stdout": "Updating 1ba241a..9cdb919\nFast-forward\n .github/workflows/codex-actions-capability.yml  | 108 ++++++++++\n brain/codebase/codex-launch-carrier-contract.md |  63 ++++++\n dispatcher/codex_launch_test.go                 | 124 +++++++++++\n dispatcher/codex_startup.go                     | 154 ++++++++++++++\n dispatcher/codex_startup_test.go                | 272 ++++++++++++++++++++++++\n dispatcher/command.go                           |   3 +-\n dispatcher/process_dispatcher.go                |  29 ++-\n dispatcher/process_session.go                   |  48 ++++-\n dispatcher/sprites_dispatcher.go                |   5 +-\n 9 files changed, 795 insertions(+), 11 deletions(-)\n create mode 100644 .github/workflows/codex-actions-capability.yml\n create mode 100644 brain/codebase/codex-launch-carrier-contract.md\n create mode 100644 dispatcher/codex_launch_test.go\n create mode 100644 dispatcher/codex_startup.go\n create mode 100644 dispatcher/codex_startup_test.go\n",
+    "stderr": "",
+    "elapsed": 0.10170483298134059
+  },
+  {
+    "argv": [
+      "/private/tmp/noodle78-macos-feqjw78c/source/bin/noodle",
+      "worktree",
+      "cleanup",
+      "issue-78-codex-launch"
+    ],
+    "exit": 0,
+    "stdout": "  Removing worktree...\n  Deleting branch issue-78-codex-launch...\nDone. issue-78-codex-launch removed.\n",
+    "stderr": "",
+    "elapsed": 3.8723256669472903
+  },
+  {
+    "argv": [
+      "git",
+      "rev-parse",
+      "HEAD"
+    ],
+    "exit": 0,
+    "stdout": "9cdb919826eb6ef25bbb47978ae4d398332cb9ed\n",
+    "stderr": "",
+    "elapsed": 0.018391541962046176
+  },
+  {
+    "argv": [
+      "git",
+      "status",
+      "--porcelain=v1"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "",
+    "elapsed": 0.04862079204758629
+  },
+  {
+    "argv": [
+      "git",
+      "worktree",
+      "list",
+      "--porcelain"
+    ],
+    "exit": 0,
+    "stdout": "worktree /Users/neon/.codex/experiments/noodle78-delivery-20260916/control\nHEAD 9cdb919826eb6ef25bbb47978ae4d398332cb9ed\nbranch refs/heads/main\n\n",
+    "stderr": "",
+    "elapsed": 0.017889332957565784
+  },
+  {
+    "argv": [
+      "git",
+      "branch",
+      "--list",
+      "issue-78-codex-launch"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "",
+    "elapsed": 0.018332584004383534
+  }
+]
