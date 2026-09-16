@@ -1,0 +1,225 @@
+{
+  "issue": "https://github.com/ed3c/noodle/issues/78",
+  "pr": "https://github.com/ed3c/noodle/pull/79",
+  "classification": "BLOCKED",
+  "head": "e6d712a2512547cdf78a85c1ee218e1ba52e3b27",
+  "authorizes_landing": false,
+  "experiment": "Native child initialization logging through actual Noodle ProcessDispatcher; one 90-second attempt",
+  "claims": {
+    "parent_stdin_write_close": "1085/1085 bytes and close succeeded",
+    "child_initialization_observed": true,
+    "direct_child_eof_syscall_observed": false,
+    "canonical_init_observed": false,
+    "matching_typed_outcomes": 0,
+    "startup_root_cause_identified": false,
+    "api_key_required": false,
+    "policy_changed": false,
+    "credentials_changed": false,
+    "production_source_changed": false,
+    "canonical_acceptance_repeated": false
+  },
+  "observed_child_logs": [
+    "codex_config::loader::layer_io: /etc/codex/managed_config.toml not found",
+    "codex_features: unknown feature key experimental_use_rmcp_client",
+    "codex_core_plugins::manager: featured-plugin cache request returned HTTP 401 Unauthorized; token could not be parsed"
+  ],
+  "interpretation": "Child reached internal config/plugin initialization beyond the old stderr prompt. Same-version upstream source orders root prompt read_to_end/decode before in-process app-server startup and plugin warmups; this supports prompt consumption by source-path inference, not syscall observation or proof of Agent comprehension. Featured-plugin warmup is spawned in the background and only warns on failure; its 401 is not established as the startup blocker or as a model-endpoint failure.",
+  "next_owner_boundary": "Locate the incomplete in-process app-server initialize/thread-start transition using supported targeted diagnostics on the same authorized carrier; preserve real Agent tool execution and session/order/stage-bound typed outcome as the success requirement. Do not infer API-key need or retry unchanged.",
+  "files": {
+    "manifest.json": {
+      "source_head": "e6d712a2512547cdf78a85c1ee218e1ba52e3b27",
+      "change": "Native module-filtered stderr diagnostics in dispatched Codex environment only",
+      "rust_log": "warn,codex_exec=info,codex_core::config=debug,codex_config=debug",
+      "deadline_seconds": 90,
+      "model": "gpt-5.6-sol",
+      "auth": "existing ChatGPT login",
+      "prompt_changed": false,
+      "policy_changed": false,
+      "production_source_changed": false,
+      "observer_sha256": "bce9b485452f4ad01d565e9e0de413ce1d3b54d1a3c78acb3384cbdc40071aed"
+    },
+    "tracing-control.json": {
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-e",
+        "trace=read",
+        "-e",
+        "raw=read",
+        "/bin/true"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "strace: test_ptrace_get_syscall_info: PTRACE_TRACEME: Operation not permitted\nstrace: ptrace(PTRACE_TRACEME, ...): Operation not permitted\nstrace: PTRACE_SETOPTIONS: Operation not permitted\nstrace: cleanup: waitpid(-1, __WALL): No child processes\n",
+      "agent_launched": false
+    },
+    "carrier.json": {
+      "version": {
+        "exit_code": 0,
+        "output": "codex-cli 0.154.0-alpha.3\n"
+      },
+      "login": {
+        "exit_code": 0,
+        "output": "Logged in using ChatGPT\n"
+      },
+      "codex_binary_sha256": "b27eeb40c34580fe9c281a371442a0c591293923ce82ed38b9d1b8763c0f1a94"
+    },
+    "setup.json": [
+      {
+        "argv": [
+          "git",
+          "init",
+          "-b",
+          "main"
+        ],
+        "exit_code": 0,
+        "output": "Initialized empty Git repository in /tmp/noodle-78-stdin-fixture/.git/\n"
+      },
+      {
+        "argv": [
+          "git",
+          "add",
+          "README.md",
+          ".gitignore"
+        ],
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "argv": [
+          "git",
+          "-c",
+          "user.name=Supervisor probe",
+          "-c",
+          "user.email=probe@localhost",
+          "commit",
+          "-m",
+          "Initialize disposable launch probe"
+        ],
+        "exit_code": 0,
+        "output": "[main (root-commit) f3e943f] Initialize disposable launch probe\n 2 files changed, 3 insertions(+)\n create mode 100644 .gitignore\n create mode 100644 README.md\n"
+      },
+      {
+        "argv": [
+          "/tmp/soodles-runtime/noodle",
+          "--project-dir",
+          "/tmp/noodle-78-stdin-fixture",
+          "worktree",
+          "create",
+          "launch"
+        ],
+        "exit_code": 0,
+        "output": "  Creating worktree at /tmp/noodle-78-stdin-fixture/.worktrees/launch...\nPreparing worktree (new branch 'launch')\nHEAD is now at f3e943f Initialize disposable launch probe\n  No lock file found — skipping dep install\n\nWorktree ready: /tmp/noodle-78-stdin-fixture/.worktrees/launch (branch: launch)\nconfig repairable: 4 adapter script path(s) are missing.\n  backlog:\n    - add -> adapters/backlog-add (adapters.backlog.scripts.add)\n    - done -> adapters/backlog-done (adapters.backlog.scripts.done)\n    - edit -> adapters/backlog-edit (adapters.backlog.scripts.edit)\n    - sync -> adapters/backlog-sync (adapters.backlog.scripts.sync)\nconfig repair prompt:\n-----\nRepair Noodle adapter script configuration so `noodle start` no longer reports missing script paths.\nFix each missing entry by either creating an executable script at that path or updating .noodle.toml to a valid executable path.\nKeep the fix minimal and avoid broad refactors.\n\nMissing adapter scripts:\n- adapters.backlog.scripts.add (backlog): adapters/backlog-add\n- adapters.backlog.scripts.done (backlog): adapters/backlog-done\n- adapters.backlog.scripts.edit (backlog): adapters/backlog-edit\n- adapters.backlog.scripts.sync (backlog): adapters/backlog-sync\n\nRequired verification:\n- Re-run `noodle start` and confirm these repairable diagnostics are gone.\n- If Go files changed, run `go test ./...`.\n\nReturn a short summary of files changed and the verification results.\n-----\n"
+      }
+    ],
+    "process-probe.go": "package main\nimport (\n \"context\"\n \"encoding/json\"\n \"fmt\"\n \"os\"\n \"path/filepath\"\n \"time\"\n \"github.com/poteto/noodle/dispatcher\"\n \"github.com/poteto/noodle/event\"\n)\nfunc main() {\n // Supervisor-owned observer: use actual candidate process dispatcher and Codex.\n fixture, binDir, mode := os.Args[1], os.Args[2], os.Args[3]\n args := []string{\"--ephemeral\"}\n if mode == \"invalid\" {args = append(args, \"--sandbox\", \"invalid-mode\")}\n ctx,cancel:=context.WithTimeout(context.Background(),90*time.Second);defer cancel()\n d:=dispatcher.NewProcessDispatcher(dispatcher.ProcessDispatcherConfig{\n ProjectDir:fixture,RuntimeDir:filepath.Join(fixture,\".noodle\"),RuntimeKind:\"process\",\n ProviderConfigs:dispatcher.ProviderConfigs{Codex:dispatcher.ProviderConfig{Path:binDir,Args:args}},\n })\n start:=time.Now()\n s,err:=d.Dispatch(ctx,dispatcher.DispatchRequest{Name:\"launch-probe\",Prompt:`You are running one bounded launch capability probe, not a production Issue. Do not inspect or modify repository source, credentials, or settings. Use your shell tool exactly once to emit the existing Noodle typed event below, then reply NOODLE_CODEX_READY and stop. The supplied environment binds fixture order launch-capability-78, stage 0 and your actual NOODLE_SESSION_ID. Execute:\n/tmp/soodles-runtime/noodle --project-dir /tmp/noodle-78-stdin-fixture event emit --session \"$NOODLE_SESSION_ID\" stage_message --payload '{\"message\":\"Real Codex launch capability completed\",\"blocking\":false,\"outcome\":\"completed\",\"order_id\":\"launch-capability-78\",\"stage_index\":0}'\nIf the tool is unavailable or refused, report that failure; do not claim completion.`, Provider:\"codex\",Model:\"gpt-5.6-sol\",WorktreePath:filepath.Join(fixture,\".worktrees\",\"launch\"),Runtime:\"process\",EnvVars:map[string]string{\"RUST_LOG\":\"warn,codex_exec=info,codex_core::config=debug,codex_config=debug\", \"NOODLE_PROJECT_DIR\":fixture,\"NOODLE_ORDER_ID\":\"launch-capability-78\",\"NOODLE_STAGE_INDEX\":\"0\"}})\n if err!=nil {json.NewEncoder(os.Stdout).Encode(map[string]any{\"dispatch_error\":err.Error()});os.Exit(1)}\n events:=[]dispatcher.SessionEvent{}\n for e:=range s.Events(){events=append(events,e)}\n stderr,_:=os.ReadFile(filepath.Join(fixture,\".noodle\",\"sessions\",s.ID(),\"stderr.log\"))\n stamped,_:=os.ReadFile(filepath.Join(fixture,\".noodle\",\"sessions\",s.ID(),\"raw.ndjson\"))\n records, readErr := event.NewEventReader(filepath.Join(fixture,\".noodle\")).ReadSession(s.ID(), event.EventFilter{})\n typed := 0\n for _, r := range records {if r.Type == event.EventStageMessage {var p event.StageMessagePayload; if json.Unmarshal(r.Payload,&p)==nil && p.Outcome==event.StageOutcomeCompleted && p.OrderID==\"launch-capability-78\" && p.StageIndex!=nil && *p.StageIndex==0 && !p.IsBlocking() && r.SessionID==s.ID() {typed++}}}\n json.NewEncoder(os.Stdout).Encode(map[string]any{\"event_records\":records,\"event_read_error\":fmt.Sprint(readErr),\"matching_typed_outcomes\":typed,\"source_head\":\"e6d712a2512547cdf78a85c1ee218e1ba52e3b27\",\"session_id\":s.ID(),\"mode\":mode,\"outcome\":s.Outcome(),\"events\":events,\"stderr\":string(stderr),\"raw\":string(stamped),\"elapsed\":time.Since(start).Seconds(),\"typed_outcome_observed\":typed==1})\n fmt.Fprintln(os.Stderr,\"This capability probe is not Issue admission or a typed completion receipt.\")\n}\n",
+    "observer.json": {
+      "exit_code": 0
+    },
+    "observer-stderr.log": "This capability probe is not Issue admission or a typed completion receipt.\n",
+    "probe.json": {
+      "elapsed": 90.094847375,
+      "event_read_error": "<nil>",
+      "event_records": null,
+      "events": [],
+      "matching_typed_outcomes": 0,
+      "mode": "permitted",
+      "outcome": {
+        "Status": "cancelled",
+        "Reason": "context cancelled before completion",
+        "HasDeliverable": false,
+        "ExitCode": -1
+      },
+      "raw": "",
+      "session_id": "launch-probe-20260916-113923-8a7cb2",
+      "source_head": "e6d712a2512547cdf78a85c1ee218e1ba52e3b27",
+      "stderr": "Reading prompt from stdin...\n2026-09-16T11:39:23.745215Z DEBUG codex_config::loader::layer_io: /etc/codex/managed_config.toml not found\n2026-09-16T11:39:23.750180Z  WARN codex_features: unknown feature key in config: experimental_use_rmcp_client\n2026-09-16T11:39:23.923773Z  WARN codex_core_plugins::manager: failed to warm featured plugin ids cache error=remote featured plugin request to https://chatgpt.com/backend-api/plugins/featured?platform=codex failed with status 401 Unauthorized: {\"detail\":\"Could not parse your authentication token. Please try signing in again.\"}\n",
+      "typed_outcome_observed": false
+    },
+    "session-files.json": {
+      "input.txt": "You are running one bounded launch capability probe, not a production Issue. Do not inspect or modify repository source, credentials, or settings. Use your shell tool exactly once to emit the existing Noodle typed event below, then reply NOODLE_CODEX_READY and stop. The supplied environment binds fixture order launch-capability-78, stage 0 and your actual NOODLE_SESSION_ID. Execute:\n/tmp/soodles-runtime/noodle --project-dir /tmp/noodle-78-stdin-fixture event emit --session \"$NOODLE_SESSION_ID\" stage_message --payload '{\"message\":\"Real Codex launch capability completed\",\"blocking\":false,\"outcome\":\"completed\",\"order_id\":\"launch-capability-78\",\"stage_index\":0}'\nIf the tool is unavailable or refused, report that failure; do not claim completion.\n\n---\n\n# Noodle Runtime Context\n\nThis session is managed by Noodle. The following are runtime facts, not project workflow policy:\n\n- working_directory: /tmp/noodle-78-stdin-fixture/.worktrees/launch\n- checkout_mode: isolated-worktree\n- selected_skill: \n\nProject workflow policy comes from the selected skill or explicit system prompt.",
+      "codex-startup.json": "{\"session_id\":\"launch-probe-20260916-113923-8a7cb2\",\"stdin\":{\"expected_bytes\":1085,\"write_started_at\":\"2026-09-16T11:39:23.667714326Z\",\"write_completed_at\":\"2026-09-16T11:39:23.66782941Z\",\"written_bytes\":1085,\"write_error\":\"\",\"close_completed_at\":\"2026-09-16T11:39:23.668138068Z\",\"close_error\":\"\"},\"first_stdout\":null,\"first_stderr\":{\"at\":\"2026-09-16T11:39:23.709349581Z\",\"bytes\":29},\"first_init_at\":null,\"persistence_error\":\"\"}",
+      "heartbeat.json": "{\"timestamp\":\"2026-09-16T11:39:23.667415373Z\",\"ttl_seconds\":30}",
+      "raw.ndjson": "",
+      "canonical.ndjson": "",
+      "spawn.json": "{\"session_id\":\"launch-probe-20260916-113923-8a7cb2\",\"provider\":\"codex\",\"model\":\"gpt-5.6-sol\",\"runtime\":\"process\",\"worktree_path\":\"/tmp/noodle-78-stdin-fixture/.worktrees/launch\",\"created_at\":\"2026-09-16T11:39:23.667339998Z\"}",
+      "prompt.txt": "You are running one bounded launch capability probe, not a production Issue. Do not inspect or modify repository source, credentials, or settings. Use your shell tool exactly once to emit the existing Noodle typed event below, then reply NOODLE_CODEX_READY and stop. The supplied environment binds fixture order launch-capability-78, stage 0 and your actual NOODLE_SESSION_ID. Execute:\n/tmp/soodles-runtime/noodle --project-dir /tmp/noodle-78-stdin-fixture event emit --session \"$NOODLE_SESSION_ID\" stage_message --payload '{\"message\":\"Real Codex launch capability completed\",\"blocking\":false,\"outcome\":\"completed\",\"order_id\":\"launch-capability-78\",\"stage_index\":0}'\nIf the tool is unavailable or refused, report that failure; do not claim completion.",
+      "stderr.log": "Reading prompt from stdin...\n2026-09-16T11:39:23.745215Z DEBUG codex_config::loader::layer_io: /etc/codex/managed_config.toml not found\n2026-09-16T11:39:23.750180Z  WARN codex_features: unknown feature key in config: experimental_use_rmcp_client\n2026-09-16T11:39:23.923773Z  WARN codex_core_plugins::manager: failed to warm featured plugin ids cache error=remote featured plugin request to https://chatgpt.com/backend-api/plugins/featured?platform=codex failed with status 401 Unauthorized: {\"detail\":\"Could not parse your authentication token. Please try signing in again.\"}\n",
+      "process.json": "{\"pid\":30,\"session_id\":\"launch-probe-20260916-113923-8a7cb2\",\"started_at\":\"2026-09-16T11:39:23.667293167Z\"}"
+    },
+    "cleanup.json": {
+      "argv": [
+        "/tmp/soodles-runtime/noodle",
+        "--project-dir",
+        "/tmp/noodle-78-stdin-fixture",
+        "worktree",
+        "cleanup",
+        "launch"
+      ],
+      "exit_code": 0,
+      "output": "  Removing worktree...\n  Deleting branch launch...\nDone. launch removed.\nconfig repairable: 4 adapter script path(s) are missing.\n  backlog:\n    - add -> adapters/backlog-add (adapters.backlog.scripts.add)\n    - done -> adapters/backlog-done (adapters.backlog.scripts.done)\n    - edit -> adapters/backlog-edit (adapters.backlog.scripts.edit)\n    - sync -> adapters/backlog-sync (adapters.backlog.scripts.sync)\nconfig repair prompt:\n-----\nRepair Noodle adapter script configuration so `noodle start` no longer reports missing script paths.\nFix each missing entry by either creating an executable script at that path or updating .noodle.toml to a valid executable path.\nKeep the fix minimal and avoid broad refactors.\n\nMissing adapter scripts:\n- adapters.backlog.scripts.add (backlog): adapters/backlog-add\n- adapters.backlog.scripts.done (backlog): adapters/backlog-done\n- adapters.backlog.scripts.edit (backlog): adapters/backlog-edit\n- adapters.backlog.scripts.sync (backlog): adapters/backlog-sync\n\nRequired verification:\n- Re-run `noodle start` and confirm these repairable diagnostics are gone.\n- If Go files changed, run `go test ./...`.\n\nReturn a short summary of files changed and the verification results.\n-----\n",
+      "status": "",
+      "worktree_absent": true,
+      "process_scope": "Process completion via Noodle wait; no independent OS process-absence claim",
+      "branch_absent": true,
+      "branch_listing": "",
+      "fixture_root_removed": true
+    },
+    "source-readback.json": {
+      "head": {
+        "exit_code": 0,
+        "output": "e6d712a2512547cdf78a85c1ee218e1ba52e3b27\n"
+      },
+      "status": {
+        "exit_code": 0,
+        "output": ""
+      }
+    }
+  },
+  "upstream_source": {
+    "tag": "rust-v0.154.0-alpha.3",
+    "commit": "d58a64e690508a752c6a5a466ea752808849b7e2",
+    "sources": [
+      {
+        "path": "codex-rs/exec/src/lib.rs",
+        "role": "Root stdin read_to_end/decode precedes InProcessAppServerClient::start",
+        "lines": [
+          780,
+          812,
+          2051,
+          2073
+        ],
+        "url": "https://github.com/openai/codex/blob/d58a64e690508a752c6a5a466ea752808849b7e2/codex-rs/exec/src/lib.rs"
+      },
+      {
+        "path": "codex-rs/app-server/src/message_processor.rs",
+        "role": "Plugin startup tasks initiated at MessageProcessor construction",
+        "lines": [
+          525,
+          539
+        ],
+        "url": "https://github.com/openai/codex/blob/d58a64e690508a752c6a5a466ea752808849b7e2/codex-rs/app-server/src/message_processor.rs"
+      },
+      {
+        "path": "codex-rs/core-plugins/src/manager.rs",
+        "role": "Featured-plugin warmup spawned in background; error logged as warning",
+        "lines": [
+          2862,
+          2872
+        ],
+        "url": "https://github.com/openai/codex/blob/d58a64e690508a752c6a5a466ea752808849b7e2/codex-rs/core-plugins/src/manager.rs"
+      },
+      {
+        "path": "codex-rs/app-server/src/in_process.rs",
+        "role": "Initialize handshake completes before returning client",
+        "lines": [
+          367,
+          380
+        ],
+        "url": "https://github.com/openai/codex/blob/d58a64e690508a752c6a5a466ea752808849b7e2/codex-rs/app-server/src/in_process.rs"
+      }
+    ],
+    "binary_source_identity_limit": "Installed binary reports this version; binary hash retained. Reproducible-build identity was not independently verified."
+  }
+}
