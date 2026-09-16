@@ -52,6 +52,7 @@ func (s *processSession) start(ctx context.Context) {
 	go func() {
 		defer s.wg.Done()
 		defer s.closeStreamDone()
+		defer s.process.Stdout().Close()
 		interceptor := &canonicalLineInterceptor{onLine: func(line []byte) {
 			s.consumeCanonicalLine(line, s.processHook)
 		}}
@@ -89,6 +90,14 @@ func (s *processSession) waitForExit(ctx context.Context) {
 		<-s.process.Done()
 	}
 
+	// A descendant may still hold an output writer after the direct child exits.
+	// Cancellation must unblock the consumer even after Done won the first select.
+	select {
+	case <-s.streamDone:
+	case <-ctx.Done():
+		_ = s.process.Stdout().Close()
+		_ = s.process.Stderr().Close()
+	}
 	exitCode, _ := s.process.ExitCode()
 	s.resolveAndMarkDone(exitCode, ctx.Err() != nil)
 }
