@@ -1,8 +1,0 @@
-mode = "auto"
-
-[routing.defaults]
-provider = "claude"
-model = "claude-sonnet-4-6"
-
-[skills]
-paths = [".agents/skills"]

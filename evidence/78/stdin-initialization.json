@@ -1,0 +1,416 @@
+{
+  "issue": "https://github.com/ed3c/noodle/issues/78",
+  "pr": "https://github.com/ed3c/noodle/pull/79",
+  "head": "e6d712a2512547cdf78a85c1ee218e1ba52e3b27",
+  "tree": "87c23adcc96b1bf10a1fd8983409cd80e3713310",
+  "base": "1ba241abb68333b5c53d9d23955f538b2cb63877",
+  "classification": "BLOCKED",
+  "authorizes_landing": false,
+  "observation": "Parent stdin write 1085/1085 bytes and close completed without errors; first stderr 29 bytes; no stdout/init/events/typed outcome within 90 seconds. Child prompt consumption and internal startup cause remain unproven.",
+  "unchanged_auth_and_policy": true,
+  "issue_amendment": "## Fresh stdin / initialization discriminator envelope — 2026-09-16\n\nSupervisor requested observing stdin write/close results and first initialization progress. Same #78 process-launch owner, existing worktree/PR #79 and rollback atom. Resume candidate 50cd7031adf1e96f8ca26a001a374af066e42f99 (tree 6530b5abd9390f53fa6e4de663273473b8e01c52), delivered base 1ba241abb68333b5c53d9d23955f538b2cb63877.\n\nAmend the existing seven-file write boundary to also admit dispatcher/codex_startup.go and dispatcher/codex_startup_test.go. Implement only bounded, session-bound diagnostics in the existing producer and consumers: stdin expected/written bytes, write and close completion/error, first stdout/stderr observation and first canonical initialization. No prompt or credential contents in the new receipt. Diagnostic persistence failure must be visible; observations never authorize execution or reclassify completion.\n\nControls must distinguish incomplete/failed writes, failed closes, pre-init stderr, actual init, and preserve byte forwarding and cancellation. Run the nearest focused positive/planted-negative controls, then canonical pnpm check once on the final provider candidate. One instrumented real Codex process probe is admitted at the SAME 90-second deadline, existing ChatGPT authentication/model/host policy. Additional observability is the material input change; no unchanged retries, API-key gate, broader permissions or timeout extension. Raw results and cleanup must be preserved even on failure.\n\nPrior acceptance does not apply to the upcoming candidate. #78 remains BLOCKED, #79 draft and Soodles #18 unadmitted until the original real typed-outcome requirement is met. No skill capability upgrade is authorized by diagnostic green tests.\n\n",
+  "files": {
+    "acceptance.json": {
+      "command": [
+        "pnpm",
+        "check"
+      ],
+      "elapsed": 38.8493947609968,
+      "exit_code": 0,
+      "head": "e6d712a2512547cdf78a85c1ee218e1ba52e3b27",
+      "status_after": ""
+    },
+    "acceptance.log": "\n> @ check /workspace/scratch/8d9f1ebaaa91/noodle/.worktrees/issue-78-codex-launch\n> pnpm run build && pnpm run test && pnpm run vet && pnpm run lint:arch && pnpm run fixtures:loop && pnpm run fixtures:hash\n\n\n> @ build /workspace/scratch/8d9f1ebaaa91/noodle/.worktrees/issue-78-codex-launch\n> pnpm --filter noodle-ui build && go build -o ./bin/noodle .\n\n\n> noodle-ui@ build /workspace/scratch/8d9f1ebaaa91/noodle/.worktrees/issue-78-codex-launch/ui\n> vite build\n\nvite v7.3.1 building client environment for production...\ntransforming...\n✓ 3220 modules transformed.\nrendering chunks...\ncomputing gzip size...\ndist/client/index.html                     0.85 kB │ gzip:   0.45 kB\ndist/client/assets/index-BjOVM1mD.css     54.21 kB │ gzip:  10.51 kB\ndist/client/assets/index-CnvJVP-F.js      31.85 kB │ gzip:  11.46 kB\ndist/client/assets/d3-xKNfCkBH.js         51.62 kB │ gzip:  17.62 kB\ndist/client/assets/router-BPmgOIxi.js     94.36 kB │ gzip:  30.83 kB\ndist/client/assets/index-BzrgpmJZ.js     334.99 kB │ gzip: 105.38 kB\ndist/client/assets/index-wNhTF6hF.js   1,330.95 kB │ gzip: 268.73 kB\n✓ built in 6.52s\n\n> @ test /workspace/scratch/8d9f1ebaaa91/noodle/.worktrees/issue-78-codex-launch\n> go test ./...\n\nok  \tgithub.com/poteto/noodle\t24.217s\nok  \tgithub.com/poteto/noodle/adapter\t(cached)\n?   \tgithub.com/poteto/noodle/adapters\t[no test files]\nok  \tgithub.com/poteto/noodle/adapters/noodles-github\t0.299s\n?   \tgithub.com/poteto/noodle/cmdmeta\t[no test files]\nok  \tgithub.com/poteto/noodle/config\t(cached)\nok  \tgithub.com/poteto/noodle/dispatcher\t0.305s\nok  \tgithub.com/poteto/noodle/event\t(cached)\nok  \tgithub.com/poteto/noodle/generate\t(cached)\n?   \tgithub.com/poteto/noodle/generate/cmd/gen-skill\t[no test files]\nok  \tgithub.com/poteto/noodle/internal/dispatch\t(cached)\nok  \tgithub.com/poteto/noodle/internal/failure\t(cached)\nok  \tgithub.com/poteto/noodle/internal/filex\t(cached)\nok  \tgithub.com/poteto/noodle/internal/ingest\t(cached)\nok  \tgithub.com/poteto/noodle/internal/integration\t(cached)\nok  \tgithub.com/poteto/noodle/internal/jsonx\t(cached)\nok  \tgithub.com/poteto/noodle/internal/lockfile\t(cached)\nok  \tgithub.com/poteto/noodle/internal/mode\t(cached)\nok  \tgithub.com/poteto/noodle/internal/orderx\t(cached)\n?   \tgithub.com/poteto/noodle/internal/procx\t[no test files]\nok  \tgithub.com/poteto/noodle/internal/projection\t(cached)\nok  \tgithub.com/poteto/noodle/internal/reducer\t(cached)\nok  \tgithub.com/poteto/noodle/internal/rtcap\t(cached)\nok  \tgithub.com/poteto/noodle/internal/schemadoc\t(cached)\nok  \tgithub.com/poteto/noodle/internal/shellx\t(cached)\nok  \tgithub.com/poteto/noodle/internal/snapshot\t0.129s\nok  \tgithub.com/poteto/noodle/internal/state\t(cached)\nok  \tgithub.com/poteto/noodle/internal/statever\t(cached)\n?   \tgithub.com/poteto/noodle/internal/statusfile\t[no test files]\nok  \tgithub.com/poteto/noodle/internal/stringx\t(cached)\nok  \tgithub.com/poteto/noodle/internal/taskreg\t(cached)\nok  \tgithub.com/poteto/noodle/internal/testutil/fixturedir\t(cached)\nok  \tgithub.com/poteto/noodle/loop\t21.980s\nok  \tgithub.com/poteto/noodle/mise\t(cached)\nok  \tgithub.com/poteto/noodle/monitor\t0.074s\nok  \tgithub.com/poteto/noodle/parse\t(cached)\nok  \tgithub.com/poteto/noodle/runtime\t0.009s\n?   \tgithub.com/poteto/noodle/scripts\t[no test files]\n?   \tgithub.com/poteto/noodle/scripts/fixturehash\t[no test files]\nok  \tgithub.com/poteto/noodle/server\t0.067s\nok  \tgithub.com/poteto/noodle/skill\t(cached)\nok  \tgithub.com/poteto/noodle/stamp\t(cached)\nok  \tgithub.com/poteto/noodle/startup\t(cached)\nok  \tgithub.com/poteto/noodle/worktree\t(cached)\n\n> @ vet /workspace/scratch/8d9f1ebaaa91/noodle/.worktrees/issue-78-codex-launch\n> go vet ./...\n\n\n> @ lint:arch /workspace/scratch/8d9f1ebaaa91/noodle/.worktrees/issue-78-codex-launch\n> sh scripts/lint-arch.sh\n\n[ARCH][WARN] internal/reducer/reducer.go:867\n  Violation: File exceeds 500 lines (867 lines).\n  Fix: Consider splitting by concern to improve readability.\n  See brain/principles/boundary-discipline.md\n[ARCH][WARN] loop/loop.go:668\n  Violation: File exceeds 500 lines (668 lines).\n  Fix: Consider splitting by concern to improve readability.\n  See brain/principles/boundary-discipline.md\n[ARCH][WARN] loop/loop_cycle_pipeline.go:509\n  Violation: File exceeds 500 lines (509 lines).\n  Fix: Consider splitting by concern to improve readability.\n  See brain/principles/boundary-discipline.md\n[ARCH][WARN] loop/reconcile.go:773\n  Violation: File exceeds 500 lines (773 lines).\n  Fix: Consider splitting by concern to improve readability.\n  See brain/principles/boundary-discipline.md\n[ARCH][WARN] internal/integration/resilience_test.go:1233\n  Violation: Go test file exceeds 1200 lines (1233 lines).\n  Fix: Consider splitting by feature and extracting shared fixtures/helpers.\n  See brain/principles/boundary-discipline.md\n[ARCH][WARN] loop/control_test.go:1222\n  Violation: Go test file exceeds 1200 lines (1222 lines).\n  Fix: Consider splitting by feature and extracting shared fixtures/helpers.\n  See brain/principles/boundary-discipline.md\n[ARCH][WARN] loop/loop_test.go:1318\n  Violation: Go test file exceeds 1200 lines (1318 lines).\n  Fix: Consider splitting by feature and extracting shared fixtures/helpers.\n  See brain/principles/boundary-discipline.md\n[ARCH][WARN] worktree/worktree_test.go:1234\n  Violation: Go test file exceeds 1200 lines (1234 lines).\n  Fix: Consider splitting by feature and extracting shared fixtures/helpers.\n  See brain/principles/boundary-discipline.md\n[ARCH] Passed with 8 warning(s).\n\n> @ fixtures:loop /workspace/scratch/8d9f1ebaaa91/noodle/.worktrees/issue-78-codex-launch\n> NOODLE_LOOP_FIXTURE_MODE=check go test ./loop -run TestLoopDirectoryFixtures -count=1 && go run ./scripts/fixturehash check --root loop/testdata\n\nok  \tgithub.com/poteto/noodle/loop\t0.248s\nfixture hash check: up to date\n\n> @ fixtures:hash /workspace/scratch/8d9f1ebaaa91/noodle/.worktrees/issue-78-codex-launch\n> go run ./scripts/fixturehash check\n\nfixture hash check: up to date\n",
+    "carrier.json": {
+      "login_status": {
+        "exit_code": 0,
+        "output": "Logged in using ChatGPT\n"
+      },
+      "version": {
+        "exit_code": 0,
+        "output": "codex-cli 0.154.0-alpha.3\n"
+      }
+    },
+    "cleanup.json": {
+      "argv": [
+        "/tmp/soodles-runtime/noodle",
+        "--project-dir",
+        "/tmp/noodle-78-stdin-fixture",
+        "worktree",
+        "cleanup",
+        "launch"
+      ],
+      "branch_absent": true,
+      "branch_listing": "",
+      "exit_code": 0,
+      "fixture_root_removed": true,
+      "output": "  Removing worktree...\n  Deleting branch launch...\nDone. launch removed.\nconfig repairable: 4 adapter script path(s) are missing.\n  backlog:\n    - add -> adapters/backlog-add (adapters.backlog.scripts.add)\n    - done -> adapters/backlog-done (adapters.backlog.scripts.done)\n    - edit -> adapters/backlog-edit (adapters.backlog.scripts.edit)\n    - sync -> adapters/backlog-sync (adapters.backlog.scripts.sync)\nconfig repair prompt:\n-----\nRepair Noodle adapter script configuration so `noodle start` no longer reports missing script paths.\nFix each missing entry by either creating an executable script at that path or updating .noodle.toml to a valid executable path.\nKeep the fix minimal and avoid broad refactors.\n\nMissing adapter scripts:\n- adapters.backlog.scripts.add (backlog): adapters/backlog-add\n- adapters.backlog.scripts.done (backlog): adapters/backlog-done\n- adapters.backlog.scripts.edit (backlog): adapters/backlog-edit\n- adapters.backlog.scripts.sync (backlog): adapters/backlog-sync\n\nRequired verification:\n- Re-run `noodle start` and confirm these repairable diagnostics are gone.\n- If Go files changed, run `go test ./...`.\n\nReturn a short summary of files changed and the verification results.\n-----\n",
+      "process_evidence": "Session Events closed after processSession.waitForExit waited for ProcessHandle.Done on this exact candidate. No independent OS process-absence claim: separate exec inspection did not share the probe PID namespace.",
+      "session_evidence_retained": true,
+      "status": "",
+      "worktree_absent": true,
+      "worktree_listing": "worktree /tmp/noodle-78-stdin-fixture\nHEAD dbb3ea382151e20ec3b9e852fce8cd27a7610b18\nbranch refs/heads/main\n\n"
+    },
+    "focused-controls.json": [
+      {
+        "exit_code": 1,
+        "name": "lost-write-result",
+        "output": "--- FAIL: TestCodexStartupInputResults (0.00s)\n    --- FAIL: TestCodexStartupInputResults/complete (0.00s)\n        codex_startup_test.go:134: lost write/close result: {SessionID:input-session Stdin:{ExpectedBytes:6 WriteStartedAt:2026-09-16 09:37:42.557965523 +0000 UTC WriteCompletedAt:2026-09-16 09:37:42.558074188 +0000 UTC WrittenBytes:0xc0000aba18 WriteError: CloseCompletedAt:2026-09-16 09:37:42.55828649 +0000 UTC CloseError:} FirstStdout:<nil> FirstStderr:<nil> FirstInitAt:<nil> PersistenceError:}, closed=true\n    --- FAIL: TestCodexStartupInputResults/short_write (0.00s)\n        codex_startup_test.go:134: lost write/close result: {SessionID:input-session Stdin:{ExpectedBytes:6 WriteStartedAt:2026-09-16 09:37:42.558685865 +0000 UTC WriteCompletedAt:2026-09-16 09:37:42.558756232 +0000 UTC WrittenBytes:0xc0000abb28 WriteError: CloseCompletedAt:2026-09-16 09:37:42.558869634 +0000 UTC CloseError:} FirstStdout:<nil> FirstStderr:<nil> FirstInitAt:<nil> PersistenceError:}, closed=true\n    --- FAIL: TestCodexStartupInputResults/write_failed (0.00s)\n        codex_startup_test.go:134: lost write/close result: {SessionID:input-session Stdin:{ExpectedBytes:6 WriteStartedAt:2026-09-16 09:37:42.559180295 +0000 UTC WriteCompletedAt:2026-09-16 09:37:42.559246555 +0000 UTC WrittenBytes:0xc0000abc50 WriteError:broken pipe CloseCompletedAt:2026-09-16 09:37:42.559324363 +0000 UTC CloseError:} FirstStdout:<nil> FirstStderr:<nil> FirstInitAt:<nil> PersistenceError:}, closed=true\n    --- FAIL: TestCodexStartupInputResults/close_failed (0.00s)\n        codex_startup_test.go:134: lost write/close result: {SessionID:input-session Stdin:{ExpectedBytes:6 WriteStartedAt:2026-09-16 09:37:42.559717449 +0000 UTC WriteCompletedAt:2026-09-16 09:37:42.559778652 +0000 UTC WrittenBytes:0xc0000abd48 WriteError: CloseCompletedAt:2026-09-16 09:37:42.559854857 +0000 UTC CloseError:close failed} FirstStdout:<nil> FirstStderr:<nil> FirstInitAt:<nil> PersistenceError:}, closed=true\nFAIL\nFAIL\tgithub.com/poteto/noodle/dispatcher\t0.006s\nFAIL\n"
+      },
+      {
+        "elapsed": 0.5971572929993272,
+        "exit_code": 1,
+        "name": "lost-close-error",
+        "output": "--- FAIL: TestCodexStartupInputResults (0.00s)\n    --- FAIL: TestCodexStartupInputResults/close_failed (0.00s)\n        codex_startup_test.go:144: lost independent completion/error: {ExpectedBytes:6 WriteStartedAt:2026-09-16 09:37:12.178604173 +0000 UTC WriteCompletedAt:2026-09-16 09:37:12.178682522 +0000 UTC WrittenBytes:0xc0000abce8 WriteError: CloseCompletedAt:2026-09-16 09:37:12.178772919 +0000 UTC CloseError:}\n    --- FAIL: TestCodexStartupInputResults/both_failed (0.00s)\n        codex_startup_test.go:144: lost independent completion/error: {ExpectedBytes:6 WriteStartedAt:2026-09-16 09:37:12.179188499 +0000 UTC WriteCompletedAt:2026-09-16 09:37:12.17926851 +0000 UTC WrittenBytes:0xc0000abdf8 WriteError:write failed CloseCompletedAt:2026-09-16 09:37:12.179371927 +0000 UTC CloseError:}\nFAIL\nFAIL\tgithub.com/poteto/noodle/dispatcher\t0.007s\nFAIL\n"
+      },
+      {
+        "elapsed": 0.5513480239969795,
+        "exit_code": 1,
+        "name": "lost-init-consumer",
+        "output": "--- FAIL: TestCodexStartupRealDispatchObservesEOFAndInit (0.00s)\n    codex_startup_test.go:205: missing real consumer observation: {SessionID:startup-20260916-093712-e1ac91 Stdin:{ExpectedBytes:365 WriteStartedAt:2026-09-16 09:37:12.729403555 +0000 UTC WriteCompletedAt:2026-09-16 09:37:12.729703269 +0000 UTC WrittenBytes:0xc0001d6078 WriteError: CloseCompletedAt:2026-09-16 09:37:12.729937584 +0000 UTC CloseError:} FirstStdout:0xc00007acc0 FirstStderr:0xc00007ace0 FirstInitAt:<nil> PersistenceError:}\nFAIL\nFAIL\tgithub.com/poteto/noodle/dispatcher\t0.007s\nFAIL\n"
+      },
+      {
+        "exit_code": 0,
+        "name": "restored-dispatcher-race",
+        "output": "ok  \tgithub.com/poteto/noodle/dispatcher\t1.346s\n"
+      }
+    ],
+    "observer-stderr.log": "This capability probe is not Issue admission or a typed completion receipt.\n",
+    "observer.json": {
+      "elapsed": 90.60664536699915,
+      "exit_code": 0
+    },
+    "probe.json": {
+      "elapsed": 90.100603144,
+      "event_read_error": "<nil>",
+      "event_records": null,
+      "events": [],
+      "matching_typed_outcomes": 0,
+      "mode": "permitted",
+      "outcome": {
+        "ExitCode": -1,
+        "HasDeliverable": false,
+        "Reason": "context cancelled before completion",
+        "Status": "cancelled"
+      },
+      "raw": "",
+      "session_id": "launch-probe-20260916-093941-3c2f4a",
+      "source_head": "e6d712a2512547cdf78a85c1ee218e1ba52e3b27",
+      "stderr": "Reading prompt from stdin...\n",
+      "typed_outcome_observed": false
+    },
+    "process-probe.go": "package main\nimport (\n \"context\"\n \"encoding/json\"\n \"fmt\"\n \"os\"\n \"path/filepath\"\n \"time\"\n \"github.com/poteto/noodle/dispatcher\"\n \"github.com/poteto/noodle/event\"\n)\nfunc main() {\n // Supervisor-owned observer: use actual candidate process dispatcher and Codex.\n fixture, binDir, mode := os.Args[1], os.Args[2], os.Args[3]\n args := []string{\"--ephemeral\"}\n if mode == \"invalid\" {args = append(args, \"--sandbox\", \"invalid-mode\")}\n ctx,cancel:=context.WithTimeout(context.Background(),90*time.Second);defer cancel()\n d:=dispatcher.NewProcessDispatcher(dispatcher.ProcessDispatcherConfig{\n ProjectDir:fixture,RuntimeDir:filepath.Join(fixture,\".noodle\"),RuntimeKind:\"process\",\n ProviderConfigs:dispatcher.ProviderConfigs{Codex:dispatcher.ProviderConfig{Path:binDir,Args:args}},\n })\n start:=time.Now()\n s,err:=d.Dispatch(ctx,dispatcher.DispatchRequest{Name:\"launch-probe\",Prompt:`You are running one bounded launch capability probe, not a production Issue. Do not inspect or modify repository source, credentials, or settings. Use your shell tool exactly once to emit the existing Noodle typed event below, then reply NOODLE_CODEX_READY and stop. The supplied environment binds fixture order launch-capability-78, stage 0 and your actual NOODLE_SESSION_ID. Execute:\n/tmp/soodles-runtime/noodle --project-dir /tmp/noodle-78-stdin-fixture event emit --session \"$NOODLE_SESSION_ID\" stage_message --payload '{\"message\":\"Real Codex launch capability completed\",\"blocking\":false,\"outcome\":\"completed\",\"order_id\":\"launch-capability-78\",\"stage_index\":0}'\nIf the tool is unavailable or refused, report that failure; do not claim completion.`, Provider:\"codex\",Model:\"gpt-5.6-sol\",WorktreePath:filepath.Join(fixture,\".worktrees\",\"launch\"),Runtime:\"process\",EnvVars:map[string]string{\"NOODLE_PROJECT_DIR\":fixture,\"NOODLE_ORDER_ID\":\"launch-capability-78\",\"NOODLE_STAGE_INDEX\":\"0\"}})\n if err!=nil {json.NewEncoder(os.Stdout).Encode(map[string]any{\"dispatch_error\":err.Error()});os.Exit(1)}\n events:=[]dispatcher.SessionEvent{}\n for e:=range s.Events(){events=append(events,e)}\n stderr,_:=os.ReadFile(filepath.Join(fixture,\".noodle\",\"sessions\",s.ID(),\"stderr.log\"))\n stamped,_:=os.ReadFile(filepath.Join(fixture,\".noodle\",\"sessions\",s.ID(),\"raw.ndjson\"))\n records, readErr := event.NewEventReader(filepath.Join(fixture,\".noodle\")).ReadSession(s.ID(), event.EventFilter{})\n typed := 0\n for _, r := range records {if r.Type == event.EventStageMessage {var p event.StageMessagePayload; if json.Unmarshal(r.Payload,&p)==nil && p.Outcome==event.StageOutcomeCompleted && p.OrderID==\"launch-capability-78\" && p.StageIndex!=nil && *p.StageIndex==0 && !p.IsBlocking() && r.SessionID==s.ID() {typed++}}}\n json.NewEncoder(os.Stdout).Encode(map[string]any{\"event_records\":records,\"event_read_error\":fmt.Sprint(readErr),\"matching_typed_outcomes\":typed,\"source_head\":\"e6d712a2512547cdf78a85c1ee218e1ba52e3b27\",\"session_id\":s.ID(),\"mode\":mode,\"outcome\":s.Outcome(),\"events\":events,\"stderr\":string(stderr),\"raw\":string(stamped),\"elapsed\":time.Since(start).Seconds(),\"typed_outcome_observed\":typed==1})\n fmt.Fprintln(os.Stderr,\"This capability probe is not Issue admission or a typed completion receipt.\")\n}\n",
+    "session-files.json": {
+      "canonical.ndjson": "",
+      "codex-startup.json": "{\"session_id\":\"launch-probe-20260916-093941-3c2f4a\",\"stdin\":{\"expected_bytes\":1085,\"write_started_at\":\"2026-09-16T09:39:41.867916217Z\",\"write_completed_at\":\"2026-09-16T09:39:41.868470091Z\",\"written_bytes\":1085,\"write_error\":\"\",\"close_completed_at\":\"2026-09-16T09:39:41.86885852Z\",\"close_error\":\"\"},\"first_stdout\":null,\"first_stderr\":{\"at\":\"2026-09-16T09:39:41.914105098Z\",\"bytes\":29},\"first_init_at\":null,\"persistence_error\":\"\"}",
+      "heartbeat.json": "{\"timestamp\":\"2026-09-16T09:39:41.868366463Z\",\"ttl_seconds\":30}",
+      "input.txt": "You are running one bounded launch capability probe, not a production Issue. Do not inspect or modify repository source, credentials, or settings. Use your shell tool exactly once to emit the existing Noodle typed event below, then reply NOODLE_CODEX_READY and stop. The supplied environment binds fixture order launch-capability-78, stage 0 and your actual NOODLE_SESSION_ID. Execute:\n/tmp/soodles-runtime/noodle --project-dir /tmp/noodle-78-stdin-fixture event emit --session \"$NOODLE_SESSION_ID\" stage_message --payload '{\"message\":\"Real Codex launch capability completed\",\"blocking\":false,\"outcome\":\"completed\",\"order_id\":\"launch-capability-78\",\"stage_index\":0}'\nIf the tool is unavailable or refused, report that failure; do not claim completion.\n\n---\n\n# Noodle Runtime Context\n\nThis session is managed by Noodle. The following are runtime facts, not project workflow policy:\n\n- working_directory: /tmp/noodle-78-stdin-fixture/.worktrees/launch\n- checkout_mode: isolated-worktree\n- selected_skill: \n\nProject workflow policy comes from the selected skill or explicit system prompt.",
+      "process.json": "{\"pid\":110,\"session_id\":\"launch-probe-20260916-093941-3c2f4a\",\"started_at\":\"2026-09-16T09:39:41.867802178Z\"}",
+      "prompt.txt": "You are running one bounded launch capability probe, not a production Issue. Do not inspect or modify repository source, credentials, or settings. Use your shell tool exactly once to emit the existing Noodle typed event below, then reply NOODLE_CODEX_READY and stop. The supplied environment binds fixture order launch-capability-78, stage 0 and your actual NOODLE_SESSION_ID. Execute:\n/tmp/soodles-runtime/noodle --project-dir /tmp/noodle-78-stdin-fixture event emit --session \"$NOODLE_SESSION_ID\" stage_message --payload '{\"message\":\"Real Codex launch capability completed\",\"blocking\":false,\"outcome\":\"completed\",\"order_id\":\"launch-capability-78\",\"stage_index\":0}'\nIf the tool is unavailable or refused, report that failure; do not claim completion.",
+      "raw.ndjson": "",
+      "spawn.json": "{\"session_id\":\"launch-probe-20260916-093941-3c2f4a\",\"provider\":\"codex\",\"model\":\"gpt-5.6-sol\",\"runtime\":\"process\",\"worktree_path\":\"/tmp/noodle-78-stdin-fixture/.worktrees/launch\",\"created_at\":\"2026-09-16T09:39:41.867929941Z\"}",
+      "stderr.log": "Reading prompt from stdin...\n"
+    },
+    "setup.json": [
+      {
+        "argv": [
+          "git",
+          "init",
+          "-b",
+          "main"
+        ],
+        "exit_code": 0,
+        "output": "Initialized empty Git repository in /tmp/noodle-78-stdin-fixture/.git/\n"
+      },
+      {
+        "argv": [
+          "git",
+          "add",
+          "README.md",
+          ".gitignore"
+        ],
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "argv": [
+          "git",
+          "-c",
+          "user.name=Supervisor probe",
+          "-c",
+          "user.email=probe@localhost",
+          "commit",
+          "-m",
+          "Initialize disposable launch probe"
+        ],
+        "exit_code": 0,
+        "output": "[main (root-commit) dbb3ea3] Initialize disposable launch probe\n 2 files changed, 3 insertions(+)\n create mode 100644 .gitignore\n create mode 100644 README.md\n"
+      },
+      {
+        "argv": [
+          "/tmp/soodles-runtime/noodle",
+          "--project-dir",
+          "/tmp/noodle-78-stdin-fixture",
+          "worktree",
+          "create",
+          "launch"
+        ],
+        "exit_code": 0,
+        "output": "  Creating worktree at /tmp/noodle-78-stdin-fixture/.worktrees/launch...\nPreparing worktree (new branch 'launch')\nHEAD is now at dbb3ea3 Initialize disposable launch probe\n  No lock file found — skipping dep install\n\nWorktree ready: /tmp/noodle-78-stdin-fixture/.worktrees/launch (branch: launch)\nconfig repairable: 4 adapter script path(s) are missing.\n  backlog:\n    - add -> adapters/backlog-add (adapters.backlog.scripts.add)\n    - done -> adapters/backlog-done (adapters.backlog.scripts.done)\n    - edit -> adapters/backlog-edit (adapters.backlog.scripts.edit)\n    - sync -> adapters/backlog-sync (adapters.backlog.scripts.sync)\nconfig repair prompt:\n-----\nRepair Noodle adapter script configuration so `noodle start` no longer reports missing script paths.\nFix each missing entry by either creating an executable script at that path or updating .noodle.toml to a valid executable path.\nKeep the fix minimal and avoid broad refactors.\n\nMissing adapter scripts:\n- adapters.backlog.scripts.add (backlog): adapters/backlog-add\n- adapters.backlog.scripts.done (backlog): adapters/backlog-done\n- adapters.backlog.scripts.edit (backlog): adapters/backlog-edit\n- adapters.backlog.scripts.sync (backlog): adapters/backlog-sync\n\nRequired verification:\n- Re-run `noodle start` and confirm these repairable diagnostics are gone.\n- If Go files changed, run `go test ./...`.\n\nReturn a short summary of files changed and the verification results.\n-----\n"
+      }
+    ],
+    "startup.json": {
+      "first_init_at": null,
+      "first_stderr": {
+        "at": "2026-09-16T09:39:41.914105098Z",
+        "bytes": 29
+      },
+      "first_stdout": null,
+      "persistence_error": "",
+      "session_id": "launch-probe-20260916-093941-3c2f4a",
+      "stdin": {
+        "close_completed_at": "2026-09-16T09:39:41.86885852Z",
+        "close_error": "",
+        "expected_bytes": 1085,
+        "write_completed_at": "2026-09-16T09:39:41.868470091Z",
+        "write_error": "",
+        "write_started_at": "2026-09-16T09:39:41.867916217Z",
+        "written_bytes": 1085
+      }
+    }
+  },
+  "actions": [
+    {
+      "id": 35080572554,
+      "name": "Noodle Actions runtime",
+      "head_sha": "e6d712a2512547cdf78a85c1ee218e1ba52e3b27",
+      "run_attempt": 1,
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/ed3c/noodle/actions/runs/35080572554",
+      "created_at": "2026-09-16T09:38:37Z",
+      "updated_at": "2026-09-16T09:39:32Z"
+    },
+    {
+      "id": 35080572639,
+      "name": "Test",
+      "head_sha": "e6d712a2512547cdf78a85c1ee218e1ba52e3b27",
+      "run_attempt": 1,
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/ed3c/noodle/actions/runs/35080572639",
+      "created_at": "2026-09-16T09:38:37Z",
+      "updated_at": "2026-09-16T09:40:04Z"
+    }
+  ],
+  "test_jobs": {
+    "jobs": [
+      {
+        "conclusion": "success",
+        "id": 104743319647,
+        "logs_url": null,
+        "name": "test",
+        "run_id": 35080572639,
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@v4",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-go@v5",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run pnpm/action-setup@v4",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-node@v4",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install dependencies",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build UI",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Install tmux",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Test",
+            "number": 9,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Vet",
+            "number": 10,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Lint architecture",
+            "number": 11,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Check skill snapshot",
+            "number": 12,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-node@v4",
+            "number": 21,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run pnpm/action-setup@v4",
+            "number": 22,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-go@v5",
+            "number": 23,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v4",
+            "number": 24,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 25,
+            "status": "completed"
+          }
+        ]
+      }
+    ]
+  },
+  "runtime_jobs": {
+    "jobs": [
+      {
+        "conclusion": "success",
+        "id": 104743319240,
+        "logs_url": null,
+        "name": "worktree-runtime",
+        "run_id": 35080572554,
+        "status": "completed",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+            "number": 2,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5",
+            "number": 3,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run pnpm/action-setup@v4",
+            "number": 4,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Run actions/setup-node@v4",
+            "number": 5,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Build the candidate through the repository entrypoint",
+            "number": 6,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Exercise Noodle worktree ownership without model credentials",
+            "number": 7,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Preserve runtime receipt",
+            "number": 8,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-node@v4",
+            "number": 13,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run pnpm/action-setup@v4",
+            "number": 14,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5",
+            "number": 15,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+            "number": 16,
+            "status": "completed"
+          },
+          {
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "status": "completed"
+          }
+        ]
+      }
+    ]
+  }
+}
