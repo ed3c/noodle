@@ -90,7 +90,8 @@ func (d *ProcessDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 		return nil, err
 	}
 
-	controller, process, err := d.startSessionProcess(ctx, req, systemPrompt, composedPrompt, sessionID, sessionDir, stderrPath)
+	stderrDone := make(chan struct{})
+	controller, process, err := d.startSessionProcess(ctx, req, systemPrompt, composedPrompt, sessionID, sessionDir, stderrPath, stderrDone)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +106,9 @@ func (d *ProcessDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 		warnings:      skillBundle.Warnings,
 		controller:    controller,
 		sink:          d.sink,
+		provider:      req.Provider,
+		stderrPath:    stderrPath,
+		stderrDone:    stderrDone,
 	})
 	session.start(ctx)
 	return session, nil
@@ -164,6 +168,7 @@ func (d *ProcessDispatcher) prepareSessionDir(
 func (d *ProcessDispatcher) startSessionProcess(
 	ctx context.Context, req DispatchRequest,
 	systemPrompt, composedPrompt, sessionID, sessionDir, stderrPath string,
+	stderrDone chan struct{},
 ) (*claudeController, *ProcessHandle, error) {
 	cmd, err := d.buildCmd(req, systemPrompt)
 	if err != nil {
@@ -183,7 +188,10 @@ func (d *ProcessDispatcher) startSessionProcess(
 		return nil, nil, err
 	}
 
-	go drainToFile(process.Stderr(), stderrPath)
+	go func() {
+		defer close(stderrDone)
+		drainToFile(process.Stderr(), stderrPath)
+	}()
 
 	if err := WriteProcessMetadata(sessionDir, sessionID, process.PID(), nowUTC()); err != nil {
 		_ = process.ForceKill()

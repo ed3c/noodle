@@ -44,10 +44,10 @@ func claudeBaseArgs(req DispatchRequest, systemPrompt string) []string {
 
 // codexBaseArgs returns the canonical Codex CLI flags for a dispatch request.
 // Callers prepend the binary path and append site-specific extras.
+// Permission policy belongs to the carrier, not the shared execution protocol.
 func codexBaseArgs(req DispatchRequest) []string {
 	args := []string{
 		"exec",
-		"--dangerously-bypass-approvals-and-sandbox",
 		"--skip-git-repo-check",
 		"--json",
 	}
@@ -129,4 +129,3 @@ func composePrompts(provider, requestPrompt, preamble, skillSystemPrompt string)
 	}
 	return systemPrompt, finalPrompt
 }
-
