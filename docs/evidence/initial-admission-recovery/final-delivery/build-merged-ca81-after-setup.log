@@ -1,0 +1,22 @@
+
+> @ build /Users/neon/.codex/experiments/noodle78-delivery-20260916/control
+> pnpm --filter noodle-ui build && go build -o ./bin/noodle .
+
+
+> noodle-ui@ build /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/ui
+> vite build
+
+You are using Node.js 22.11.0. Vite requires Node.js version 20.19+ or 22.12+. Please upgrade your Node.js version.
+vite v7.3.1 building client environment for production...
+transforming...
+✓ 3220 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/client/index.html                     0.85 kB │ gzip:   0.45 kB
+dist/client/assets/index-BjOVM1mD.css     54.21 kB │ gzip:  10.51 kB
+dist/client/assets/index-CnvJVP-F.js      31.85 kB │ gzip:  11.46 kB
+dist/client/assets/d3-xKNfCkBH.js         51.62 kB │ gzip:  17.62 kB
+dist/client/assets/router-BPmgOIxi.js     94.36 kB │ gzip:  30.83 kB
+dist/client/assets/index-BzrgpmJZ.js     334.99 kB │ gzip: 105.38 kB
+dist/client/assets/index-wNhTF6hF.js   1,330.95 kB │ gzip: 268.73 kB
+✓ built in 4.26s

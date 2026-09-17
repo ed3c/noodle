@@ -1,0 +1,15 @@
+{
+  "issue": 84,
+  "owner": "user-authorized external supervisor",
+  "candidate_head": "5d1e9fefd902bec53b260b22abf3b55c3caf0203",
+  "base": "656e9ec73689c523058750e8b0a2388a15bb84fa",
+  "test_run": 35195000559,
+  "evidence_commit": "19ba580f12ec390c572ad63283f920455bb6028b",
+  "original_order": "noodle-84",
+  "request": {
+    "repository_full_name": "ed3c/noodle",
+    "pr_number": 85,
+    "expected_head_sha": "5d1e9fefd902bec53b260b22abf3b55c3caf0203",
+    "merge_method": "merge"
+  }
+}

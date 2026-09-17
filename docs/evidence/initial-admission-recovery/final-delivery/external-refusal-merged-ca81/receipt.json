@@ -1,0 +1,111 @@
+{
+  "scope": "release CLI refusals over synthetic variants of preserved input; no production mutation",
+  "binary_sha256": "5657c8c3dcaa2491d290a35995c35e4c3d46993955b151f3c75e3bac94476aff",
+  "observer_sha256": "b0029229f2794b283d8ab30faba8a621e0cd7035d83edcc6001a1a994229662b",
+  "cases": [
+    {
+      "case": "wrong-digest",
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle84-20260917/noodle-merged-ca81",
+        "--project-dir",
+        "/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-negative-4nxgrwxn/control",
+        "admission",
+        "retire",
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "dfb96fcf7d8d776ea177173c4c0c717d"
+      ],
+      "exit": 1,
+      "stdout": "{\"owner\":\"Noodle initial admission\",\"status\":\"refused\",\"subject\":{\"proposal_sha256\":\"c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088\",\"initial_revision\":\"\",\"order_ids\":null},\"current_order_revision\":\"dfb96fcf7d8d776ea177173c4c0c717d\",\"invalid\":\"proposal_sha256 changed; later mailbox preserved\",\"next\":{\"argv\":[],\"guidance\":\"Preserve the reported evidence. The named operator must supply the missing evidence or resolve the reported owner state; then use readback_argv to inspect again. Inspection is not permission to restart or repeat a write.\",\"required\":\"proposal_sha256 changed; later mailbox preserved\",\"provided_by\":\"Noodle operator supervising this project and its original session records\",\"readback_argv\":[\"/Users/neon/.codex/experiments/noodle84-20260917/noodle-merged-ca81\",\"--project-dir\",\"/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-negative-4nxgrwxn/control\",\"admission\",\"inspect\"]}}\n",
+      "stderr": "config repairable: adapters.backlog: no backlog adapter configured Fix: Add [adapters.backlog] to .noodle.toml with adapter scripts.\nadmission refused: proposal_sha256 changed; later mailbox preserved\n",
+      "preserved": true,
+      "passed": true
+    },
+    {
+      "case": "wrong-revision",
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle84-20260917/noodle-merged-ca81",
+        "--project-dir",
+        "/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-negative-fsbymhcn/control",
+        "admission",
+        "retire",
+        "c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088",
+        "00000000000000000000000000000000"
+      ],
+      "exit": 1,
+      "stdout": "{\"owner\":\"Noodle initial admission\",\"status\":\"refused\",\"subject\":{\"proposal_sha256\":\"\",\"initial_revision\":\"\",\"order_ids\":null},\"current_order_revision\":\"dfb96fcf7d8d776ea177173c4c0c717d\",\"invalid\":\"current_order_revision changed\",\"next\":{\"argv\":[],\"guidance\":\"Preserve the reported evidence. The named operator must supply the missing evidence or resolve the reported owner state; then use readback_argv to inspect again. Inspection is not permission to restart or repeat a write.\",\"required\":\"current_order_revision changed\",\"provided_by\":\"Noodle operator supervising this project and its original session records\",\"readback_argv\":[\"/Users/neon/.codex/experiments/noodle84-20260917/noodle-merged-ca81\",\"--project-dir\",\"/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-negative-fsbymhcn/control\",\"admission\",\"inspect\"]}}\n",
+      "stderr": "config repairable: adapters.backlog: no backlog adapter configured Fix: Add [adapters.backlog] to .noodle.toml with adapter scripts.\nadmission refused: current_order_revision changed\n",
+      "preserved": true,
+      "passed": true
+    },
+    {
+      "case": "admitted-ledger",
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle84-20260917/noodle-merged-ca81",
+        "--project-dir",
+        "/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-negative-cf56ytxf/control",
+        "admission",
+        "retire",
+        "c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088",
+        "dfb96fcf7d8d776ea177173c4c0c717d"
+      ],
+      "exit": 1,
+      "stdout": "{\"owner\":\"Noodle initial admission\",\"status\":\"refused\",\"subject\":{\"proposal_sha256\":\"c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088\",\"initial_revision\":\"970e887025e1afec651ffdd8f8b42f76\",\"order_ids\":[\"soodles-39\"]},\"current_order_revision\":\"dfb96fcf7d8d776ea177173c4c0c717d\",\"invalid\":\"initial subject \\\"soodles-39\\\" is owned, admitted, duplicate, reserved or ambiguous\",\"next\":{\"argv\":[],\"guidance\":\"Preserve the reported evidence. The named operator must supply the missing evidence or resolve the reported owner state; then use readback_argv to inspect again. Inspection is not permission to restart or repeat a write.\",\"required\":\"initial subject \\\"soodles-39\\\" is owned, admitted, duplicate, reserved or ambiguous\",\"provided_by\":\"Noodle operator supervising this project and its original session records\",\"readback_argv\":[\"/Users/neon/.codex/experiments/noodle84-20260917/noodle-merged-ca81\",\"--project-dir\",\"/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-negative-cf56ytxf/control\",\"admission\",\"inspect\"]}}\n",
+      "stderr": "config repairable: adapters.backlog: no backlog adapter configured Fix: Add [adapters.backlog] to .noodle.toml with adapter scripts.\nadmission refused: initial subject \"soodles-39\" is owned, admitted, duplicate, reserved or ambiguous\n",
+      "preserved": true,
+      "passed": true
+    },
+    {
+      "case": "valid-proposal",
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle84-20260917/noodle-merged-ca81",
+        "--project-dir",
+        "/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-negative-qhqqkezv/control",
+        "admission",
+        "retire",
+        "f4e3c252e98f7f30d00399410b07f99a1cafd93c3f194857f6abdd5dac5d2d23",
+        "dfb96fcf7d8d776ea177173c4c0c717d"
+      ],
+      "exit": 1,
+      "stdout": "{\"owner\":\"Noodle initial admission\",\"status\":\"refused\",\"subject\":{\"proposal_sha256\":\"f4e3c252e98f7f30d00399410b07f99a1cafd93c3f194857f6abdd5dac5d2d23\",\"initial_revision\":\"dfb96fcf7d8d776ea177173c4c0c717d\",\"order_ids\":[\"soodles-39\"]},\"current_order_revision\":\"dfb96fcf7d8d776ea177173c4c0c717d\",\"invalid\":\"initial proposal is currently valid; retain it for normal admission\",\"next\":{\"argv\":[],\"guidance\":\"Preserve the reported evidence. The named operator must supply the missing evidence or resolve the reported owner state; then use readback_argv to inspect again. Inspection is not permission to restart or repeat a write.\",\"required\":\"initial proposal is currently valid; retain it for normal admission\",\"provided_by\":\"Noodle operator supervising this project and its original session records\",\"readback_argv\":[\"/Users/neon/.codex/experiments/noodle84-20260917/noodle-merged-ca81\",\"--project-dir\",\"/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-negative-qhqqkezv/control\",\"admission\",\"inspect\"]}}\n",
+      "stderr": "config repairable: adapters.backlog: no backlog adapter configured Fix: Add [adapters.backlog] to .noodle.toml with adapter scripts.\nadmission refused: initial proposal is currently valid; retain it for normal admission\n",
+      "preserved": true,
+      "passed": true
+    },
+    {
+      "case": "live-session",
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle84-20260917/noodle-merged-ca81",
+        "--project-dir",
+        "/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-negative-slqkrkcs/control",
+        "admission",
+        "retire",
+        "c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088",
+        "dfb96fcf7d8d776ea177173c4c0c717d"
+      ],
+      "exit": 1,
+      "stdout": "{\"owner\":\"Noodle initial admission\",\"status\":\"refused\",\"subject\":{\"proposal_sha256\":\"\",\"initial_revision\":\"\",\"order_ids\":null},\"current_order_revision\":\"\",\"invalid\":\"session \\\"external-live-guard\\\" process or process group is present\",\"next\":{\"argv\":[],\"guidance\":\"Preserve the reported evidence. The named operator must supply the missing evidence or resolve the reported owner state; then use readback_argv to inspect again. Inspection is not permission to restart or repeat a write.\",\"required\":\"session \\\"external-live-guard\\\" process or process group is present\",\"provided_by\":\"Noodle operator supervising this project and its original session records\",\"readback_argv\":[\"/Users/neon/.codex/experiments/noodle84-20260917/noodle-merged-ca81\",\"--project-dir\",\"/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-negative-slqkrkcs/control\",\"admission\",\"inspect\"]}}\n",
+      "stderr": "config repairable: adapters.backlog: no backlog adapter configured Fix: Add [adapters.backlog] to .noodle.toml with adapter scripts.\nadmission refused: session \"external-live-guard\" process or process group is present\n",
+      "preserved": true,
+      "passed": true
+    },
+    {
+      "case": "orphan-live-group",
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle84-20260917/noodle-merged-ca81",
+        "--project-dir",
+        "/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-negative-803mkvvm/control",
+        "admission",
+        "retire",
+        "c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088",
+        "dfb96fcf7d8d776ea177173c4c0c717d"
+      ],
+      "exit": 1,
+      "stdout": "{\"owner\":\"Noodle initial admission\",\"status\":\"refused\",\"subject\":{\"proposal_sha256\":\"\",\"initial_revision\":\"\",\"order_ids\":null},\"current_order_revision\":\"\",\"invalid\":\"session \\\"external-live-guard\\\" process or process group is present\",\"next\":{\"argv\":[],\"guidance\":\"Preserve the reported evidence. The named operator must supply the missing evidence or resolve the reported owner state; then use readback_argv to inspect again. Inspection is not permission to restart or repeat a write.\",\"required\":\"session \\\"external-live-guard\\\" process or process group is present\",\"provided_by\":\"Noodle operator supervising this project and its original session records\",\"readback_argv\":[\"/Users/neon/.codex/experiments/noodle84-20260917/noodle-merged-ca81\",\"--project-dir\",\"/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-negative-803mkvvm/control\",\"admission\",\"inspect\"]}}\n",
+      "stderr": "config repairable: adapters.backlog: no backlog adapter configured Fix: Add [adapters.backlog] to .noodle.toml with adapter scripts.\nadmission refused: session \"external-live-guard\" process or process group is present\n",
+      "preserved": true,
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "authorizes_landing": false
+}

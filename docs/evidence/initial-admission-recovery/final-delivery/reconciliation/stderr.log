@@ -1,0 +1,4 @@
+2026-09-17T15:46:10.326479+08:00 INFO api: start initialized project=/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control runtime_dir=/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.noodle once=false server_enabled=false
+2026-09-17T15:46:10.328349+08:00 INFO api: web server disabled
+2026-09-17T15:46:10.344242+08:00 INFO api: control command action=mode status=ok
+2026-09-17T15:46:10.469557+08:00 INFO api: control command action=merge status=ok

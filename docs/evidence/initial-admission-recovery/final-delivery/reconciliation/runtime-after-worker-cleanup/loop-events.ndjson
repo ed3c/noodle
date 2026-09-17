@@ -1,0 +1,6 @@
+{"seq":1,"type":"stage.failed","at":"2026-09-17T06:42:48.715646Z","payload":{"order_id":"schedule","stage_index":0,"reason":"cook exited with status failed","session_id":"schedule-20260917-064247-df8d13","failure":{"class":"backend_recoverable","recoverability":"recoverable","owner":"backend","scope":"order","cycle_class":"order-hard","order_class":"stage-terminal"}}}
+{"seq":2,"type":"order.failed","at":"2026-09-17T06:42:48.716135Z","payload":{"order_id":"schedule","reason":"cook exited with status failed","failure":{"class":"backend_recoverable","recoverability":"recoverable","owner":"backend","scope":"order","cycle_class":"order-hard","order_class":"stage-terminal"}}}
+{"seq":3,"type":"order.requeued","at":"2026-09-17T07:02:17.097541Z","payload":{"order_id":"noodle-84"}}
+{"seq":4,"type":"order.requeued","at":"2026-09-17T07:32:47.395324Z","payload":{"order_id":"noodle-84"}}
+{"seq":5,"type":"stage.completed","at":"2026-09-17T07:46:10.403513Z","payload":{"order_id":"noodle-84","stage_index":0,"task_key":"execute","session_id":"noodle-84-0-execute-20260917-073247-961cc0"}}
+{"seq":6,"type":"order.completed","at":"2026-09-17T07:46:10.403606Z","payload":{"order_id":"noodle-84"}}

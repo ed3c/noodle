@@ -1,0 +1,33 @@
+{
+  "records": [
+    {
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle82-20260916/noodle",
+        "worktree",
+        "cleanup",
+        "noodle-84-0-execute"
+      ],
+      "cwd": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control",
+      "exit": 0,
+      "stdout": "  Removing worktree...\n  Deleting branch noodle-84-0-execute...\nDone. noodle-84-0-execute removed.\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle82-20260916/noodle",
+        "worktree",
+        "cleanup",
+        "issue84-control"
+      ],
+      "cwd": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control",
+      "exit": 0,
+      "stdout": "  Removing worktree...\n  Deleting branch issue84-control...\nDone. issue84-control removed.\n",
+      "stderr": ""
+    }
+  ],
+  "worker_removed": true,
+  "control_removed": true,
+  "runtime_preserved": true,
+  "process_groups_absent": true,
+  "main": "ca81f942f478e8e4afcbbce6ca69640867efe753"
+}

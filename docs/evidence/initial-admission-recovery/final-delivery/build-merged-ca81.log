@@ -1,0 +1,15 @@
+
+> @ build /Users/neon/.codex/experiments/noodle78-delivery-20260916/control
+> pnpm --filter noodle-ui build && go build -o ./bin/noodle .
+
+
+> noodle-ui@ build /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/ui
+> vite build
+
+sh: vite: command not found
+/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/ui:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  noodle-ui@ build: `vite build`
+spawn ENOENT
+ WARN   Local package.json exists, but node_modules missing, did you mean to install?
+ ELIFECYCLE  Command failed with exit code 1.
+ WARN   Local package.json exists, but node_modules missing, did you mean to install?

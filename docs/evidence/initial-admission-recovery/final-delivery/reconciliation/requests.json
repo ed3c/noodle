@@ -1,0 +1,12 @@
+[
+  {
+    "id": "issue84-reconcile-1dc9499948454dfab034f0c042b547d2",
+    "action": "mode",
+    "value": "manual"
+  },
+  {
+    "id": "issue84-reconcile-6baee03c047446a9850eaabe149c0d9c",
+    "action": "merge",
+    "order_id": "noodle-84"
+  }
+]

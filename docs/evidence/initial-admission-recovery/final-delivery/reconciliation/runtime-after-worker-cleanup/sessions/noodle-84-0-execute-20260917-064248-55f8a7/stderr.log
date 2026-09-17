@@ -1,0 +1,16 @@
+Reading prompt from stdin...
+2026-09-17T06:42:49.251990Z  WARN codex_skills::interface: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/
+2026-09-17T06:42:49.252015Z  WARN codex_skills::interface: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/
+2026-09-17T06:42:50.256643Z  WARN codex_skills::interface: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/
+2026-09-17T06:42:50.256658Z  WARN codex_skills::interface: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/
+2026-09-17T06:44:29.687996Z  WARN codex_sandboxing::violation: recorded sandbox violation: resource=network backend=managed_network_proxy protocol=http-connect host=proxy.golang.org port=Some(443) reason=not_allowed method=Some("CONNECT") mode=None client=Some("127.0.0.1:54263") decision=Some("deny") source=Some("baseline_policy")
+2026-09-17T06:44:29.689101Z  WARN codex_sandboxing::violation: recorded sandbox violation: resource=network backend=managed_network_proxy protocol=http-connect host=proxy.golang.org port=Some(443) reason=not_allowed method=Some("CONNECT") mode=None client=Some("127.0.0.1:54265") decision=Some("deny") source=Some("baseline_policy")
+2026-09-17T06:44:29.689303Z  WARN codex_network_proxy::http_proxy: CONNECT blocked (client=127.0.0.1:54263, host=proxy.golang.org, reason=not_allowed)
+2026-09-17T06:44:29.689417Z  WARN codex_network_proxy::http_proxy: CONNECT blocked (client=127.0.0.1:54265, host=proxy.golang.org, reason=not_allowed)
+2026-09-17T06:44:29.689424Z  WARN codex_sandboxing::violation: recorded sandbox violation: resource=network backend=managed_network_proxy protocol=http-connect host=proxy.golang.org port=Some(443) reason=not_allowed method=Some("CONNECT") mode=None client=Some("127.0.0.1:54266") decision=Some("deny") source=Some("baseline_policy")
+2026-09-17T06:44:29.689432Z  WARN codex_network_proxy::http_proxy: CONNECT blocked (client=127.0.0.1:54266, host=proxy.golang.org, reason=not_allowed)
+2026-09-17T06:44:29.691154Z  WARN codex_sandboxing::violation: recorded sandbox violation: resource=network backend=managed_network_proxy protocol=http-connect host=proxy.golang.org port=Some(443) reason=not_allowed method=Some("CONNECT") mode=None client=Some("127.0.0.1:54264") decision=Some("deny") source=Some("baseline_policy")
+2026-09-17T06:44:29.691166Z  WARN codex_network_proxy::http_proxy: CONNECT blocked (client=127.0.0.1:54264, host=proxy.golang.org, reason=not_allowed)
+2026-09-17T06:44:29.691635Z ERROR codex_core::tools::router: error=exec_command failed: ProcessFailed { message: "Network access to \"proxy.golang.org\" was blocked: domain is not on the allowlist for the current sandbox mode." }
+2026-09-17T06:52:30.840715Z  WARN codex_sandboxing::violation: recorded sandbox violation: resource=filesystem backend=seatbelt reason=operation_not_permitted path=unknown
+2026-09-17T06:53:00.763365Z ERROR codex_core::tools::router: error=patch rejected: writing outside of the project; rejected by user approval settings

@@ -1,0 +1,17 @@
+[order:noodle-84] Work backlog item noodle-84
+Task: This is the final bounded verification continuation of...
+
+Use Skill(execute) for methodology.
+
+This is the final bounded verification continuation of the ORIGINAL Noodle order noodle-84, stage 0, original worktree. Two real blocked attempts are preserved. The supervisor restored saved work after baseline dispatch discarded dirty progress, finished the causal repairs, and committed passing candidate 5d1e9fefd902bec53b260b22abf3b55c3caf0203. Do not reconstruct missing code or invent an order/outcome. Verify that exact clean HEAD before any drive. No implementation edits, new commits, provider calls, merge, additional agents or full smoke/model reruns are needed in this stage.
+
+Read /Users/neon/.codex/experiments/noodle84-20260917/issue-amended-smoke-fixture.json and the original worker handoffs to understand scope; then the current .agents/skills/noodle/SKILL.md. Frozen selected inputs are /Users/neon/.codex/experiments/noodle84-20260917/continuation-selection-attempt3.json. It binds the exact binary, skill digest and two disposable fixture roots. Full pnpm check passed on this clean HEAD; full pnpm test:smoke passed in 267.974 seconds; fixed external owner observers passed. Read their evidence only if needed to diagnose; do not treat them as Issue closure.
+
+Your real task is to demonstrate the shortest P-class path as a fresh Session: obtain admission help, inspect the stale fixture, execute the owner's current next.argv exactly as an argv array, and follow the retired readback to no_proposal. Stop there and report the named scheduling owner, no new order. Inspect the valid-proposal fixture, preserve it, and classify its correct refusal GREEN. Do not reconstruct pins, edit fixture/runtime files, start a loop, touch production, or change permissions. Journal actual argv/stdout/stderr/returncodes and loaded skill digest under /Users/neon/.codex/experiments/noodle84-20260917/worker-evidence-attempt3/journal.json. Use a bounded subprocess wait for each short CLI invocation.
+
+After successful actual drives, emit exactly ONE typed stage_message using /Users/neon/.codex/experiments/noodle82-20260916/noodle event emit (read its help first), with actual env NOODLE_SESSION_ID, NOODLE_ORDER_ID and integer NOODLE_STAGE_INDEX. Use outcome=completed, blocking=false only if the exact clean committed candidate and both CLI cases verified. This means this implementation/verification stage, not provider delivery or Issue resolution. On a concrete blocker emit blocked/blocking=true. Preserve a handoff JSON with actual candidate and journal path in worker-evidence-attempt3. Never fill a process exit yourself. Do NOT emit stage_yield: the external recorder must observe your actual exit. After the typed message, immediately return a one-sentence final response. The supervisor owns cleanup and delivery. This stage is bounded to 600 seconds; keep it short and do not add unrelated self-review after completing the stated steps.
+
+You are resuming work in worktree "noodle-84-0-execute" which has 1 prior commit(s):
+5d1e9fe fix(admission): retire rejected initial proposals through the stopped owner
+
+Review what was done and continue with the remaining work.

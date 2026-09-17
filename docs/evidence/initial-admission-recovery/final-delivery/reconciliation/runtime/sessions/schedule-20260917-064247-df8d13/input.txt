@@ -1,0 +1,73 @@
+Use Skill(schedule). The selected skill is the single owner of project scheduling and output policy.
+
+Runtime interface:
+- checkout_mode: primary-checkout
+- selected_skill: schedule
+- selected_skill_path: /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.agents/skills/schedule
+- mise_input: /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.noodle/mise.json
+- promotion_input: /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.noodle/orders-next.json
+- canonical_orders: /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.noodle/orders.json (read-only; the loop promotes atomically)
+
+Supported compact transport schema (the selected skill may impose stricter project policy):
+orders.json schema (JSON):
+```json
+{
+  "action_needed": [
+    "string - backlog item ID skipped pending user action"
+  ],
+  "initial_revision": "string (optional) - optional current order_revision from Noodle state.snapshot.json; requires every proposed ID to be absent. Stale/replayed proposals refuse before promotion. This is not execution authorization; omit only for the existing legacy scheduling contract.",
+  "orders": [
+    {
+      "id": "string - order ID (plan ID as string, or unique slug)",
+      "plan": [
+        "string - linked plan path(s), e.g. plans/15-bootstrap-onboarding/overview"
+      ],
+      "rationale": "string (optional) - placement reason citing a rule or principle",
+      "stages": [
+        {
+          "do": "string (optional) - task key (must match a task_types[].key from mise)",
+          "extra": {
+            "<key>": "JSON - opaque extension data preserved across round-trips"
+          },
+          "extra_prompt": "string (optional) - supplemental instructions for the cook on how to approach the task (max ~1000 chars)",
+          "group": "number (optional) - parallel group ID; stages in the same group run concurrently, groups execute sequentially (default: 0)",
+          "model": "string (optional) - model for this stage (optional; defaults from routing config)",
+          "prompt": "string (optional) - full prompt text for the dispatched session",
+          "runtime": "string (optional) - runtime for this stage (process, sprites, etc.)",
+          "with": "string (optional) - provider for this stage (optional; defaults from routing config)"
+        }
+      ],
+      "title": "string (optional) - brief order description"
+    }
+  ]
+}
+```
+
+Constraints:
+- Each order is a pipeline of stage groups executed sequentially. Stages within the same group run concurrently.
+- Group related stages into one order rather than separate orders.
+- Stage `do` values must match a `task_types[].key` from mise, or omit `do` and provide a `prompt` for ad-hoc stages.
+- Each `rationale` should cite a specific scheduling rule or principle.
+- Do not include `status` or `skill` fields — the loop sets these automatically.
+
+Task types you may schedule:
+- adversarial-review: After cook sessions that produce large diffs (200+ lines), implement plan phases, or complete a planning session
+- execute: When backlog items with linked plans are ready for implementation
+- meditate: Standalone single-stage order after several reflect cycles have accumulated. Expensive — don't over-schedule.
+- noodles-issue-execute: Only when the target schedule selects an authorized ed3c/noodle Issue
+- oops: When infrastructure failures are detected (build breaks, test failures, stale Noodle state)
+- plan: When backlog items are tagged #needs_plan and have no linked plan yet
+- quality: Follow-up stage after execute. Cross-provider review preferred — if codex executed, schedule quality on claude; if claude executed, schedule on codex.
+- reflect: Follow-up stage after quality — capture learnings from the completed execute→quality cycle.
+
+---
+
+# Noodle Runtime Context
+
+This session is managed by Noodle. The following are runtime facts, not project workflow policy:
+
+- working_directory: /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control
+- checkout_mode: primary-checkout
+- selected_skill: schedule
+
+Project workflow policy comes from the selected skill or explicit system prompt.

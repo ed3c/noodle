@@ -1,0 +1,33 @@
+{
+  "issue": "ed3c/noodle#84",
+  "pull_request": 85,
+  "candidate": "5d1e9fefd902bec53b260b22abf3b55c3caf0203",
+  "provider_merge": "ca81f942f478e8e4afcbbce6ca69640867efe753",
+  "provider_issue_closed": true,
+  "original_order": "noodle-84",
+  "order_status": "completed",
+  "original_worker_and_control_cleaned": true,
+  "original_sessions_quiescent": true,
+  "accepted_native_binary": {
+    "binary": "/Users/neon/.codex/experiments/noodle84-20260917/noodle-merged-ca81",
+    "sha256": "5657c8c3dcaa2491d290a35995c35e4c3d46993955b151f3c75e3bac94476aff",
+    "source_head": "ca81f942f478e8e4afcbbce6ca69640867efe753",
+    "carrier": "darwin_arm64",
+    "build_receipt": "build-merged-ca81-after-setup.json",
+    "fixed_observers": [
+      "external-merged-ca81/receipt.json",
+      "external-refusal-merged-ca81/receipt.json"
+    ],
+    "purpose": "explicit supervisor selection for stopped initial-proposal recovery",
+    "old_stamp_failure_retained": "build-provenance-failure.json",
+    "does_not_change_soodles_runtime_lock": true
+  },
+  "scope_limitations": [
+    "old binary build stamp failed source claim; preserved as failure",
+    "first independent P consumer required SIGTERM; not natural completion",
+    "dirty requeue discards uncommitted progress; not repaired by this atom",
+    "historical failed schedule and two blocked attempts retained",
+    "no Windows or power-loss guarantee"
+  ],
+  "authorizes_landing": false
+}

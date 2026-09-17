@@ -1,0 +1,14 @@
+{
+  "binary": "/Users/neon/.codex/experiments/noodle84-20260917/noodle-merged-ca81",
+  "sha256": "5657c8c3dcaa2491d290a35995c35e4c3d46993955b151f3c75e3bac94476aff",
+  "source_head": "ca81f942f478e8e4afcbbce6ca69640867efe753",
+  "carrier": "darwin_arm64",
+  "build_receipt": "build-merged-ca81-after-setup.json",
+  "fixed_observers": [
+    "external-merged-ca81/receipt.json",
+    "external-refusal-merged-ca81/receipt.json"
+  ],
+  "purpose": "explicit supervisor selection for stopped initial-proposal recovery",
+  "old_stamp_failure_retained": "build-provenance-failure.json",
+  "does_not_change_soodles_runtime_lock": true
+}

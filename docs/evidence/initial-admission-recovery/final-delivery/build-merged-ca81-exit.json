@@ -1,0 +1,9 @@
+{
+  "argv": [
+    "pnpm",
+    "build"
+  ],
+  "cwd": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control",
+  "returncode": 1,
+  "elapsed_seconds": 0.779895999992732
+}
