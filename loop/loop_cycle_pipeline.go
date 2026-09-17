@@ -47,7 +47,7 @@ func (l *Loop) mergeOrdersNext() (mergeResult, error) {
 			}
 		}
 	}
-	return consumeOrdersNextAtRevision(l.deps.OrdersNextFile, orders, l.orderRevision, nonScheduleOrderIDs(l.canonical), admitted)
+	return consumeOrdersNextAtRevision(l.deps.OrdersNextFile, orders, l.orderRevision, nonScheduleOrderIDs(l.canonical), initialProjectionIDs(l.canonical), admitted)
 }
 
 // handlePromotionResult processes the side effects of an orders-next

@@ -70,6 +70,27 @@ All commands accept `--project-dir` (default: current directory, env: `NOODLE_PR
 | `noodle status` | Show runtime status (active agents, queue depth, loop state) |
 | `noodle reset` | Clear all runtime state (refuses if loop is running) |
 
+### Initial proposal recovery (P-class)
+
+Use the existing Noodle owner with a known project and a stopped loop.
+Run noodle --project-dir <known-project> admission inspect and consume its JSON.
+For recoverable, execute next.argv exactly as an argv array. Never reconstruct
+the digest, revision or command from memory or a historical checkpoint.
+For refused, preserve evidence and report next.required to next.provided_by.
+After that owner resolves the condition, use next.readback_argv to inspect again.
+A valid initial proposal remains available for normal admission; do not retire it.
+For retired, follow next.argv once for fresh canonical readback. For no_proposal,
+recovery is finished: next.argv is empty and next names the scheduling owner
+and inputs for a separately admitted intent. Do not loop inspection indefinitely.
+Retirement does not dispatch, restart, complete an order or authorize provider
+writes. Record the actual JSON, argv and operation results. Missing owner/project
+inputs must be supplied by the supervising operator, not guessed by the Session.
+
+| Command | Description |
+|---------|-------------|
+| noodle admission inspect | Inspect owner, subject, revision, invalid and exact next argv |
+| noodle admission retire PROPOSAL_SHA256 CURRENT_ORDER_REVISION | Archive and retire only the unchanged rejected initial proposal |
+
 ### Skills & Schemas
 
 | Command | Description |

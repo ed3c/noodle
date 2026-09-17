@@ -3,6 +3,21 @@
 // for command names and descriptions.
 package cmdmeta
 
+// AdmissionRecoveryGuide is shared by CLI help and the generated P-class skill.
+const AdmissionRecoveryGuide = `Use the existing Noodle owner with a known project and a stopped loop.
+Run noodle --project-dir <known-project> admission inspect and consume its JSON.
+For recoverable, execute next.argv exactly as an argv array. Never reconstruct
+the digest, revision or command from memory or a historical checkpoint.
+For refused, preserve evidence and report next.required to next.provided_by.
+After that owner resolves the condition, use next.readback_argv to inspect again.
+A valid initial proposal remains available for normal admission; do not retire it.
+For retired, follow next.argv once for fresh canonical readback. For no_proposal,
+recovery is finished: next.argv is empty and next names the scheduling owner
+and inputs for a separately admitted intent. Do not loop inspection indefinitely.
+Retirement does not dispatch, restart, complete an order or authorize provider
+writes. Record the actual JSON, argv and operation results. Missing owner/project
+inputs must be supplied by the supervising operator, not guessed by the Session.`
+
 // Flag describes a CLI flag.
 type Flag struct {
 	Name    string // long name (e.g. "once")
@@ -53,6 +68,10 @@ func Commands() []Command {
 			{Name: "emit", Short: "Emit an external event", Flags: []Flag{
 				{Name: "payload", Type: "string", Desc: "Event payload as JSON"},
 			}},
+		}},
+		{Name: "admission", Short: "Inspect or retire a rejected initial proposal with the stopped owner", Subcommands: []Command{
+			{Name: "inspect", Short: "Read admission evidence and exact supported continuation"},
+			{Name: "retire", Short: "Retire an unchanged rejected initial proposal"},
 		}},
 		{Name: "reset", Short: "Clear all runtime state"},
 	}

@@ -1,6 +1,8 @@
 // Package generate produces auto-generated files from source metadata.
 package generate
 
+import "github.com/poteto/noodle/cmdmeta"
+
 //go:generate go run ./cmd/gen-skill
 
 // GenerateSkillContent returns the full SKILL.md content for the noodle skill.
@@ -82,6 +84,15 @@ All commands accept ` + "`--project-dir`" + ` (default: current directory, env: 
 | ` + "`noodle start --once`" + ` | Run one scheduling cycle and exit |
 | ` + "`noodle status`" + ` | Show runtime status (active agents, queue depth, loop state) |
 | ` + "`noodle reset`" + ` | Clear all runtime state (refuses if loop is running) |
+
+### Initial proposal recovery (P-class)
+
+` + cmdmeta.AdmissionRecoveryGuide + `
+
+| Command | Description |
+|---------|-------------|
+| noodle admission inspect | Inspect owner, subject, revision, invalid and exact next argv |
+| noodle admission retire PROPOSAL_SHA256 CURRENT_ORDER_REVISION | Archive and retire only the unchanged rejected initial proposal |
 
 ### Skills & Schemas
 

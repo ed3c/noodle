@@ -149,14 +149,8 @@ func main() {
 1. [ ] Create a hello.txt file containing "hello world" ~small
 `)
 
-	// Skills directory — copy schedule and execute from the repo.
-	srcSkills := filepath.Join(repoRoot(t), ".agents", "skills")
-	dstSkills := filepath.Join(dir, ".agents", "skills")
-	for _, skill := range []string{"schedule", "execute"} {
-		src := filepath.Join(srcSkills, skill)
-		dst := filepath.Join(dstSkills, skill)
-		copyDir(t, src, dst)
-	}
+	// This is a local-backlog fixture, not the repository's GitHub target.
+	writeSmokeSkills(t, dir, noodleBin, true)
 
 	// Backlog adapter scripts — simple shell scripts for the E2E test.
 	adapterDir := filepath.Join(dir, "adapters")
@@ -192,7 +186,7 @@ echo "edit: $@" >&2
 
 [routing.defaults]
 provider = "codex"
-model = "gpt-5.3-codex-spark"
+model = "gpt-6-astra"
 
 [skills]
 paths = [".agents/skills"]
@@ -228,6 +222,41 @@ port = 13737
 	run(t, dir, "git", "commit", "-m", "noodle e2e scaffolding")
 
 	return dir
+}
+
+func writeSmokeSkills(t *testing.T, dir, noodleBin string, waitForUI bool) {
+	t.Helper()
+	writeFile(t, filepath.Join(dir, ".agents", "skills", "schedule", "SKILL.md"), `---
+name: schedule
+description: Schedule this isolated local-backlog smoke fixture.
+schedule: When its local backlog has an unowned task.
+---
+Read .noodle/mise.json and .noodle/state.snapshot.json in this fixture.
+Do not invoke a GitHub adapter, use credentials, or read another repository.
+If orders-next.json already exists, leave it untouched and return.
+Select the first open backlog item not owned by any canonical order or initial
+admission ledger entry. If none exists, write {"orders":[]} to orders-next.json.
+Otherwise write exactly one INITIAL proposal to .noodle/orders-next.json:
+use the snapshot's current order_revision as initial_revision, the exact backlog
+id, and one stage with do="execute", runtime="process", and prompt containing
+that local task. Do not modify canonical files. Return after publishing.
+`)
+	barrier := ""
+	if waitForUI {
+		barrier = fmt.Sprintf("Before committing or yielding, wait at most 90 seconds for the fixture observer file %q to exist. The UI observer creates it after inspecting your actual active worktree. If it never arrives, report failure.\n", filepath.Join(dir, ".noodle", "ui-observed"))
+	}
+	writeFile(t, filepath.Join(dir, ".agents", "skills", "execute", "SKILL.md"), fmt.Sprintf(`---
+name: execute
+description: Execute the local smoke task in the Noodle-created worktree.
+schedule: When the fixture scheduler admits its local task.
+---
+Implement the actual local task: create hello.txt containing hello world.
+Use this existing worktree, run go test ./..., and verify hello.txt contents.
+Do not call GitHub, access credentials, spawn agents, or merge the worktree.
+%s
+Commit passing work. Read the supplied binary's event help and emit stage_yield
+with your actual NOODLE_SESSION_ID, using %q. Then return. Noodle owns merging.
+`, barrier, noodleBin))
 }
 
 // milestone represents a phased polling checkpoint.
