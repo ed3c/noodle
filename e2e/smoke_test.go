@@ -109,6 +109,7 @@ func TestSmokeAgentLoop(t *testing.T) {
 		if err := runPlaywrightTests(t, baseURL); err != nil {
 			return fmt.Errorf("playwright UI smoke: %w", err)
 		}
+		writeFile(t, filepath.Join(projectDir, ".noodle", "ui-observed"), "observed\n")
 		if err := pollMilestones(t, postUISmokeMilestones, projectDir); err != nil {
 			return err
 		}
@@ -177,12 +178,7 @@ func TestSmokeProcessRuntimeDefault(t *testing.T) {
 
 	writeFile(t, filepath.Join(dir, "brain", "todos.md"), "# Todos\n\n<!-- next-id: 2 -->\n\n## Tasks\n\n1. [ ] Create hello.txt ~small\n")
 
-	// Skills.
-	srcSkills := filepath.Join(repoRoot(t), ".agents", "skills")
-	dstSkills := filepath.Join(dir, ".agents", "skills")
-	for _, skill := range []string{"schedule", "execute"} {
-		copyDir(t, filepath.Join(srcSkills, skill), filepath.Join(dstSkills, skill))
-	}
+	writeSmokeSkills(t, dir, noodleBin, false)
 
 	// Adapter scripts.
 	adapterDir := filepath.Join(dir, "adapters")
@@ -201,7 +197,7 @@ func TestSmokeProcessRuntimeDefault(t *testing.T) {
 
 [routing.defaults]
 provider = "codex"
-model = "gpt-5.3-codex-spark"
+model = "gpt-6-astra"
 
 [skills]
 paths = [".agents/skills"]
@@ -445,7 +441,7 @@ func TestSmokeStartOnceBacklogParseWarningIsRecoverable(t *testing.T) {
 
 [routing.defaults]
 provider = "codex"
-model = "gpt-5.3-codex-spark"
+model = "gpt-6-astra"
 
 [skills]
 paths = [".agents/skills"]
@@ -532,12 +528,12 @@ func TestSmokeScheduleOnlyNoTaskTypes(t *testing.T) {
 	chmodExec(t, filepath.Join(adapterDir, "backlog-add"))
 	chmodExec(t, filepath.Join(adapterDir, "backlog-edit"))
 
-	// Config: schedule-only, codex-spark for speed.
+	// Config: schedule-only, the measured Codex carrier.
 	writeFile(t, filepath.Join(dir, ".noodle.toml"), `mode = "auto"
 
 [routing.defaults]
 provider = "codex"
-model = "gpt-5.3-codex-spark"
+model = "gpt-6-astra"
 
 [skills]
 paths = [".agents/skills"]
@@ -678,21 +674,28 @@ If INSTALL.md says to ask the user, choose these defaults and continue:
 - first backlog item in todos.md: "Initial smoke test task"
 - brainmaxxing: no
 
-Complete the setup end-to-end and then report completion.`, installMd)
+This is a bounded local onboarding fixture. The tested binary is %s and is on
+PATH; do not install another binary. Source files are pinned to %s: copy its
+.agents/skills/noodle and defaults/adapters files instead of downloading remote
+tips. Follow the remaining setup steps and write project-local schedule/execute
+skills for this simple Go fixture. Do not inspect personal conversation history,
+unrelated projects or account settings. Do not start a persistent loop: the test
+will run the supplied binary with start --once after your actual exit.
+Complete the setup and report the observed result.`, installMd, noodleBin, root)
 
 	codexOut := filepath.Join(t.TempDir(), "codex-output.txt")
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 	defer cancel()
 
 	codexCmd := exec.CommandContext(ctx, "codex", "exec",
 		"--skip-git-repo-check",
 		"--dangerously-bypass-approvals-and-sandbox",
-		"--model", "gpt-5.3-codex-spark",
+		"--model", "gpt-6-astra",
 		"-o", codexOut,
 		prompt,
 	)
 	codexCmd.Dir = dir
-	codexCmd.Env = append(os.Environ(), "NOODLE_NO_BROWSER=1")
+	codexCmd.Env = append(os.Environ(), "NOODLE_NO_BROWSER=1", "PATH="+filepath.Dir(noodleBin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	codexOutput, codexErr := codexCmd.CombinedOutput()
 	t.Logf("codex output:\n%s", string(codexOutput))

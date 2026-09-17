@@ -303,10 +303,10 @@ type mergeResult struct {
 // skipped (not rejected), except when replacing a failed order with a new
 // active proposal for explicit restart.
 func consumeOrdersNext(nextPath string, existing OrdersFile) (mergeResult, error) {
-	return consumeOrdersNextAtRevision(nextPath, existing, "", nil, nil)
+	return consumeOrdersNextAtRevision(nextPath, existing, "", nil, nil, nil)
 }
 
-func consumeOrdersNextAtRevision(nextPath string, existing OrdersFile, revision string, ownedIDs, admittedEffects map[string]struct{}) (mergeResult, error) {
+func consumeOrdersNextAtRevision(nextPath string, existing OrdersFile, revision string, ownedIDs, projectedOwnedIDs, admittedEffects map[string]struct{}) (mergeResult, error) {
 	nextData, err := os.ReadFile(nextPath)
 	if os.IsNotExist(err) {
 		return mergeResult{}, nil
@@ -349,14 +349,15 @@ func consumeOrdersNextAtRevision(nextPath string, existing OrdersFile, revision 
 				projectedIDs[id] = struct{}{}
 			}
 		}
-		if !maps.Equal(projectedIDs, ownedIDs) {
+		if !maps.Equal(projectedIDs, projectedOwnedIDs) {
 			return mergeResult{}, ordersNextRejectedError{fmt.Errorf("invalid initial admission orders projection: differs from canonical ownership; owner: Noodle canonical checkpoint; reconcile owner state before initial admission")}
 		}
 		seen := make(map[string]bool, len(incoming.Orders))
 		for _, order := range incoming.Orders {
 			_, owned := existingIndex[order.ID]
+			_, canonicalOwned := ownedIDs[order.ID]
 			_, admitted := admittedEffects[initialAdmissionEffectID(order.ID)]
-			if owned || admitted || seen[order.ID] || strings.TrimSpace(order.ID) == "" || order.ID == scheduleOrderID {
+			if owned || canonicalOwned || admitted || seen[order.ID] || strings.TrimSpace(order.ID) == "" || order.ID == scheduleOrderID {
 				return mergeResult{}, ordersNextRejectedError{fmt.Errorf("invalid initial order.id=%q: already owned, duplicate or reserved; owner: Noodle canonical orders; read existing order and use its explicit control for recovery", order.ID)}
 			}
 			seen[order.ID] = true
