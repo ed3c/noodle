@@ -1,0 +1,8 @@
+=== RUN   TestAdmissionRecoveryHistoricalEvidenceScope
+=== RUN   TestAdmissionRecoveryHistoricalEvidenceScope/unrelated_pending_effect
+    admission_scope_test.go:29: unrelated/stale evidence blocked exact unpromoted subject: {Owner:Noodle initial admission Status:refused Subject:{SHA256: InitialRevision: OrderIDs:[]} Revision: Invalid:mutant rejects all pending history Next:{Argv:[] Guidance:Preserve the reported evidence. The named operator must supply the missing evidence or resolve the reported owner state; then use readback_argv to inspect again. Inspection is not permission to restart or repeat a write. Required:mutant rejects all pending history ProvidedBy:Noodle operator supervising this project and its original session records ReadbackArgv:[noodle --project-dir /var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/TestAdmissionRecoveryHistoricalEvidenceScopeunrelated_pending_e346231343/001 admission inspect]}}
+--- FAIL: TestAdmissionRecoveryHistoricalEvidenceScope (0.01s)
+    --- FAIL: TestAdmissionRecoveryHistoricalEvidenceScope/unrelated_pending_effect (0.01s)
+FAIL
+FAIL	github.com/poteto/noodle/loop	0.470s
+FAIL

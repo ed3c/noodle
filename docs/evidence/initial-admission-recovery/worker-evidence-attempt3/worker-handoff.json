@@ -1,0 +1,44 @@
+{
+  "status": "completed",
+  "scope": "Original noodle-84 stage 0 implementation/verification only; not provider delivery or Issue resolution",
+  "actual_candidate": "5d1e9fefd902bec53b260b22abf3b55c3caf0203",
+  "candidate_clean": true,
+  "journal_path": "/Users/neon/.codex/experiments/noodle84-20260917/worker-evidence-attempt3/journal.json",
+  "worktree": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute",
+  "session_id": "noodle-84-0-execute-20260917-073247-961cc0",
+  "order_id": "noodle-84",
+  "stage_index": 0,
+  "cases": {
+    "valid-proposal": {
+      "classification": "GREEN",
+      "status": "refused",
+      "proposal_and_existing_files_preserved": true,
+      "owner_created_files": {
+        ".noodle/noodle.lock": "703d2c10fa601276a4dd96193faed68902a642a44eb5b01b40d6fc8499e12822"
+      },
+      "required": "initial proposal is currently valid; retain it for normal admission",
+      "provided_by": "Noodle operator supervising this project and its original session records"
+    },
+    "stale-proposal": {
+      "classification": "GREEN",
+      "statuses": [
+        "recoverable",
+        "retired",
+        "no_proposal"
+      ],
+      "scheduling_owner": "Noodle scheduling owner through the existing schedule skill / orders-next.json admission entry",
+      "required": "A separately admitted intent and a fresh INITIAL proposal bound to current_order_revision",
+      "canonical_files_preserved": true,
+      "new_order": false
+    }
+  },
+  "loaded_skill": {
+    "path": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/.agents/skills/noodle/SKILL.md",
+    "sha256": "0dda11c1b839400686168505ce56cdd359e595ea78b9129a2761243959c496d0",
+    "expected_sha256": "0dda11c1b839400686168505ce56cdd359e595ea78b9129a2761243959c496d0"
+  },
+  "new_order": false,
+  "provider_delivery_claimed": false,
+  "issue_resolution_claimed": false,
+  "cleanup_and_delivery_owner": "supervisor"
+}

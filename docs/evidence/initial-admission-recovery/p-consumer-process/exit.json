@@ -1,0 +1,35 @@
+{
+  "recorder_pid": 96171,
+  "cwd": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute",
+  "argv": [
+    "/Users/neon/.codex/packages/standalone/releases/0.153.4-aarch64-apple-darwin/bin/codex",
+    "exec",
+    "--json",
+    "--model",
+    "gpt-6-astra",
+    "-c",
+    "default_permissions=\"agent-default\"",
+    "-c",
+    "approval_policy=\"never\"",
+    "--add-dir",
+    "/Users/neon/.codex/experiments/noodle84-20260917"
+  ],
+  "session_id": null,
+  "order_id": null,
+  "stage_index": null,
+  "started_at": "2026-09-17T07:24:08.911316+00:00",
+  "authorizes_landing": false,
+  "child_pid": 96172,
+  "child_pgid": 96162,
+  "returncode": -15,
+  "termination_signal": 15,
+  "finished_at": "2026-09-17T07:28:25.782352+00:00",
+  "elapsed_seconds": 256.8677913749707,
+  "forwarded_signals": [
+    15
+  ],
+  "waited": true,
+  "stdout_sha256": "ba8fa6bd97922f7ed7b0b40b8a96243762cfead6abf29b75577df53a173e85bb",
+  "stdout_bytes": 34359,
+  "terminal_tail_lines_deferred": 0
+}

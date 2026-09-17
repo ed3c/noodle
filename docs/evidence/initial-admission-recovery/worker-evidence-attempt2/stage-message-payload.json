@@ -1,0 +1,7 @@
+{
+  "message": "Blocked: original worktree is clean at source parent 656e9ec; prior implementation and supervisor candidate are absent. loop/admission_recovery.go and cmd_admission.go are missing; generated skill SHA256 mismatches continuation-selection.json. No tests or commit claimed. Raw readback and worker-handoff.json saved in worker-evidence-attempt2. Supervisor must restore and verify candidate continuity before another same-order attempt.",
+  "blocking": true,
+  "outcome": "blocked",
+  "order_id": "noodle-84",
+  "stage_index": 0
+}

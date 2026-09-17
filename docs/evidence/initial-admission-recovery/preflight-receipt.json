@@ -1,0 +1,10 @@
+{
+  "git_root": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute",
+  "doctor_exit": 1,
+  "doctor_failed_checks": [
+    "terminal.env"
+  ],
+  "repo_predicate": true,
+  "initial_proposal_sha256": "93dc183697003ae385a1c4df168242714988d715a9c4c6316939d025d38214b3",
+  "writer_started": false
+}

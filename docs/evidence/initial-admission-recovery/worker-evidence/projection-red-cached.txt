@@ -1,0 +1,13 @@
+go: downloading github.com/fsnotify/fsnotify v1.9.0
+go: downloading github.com/BurntSushi/toml v1.6.0
+go: downloading gopkg.in/yaml.v3 v3.0.1
+go: downloading github.com/superfly/sprites-go v0.0.0-20260226040941-951bb2e6b07d
+go: downloading github.com/gorilla/websocket v1.5.3
+go: downloading golang.org/x/term v0.34.0
+go: downloading github.com/Masterminds/semver/v3 v3.2.1
+go: downloading golang.org/x/sys v0.41.0
+--- FAIL: TestInitialAdmissionCompletedProjectionBoundary (0.01s)
+    admission_projection_test.go:29: fresh B rejected after completed A: invalid initial admission orders projection: differs from canonical ownership; owner: Noodle canonical checkpoint; reconcile owner state before initial admission
+FAIL
+FAIL	github.com/poteto/noodle/loop	1.555s
+FAIL

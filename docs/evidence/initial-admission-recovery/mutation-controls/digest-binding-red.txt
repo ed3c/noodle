@@ -1,0 +1,8 @@
+=== RUN   TestAdmissionRecoveryBindingsAndLock
+=== RUN   TestAdmissionRecoveryBindingsAndLock/digest
+    admission_recovery_test.go:251: unsafe retirement: {Owner:Noodle initial admission Status:retired Subject:{SHA256:269429e212be0101e0e063926ef6a29ab72e4f3419ad4c9dc8d57cc86b67bcb1 InitialRevision:00000000000000000000000000000000 OrderIDs:[B]} Revision:824f0cbe36444fb263df627f180eed8a Invalid: Next:{Argv:[noodle --project-dir /var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/TestAdmissionRecoveryBindingsAndLockdigest2522413895/001 admission inspect] Guidance:Read fresh canonical revision and ownership before preparing a new initial proposal through the existing scheduling/admission flow. Retirement grants no execution or provider authority. Required: ProvidedBy: ReadbackArgv:[noodle --project-dir /var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/TestAdmissionRecoveryBindingsAndLockdigest2522413895/001 admission inspect]}}
+--- FAIL: TestAdmissionRecoveryBindingsAndLock (0.06s)
+    --- FAIL: TestAdmissionRecoveryBindingsAndLock/digest (0.05s)
+FAIL
+FAIL	github.com/poteto/noodle/loop	0.510s
+FAIL

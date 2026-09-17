@@ -1,0 +1,8 @@
+=== RUN   TestAdmissionRecoveryBindingsAndLock
+=== RUN   TestAdmissionRecoveryBindingsAndLock/lock
+    admission_recovery_test.go:240: inspection ignored instance lock
+--- FAIL: TestAdmissionRecoveryBindingsAndLock (0.03s)
+    --- FAIL: TestAdmissionRecoveryBindingsAndLock/lock (0.03s)
+FAIL
+FAIL	github.com/poteto/noodle/loop	0.485s
+FAIL

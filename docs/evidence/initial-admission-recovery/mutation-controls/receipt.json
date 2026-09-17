@@ -1,0 +1,634 @@
+{
+  "passed": false,
+  "gates": [
+    {
+      "gate": "canonical-schema",
+      "control": "TestAdmissionRecoveryRefusalGates/unknown_schema",
+      "mutated_file": "loop/admission_evidence.go",
+      "original_sha256": "2f768faa20dce60744848bfa4a48d57e35f9587e588d7a964b90376227a8ec84",
+      "mutant_sha256": "e9d466d6de9f6654612b17b6e4b84e8fca0fc91514148576801b2ea3fd81452a",
+      "replacement": {
+        "before": "snapshot.State.SchemaVersion != statever.Current",
+        "after": "false"
+      },
+      "red": {
+        "exit": 1,
+        "log": "canonical-schema-red.txt",
+        "sha256": "4d9ad8d96544a8165d355e4eb36e9d413cacf93760614020aa83dc16b3bdd565",
+        "assertion_failed": false,
+        "build_failed": true
+      },
+      "green": {
+        "exit": 0,
+        "log": "canonical-schema-green.txt",
+        "sha256": "a65ca2e8af0466be8010c6e769aa1ce83f39491cc6d892e3981f0856f3078360",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": false
+    },
+    {
+      "gate": "projection",
+      "control": "TestAdmissionRecoveryRefusalGates/projection_mismatch",
+      "mutated_file": "loop/admission_evidence.go",
+      "original_sha256": "2f768faa20dce60744848bfa4a48d57e35f9587e588d7a964b90376227a8ec84",
+      "mutant_sha256": "5ba45568ff0bfcc1e97f437d5965461a23b72ad8656c5262e7a1920587568bfe",
+      "replacement": {
+        "before": "if err := validateAdmissionProjection(snapshot.State, orders); err != nil {",
+        "after": "if err := error(nil); err != nil {"
+      },
+      "red": {
+        "exit": 1,
+        "log": "projection-red.txt",
+        "sha256": "128d1544ac030108e2966efcdf287ebd623a8b730088a2f9336bd3e3844f19a1",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "projection-green.txt",
+        "sha256": "de9cebb136b6e744c8dc861e73abfc64e6f067e9c5d1cd56fee05cdac6296438",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "canonical-ownership",
+      "control": "TestAdmissionRecoveryRefusalGates/owned",
+      "mutated_file": "loop/admission_evidence.go",
+      "original_sha256": "2f768faa20dce60744848bfa4a48d57e35f9587e588d7a964b90376227a8ec84",
+      "mutant_sha256": "84f759cc532148228676ee84cf1ce8281dbb1e02d9f16b0893a9f40747493eca",
+      "replacement": {
+        "before": "if exists || admitted[initialAdmissionEffectID(o.ID)]",
+        "after": "if (exists && false) || admitted[initialAdmissionEffectID(o.ID)]"
+      },
+      "red": {
+        "exit": 1,
+        "log": "canonical-ownership-red.txt",
+        "sha256": "060f58522bb274cda2cfb100a509b9a605f1eb7564c68c90005234360bc9374a",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "canonical-ownership-green.txt",
+        "sha256": "542f1e42855db97c4470868b992f0c395c830e74b6dcefb0ec70952255dea606",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "admission-ledger",
+      "control": "TestAdmissionRecoveryRefusalGates/admitted",
+      "mutated_file": "loop/admission_evidence.go",
+      "original_sha256": "2f768faa20dce60744848bfa4a48d57e35f9587e588d7a964b90376227a8ec84",
+      "mutant_sha256": "4d261b4c61e980cb461eec53168b6f88402906ecb938faa996b6a302c472ce36",
+      "replacement": {
+        "before": "admitted[initialAdmissionEffectID(o.ID)] || effectSubjects[o.ID]",
+        "after": "(admitted[initialAdmissionEffectID(o.ID)] && false) || (effectSubjects[o.ID] && false)"
+      },
+      "red": {
+        "exit": 1,
+        "log": "admission-ledger-red.txt",
+        "sha256": "4140babab93359090a68893ddb9992cde916ea26e8f17db9631c442e84eaff95",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "admission-ledger-green.txt",
+        "sha256": "fe9fb806c13f148b8d9133adb4e2133f9b9b29e87070f2be3a76ce83357e46f6",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "subject-dispatch",
+      "control": "TestAdmissionPendingIntentBoundaries/subject_dispatch",
+      "mutated_file": "loop/admission_evidence.go",
+      "original_sha256": "2f768faa20dce60744848bfa4a48d57e35f9587e588d7a964b90376227a8ec84",
+      "mutant_sha256": "1325dea6232b31737a5411b6f39afe5de27b7d2d7669eaff79ce6e8636438302",
+      "replacement": {
+        "before": "|| effectSubjects[o.ID] ||",
+        "after": "|| (effectSubjects[o.ID] && false) ||"
+      },
+      "red": {
+        "exit": 1,
+        "log": "subject-dispatch-red.txt",
+        "sha256": "99220571e6133494260b5f49930fe265e3c03163d9b759a646277062921ec513",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "subject-dispatch-green.txt",
+        "sha256": "8ecd6390dd076ba4cc06082a8d1713158194d9b69f706df661ad05a2a60592a6",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "valid-proposal",
+      "control": "TestAdmissionRecoveryRefusalGates/valid_initial",
+      "mutated_file": "loop/admission_recovery.go",
+      "original_sha256": "88155dcc955da4cd4ad4bdfd665b9c431f1c0adff6e8a0c526b7dcebd8e6cd2b",
+      "mutant_sha256": "a4c31f5bb6526fb1a98903c6bf1e17bc5f8afa9125a79c9cde5c492f9a75878b",
+      "replacement": {
+        "before": "if *compact.InitialRevision == r.Revision {",
+        "after": "if *compact.InitialRevision == r.Revision && false {"
+      },
+      "red": {
+        "exit": 1,
+        "log": "valid-proposal-red.txt",
+        "sha256": "bd11111062f2e548ff8db527a87be69e37654f632b2534a369ef1efe71896ed8",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "valid-proposal-green.txt",
+        "sha256": "242c724845890afd924973a1b57aa1d29453b3f799ddf387f01fcd64d358f1a8",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "digest-binding",
+      "control": "TestAdmissionRecoveryBindingsAndLock/digest",
+      "mutated_file": "loop/admission_recovery.go",
+      "original_sha256": "88155dcc955da4cd4ad4bdfd665b9c431f1c0adff6e8a0c526b7dcebd8e6cd2b",
+      "mutant_sha256": "66b62b847a6c87206a88d8d78dd290d1cba8ca26ed759305fc806994dd08bf06",
+      "replacement": {
+        "before": "if digest != \"\" && digest != r.Subject.SHA256 {",
+        "after": "if digest != \"\" && digest != r.Subject.SHA256 && false {"
+      },
+      "red": {
+        "exit": 1,
+        "log": "digest-binding-red.txt",
+        "sha256": "0b6027a2790767849cdb61b47365b12df3541f4d5dabe4febe66c4c170a8764f",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "digest-binding-green.txt",
+        "sha256": "03eacac3633291af6006b607578a32001a7cf51cb4f12bfbdd53ee95e28891d1",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "revision-binding",
+      "control": "TestAdmissionRecoveryBindingsAndLock/revision",
+      "mutated_file": "loop/admission_recovery.go",
+      "original_sha256": "88155dcc955da4cd4ad4bdfd665b9c431f1c0adff6e8a0c526b7dcebd8e6cd2b",
+      "mutant_sha256": "5b14f7132d9fe5b0bba186a410a13a6c0fbb30ef8e7a03d7bf63eef55f3c1958",
+      "replacement": {
+        "before": "if revision != \"\" && revision != r.Revision {",
+        "after": "if revision != \"\" && revision != r.Revision && false {"
+      },
+      "red": {
+        "exit": 1,
+        "log": "revision-binding-red.txt",
+        "sha256": "b699c61960cc29eccc4d3728e74aec49987479415441260f0e8ddee9d9348fe4",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "revision-binding-green.txt",
+        "sha256": "ea98e2a7561e0d15abc694a645d8900ed9767ef8048ab36f9977ad66d4c863a5",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "owner-lock",
+      "control": "TestAdmissionRecoveryBindingsAndLock/lock",
+      "mutated_file": "loop/admission_recovery.go",
+      "original_sha256": "88155dcc955da4cd4ad4bdfd665b9c431f1c0adff6e8a0c526b7dcebd8e6cd2b",
+      "mutant_sha256": "c8847441f7cf67f28b4889c6e9f78df0a1efd7f354b7879bc99e83ca3fc7728a",
+      "replacement": {
+        "before": "lockfile.TryLock(filepath.Join(dir, \"noodle.lock\"))",
+        "after": "lockfile.TryLock(filepath.Join(dir, \"mutant-unused.lock\"))"
+      },
+      "red": {
+        "exit": 1,
+        "log": "owner-lock-red.txt",
+        "sha256": "1daec05a077f4cdca9f56c1374f0da304d2ba2c8059b437391b52a0b1fa21302",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "owner-lock-green.txt",
+        "sha256": "b2366c1aad3793ec201f2f214ecf6b50e76ebca074e323bfd126be2d5140c2b0",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "process-group",
+      "control": "TestAdmissionRecoveryDeadRootLiveGroup",
+      "mutated_file": "loop/admission_evidence.go",
+      "original_sha256": "2f768faa20dce60744848bfa4a48d57e35f9587e588d7a964b90376227a8ec84",
+      "mutant_sha256": "2089fde8fbc93a748f34d7a1fef05676851cbc03871b5442107cd8fcf8c02462",
+      "replacement": {
+        "before": "if !absent {",
+        "after": "if !absent && false {"
+      },
+      "red": {
+        "exit": 1,
+        "log": "process-group-red.txt",
+        "sha256": "733c437753ab304521be0435909e4b1898347a7f483379ee207cdd41383edcb8",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "process-group-green.txt",
+        "sha256": "cba5d49dad77689a724400ebf13729c8e952f17131648e4405189370b35d8a3f",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "metadata-identity",
+      "control": "TestAdmissionPendingIntentBoundaries/metadata_identity",
+      "mutated_file": "loop/admission_evidence.go",
+      "original_sha256": "2f768faa20dce60744848bfa4a48d57e35f9587e588d7a964b90376227a8ec84",
+      "mutant_sha256": "8adaeeeb4b32ba8496a227da0a0b71c812b42cc8ad50f808664e51ce31050654",
+      "replacement": {
+        "before": "meta.SessionID != entry.Name() ||",
+        "after": "(meta.SessionID != entry.Name() && false) ||"
+      },
+      "red": {
+        "exit": 1,
+        "log": "metadata-identity-red.txt",
+        "sha256": "7b4b2f6e4a44b97d96c6b3f670d7b2fd148ebbb4d84d2fc5287d0b5a7a1579c3",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "metadata-identity-green.txt",
+        "sha256": "a75eaafb33dbf6b747d01754dc417f5dc00691b3d2a2e40db339b75b40439383",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "durable-intent",
+      "control": "TestAdmissionRetirementPhysicalCrash/after_intent",
+      "mutated_file": "loop/admission_recovery.go",
+      "original_sha256": "88155dcc955da4cd4ad4bdfd665b9c431f1c0adff6e8a0c526b7dcebd8e6cd2b",
+      "mutant_sha256": "b92e8fa0f0017c8dba55a3abe951bd57230d144afced11f9d63b8ef904a3e65f",
+      "replacement": {
+        "before": "barrier(\"before_intent\")\n\t}\n\tif err := persistAdmissionReceipt(dir, *receipt); err != nil {",
+        "after": "barrier(\"before_intent\")\n\t}\n\tif err := error(nil); err != nil {"
+      },
+      "red": {
+        "exit": 1,
+        "log": "durable-intent-red.txt",
+        "sha256": "c209e7cffc38d16431079610064434f0a3e2be2c62f516973f3376f8aa1cbebb",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "durable-intent-green.txt",
+        "sha256": "9694d22d99229f1b667827aaf54b798ef1fde07beaee827f63cfd83e8e0489f0",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "pending-discovery",
+      "control": "TestAdmissionRetirementPhysicalCrash/after_remove",
+      "mutated_file": "loop/admission_recovery.go",
+      "original_sha256": "88155dcc955da4cd4ad4bdfd665b9c431f1c0adff6e8a0c526b7dcebd8e6cd2b",
+      "mutant_sha256": "0f2571bdc2eb3e1bf3649e155ee994200d771d9f2d35a9e68f14b1bd80d10cea",
+      "replacement": {
+        "before": "receipt, err = pendingAdmissionReceipt(dir)",
+        "after": "receipt, err = (*admissionReceipt)(nil), error(nil)"
+      },
+      "red": {
+        "exit": 1,
+        "log": "pending-discovery-red.txt",
+        "sha256": "97f3353be259765adce8fca17fb528054486f8f5967d2d8634a70fca8c5c9e67",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "pending-discovery-green.txt",
+        "sha256": "34612a42daf6789f8ef1b0e912298dddf11f9e7c2eb1fb6de98a9fd5b5640695",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "pending-revision",
+      "control": "TestAdmissionPendingIntentBoundaries/changed_revision",
+      "mutated_file": "loop/admission_recovery.go",
+      "original_sha256": "88155dcc955da4cd4ad4bdfd665b9c431f1c0adff6e8a0c526b7dcebd8e6cd2b",
+      "mutant_sha256": "d96aa3a74fb0c18595a9945a730106e9fb1c0236b8f75643435e7b40f021f13a",
+      "replacement": {
+        "before": "if receipt.Revision != r.Revision {",
+        "after": "if receipt.Revision != r.Revision && false {"
+      },
+      "red": {
+        "exit": 1,
+        "log": "pending-revision-red.txt",
+        "sha256": "cef8abf59198c35a63d07802008012708d02080c0dea754815a53bfcd50e326a",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "pending-revision-green.txt",
+        "sha256": "c044c10c8bf1b09ab3366035de7970c685bca6152e9aa0b6f5d47e862389fa3c",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "pending-later-mailbox",
+      "control": "TestAdmissionPendingIntentBoundaries/later_mailbox",
+      "mutated_file": "loop/admission_recovery.go",
+      "original_sha256": "88155dcc955da4cd4ad4bdfd665b9c431f1c0adff6e8a0c526b7dcebd8e6cd2b",
+      "mutant_sha256": "087443f5f60ba32a1124a7ec1ac47d41bd95e6888d6266e333fc31edd33dc500",
+      "replacement": {
+        "before": "if !missing && !bytes.Equal(data, receipt.Proposal) {",
+        "after": "if !missing && !bytes.Equal(data, receipt.Proposal) && false {"
+      },
+      "red": {
+        "exit": 1,
+        "log": "pending-later-mailbox-red.txt",
+        "sha256": "e549d6e1fbdaf9517fccb5c72a2054d8952b4762377603fc083368586a4186ff",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "pending-later-mailbox-green.txt",
+        "sha256": "8de7320ecebc25811bde08d6deb464393d6cfedce09c04613d9a01b739f8c496",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "pending-ambiguity",
+      "control": "TestAdmissionPendingIntentBoundaries/multiple_intents",
+      "mutated_file": "loop/admission_recovery.go",
+      "original_sha256": "88155dcc955da4cd4ad4bdfd665b9c431f1c0adff6e8a0c526b7dcebd8e6cd2b",
+      "mutant_sha256": "8cedfa125c2ef56883e1276f82c85809c2aca9f932c68835e5bda99c1eb1d280",
+      "replacement": {
+        "before": "if pending != nil {",
+        "after": "if pending != nil && false {"
+      },
+      "red": {
+        "exit": 1,
+        "log": "pending-ambiguity-red.txt",
+        "sha256": "53c02250764e1c571f78fec621b4dd6a42821a4ee8598b4906002f4ed3b10ecf",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "pending-ambiguity-green.txt",
+        "sha256": "5ee3ebe344a3cc2aa5c34216e80b7abfa254777a41c4d09efc64ce66eb5a766d",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "retired-later-mailbox",
+      "control": "TestAdmissionRecoveryRetiresExactBytes",
+      "mutated_file": "loop/admission_recovery.go",
+      "original_sha256": "88155dcc955da4cd4ad4bdfd665b9c431f1c0adff6e8a0c526b7dcebd8e6cd2b",
+      "mutant_sha256": "50769fe97cc0d6ad95d5ce066d4cb5a1b2bdf3c92c53547d1d20d77baa36ba4e",
+      "replacement": {
+        "before": "receipt.Retired = true\n\t\t\t\tif err := persistAdmissionReceipt",
+        "after": "_ = os.Remove(nextPath)\n\t\t\t\treceipt.Retired = true\n\t\t\t\tif err := persistAdmissionReceipt"
+      },
+      "red": {
+        "exit": 1,
+        "log": "retired-later-mailbox-red.txt",
+        "sha256": "574713bd841fa1970f4af387ae7fac62bb3ee0b8b11b2a12bc67c305e9b1b558",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "retired-later-mailbox-green.txt",
+        "sha256": "037756db21f9bb67b504d19222743478f762973d44d4caf83347783c5e877a2b",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "historical-effect-scope",
+      "control": "TestAdmissionRecoveryHistoricalEvidenceScope/unrelated_pending_effect",
+      "mutated_file": "loop/admission_evidence.go",
+      "original_sha256": "2f768faa20dce60744848bfa4a48d57e35f9587e588d7a964b90376227a8ec84",
+      "mutant_sha256": "9b8d4d3de7f7b4f028be5f980d60a6fa54573d3d15ac6fd3997c0693137a4b49",
+      "replacement": {
+        "before": "case reducer.EffectLedgerPending:\n",
+        "after": "case reducer.EffectLedgerPending:\n\t\t\treturn fmt.Errorf(\"mutant rejects all pending history\")\n"
+      },
+      "red": {
+        "exit": 1,
+        "log": "historical-effect-scope-red.txt",
+        "sha256": "594657b71f7b548fddcd3ceaaf8bdb02c27b1d4768a68329fc8e2a2af1f9830e",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "historical-effect-scope-green.txt",
+        "sha256": "858e07de30f6b2ec42513301b37fa2033d3bec0c0cb21d1632c96fe609046d69",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    },
+    {
+      "gate": "stale-meta-scope",
+      "control": "TestAdmissionRecoveryHistoricalEvidenceScope/stale_running_metadata",
+      "mutated_file": "loop/admission_evidence.go",
+      "original_sha256": "2f768faa20dce60744848bfa4a48d57e35f9587e588d7a964b90376227a8ec84",
+      "mutant_sha256": "3a0b13f2b97d196a994ea32e0c956b155b47cffc9c3cb4bbc091702d1b4e97f7",
+      "replacement": {
+        "before": "if meta.SessionID != entry.Name() ||",
+        "after": "if meta.Alive || meta.Status == monitor.SessionStatusRunning || meta.SessionID != entry.Name() ||"
+      },
+      "red": {
+        "exit": 1,
+        "log": "stale-meta-scope-red.txt",
+        "sha256": "b2c92b2408f721f0a07fea6fc6d443b4087ee153ddbe0b9c4db7328fe51e9bf4",
+        "assertion_failed": true,
+        "build_failed": false
+      },
+      "green": {
+        "exit": 0,
+        "log": "stale-meta-scope-green.txt",
+        "sha256": "3a945d8738a2023883c294d89090ae8338c5ea171e0c8e7950d4d72589263374",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "legal_noncase": {
+        "exit": 0,
+        "log": "legal-noncases.txt",
+        "sha256": "0ae823ee86134c9d6e2bb99424ac116c51cbc56a6f34f22296776e681231bc39",
+        "assertion_failed": false,
+        "build_failed": false
+      },
+      "passed": true
+    }
+  ],
+  "scratch_removed": true,
+  "authorizes_landing": false
+}

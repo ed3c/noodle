@@ -1,0 +1,6 @@
+=== RUN   TestAdmissionPendingIntentBoundaries
+=== RUN   TestAdmissionPendingIntentBoundaries/subject_dispatch
+--- PASS: TestAdmissionPendingIntentBoundaries (0.04s)
+    --- PASS: TestAdmissionPendingIntentBoundaries/subject_dispatch (0.04s)
+PASS
+ok  	github.com/poteto/noodle/loop	0.299s

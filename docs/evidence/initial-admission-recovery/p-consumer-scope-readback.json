@@ -1,0 +1,23 @@
+{
+  "cli_intent_observed": true,
+  "exact_next_consumption": true,
+  "valid_noncase_preserved": true,
+  "native_codex_exit": -15,
+  "natural_exit_proven": false,
+  "overall_observer_errors_preserved": true,
+  "quiescence": [
+    {
+      "pid": 96171,
+      "absent": true
+    },
+    {
+      "pid": 96172,
+      "absent": true
+    },
+    {
+      "pid": -96162,
+      "absent": true
+    }
+  ],
+  "authorizes_landing": false
+}

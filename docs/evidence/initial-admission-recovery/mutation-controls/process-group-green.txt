@@ -1,0 +1,5 @@
+=== RUN   TestAdmissionRecoveryDeadRootLiveGroup
+    admission_process_unix_test.go:38: reaped root PID 84818; live group refused
+--- PASS: TestAdmissionRecoveryDeadRootLiveGroup (0.02s)
+PASS
+ok  	github.com/poteto/noodle/loop	0.275s

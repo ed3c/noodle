@@ -1,0 +1,7 @@
+{
+  "revision": 2,
+  "selected_at": 1789628870.82894,
+  "observer_sha256": "b0029229f2794b283d8ab30faba8a621e0cd7035d83edcc6001a1a994229662b",
+  "reason": "Before first candidate evaluation: complete admitted ledger fixture, terminal metadata for process-group checks, and assert exact causal refusal to prevent unrelated earlier gates yielding false GREEN. v1 retained; no candidate result suppressed.",
+  "authorizes_landing": false
+}

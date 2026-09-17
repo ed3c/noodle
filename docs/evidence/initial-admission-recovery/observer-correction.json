@@ -1,0 +1,7 @@
+{
+  "v1_preserved": "/Users/neon/.codex/experiments/noodle84-20260917/observer-v1",
+  "v1_defect": "Observer required an entire raw file equal to proposal, although contract requires preserving exact bytes and allows lossless byte encoding in a durable receipt.",
+  "timing": "Corrected before any new candidate observer run or acceptance; no candidate verdict was used to relax a failed outcome.",
+  "retained_discriminator": "Recoverable status, exact next argv, successful retirement, exact original bytes (raw or lossless decoded), immutable canonical/projection and repeat readback remain required.",
+  "authorizes_landing": false
+}

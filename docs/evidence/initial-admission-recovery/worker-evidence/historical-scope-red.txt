@@ -1,0 +1,11 @@
+=== RUN   TestAdmissionRecoveryHistoricalEvidenceScope
+=== RUN   TestAdmissionRecoveryHistoricalEvidenceScope/unrelated_pending_effect
+    admission_scope_test.go:28: unrelated/stale evidence blocked exact unpromoted subject: {Owner:Noodle initial admission Status:refused Subject:{SHA256: InitialRevision: OrderIDs:[]} Revision: Invalid:active or ambiguous effect "historical-dispatch" Next:{Argv:[] Guidance:Preserve the reported evidence. The named operator must supply the missing evidence or resolve the reported owner state; then use readback_argv to inspect again. Inspection is not permission to restart or repeat a write. Required:active or ambiguous effect "historical-dispatch" ProvidedBy:Noodle operator supervising this project and its original session records ReadbackArgv:[noodle --project-dir /var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/TestAdmissionRecoveryHistoricalEvidenceScopeunrelated_pending_e3156933618/001 admission inspect]}}
+=== RUN   TestAdmissionRecoveryHistoricalEvidenceScope/stale_running_metadata
+    admission_scope_test.go:28: unrelated/stale evidence blocked exact unpromoted subject: {Owner:Noodle initial admission Status:refused Subject:{SHA256: InitialRevision: OrderIDs:[]} Revision: Invalid:active or ambiguous session "worker" Next:{Argv:[] Guidance:Preserve the reported evidence. The named operator must supply the missing evidence or resolve the reported owner state; then use readback_argv to inspect again. Inspection is not permission to restart or repeat a write. Required:active or ambiguous session "worker" ProvidedBy:Noodle operator supervising this project and its original session records ReadbackArgv:[noodle --project-dir /var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/TestAdmissionRecoveryHistoricalEvidenceScopestale_running_metad2316927432/001 admission inspect]}}
+--- FAIL: TestAdmissionRecoveryHistoricalEvidenceScope (0.02s)
+    --- FAIL: TestAdmissionRecoveryHistoricalEvidenceScope/unrelated_pending_effect (0.01s)
+    --- FAIL: TestAdmissionRecoveryHistoricalEvidenceScope/stale_running_metadata (0.01s)
+FAIL
+FAIL	github.com/poteto/noodle/loop	0.541s
+FAIL

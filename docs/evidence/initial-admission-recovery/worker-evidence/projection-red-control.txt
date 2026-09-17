@@ -1,0 +1,14 @@
+go: downloading github.com/fsnotify/fsnotify v1.9.0
+go: downloading github.com/BurntSushi/toml v1.6.0
+go: downloading gopkg.in/yaml.v3 v3.0.1
+go: downloading github.com/superfly/sprites-go v0.0.0-20260226040941-951bb2e6b07d
+# github.com/poteto/noodle/loop
+loop/loop.go:14:2: module lookup disabled by GOPROXY=off
+# github.com/poteto/noodle/loop
+config/parse.go:9:2: module lookup disabled by GOPROXY=off
+# github.com/poteto/noodle/loop
+skill/frontmatter.go:7:2: module lookup disabled by GOPROXY=off
+# github.com/poteto/noodle/loop
+dispatcher/sprites_dispatcher.go:8:2: module lookup disabled by GOPROXY=off
+FAIL	github.com/poteto/noodle/loop [setup failed]
+FAIL

@@ -1,0 +1,7 @@
+=== RUN   TestAdmissionRetirementPhysicalCrash
+=== RUN   TestAdmissionRetirementPhysicalCrash/after_intent
+    admission_recovery_test.go:375: actual child pid=84855 phase=after_intent exit=signal: killed
+--- PASS: TestAdmissionRetirementPhysicalCrash (0.11s)
+    --- PASS: TestAdmissionRetirementPhysicalCrash/after_intent (0.10s)
+PASS
+ok  	github.com/poteto/noodle/loop	0.366s

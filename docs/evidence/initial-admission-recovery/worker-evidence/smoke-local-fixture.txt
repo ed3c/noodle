@@ -1,0 +1,5 @@
+
+> @ test:smoke /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute
+> go test -tags e2e -timeout 600s -count=1 ./e2e/
+
+ok  	github.com/poteto/noodle/e2e	267.974s

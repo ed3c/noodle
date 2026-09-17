@@ -1,0 +1,6 @@
+=== RUN   TestAdmissionRecoveryBindingsAndLock
+=== RUN   TestAdmissionRecoveryBindingsAndLock/lock
+--- PASS: TestAdmissionRecoveryBindingsAndLock (0.02s)
+    --- PASS: TestAdmissionRecoveryBindingsAndLock/lock (0.02s)
+PASS
+ok  	github.com/poteto/noodle/loop	0.281s

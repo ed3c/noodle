@@ -1,0 +1,104 @@
+diff --git a/cmdmeta/cmdmeta.go b/cmdmeta/cmdmeta.go
+index 3da1c06..b5f29f9 100644
+--- a/cmdmeta/cmdmeta.go
++++ b/cmdmeta/cmdmeta.go
+@@ -54,6 +54,10 @@ func Commands() []Command {
+ 				{Name: "payload", Type: "string", Desc: "Event payload as JSON"},
+ 			}},
+ 		}},
++		{Name: "admission", Short: "Inspect or retire a rejected initial proposal with the stopped owner", Subcommands: []Command{
++			{Name: "inspect", Short: "Read admission evidence and exact supported continuation"},
++			{Name: "retire", Short: "Retire an unchanged rejected initial proposal"},
++		}},
+ 		{Name: "reset", Short: "Clear all runtime state"},
+ 	}
+ }
+diff --git a/generate/skill_noodle.go b/generate/skill_noodle.go
+index 2438ef0..4e50069 100644
+--- a/generate/skill_noodle.go
++++ b/generate/skill_noodle.go
+@@ -83,6 +83,24 @@ All commands accept ` + "`--project-dir`" + ` (default: current directory, env:
+ | ` + "`noodle status`" + ` | Show runtime status (active agents, queue depth, loop state) |
+ | ` + "`noodle reset`" + ` | Clear all runtime state (refuses if loop is running) |
+ 
++### Initial proposal recovery (P-class)
++
++Use the existing Noodle owner; this operation requires a stopped loop.
++Run noodle --project-dir <known-project> admission inspect and consume its JSON.
++If the owner/project input is missing, stop and report that missing input.
++For status recoverable, execute the returned next.argv exactly as an argv array;
++never reconstruct the digest, revision or command from a checkpoint or memory.
++For refused, preserve evidence and report invalid to the named owner. A currently
++valid initial proposal stays available for normal admission. Do not invent a retry.
++For retired or no_proposal, follow next for fresh canonical readback before the
++existing initial-admission flow. Retirement does not dispatch, restart, complete
++an order, or authorize provider writes. Record the actual JSON and operation result.
++
++| Command | Description |
++|---------|-------------|
++| noodle admission inspect | Inspect owner, subject, revision, invalid and exact next argv |
++| noodle admission retire PROPOSAL_SHA256 CURRENT_ORDER_REVISION | Archive and retire only the unchanged rejected initial proposal |
++
+ ### Skills & Schemas
+ 
+ | Command | Description |
+diff --git a/loop/loop_cycle_pipeline.go b/loop/loop_cycle_pipeline.go
+index c21e7d1..968678a 100644
+--- a/loop/loop_cycle_pipeline.go
++++ b/loop/loop_cycle_pipeline.go
+@@ -47,7 +47,7 @@ func (l *Loop) mergeOrdersNext() (mergeResult, error) {
+ 			}
+ 		}
+ 	}
+-	return consumeOrdersNextAtRevision(l.deps.OrdersNextFile, orders, l.orderRevision, nonScheduleOrderIDs(l.canonical), admitted)
++	return consumeOrdersNextAtRevision(l.deps.OrdersNextFile, orders, l.orderRevision, nonScheduleOrderIDs(l.canonical), initialProjectionIDs(l.canonical), admitted)
+ }
+ 
+ // handlePromotionResult processes the side effects of an orders-next
+diff --git a/loop/orders.go b/loop/orders.go
+index 3d8bd80..b0f3eb4 100644
+--- a/loop/orders.go
++++ b/loop/orders.go
+@@ -303,10 +303,10 @@ type mergeResult struct {
+ // skipped (not rejected), except when replacing a failed order with a new
+ // active proposal for explicit restart.
+ func consumeOrdersNext(nextPath string, existing OrdersFile) (mergeResult, error) {
+-	return consumeOrdersNextAtRevision(nextPath, existing, "", nil, nil)
++	return consumeOrdersNextAtRevision(nextPath, existing, "", nil, nil, nil)
+ }
+ 
+-func consumeOrdersNextAtRevision(nextPath string, existing OrdersFile, revision string, ownedIDs, admittedEffects map[string]struct{}) (mergeResult, error) {
++func consumeOrdersNextAtRevision(nextPath string, existing OrdersFile, revision string, ownedIDs, projectedOwnedIDs, admittedEffects map[string]struct{}) (mergeResult, error) {
+ 	nextData, err := os.ReadFile(nextPath)
+ 	if os.IsNotExist(err) {
+ 		return mergeResult{}, nil
+@@ -349,14 +349,15 @@ func consumeOrdersNextAtRevision(nextPath string, existing OrdersFile, revision
+ 				projectedIDs[id] = struct{}{}
+ 			}
+ 		}
+-		if !maps.Equal(projectedIDs, ownedIDs) {
++		if !maps.Equal(projectedIDs, projectedOwnedIDs) {
+ 			return mergeResult{}, ordersNextRejectedError{fmt.Errorf("invalid initial admission orders projection: differs from canonical ownership; owner: Noodle canonical checkpoint; reconcile owner state before initial admission")}
+ 		}
+ 		seen := make(map[string]bool, len(incoming.Orders))
+ 		for _, order := range incoming.Orders {
+ 			_, owned := existingIndex[order.ID]
++			_, canonicalOwned := ownedIDs[order.ID]
+ 			_, admitted := admittedEffects[initialAdmissionEffectID(order.ID)]
+-			if owned || admitted || seen[order.ID] || strings.TrimSpace(order.ID) == "" || order.ID == scheduleOrderID {
++			if owned || canonicalOwned || admitted || seen[order.ID] || strings.TrimSpace(order.ID) == "" || order.ID == scheduleOrderID {
+ 				return mergeResult{}, ordersNextRejectedError{fmt.Errorf("invalid initial order.id=%q: already owned, duplicate or reserved; owner: Noodle canonical orders; read existing order and use its explicit control for recovery", order.ID)}
+ 			}
+ 			seen[order.ID] = true
+diff --git a/root.go b/root.go
+index 103c521..8c38606 100644
+--- a/root.go
++++ b/root.go
+@@ -75,6 +75,7 @@ func NewRootCmd() *cobra.Command {
+ 		newWorktreeCmd(&app),
+ 		newEventCmd(&app),
+ 		newResetCmd(&app),
++		newAdmissionCmd(&app),
+ 	)
+ 
+ 	return root

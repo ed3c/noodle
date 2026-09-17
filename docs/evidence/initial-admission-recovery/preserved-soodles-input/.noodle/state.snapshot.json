@@ -1,0 +1,246 @@
+{
+  "order_revision": "dfb96fcf7d8d776ea177173c4c0c717d",
+  "state": {
+    "orders": {},
+    "pending_reviews": {},
+    "action_needed": null,
+    "mode": "supervised",
+    "mode_epoch": 1,
+    "mode_transitions": [
+      {
+        "from_mode": "supervised",
+        "to_mode": "supervised",
+        "epoch": 1,
+        "requested_by": "control",
+        "reason": "mode control command",
+        "applied_at": "2026-09-17T13:28:22.964109+08:00"
+      }
+    ],
+    "schema_version": 1,
+    "last_event_id": "31"
+  },
+  "effect_ledger": [
+    {
+      "effect_id": "event-2-effect-0",
+      "effect": {
+        "effect_id": "event-2-effect-0",
+        "type": "dispatch",
+        "payload": {
+          "attempt_id": "schedule-0-attempt-0",
+          "order_id": "schedule",
+          "stage_index": 0
+        },
+        "created_at": "2026-09-17T00:06:39.47517+08:00"
+      },
+      "status": "pending",
+      "attempts": 0,
+      "last_attempt_at": "0001-01-01T00:00:00Z",
+      "result": null
+    },
+    {
+      "effect_id": "event-5-effect-0",
+      "effect": {
+        "effect_id": "event-5-effect-0",
+        "type": "dispatch",
+        "payload": {
+          "attempt_id": "schedule-0-attempt-0",
+          "order_id": "schedule",
+          "stage_index": 0
+        },
+        "created_at": "2026-09-17T00:07:11.275497+08:00"
+      },
+      "status": "pending",
+      "attempts": 0,
+      "last_attempt_at": "0001-01-01T00:00:00Z",
+      "result": null
+    },
+    {
+      "effect_id": "event-8-effect-0",
+      "effect": {
+        "effect_id": "event-8-effect-0",
+        "type": "dispatch",
+        "payload": {
+          "attempt_id": "schedule-0-attempt-0",
+          "order_id": "schedule",
+          "stage_index": 0
+        },
+        "created_at": "2026-09-17T00:07:39.059519+08:00"
+      },
+      "status": "pending",
+      "attempts": 0,
+      "last_attempt_at": "0001-01-01T00:00:00Z",
+      "result": null
+    },
+    {
+      "effect_id": "event-11-effect-0",
+      "effect": {
+        "effect_id": "event-11-effect-0",
+        "type": "dispatch",
+        "payload": {
+          "attempt_id": "schedule-0-attempt-0",
+          "order_id": "schedule",
+          "stage_index": 0
+        },
+        "created_at": "2026-09-17T00:10:22.275401+08:00"
+      },
+      "status": "pending",
+      "attempts": 0,
+      "last_attempt_at": "0001-01-01T00:00:00Z",
+      "result": null
+    },
+    {
+      "effect_id": "event-14-effect-0",
+      "effect": {
+        "effect_id": "event-14-effect-0",
+        "type": "dispatch",
+        "payload": {
+          "attempt_id": "schedule-0-attempt-0",
+          "order_id": "schedule",
+          "stage_index": 0
+        },
+        "created_at": "2026-09-17T00:11:52.862914+08:00"
+      },
+      "status": "pending",
+      "attempts": 0,
+      "last_attempt_at": "0001-01-01T00:00:00Z",
+      "result": null
+    },
+    {
+      "effect_id": "event-16-effect-0",
+      "effect": {
+        "effect_id": "event-16-effect-0",
+        "type": "cleanup",
+        "payload": {
+          "order_id": "schedule",
+          "stage_index": 0,
+          "worktree_name": ""
+        },
+        "created_at": "2026-09-17T00:11:55.035108+08:00"
+      },
+      "status": "pending",
+      "attempts": 0,
+      "last_attempt_at": "0001-01-01T00:00:00Z",
+      "result": null
+    },
+    {
+      "effect_id": "event-17-effect-0",
+      "effect": {
+        "effect_id": "event-17-effect-0",
+        "type": "dispatch",
+        "payload": {
+          "attempt_id": "schedule-0-attempt-1",
+          "order_id": "schedule",
+          "stage_index": 0
+        },
+        "created_at": "2026-09-17T01:04:23.12583+08:00"
+      },
+      "status": "pending",
+      "attempts": 0,
+      "last_attempt_at": "0001-01-01T00:00:00Z",
+      "result": null
+    },
+    {
+      "effect_id": "initial-admission-a20fec1a28157a07af32b12735acd61a2977ff903d75023ebefee8ee18ef013e",
+      "effect": {
+        "effect_id": "initial-admission-a20fec1a28157a07af32b12735acd61a2977ff903d75023ebefee8ee18ef013e",
+        "type": "initial_admission",
+        "payload": {
+          "initial_revision": "026c6e8e082892d0f4f50d7de72c9297",
+          "order_id": "soodles-18"
+        },
+        "created_at": "2026-09-16T17:04:42.06476Z"
+      },
+      "status": "done",
+      "attempts": 1,
+      "last_attempt_at": "2026-09-16T17:04:42.06476Z",
+      "result": {
+        "effect_id": "initial-admission-a20fec1a28157a07af32b12735acd61a2977ff903d75023ebefee8ee18ef013e",
+        "status": "completed",
+        "error": "",
+        "timestamp": "2026-09-16T17:04:42.06476Z"
+      }
+    },
+    {
+      "effect_id": "event-21-effect-0",
+      "effect": {
+        "effect_id": "event-21-effect-0",
+        "type": "dispatch",
+        "payload": {
+          "attempt_id": "soodles-18-0-attempt-0",
+          "order_id": "soodles-18",
+          "stage_index": 0
+        },
+        "created_at": "2026-09-17T01:04:42.104314+08:00"
+      },
+      "status": "pending",
+      "attempts": 0,
+      "last_attempt_at": "0001-01-01T00:00:00Z",
+      "result": null
+    },
+    {
+      "effect_id": "event-25-effect-0",
+      "effect": {
+        "effect_id": "event-25-effect-0",
+        "type": "write_projection",
+        "payload": {
+          "order_id": "soodles-18"
+        },
+        "created_at": "2026-09-17T01:26:59.591442+08:00"
+      },
+      "status": "pending",
+      "attempts": 0,
+      "last_attempt_at": "0001-01-01T00:00:00Z",
+      "result": null
+    },
+    {
+      "effect_id": "event-25-effect-1",
+      "effect": {
+        "effect_id": "event-25-effect-1",
+        "type": "ack",
+        "payload": {
+          "order_id": "soodles-18"
+        },
+        "created_at": "2026-09-17T01:26:59.591442+08:00"
+      },
+      "status": "pending",
+      "attempts": 0,
+      "last_attempt_at": "0001-01-01T00:00:00Z",
+      "result": null
+    },
+    {
+      "effect_id": "event-27-effect-0",
+      "effect": {
+        "effect_id": "event-27-effect-0",
+        "type": "dispatch",
+        "payload": {
+          "attempt_id": "schedule-0-attempt-0",
+          "order_id": "schedule",
+          "stage_index": 0
+        },
+        "created_at": "2026-09-17T13:28:23.77383+08:00"
+      },
+      "status": "pending",
+      "attempts": 0,
+      "last_attempt_at": "0001-01-01T00:00:00Z",
+      "result": null
+    },
+    {
+      "effect_id": "event-30-effect-0",
+      "effect": {
+        "effect_id": "event-30-effect-0",
+        "type": "dispatch",
+        "payload": {
+          "attempt_id": "schedule-0-attempt-0",
+          "order_id": "schedule",
+          "stage_index": 0
+        },
+        "created_at": "2026-09-17T13:28:24.795118+08:00"
+      },
+      "status": "pending",
+      "attempts": 0,
+      "last_attempt_at": "0001-01-01T00:00:00Z",
+      "result": null
+    }
+  ],
+  "generated_at": "2026-09-17T05:28:48.945923Z"
+}

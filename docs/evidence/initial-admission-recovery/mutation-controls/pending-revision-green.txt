@@ -1,0 +1,6 @@
+=== RUN   TestAdmissionPendingIntentBoundaries
+=== RUN   TestAdmissionPendingIntentBoundaries/changed_revision
+--- PASS: TestAdmissionPendingIntentBoundaries (0.03s)
+    --- PASS: TestAdmissionPendingIntentBoundaries/changed_revision (0.03s)
+PASS
+ok  	github.com/poteto/noodle/loop	0.290s

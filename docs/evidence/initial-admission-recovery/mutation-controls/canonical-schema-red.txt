@@ -1,0 +1,4 @@
+FAIL	github.com/poteto/noodle/loop [build failed]
+FAIL
+# github.com/poteto/noodle/loop [github.com/poteto/noodle/loop.test]
+loop/admission_evidence.go:16:2: "github.com/poteto/noodle/internal/statever" imported and not used

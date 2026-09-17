@@ -1,0 +1,79 @@
+=== RUN   TestAdmissionRecoveryRetiresExactBytes
+--- PASS: TestAdmissionRecoveryRetiresExactBytes (0.12s)
+=== RUN   TestAdmissionRecoveryRefusalGates
+=== RUN   TestAdmissionRecoveryRefusalGates/missing_checkpoint
+=== RUN   TestAdmissionRecoveryRefusalGates/corrupt_checkpoint
+=== RUN   TestAdmissionRecoveryRefusalGates/incomplete_checkpoint
+=== RUN   TestAdmissionRecoveryRefusalGates/unknown_schema
+=== RUN   TestAdmissionRecoveryRefusalGates/missing_orders
+=== RUN   TestAdmissionRecoveryRefusalGates/corrupt_orders
+=== RUN   TestAdmissionRecoveryRefusalGates/missing_sessions
+=== RUN   TestAdmissionRecoveryRefusalGates/valid_initial
+=== RUN   TestAdmissionRecoveryRefusalGates/noninitial
+=== RUN   TestAdmissionRecoveryRefusalGates/corrupt_proposal
+=== RUN   TestAdmissionRecoveryRefusalGates/owned
+=== RUN   TestAdmissionRecoveryRefusalGates/admitted
+=== RUN   TestAdmissionRecoveryRefusalGates/malformed_ledger
+=== RUN   TestAdmissionRecoveryRefusalGates/projection_mismatch
+=== RUN   TestAdmissionRecoveryRefusalGates/active_session
+=== RUN   TestAdmissionRecoveryRefusalGates/live_process
+=== RUN   TestAdmissionRecoveryRefusalGates/ambiguous_session
+=== RUN   TestAdmissionRecoveryRefusalGates/corrupt_session
+=== RUN   TestAdmissionRecoveryRefusalGates/symlink_proposal
+--- PASS: TestAdmissionRecoveryRefusalGates (0.35s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/missing_checkpoint (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/corrupt_checkpoint (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/incomplete_checkpoint (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/unknown_schema (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/missing_orders (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/corrupt_orders (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/missing_sessions (0.01s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/valid_initial (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/noninitial (0.03s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/corrupt_proposal (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/owned (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/admitted (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/malformed_ledger (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/projection_mismatch (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/active_session (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/live_process (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/ambiguous_session (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/corrupt_session (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/symlink_proposal (0.02s)
+=== RUN   TestAdmissionRecoveryBindingsAndLock
+=== RUN   TestAdmissionRecoveryBindingsAndLock/digest
+=== RUN   TestAdmissionRecoveryBindingsAndLock/revision
+=== RUN   TestAdmissionRecoveryBindingsAndLock/lock
+=== RUN   TestAdmissionRecoveryBindingsAndLock/corrupt_receipt
+--- PASS: TestAdmissionRecoveryBindingsAndLock (0.06s)
+    --- PASS: TestAdmissionRecoveryBindingsAndLock/digest (0.02s)
+    --- PASS: TestAdmissionRecoveryBindingsAndLock/revision (0.02s)
+    --- PASS: TestAdmissionRecoveryBindingsAndLock/lock (0.02s)
+    --- PASS: TestAdmissionRecoveryBindingsAndLock/corrupt_receipt (0.02s)
+=== RUN   TestAdmissionRecoveryLegalNoncases
+=== RUN   TestAdmissionRecoveryLegalNoncases/valid_initial_remains_admissible
+=== RUN   TestAdmissionRecoveryLegalNoncases/no_proposal
+=== RUN   TestAdmissionRecoveryLegalNoncases/dead_terminal_session
+=== RUN   TestAdmissionRecoveryLegalNoncases/completed_A_stale_B
+--- PASS: TestAdmissionRecoveryLegalNoncases (0.09s)
+    --- PASS: TestAdmissionRecoveryLegalNoncases/valid_initial_remains_admissible (0.01s)
+    --- PASS: TestAdmissionRecoveryLegalNoncases/no_proposal (0.01s)
+    --- PASS: TestAdmissionRecoveryLegalNoncases/dead_terminal_session (0.01s)
+    --- PASS: TestAdmissionRecoveryLegalNoncases/completed_A_stale_B (0.06s)
+=== RUN   TestAdmissionRetirementCrashChild
+--- PASS: TestAdmissionRetirementCrashChild (0.00s)
+=== RUN   TestAdmissionRetirementPhysicalCrash
+=== RUN   TestAdmissionRetirementPhysicalCrash/before_intent
+    admission_recovery_test.go:375: actual child pid=74475 phase=before_intent exit=signal: killed
+=== RUN   TestAdmissionRetirementPhysicalCrash/after_intent
+    admission_recovery_test.go:375: actual child pid=74476 phase=after_intent exit=signal: killed
+=== RUN   TestAdmissionRetirementPhysicalCrash/after_remove
+    admission_recovery_test.go:375: actual child pid=74477 phase=after_remove exit=signal: killed
+    admission_recovery_test.go:389: readback cannot resume: {Owner:Noodle initial admission Status:no_proposal Subject:{SHA256: InitialRevision: OrderIDs:[]} Revision:179943651477d0cfbcb802686a32b710 Invalid: Next:{Argv:[noodle --project-dir /private/tmp/TestAdmissionRetirementPhysicalCrashafter_remove3835538009/001 admission inspect] Guidance:Read fresh canonical revision and ownership before preparing a new initial proposal through the existing scheduling/admission flow. Retirement grants no execution or provider authority.}}
+--- FAIL: TestAdmissionRetirementPhysicalCrash (0.24s)
+    --- PASS: TestAdmissionRetirementPhysicalCrash/before_intent (0.08s)
+    --- PASS: TestAdmissionRetirementPhysicalCrash/after_intent (0.10s)
+    --- FAIL: TestAdmissionRetirementPhysicalCrash/after_remove (0.06s)
+FAIL
+FAIL	github.com/poteto/noodle/loop	1.426s
+FAIL

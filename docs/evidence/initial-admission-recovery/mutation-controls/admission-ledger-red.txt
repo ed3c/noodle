@@ -1,0 +1,8 @@
+=== RUN   TestAdmissionRecoveryRefusalGates
+=== RUN   TestAdmissionRecoveryRefusalGates/admitted
+    admission_recovery_test.go:204: unsafe inspection: {Owner:Noodle initial admission Status:recoverable Subject:{SHA256:269429e212be0101e0e063926ef6a29ab72e4f3419ad4c9dc8d57cc86b67bcb1 InitialRevision:00000000000000000000000000000000 OrderIDs:[B]} Revision:36f3573a5c446633fcad4c8a79d519bd Invalid:invalid initial_revision="00000000000000000000000000000000": current canonical order_revision="36f3573a5c446633fcad4c8a79d519bd" Next:{Argv:[noodle --project-dir /var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/TestAdmissionRecoveryRefusalGatesadmitted2698132906/001 admission retire 269429e212be0101e0e063926ef6a29ab72e4f3419ad4c9dc8d57cc86b67bcb1 36f3573a5c446633fcad4c8a79d519bd] Guidance:Run this exact argv only for this rejected proposal. Retirement does not admit or restart work. Required: ProvidedBy: ReadbackArgv:[noodle --project-dir /var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/TestAdmissionRecoveryRefusalGatesadmitted2698132906/001 admission inspect]}}
+--- FAIL: TestAdmissionRecoveryRefusalGates (0.02s)
+    --- FAIL: TestAdmissionRecoveryRefusalGates/admitted (0.02s)
+FAIL
+FAIL	github.com/poteto/noodle/loop	0.474s
+FAIL

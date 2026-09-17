@@ -1,0 +1,11 @@
+{
+  "generator": {
+    "command": "go generate ./generate/...",
+    "exit_code": 1,
+    "stderr": "write skill: open /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/.agents/skills/noodle/SKILL.md: operation not permitted\nexit status 1\ngenerate/skill_noodle.go:4: running \"go\": exit status 1"
+  },
+  "standard_patch": {
+    "result": "patch rejected: writing outside of the project; rejected by user approval settings"
+  },
+  "facts": "The target is a tracked regular file inside the current worktree, not a symlink. Approval policy is never. No permission escalation or alternate write bypass attempted."
+}

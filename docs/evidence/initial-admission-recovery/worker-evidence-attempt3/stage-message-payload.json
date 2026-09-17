@@ -1,0 +1,7 @@
+{
+  "message": "Verified exact clean candidate 5d1e9fefd902bec53b260b22abf3b55c3caf0203. Fresh Session consumed frozen admission CLI next.argv exactly: stale recoverable -> retired -> no_proposal; stopped with no new order. Scheduling owner: Noodle scheduling owner through the existing schedule skill / orders-next.json admission entry. Valid proposal correctly refused retirement (actual exit 1), all pre-existing fixture files preserved; owner created only noodle.lock: GREEN. This completes only the implementation/verification stage, not provider delivery or Issue resolution. Journal: /Users/neon/.codex/experiments/noodle84-20260917/worker-evidence-attempt3/journal.json; handoff: /Users/neon/.codex/experiments/noodle84-20260917/worker-evidence-attempt3/worker-handoff.json",
+  "blocking": false,
+  "outcome": "completed",
+  "order_id": "noodle-84",
+  "stage_index": 0
+}

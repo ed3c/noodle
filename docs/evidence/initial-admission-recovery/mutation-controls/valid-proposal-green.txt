@@ -1,0 +1,6 @@
+=== RUN   TestAdmissionRecoveryRefusalGates
+=== RUN   TestAdmissionRecoveryRefusalGates/valid_initial
+--- PASS: TestAdmissionRecoveryRefusalGates (0.02s)
+    --- PASS: TestAdmissionRecoveryRefusalGates/valid_initial (0.02s)
+PASS
+ok  	github.com/poteto/noodle/loop	0.272s

@@ -1,0 +1,14 @@
+ M cmdmeta/cmdmeta.go
+ M generate/skill_noodle.go
+ M loop/loop_cycle_pipeline.go
+ M loop/orders.go
+ M root.go
+?? cmd_admission.go
+?? internal/filex/durable.go
+?? internal/procx/group_absent_unix.go
+?? internal/procx/group_absent_windows.go
+?? loop/admission_evidence.go
+?? loop/admission_process_unix_test.go
+?? loop/admission_projection_test.go
+?? loop/admission_recovery.go
+?? loop/admission_recovery_test.go

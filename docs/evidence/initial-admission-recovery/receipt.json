@@ -1,0 +1,35 @@
+{
+  "issue": "ed3c/noodle#84",
+  "candidate_head": "5d1e9fefd902bec53b260b22abf3b55c3caf0203",
+  "real_order_id": "noodle-84",
+  "implementation_started_before_commit": true,
+  "controls": {
+    "triplets": 19,
+    "all_passed": true,
+    "initial_invalid_mutant_preserved": "mutation-controls/canonical-schema-red.txt"
+  },
+  "clean_check": {
+    "command": "pnpm check",
+    "observed_exit": 0,
+    "log": "worker-evidence/check-clean-5d1e9fe.txt"
+  },
+  "smoke": {
+    "command": "pnpm test:smoke",
+    "observed_exit": 0,
+    "elapsed_seconds": 267.974,
+    "log": "worker-evidence/smoke-local-fixture.txt",
+    "previous_failures_preserved": true
+  },
+  "external_recovery": "external-clean-5d1e9fe/receipt.json",
+  "external_refusals": "external-refusal-clean-5d1e9fe/receipt.json",
+  "provider_test_run": 35195000559,
+  "scope": "Native macOS CLI recovery and local runtime smoke; Linux provider Test; no Windows process-tree recovery or cloud-carrier equivalence claim",
+  "known_limits": [
+    "Baseline retry dispatch discards dirty progress; only verified committed continuation is used here.",
+    "The first independent P consumer completed CLI intent but required SIGTERM; actual -15 exit retained.",
+    "Retirement does not restart or complete the proposed production order."
+  ],
+  "authorizes_landing": false,
+  "fresh_original_order_verification": "attempt3-observer-receipt.json",
+  "provider_delivery": "pending"
+}

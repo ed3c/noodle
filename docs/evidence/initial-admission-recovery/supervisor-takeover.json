@@ -1,0 +1,25 @@
+{
+  "original_order": "noodle-84",
+  "original_session": "noodle-84-0-execute-20260917-064248-55f8a7",
+  "actual_child_exit": 0,
+  "checks": [
+    {
+      "pid_or_pgid": 72213,
+      "result": "absent"
+    },
+    {
+      "pid_or_pgid": 72231,
+      "result": "absent"
+    },
+    {
+      "pid_or_pgid": 72240,
+      "result": "absent"
+    },
+    {
+      "pid_or_pgid": -72231,
+      "result": "absent"
+    }
+  ],
+  "time": "2026-09-17T06:59:23.151409+00:00",
+  "scope": "Quiescent supervisor corrects original worktree within Issue84; no new writer, no outcome or canonical state edits. Original blocked attempt retained; a later actual same-order attempt must verify completion."
+}

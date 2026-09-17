@@ -1,0 +1,9 @@
+{
+  "pid": 75718,
+  "argv": [
+    "/Users/neon/.codex/experiments/noodle82-20260916/noodle",
+    "start"
+  ],
+  "cwd": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control",
+  "parent_emits_outcome": false
+}

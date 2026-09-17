@@ -1,0 +1,15 @@
+{
+  "order": "noodle-84",
+  "blocked_attempt": "noodle-84-0-execute-20260917-070217-b3d88a",
+  "actual_exit": 0,
+  "processes_proven_absent": [
+    75725,
+    75747,
+    -75725
+  ],
+  "cause": "baseline loop/cook_spawn.go:75 calls resetWorktreeState for retry, which git checkout/clean discards uncommitted files; committed branch progress preserved",
+  "restoration": "saved first-attempt tracked diff and original untracked bytes restored to original worktree; supervisor amendments will be reapplied and verified before committing",
+  "canonical_mutations": 0,
+  "do_not_retry_dirty_worktree": true,
+  "time": "2026-09-17T07:04:59.309712+00:00"
+}

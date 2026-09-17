@@ -1,0 +1,35 @@
+{
+  "candidate_head": "5d1e9fefd902bec53b260b22abf3b55c3caf0203",
+  "session_id": "noodle-84-0-execute-20260917-073247-961cc0",
+  "order_id": "noodle-84",
+  "stage_index": 0,
+  "typed_outcome": {
+    "message": "Verified exact clean candidate 5d1e9fefd902bec53b260b22abf3b55c3caf0203. Fresh Session consumed frozen admission CLI next.argv exactly: stale recoverable -> retired -> no_proposal; stopped with no new order. Scheduling owner: Noodle scheduling owner through the existing schedule skill / orders-next.json admission entry. Valid proposal correctly refused retirement (actual exit 1), all pre-existing fixture files preserved; owner created only noodle.lock: GREEN. This completes only the implementation/verification stage, not provider delivery or Issue resolution. Journal: /Users/neon/.codex/experiments/noodle84-20260917/worker-evidence-attempt3/journal.json; handoff: /Users/neon/.codex/experiments/noodle84-20260917/worker-evidence-attempt3/worker-handoff.json",
+    "blocking": false,
+    "outcome": "completed",
+    "order_id": "noodle-84",
+    "stage_index": 0
+  },
+  "actual_codex_exit": 0,
+  "waited": true,
+  "quiescence_absent": [
+    99301,
+    99302,
+    -99301
+  ],
+  "fixture_checks": {
+    "stale-proposal": {
+      "orders.json": "5d3631b493687c08bebd5e39e19548dd94e713b6178e63799dc545d16c9f049b",
+      "state.snapshot.json": "3ef9e4f32535d5729c6eae0bf1de59c36c290c25e28ef467959e426bd330aee9"
+    },
+    "valid-proposal": {
+      "orders.json": "5d3631b493687c08bebd5e39e19548dd94e713b6178e63799dc545d16c9f049b",
+      "state.snapshot.json": "3ef9e4f32535d5729c6eae0bf1de59c36c290c25e28ef467959e426bd330aee9"
+    }
+  },
+  "exact_next_consumption": true,
+  "fixtures_removed": true,
+  "journal_retained": true,
+  "natural_exit_proven": true,
+  "authorizes_landing": false
+}

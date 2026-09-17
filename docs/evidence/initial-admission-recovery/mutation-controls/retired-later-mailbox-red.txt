@@ -1,0 +1,6 @@
+=== RUN   TestAdmissionRecoveryRetiresExactBytes
+    admission_recovery_test.go:108: later mailbox overwritten
+--- FAIL: TestAdmissionRecoveryRetiresExactBytes (0.09s)
+FAIL
+FAIL	github.com/poteto/noodle/loop	0.550s
+FAIL

@@ -1,0 +1,140 @@
+{
+  "selected_at": 1789629163.3948889,
+  "cases": [
+    [
+      "canonical-schema",
+      "loop/admission_evidence.go",
+      "snapshot.State.SchemaVersion != statever.Current",
+      "false",
+      "TestAdmissionRecoveryRefusalGates/unknown_schema"
+    ],
+    [
+      "projection",
+      "loop/admission_evidence.go",
+      "if err := validateAdmissionProjection(snapshot.State, orders); err != nil {",
+      "if err := error(nil); err != nil {",
+      "TestAdmissionRecoveryRefusalGates/projection_mismatch"
+    ],
+    [
+      "canonical-ownership",
+      "loop/admission_evidence.go",
+      "if exists || admitted[initialAdmissionEffectID(o.ID)]",
+      "if (exists && false) || admitted[initialAdmissionEffectID(o.ID)]",
+      "TestAdmissionRecoveryRefusalGates/owned"
+    ],
+    [
+      "admission-ledger",
+      "loop/admission_evidence.go",
+      "admitted[initialAdmissionEffectID(o.ID)] || effectSubjects[o.ID]",
+      "(admitted[initialAdmissionEffectID(o.ID)] && false) || (effectSubjects[o.ID] && false)",
+      "TestAdmissionRecoveryRefusalGates/admitted"
+    ],
+    [
+      "subject-dispatch",
+      "loop/admission_evidence.go",
+      "|| effectSubjects[o.ID] ||",
+      "|| (effectSubjects[o.ID] && false) ||",
+      "TestAdmissionPendingIntentBoundaries/subject_dispatch"
+    ],
+    [
+      "valid-proposal",
+      "loop/admission_recovery.go",
+      "if *compact.InitialRevision == r.Revision {",
+      "if *compact.InitialRevision == r.Revision && false {",
+      "TestAdmissionRecoveryRefusalGates/valid_initial"
+    ],
+    [
+      "digest-binding",
+      "loop/admission_recovery.go",
+      "if digest != \"\" && digest != r.Subject.SHA256 {",
+      "if digest != \"\" && digest != r.Subject.SHA256 && false {",
+      "TestAdmissionRecoveryBindingsAndLock/digest"
+    ],
+    [
+      "revision-binding",
+      "loop/admission_recovery.go",
+      "if revision != \"\" && revision != r.Revision {",
+      "if revision != \"\" && revision != r.Revision && false {",
+      "TestAdmissionRecoveryBindingsAndLock/revision"
+    ],
+    [
+      "owner-lock",
+      "loop/admission_recovery.go",
+      "lockfile.TryLock(filepath.Join(dir, \"noodle.lock\"))",
+      "lockfile.TryLock(filepath.Join(dir, \"mutant-unused.lock\"))",
+      "TestAdmissionRecoveryBindingsAndLock/lock"
+    ],
+    [
+      "process-group",
+      "loop/admission_evidence.go",
+      "if !absent {",
+      "if !absent && false {",
+      "TestAdmissionRecoveryDeadRootLiveGroup"
+    ],
+    [
+      "metadata-identity",
+      "loop/admission_evidence.go",
+      "meta.SessionID != entry.Name() ||",
+      "(meta.SessionID != entry.Name() && false) ||",
+      "TestAdmissionPendingIntentBoundaries/metadata_identity"
+    ],
+    [
+      "durable-intent",
+      "loop/admission_recovery.go",
+      "barrier(\"before_intent\")\n\t}\n\tif err := persistAdmissionReceipt(dir, *receipt); err != nil {",
+      "barrier(\"before_intent\")\n\t}\n\tif err := error(nil); err != nil {",
+      "TestAdmissionRetirementPhysicalCrash/after_intent"
+    ],
+    [
+      "pending-discovery",
+      "loop/admission_recovery.go",
+      "receipt, err = pendingAdmissionReceipt(dir)",
+      "receipt, err = (*admissionReceipt)(nil), error(nil)",
+      "TestAdmissionRetirementPhysicalCrash/after_remove"
+    ],
+    [
+      "pending-revision",
+      "loop/admission_recovery.go",
+      "if receipt.Revision != r.Revision {",
+      "if receipt.Revision != r.Revision && false {",
+      "TestAdmissionPendingIntentBoundaries/changed_revision"
+    ],
+    [
+      "pending-later-mailbox",
+      "loop/admission_recovery.go",
+      "if !missing && !bytes.Equal(data, receipt.Proposal) {",
+      "if !missing && !bytes.Equal(data, receipt.Proposal) && false {",
+      "TestAdmissionPendingIntentBoundaries/later_mailbox"
+    ],
+    [
+      "pending-ambiguity",
+      "loop/admission_recovery.go",
+      "if pending != nil {",
+      "if pending != nil && false {",
+      "TestAdmissionPendingIntentBoundaries/multiple_intents"
+    ],
+    [
+      "retired-later-mailbox",
+      "loop/admission_recovery.go",
+      "receipt.Retired = true\n\t\t\t\tif err := persistAdmissionReceipt",
+      "_ = os.Remove(nextPath)\n\t\t\t\treceipt.Retired = true\n\t\t\t\tif err := persistAdmissionReceipt",
+      "TestAdmissionRecoveryRetiresExactBytes"
+    ],
+    [
+      "historical-effect-scope",
+      "loop/admission_evidence.go",
+      "case reducer.EffectLedgerPending:\n",
+      "case reducer.EffectLedgerPending:\n\t\t\treturn fmt.Errorf(\"mutant rejects all pending history\")\n",
+      "TestAdmissionRecoveryHistoricalEvidenceScope/unrelated_pending_effect"
+    ],
+    [
+      "stale-meta-scope",
+      "loop/admission_evidence.go",
+      "if meta.SessionID != entry.Name() ||",
+      "if meta.Alive || meta.Status == monitor.SessionStatusRunning || meta.SessionID != entry.Name() ||",
+      "TestAdmissionRecoveryHistoricalEvidenceScope/stale_running_metadata"
+    ]
+  ],
+  "script_sha256": "9ccf3cd12285f0cf72a3dd51428b490699606810844227dea7010ec28922f125",
+  "scope": "isolated source-copy planted defects; never candidate or production state edits"
+}

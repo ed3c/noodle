@@ -1,0 +1,87 @@
+{
+  "recorded_at": "2026-09-17T07:03:48.065893+00:00",
+  "cwd": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute",
+  "commands": [
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--show-toplevel",
+        "--is-inside-work-tree",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute\ntrue\n656e9ec73689c523058750e8b0a2388a15bb84fa\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--stat"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "worktree",
+        "list",
+        "--porcelain"
+      ],
+      "exit_code": 0,
+      "stdout": "worktree /Users/neon/.codex/experiments/noodle78-delivery-20260916/control\nHEAD 656e9ec73689c523058750e8b0a2388a15bb84fa\nbranch refs/heads/main\n\nworktree /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control\nHEAD 656e9ec73689c523058750e8b0a2388a15bb84fa\nbranch refs/heads/issue84-control\n\nworktree /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute\nHEAD 656e9ec73689c523058750e8b0a2388a15bb84fa\nbranch refs/heads/noodle-84-0-execute\n\n",
+      "stderr": ""
+    }
+  ],
+  "files": {
+    "loop/admission_recovery.go": {
+      "exists": false,
+      "expected_supervisor_sha256": "44113f202eb74883f115b999ea5194ad5f8a25fe896013ade03808d262924b14",
+      "actual_sha256": null
+    },
+    "cmd_admission.go": {
+      "exists": false,
+      "expected_supervisor_sha256": null,
+      "actual_sha256": null
+    },
+    "loop/admission_recovery_test.go": {
+      "exists": false,
+      "expected_supervisor_sha256": null,
+      "actual_sha256": null
+    },
+    "loop/admission_evidence.go": {
+      "exists": false,
+      "expected_supervisor_sha256": null,
+      "actual_sha256": null
+    },
+    "generate/skill_noodle.go": {
+      "exists": true,
+      "expected_supervisor_sha256": null,
+      "actual_sha256": "fe4efee7db9ec971089dcddc180e71d1fac551e211853e35072a9b5a05ffccf1"
+    },
+    ".agents/skills/noodle/SKILL.md": {
+      "exists": true,
+      "expected_supervisor_sha256": "3fe3269f7a61cee54fd72e114005211cd3c8b08568b875a0e68c2c4a0c2da192",
+      "actual_sha256": "f13fb6356115aaca0b227ed691f724ca899b7946d21a4f84d6d816cb14611253"
+    }
+  },
+  "runtime_identity": {
+    "NOODLE_SESSION_ID": "noodle-84-0-execute-20260917-070217-b3d88a",
+    "NOODLE_ORDER_ID": "noodle-84",
+    "NOODLE_STAGE_INDEX": "0"
+  }
+}

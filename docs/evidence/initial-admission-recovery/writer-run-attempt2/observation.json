@@ -1,0 +1,245 @@
+{
+  "status": "worker_review",
+  "loop_exit": 0,
+  "elapsed_seconds": 116.9851315410342,
+  "snapshot_at_stop": {
+    "order_revision": "01a0b8614683e081d0df0f8c1cc5a9ba",
+    "state": {
+      "orders": {
+        "noodle-84": {
+          "order_id": "noodle-84",
+          "sequence": 1,
+          "title": "SAME-ORDER SUPERVISED CONTINUATION for Noodle #84, attempt after...",
+          "plan": null,
+          "rationale": "",
+          "status": "active",
+          "stages": [
+            {
+              "stage_index": 0,
+              "task_key": "execute",
+              "prompt": "SAME-ORDER SUPERVISED CONTINUATION for Noodle #84, attempt after a genuine blocked outcome. Preserve original task/Issue authority below, with these current corrections taking precedence for this attempt:\n- Read worker-evidence/worker-handoff.json, supervisor-takeover.json and supervisor-recovery-green.txt. The original process and group are proven absent. Supervisor corrected pending intent discovery and richer refusal readback in loop/admission_recovery.go, and legitimately regenerated the tracked .agents/skills/noodle/SKILL.md using this parent environment. That protected-file write is complete; do not repeat a known forbidden child write or change permissions. Generated source and generated file are now synchronized. If skill source needs correction, write proposed exact change in evidence and report blocked for supervisor to regenerate; no bypass.\n- Remain the sole active implementation writer in the ORIGINAL Noodle order84/worktree. Inspect supervisor diff critically. Finish causal implementation tests including pending receipt ambiguity, later mailbox preservation, stale pending revision, and exact inspect readback after actual process kill. Legal no-proposal must stay GREEN.\n- Complete per-gate defect RED / same control corrected GREEN / legal non-case GREEN, via bounded planted defects outside production. Do not merely label correct rejection RED. Document mutant diffs/digests and actual exits. Keep mutations isolated from production and restore candidate before final tests. Existing refusal tests exercise inspect plus retire; ensure the gate being claimed actually causes rejection (not an unrelated incomplete fixture).\n- Full pnpm check and smoke required before committing. Local dependency cache works: GOMODCACHE=/private/tmp/codex-go-mod GOCACHE=/private/tmp/codex-go-cache GOPROXY=file:///Users/neon/go/pkg/mod/cache/download GOSUMDB=off. Do not retry blocked network/empty cache or modify tests to skip failures. Supervisor generated skill already; full check does not run generator.\n- Record this attempt under /Users/neon/.codex/experiments/noodle84-20260917/worker-evidence-attempt2; preserve prior attempt evidence untouched. Add minimal brain note for observed recovery invariants if appropriate. Commit only passing code. No provider writes or local merge. Exact same-order typed completion (not Issue resolution) only after verified commit; do not fill exit yourself.\n- Parent handles fixed external release observers and separate fresh P-class consumer after your final commit. Do not change external observer bytes. Deadline 1800 seconds. Stop on a new concrete blocker with actual blocked typed outcome and raw handoff. No other agents.\nOriginal admitted task follows:\n\nImplement the user-admitted ed3c/noodle Issue #84 in this actual Noodle-owned worktree. You are the sole implementation writer. Read /Users/neon/.codex/experiments/noodle84-20260917/issue-admitted.json (exact provider Issue body) and follow its causal write boundary. Read repository CLAUDE.md, execute and noodle skills, and the nearest tests. This is a real implementation stage, not a fabricated order or a fixture role. Source parent is 656e9ec73689c523058750e8b0a2388a15bb84fa. Do not modify other repositories, access private keys, reset state, create another writer/agent, push, merge, close Issues or invoke noodles-issue-execute/source dispatch. This user-authorized supervised stage uses execute; provider handoff/landing remain with the external supervisor after your verified commit.\n\nImplement the minimal stopped-owner CLI: noodle admission inspect; noodle admission retire PROPOSAL_SHA256 CURRENT_ORDER_REVISION. Inspection returns JSON with owner, status, subject/revision, invalid when refused, and next (including exact argv for supported retirement; no command guessing). Supported statuses should distinguish recoverable, refused, retired/no proposal. Both actions must use the existing .noodle/noodle.lock. Do not create a missing canonical checkpoint or treat absent state as safe. Validate current canonical snapshot and effects, actual orders projection and session/process records. Only a definitively unpromoted rejected INITIAL proposal can be retired; a currently valid initial proposal is a legal non-case and must remain available for admission. Reject admitted/owned subjects, active or ambiguous sessions, mismatched digest/revision, and corrupt/unreadable evidence. A dead root PID does not prove its process group is absent: use the nearest existing process-group conventions and portable helpers as needed.\n\nRetirement must preserve original proposal bytes and rejection reason before mailbox removal, with durable exact-subject receipt/intent. Crash before/after persistence and removal must resume by readback without a second dispatch or overwriting a later mailbox. Do not mutate canonical state, admission ledger, worktrees, or provider state. Reuse internal/reducer snapshot, internal/orderx, initialAdmissionEffectID, internal/filex and internal/lockfile instead of a second owner abstraction. You may keep recovery code in loop (same transition owner) and a thin root CLI adapter. Study loop/initial_admission_test.go, loop/orders.go:consumeOrdersNextAtRevision, cmd_start.go instance lock, loop/canonical_checkpoint.go, internal/procx, and existing actual-child crash tests. Exact archived production state will be tested externally; do not touch /Users/neon/soodles/.noodle.\n\nUse meaningful defect RED / corrected same control GREEN / legal non-case GREEN controls for each new gate. Preserve test outputs in /Users/neon/.codex/experiments/noodle84-20260917/worker-evidence. Exercise actual child-process interruption, not just a mocked exception. Keep production fault flags out of CLI. Keep the interface small. Avoid broad unrelated projection behavior changes: if completed-order projection mismatch needs correction, first prove its exact causal producer/consumer boundary.\n\nP-class entry belongs to the existing generated Noodle skill. cmdmeta and generate are its source; never edit generated SKILL.md alone. Add a short recipe that Session can consume from the existing skill and exact CLI next, with missing owner/input and no invented retry. Existing instructions saying local merge do not apply to this supervised provider-delivery stage. Do not claim measured decision-cost improvement or whole Issue resolution.\n\nRun focused controls, then pnpm check and the required smoke suite (pnpm test:smoke) as applicable to the repository execute verification instructions. Preserve failures; at most three attempts per specific unchanged problem. Fix causal failures, never disable/skip checks. Inspect diff and commit only passing code in this worktree with author ed3c <30064024+ed3c@users.noreply.github.com>. Do not push; the supervisor performs exact-head provider checks and landing. Write a concise worker-handoff.json in the external worker-evidence directory, including actual commit, checks, raw output paths, source files, known limitations and supported next steps.\n\nBefore returning, emit exactly one Agent-produced typed stage_message using the supplied Noodle executable /Users/neon/.codex/experiments/noodle82-20260916/noodle and actual NOODLE_SESSION_ID, NOODLE_ORDER_ID and integer NOODLE_STAGE_INDEX from your environment. Read event emit --help first. Fields: message, blocking, outcome, order_id, stage_index. Use completed/blocking=false only when this implementation-and-check stage is committed and verified; it does not mean provider delivery or Issue closure. Use blocked or failed with blocking=true on missing capability/failed verification. For this recorder-bound stage, do NOT emit stage_yield: return immediately after the typed message so the recorder can wait for your actual CLI exit, persist it and then forward terminal harness events. The supervisor will inspect the actual Noodle review state. Do not fill process exit yourself. Deadline for this writer is 1800 seconds; stop and preserve work on a concrete blocker.",
+              "skill": "execute",
+              "provider": "codex",
+              "model": "gpt-6-astra",
+              "runtime": "process",
+              "group": 0,
+              "status": "review",
+              "extra_prompt": "",
+              "attempts": [
+                {
+                  "attempt_id": "noodle-84-0-attempt-0",
+                  "session_id": "noodle-84-0-execute-20260917-064248-55f8a7",
+                  "status": "failed",
+                  "started_at": "2026-09-17T14:42:48.809498+08:00",
+                  "completed_at": "2026-09-17T14:54:23.134114+08:00",
+                  "exit_code": null,
+                  "worktree_name": "noodle-84-0-execute",
+                  "error": "requeue typed blocked outcome"
+                },
+                {
+                  "attempt_id": "noodle-84-0-attempt-1",
+                  "session_id": "noodle-84-0-execute-20260917-070217-b3d88a",
+                  "status": "completed",
+                  "started_at": "2026-09-17T15:02:17.283586+08:00",
+                  "completed_at": "2026-09-17T15:04:13.685608+08:00",
+                  "exit_code": null,
+                  "worktree_name": "noodle-84-0-execute",
+                  "error": ""
+                }
+              ]
+            }
+          ],
+          "created_at": "2026-09-17T14:42:47.694748+08:00",
+          "updated_at": "2026-09-17T15:04:13.685608+08:00",
+          "metadata": {
+            "plan": "",
+            "rationale": "",
+            "title": "Noodle #84: safe initial proposal recovery"
+          }
+        },
+        "schedule": {
+          "order_id": "schedule",
+          "sequence": 0,
+          "title": "scheduling tasks based on your backlog",
+          "plan": null,
+          "rationale": "",
+          "status": "failed",
+          "stages": [
+            {
+              "stage_index": 0,
+              "task_key": "schedule",
+              "prompt": "",
+              "skill": "schedule",
+              "provider": "codex",
+              "model": "gpt-6-astra",
+              "runtime": "process",
+              "group": 0,
+              "status": "failed",
+              "extra_prompt": "",
+              "attempts": [
+                {
+                  "attempt_id": "schedule-0-attempt-0",
+                  "session_id": "schedule-20260917-064247-df8d13",
+                  "status": "failed",
+                  "started_at": "2026-09-17T14:42:47.701266+08:00",
+                  "completed_at": "2026-09-17T14:42:48.711047+08:00",
+                  "exit_code": null,
+                  "worktree_name": "",
+                  "error": "cook exited with status failed"
+                }
+              ]
+            }
+          ],
+          "created_at": "2026-09-17T14:40:47.274791+08:00",
+          "updated_at": "2026-09-17T07:02:17.097752Z",
+          "metadata": {
+            "plan": "",
+            "rationale": "",
+            "title": "scheduling tasks based on your backlog"
+          }
+        }
+      },
+      "pending_reviews": {
+        "noodle-84": {
+          "order_id": "noodle-84",
+          "stage_index": 0,
+          "task_key": "execute",
+          "prompt": "SAME-ORDER SUPERVISED CONTINUATION for Noodle #84, attempt after a genuine blocked outcome. Preserve original task/Issue authority below, with these current corrections taking precedence for this attempt:\n- Read worker-evidence/worker-handoff.json, supervisor-takeover.json and supervisor-recovery-green.txt. The original process and group are proven absent. Supervisor corrected pending intent discovery and richer refusal readback in loop/admission_recovery.go, and legitimately regenerated the tracked .agents/skills/noodle/SKILL.md using this parent environment. That protected-file write is complete; do not repeat a known forbidden child write or change permissions. Generated source and generated file are now synchronized. If skill source needs correction, write proposed exact change in evidence and report blocked for supervisor to regenerate; no bypass.\n- Remain the sole active implementation writer in the ORIGINAL Noodle order84/worktree. Inspect supervisor diff critically. Finish causal implementation tests including pending receipt ambiguity, later mailbox preservation, stale pending revision, and exact inspect readback after actual process kill. Legal no-proposal must stay GREEN.\n- Complete per-gate defect RED / same control corrected GREEN / legal non-case GREEN, via bounded planted defects outside production. Do not merely label correct rejection RED. Document mutant diffs/digests and actual exits. Keep mutations isolated from production and restore candidate before final tests. Existing refusal tests exercise inspect plus retire; ensure the gate being claimed actually causes rejection (not an unrelated incomplete fixture).\n- Full pnpm check and smoke required before committing. Local dependency cache works: GOMODCACHE=/private/tmp/codex-go-mod GOCACHE=/private/tmp/codex-go-cache GOPROXY=file:///Users/neon/go/pkg/mod/cache/download GOSUMDB=off. Do not retry blocked network/empty cache or modify tests to skip failures. Supervisor generated skill already; full check does not run generator.\n- Record this attempt under /Users/neon/.codex/experiments/noodle84-20260917/worker-evidence-attempt2; preserve prior attempt evidence untouched. Add minimal brain note for observed recovery invariants if appropriate. Commit only passing code. No provider writes or local merge. Exact same-order typed completion (not Issue resolution) only after verified commit; do not fill exit yourself.\n- Parent handles fixed external release observers and separate fresh P-class consumer after your final commit. Do not change external observer bytes. Deadline 1800 seconds. Stop on a new concrete blocker with actual blocked typed outcome and raw handoff. No other agents.\nOriginal admitted task follows:\n\nImplement the user-admitted ed3c/noodle Issue #84 in this actual Noodle-owned worktree. You are the sole implementation writer. Read /Users/neon/.codex/experiments/noodle84-20260917/issue-admitted.json (exact provider Issue body) and follow its causal write boundary. Read repository CLAUDE.md, execute and noodle skills, and the nearest tests. This is a real implementation stage, not a fabricated order or a fixture role. Source parent is 656e9ec73689c523058750e8b0a2388a15bb84fa. Do not modify other repositories, access private keys, reset state, create another writer/agent, push, merge, close Issues or invoke noodles-issue-execute/source dispatch. This user-authorized supervised stage uses execute; provider handoff/landing remain with the external supervisor after your verified commit.\n\nImplement the minimal stopped-owner CLI: noodle admission inspect; noodle admission retire PROPOSAL_SHA256 CURRENT_ORDER_REVISION. Inspection returns JSON with owner, status, subject/revision, invalid when refused, and next (including exact argv for supported retirement; no command guessing). Supported statuses should distinguish recoverable, refused, retired/no proposal. Both actions must use the existing .noodle/noodle.lock. Do not create a missing canonical checkpoint or treat absent state as safe. Validate current canonical snapshot and effects, actual orders projection and session/process records. Only a definitively unpromoted rejected INITIAL proposal can be retired; a currently valid initial proposal is a legal non-case and must remain available for admission. Reject admitted/owned subjects, active or ambiguous sessions, mismatched digest/revision, and corrupt/unreadable evidence. A dead root PID does not prove its process group is absent: use the nearest existing process-group conventions and portable helpers as needed.\n\nRetirement must preserve original proposal bytes and rejection reason before mailbox removal, with durable exact-subject receipt/intent. Crash before/after persistence and removal must resume by readback without a second dispatch or overwriting a later mailbox. Do not mutate canonical state, admission ledger, worktrees, or provider state. Reuse internal/reducer snapshot, internal/orderx, initialAdmissionEffectID, internal/filex and internal/lockfile instead of a second owner abstraction. You may keep recovery code in loop (same transition owner) and a thin root CLI adapter. Study loop/initial_admission_test.go, loop/orders.go:consumeOrdersNextAtRevision, cmd_start.go instance lock, loop/canonical_checkpoint.go, internal/procx, and existing actual-child crash tests. Exact archived production state will be tested externally; do not touch /Users/neon/soodles/.noodle.\n\nUse meaningful defect RED / corrected same control GREEN / legal non-case GREEN controls for each new gate. Preserve test outputs in /Users/neon/.codex/experiments/noodle84-20260917/worker-evidence. Exercise actual child-process interruption, not just a mocked exception. Keep production fault flags out of CLI. Keep the interface small. Avoid broad unrelated projection behavior changes: if completed-order projection mismatch needs correction, first prove its exact causal producer/consumer boundary.\n\nP-class entry belongs to the existing generated Noodle skill. cmdmeta and generate are its source; never edit generated SKILL.md alone. Add a short recipe that Session can consume from the existing skill and exact CLI next, with missing owner/input and no invented retry. Existing instructions saying local merge do not apply to this supervised provider-delivery stage. Do not claim measured decision-cost improvement or whole Issue resolution.\n\nRun focused controls, then pnpm check and the required smoke suite (pnpm test:smoke) as applicable to the repository execute verification instructions. Preserve failures; at most three attempts per specific unchanged problem. Fix causal failures, never disable/skip checks. Inspect diff and commit only passing code in this worktree with author ed3c <30064024+ed3c@users.noreply.github.com>. Do not push; the supervisor performs exact-head provider checks and landing. Write a concise worker-handoff.json in the external worker-evidence directory, including actual commit, checks, raw output paths, source files, known limitations and supported next steps.\n\nBefore returning, emit exactly one Agent-produced typed stage_message using the supplied Noodle executable /Users/neon/.codex/experiments/noodle82-20260916/noodle and actual NOODLE_SESSION_ID, NOODLE_ORDER_ID and integer NOODLE_STAGE_INDEX from your environment. Read event emit --help first. Fields: message, blocking, outcome, order_id, stage_index. Use completed/blocking=false only when this implementation-and-check stage is committed and verified; it does not mean provider delivery or Issue closure. Use blocked or failed with blocking=true on missing capability/failed verification. For this recorder-bound stage, do NOT emit stage_yield: return immediately after the typed message so the recorder can wait for your actual CLI exit, persist it and then forward terminal harness events. The supervisor will inspect the actual Noodle review state. Do not fill process exit yourself. Deadline for this writer is 1800 seconds; stop and preserve work on a concrete blocker.",
+          "provider": "codex",
+          "model": "gpt-6-astra",
+          "runtime": "process",
+          "skill": "execute",
+          "plan": null,
+          "worktree_name": "noodle-84-0-execute",
+          "worktree_path": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute",
+          "session_id": "noodle-84-0-execute-20260917-070217-b3d88a",
+          "reason": "blocked by typed stage outcome: Blocked: original worktree is clean at source parent 656e9ec; prior implementation and supervisor candidate are absent. loop/admission_recovery.go and cmd_admission.go are missing; generated skill SHA256 mismatches continuation-selection.json. No tests or commit claimed. Raw readback and worker-handoff.json saved in worker-evidence-attempt2. Supervisor must restore and verify candidate continuity before another same-order attempt."
+        }
+      },
+      "action_needed": null,
+      "mode": "supervised",
+      "mode_epoch": 3,
+      "mode_transitions": [
+        {
+          "from_mode": "manual",
+          "to_mode": "supervised",
+          "epoch": 1,
+          "requested_by": "control",
+          "reason": "mode control command",
+          "applied_at": "2026-09-17T14:42:47.625607+08:00"
+        },
+        {
+          "from_mode": "supervised",
+          "to_mode": "manual",
+          "epoch": 2,
+          "requested_by": "control",
+          "reason": "mode control command",
+          "applied_at": "2026-09-17T15:02:17.09271+08:00"
+        },
+        {
+          "from_mode": "manual",
+          "to_mode": "supervised",
+          "epoch": 3,
+          "requested_by": "control",
+          "reason": "mode control command",
+          "applied_at": "2026-09-17T15:02:17.098619+08:00"
+        }
+      ],
+      "schema_version": 1,
+      "last_event_id": "15"
+    },
+    "effect_ledger": [
+      {
+        "effect_id": "initial-admission-1f5c9bd35ae0394fa819e6eeb047adb69ee4e966913a756e4e65ae6b73e24014",
+        "effect": {
+          "effect_id": "initial-admission-1f5c9bd35ae0394fa819e6eeb047adb69ee4e966913a756e4e65ae6b73e24014",
+          "type": "initial_admission",
+          "payload": {
+            "initial_revision": "894d8d5dffd955cf3eb7a85efd1aed06",
+            "order_id": "noodle-84"
+          },
+          "created_at": "2026-09-17T06:42:47.694717Z"
+        },
+        "status": "done",
+        "attempts": 1,
+        "last_attempt_at": "2026-09-17T06:42:47.694717Z",
+        "result": {
+          "effect_id": "initial-admission-1f5c9bd35ae0394fa819e6eeb047adb69ee4e966913a756e4e65ae6b73e24014",
+          "status": "completed",
+          "error": "",
+          "timestamp": "2026-09-17T06:42:47.694717Z"
+        }
+      },
+      {
+        "effect_id": "event-4-effect-0",
+        "effect": {
+          "effect_id": "event-4-effect-0",
+          "type": "dispatch",
+          "payload": {
+            "attempt_id": "schedule-0-attempt-0",
+            "order_id": "schedule",
+            "stage_index": 0
+          },
+          "created_at": "2026-09-17T14:42:47.696478+08:00"
+        },
+        "status": "pending",
+        "attempts": 0,
+        "last_attempt_at": "0001-01-01T00:00:00Z",
+        "result": null
+      },
+      {
+        "effect_id": "event-6-effect-0",
+        "effect": {
+          "effect_id": "event-6-effect-0",
+          "type": "cleanup",
+          "payload": {
+            "order_id": "schedule",
+            "stage_index": 0,
+            "worktree_name": ""
+          },
+          "created_at": "2026-09-17T14:42:48.711047+08:00"
+        },
+        "status": "pending",
+        "attempts": 0,
+        "last_attempt_at": "0001-01-01T00:00:00Z",
+        "result": null
+      },
+      {
+        "effect_id": "event-7-effect-0",
+        "effect": {
+          "effect_id": "event-7-effect-0",
+          "type": "dispatch",
+          "payload": {
+            "attempt_id": "noodle-84-0-attempt-0",
+            "order_id": "noodle-84",
+            "stage_index": 0
+          },
+          "created_at": "2026-09-17T14:42:48.760722+08:00"
+        },
+        "status": "pending",
+        "attempts": 0,
+        "last_attempt_at": "0001-01-01T00:00:00Z",
+        "result": null
+      },
+      {
+        "effect_id": "event-13-effect-0",
+        "effect": {
+          "effect_id": "event-13-effect-0",
+          "type": "dispatch",
+          "payload": {
+            "attempt_id": "noodle-84-0-attempt-1",
+            "order_id": "noodle-84",
+            "stage_index": 0
+          },
+          "created_at": "2026-09-17T15:02:17.260177+08:00"
+        },
+        "status": "pending",
+        "attempts": 0,
+        "last_attempt_at": "0001-01-01T00:00:00Z",
+        "result": null
+      }
+    ],
+    "generated_at": "2026-09-17T07:04:13.685664Z"
+  },
+  "authorizes_landing": false
+}

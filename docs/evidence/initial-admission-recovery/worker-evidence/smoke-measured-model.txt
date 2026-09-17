@@ -1,0 +1,2052 @@
+
+> @ test:smoke /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute
+> go test -tags e2e -timeout 600s -count=1 ./e2e/
+
+2026-09-17T15:14:53.149515+08:00 INFO api: start initialized project=/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3222918283 runtime_dir=/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3222918283/.noodle once=false server_enabled=true
+2026-09-17T15:14:53.150777+08:00 INFO api: listening component=server addr=localhost:13737
+2026-09-17T15:14:53.150902+08:00 INFO api: browser launch skipped component=server reason="NOODLE_NO_BROWSER=1" url=http://localhost:13737
+2026-09-17T15:14:53.15264+08:00 INFO api: startup injected schedule order
+2026-09-17T15:14:53.677779+08:00 INFO api: schedule dispatched session=schedule-20260917-071453-46065f attempt=0
+2026-09-17T15:15:36.469541+08:00 INFO api: schedule completed session=schedule-20260917-071453-46065f
+2026-09-17T15:15:36.471691+08:00 INFO api: order removed order=schedule
+2026-09-17T15:15:36.474152+08:00 INFO api: orders empty, bootstrapping schedule
+2026-09-17T15:15:36.480025+08:00 INFO api: schedule dispatched session=schedule-20260917-071536-749874 attempt=0
+2026-09-17T15:16:04.346722+08:00 INFO api: start initialized project=/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3151185793 runtime_dir=/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3151185793/.noodle once=false server_enabled=true
+2026-09-17T15:16:04.347221+08:00 INFO api: listening component=server addr=localhost:13737
+2026-09-17T15:16:04.347275+08:00 INFO api: browser launch skipped component=server reason="NOODLE_NO_BROWSER=1" url=http://localhost:13737
+2026-09-17T15:16:04.348538+08:00 INFO api: startup injected schedule order
+2026-09-17T15:16:04.778165+08:00 INFO api: schedule dispatched session=schedule-20260917-071604-5dcb25 attempt=0
+2026-09-17T15:16:39.831819+08:00 INFO api: schedule completed session=schedule-20260917-071604-5dcb25
+2026-09-17T15:16:39.833902+08:00 INFO api: order removed order=schedule
+2026-09-17T15:16:39.83613+08:00 INFO api: orders empty, bootstrapping schedule
+2026-09-17T15:16:39.841809+08:00 INFO api: schedule dispatched session=schedule-20260917-071639-91764d attempt=0
+--- FAIL: TestSmokeAgentLoop (142.97s)
+    smoke_test.go:52: noodle binary: /var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-3942718404/noodle
+    smoke_test.go:53: project dir:   /var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3222918283
+    smoke_test.go:72: noodle started (pid 85317)
+    smoke_test.go:103: polling milestone: Phase A: orders.json appears (timeout 1m0s)
+    smoke_test.go:103: milestone Phase A: orders.json appears reached
+    smoke_test.go:103: polling milestone: Phase B: session directory appears (timeout 2m0s)
+    smoke_test.go:103: milestone Phase B: session directory appears reached
+    smoke_test.go:106: server ready at http://127.0.0.1:13737
+    smoke_test.go:109: playwright output:
+        
+        Running 9 tests using 1 worker
+        
+          ✓  1 [chromium] › smoke.spec.ts:31:3 › Noodle UI smoke › channel layout loads with sidebar, feed, and context panel (788ms)
+          ✓  2 [chromium] › smoke.spec.ts:52:3 › Noodle UI smoke › sidebar shows scheduler channel (500ms)
+          ✓  3 [chromium] › smoke.spec.ts:61:3 › Noodle UI smoke › dashboard route loads (473ms)
+          ✓  4 [chromium] › smoke.spec.ts:69:3 › Noodle UI smoke › topology route loads (477ms)
+          ✓  5 [chromium] › smoke.spec.ts:77:3 › Noodle UI smoke › steer input is functional (502ms)
+          ✓  6 [chromium] › smoke.spec.ts:88:3 › Noodle UI smoke › snapshot API returns valid data (28ms)
+          ✓  7 [chromium] › smoke.spec.ts:99:3 › Noodle UI smoke › config API returns provider and model (5ms)
+          ✓  8 [chromium] › smoke.spec.ts:108:3 › Noodle UI smoke › WebSocket endpoint is reachable (123ms)
+          ✘  9 [chromium] › smoke.spec.ts:138:3 › Noodle UI smoke › active agent context shows worktree name (30.0s)
+          ✘  10 [chromium] › smoke.spec.ts:138:3 › Noodle UI smoke › active agent context shows worktree name (retry #1) (30.0s)
+        
+        
+          1) [chromium] › smoke.spec.ts:138:3 › Noodle UI smoke › active agent context shows worktree name ─
+        
+            [31mTest timeout of 30000ms exceeded.[39m
+        
+            Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+        
+            [31mTest timeout of 30000ms exceeded.[39m
+        
+          1 failed
+            [chromium] › smoke.spec.ts:138:3 › Noodle UI smoke › active agent context shows worktree name ──
+          8 passed (1.1m)
+    smoke_test.go:121: diagnostics [schedule-20260917-071453-46065f/prompt.txt]:
+        Use Skill(schedule). The selected skill is the single owner of project scheduling and output policy.
+        
+        Runtime interface:
+        - checkout_mode: primary-checkout
+        - selected_skill: schedule
+        - selected_skill_path: /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3222918283/.agents/skills/schedule
+        - mise_input: /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3222918283/.noodle/mise.json
+        - promotion_input: /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3222918283/.noodle/orders-next.json
+        - canonical_orders: /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3222918283/.noodle/orders.json (read-only; the loop promotes atomically)
+        
+        Supported compact transport schema (the selected skill may impose stricter project policy):
+        orders.json schema (JSON):
+        ```json
+        {
+          "action_needed": [
+            "string - backlog item ID skipped pending user action"
+          ],
+          "initial_revision": "string (optional) - optional current order_revision from Noodle state.snapshot.json; requires every proposed ID to be absent. Stale/replayed proposals refuse before promotion. This is not execution authorization; omit only for the existing legacy scheduling contract.",
+          "orders": [
+            {
+              "id": "string - order ID (plan ID as string, or unique slug)",
+              "plan": [
+                "string - linked plan path(s), e.g. plans/15-bootstrap-onboarding/overview"
+              ],
+              "rationale": "string (optional) - placement reason citing a rule or principle",
+              "stages": [
+                {
+                  "do": "string (optional) - task key (must match a task_types[].key from mise)",
+                  "extra": {
+                    "<key>": "JSON - opaque extension data preserved across round-trips"
+                  },
+                  "extra_prompt": "string (optional) - supplemental instructions for the cook on how to approach the task (max ~1000 chars)",
+                  "group": "number (optional) - parallel group ID; stages in the same group run concurrently, groups execute sequentially (default: 0)",
+                  "model": "string (optional) - model for this stage (optional; defaults from routing config)",
+                  "prompt": "string (optional) - full prompt text for the dispatched session",
+                  "runtime": "string (optional) - runtime for this stage (process, sprites, etc.)",
+                  "with": "string (optional) - provider for this stage (optional; defaults from routing config)"
+                }
+              ],
+              "title": "string (optional) - brief order description"
+            }
+          ]
+        }
+        ```
+        
+        Constraints:
+        - Each order is a pipeline of stage groups executed sequentially. Stages within the same group run concurrently.
+        - Group related stages into one order rather than separate orders.
+        - Stage `do` values must match a `task_types[].key` from mise, or omit `do` and provide a `prompt` for ad-hoc stages.
+        - Each `rationale` should cite a specific scheduling rule or principle.
+        - Do not include `status` or `skill` fields — the loop sets these automatically.
+        
+        Task types you may schedule:
+        - execute: When backlog items with linked plans are ready for implementation
+    smoke_test.go:121: diagnostics [schedule-20260917-071453-46065f/stderr.log]:
+        Reading prompt from stdin...
+        2026-09-17T07:14:53.887232Z  WARN codex_skills::interface: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/
+        2026-09-17T07:14:53.887256Z  WARN codex_skills::interface: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/
+        2026-09-17T07:14:54.614304Z  WARN codex_skills::interface: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/
+        2026-09-17T07:14:54.614325Z  WARN codex_skills::interface: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/
+    smoke_test.go:121: diagnostics [schedule-20260917-071453-46065f/canonical.ndjson]: 11 lines, type counts: map[action:8 error:1 init:1 result:1]
+    smoke_test.go:121: diagnostics [schedule-20260917-071453-46065f/canonical.ndjson] TAIL:
+        {"provider":"codex","type":"init","message":"codex session started","timestamp":"2026-09-17T07:14:54.050187Z"}
+        {"provider":"codex","type":"action","message":"text:turn started","timestamp":"2026-09-17T07:14:54.146377Z"}
+        {"provider":"codex","type":"action","message":"text:我會先讀取 `schedule` Skill，依其規則檢查排程輸入並產生待提升的訂單檔。","timestamp":"2026-09-17T07:15:00.992897Z"}
+        {"provider":"codex","type":"action","message":"$ cat .agents/skills/schedule/SKILL.md","timestamp":"2026-09-17T07:15:06.061082Z"}
+        {"provider":"codex","type":"action","message":"$ pwd; rg --files -g AGENTS.md -g 'go.mod' -g '*schedule*' -g '*main*' -g '\"'!.git'\"' -g '\"'!node_modules'\"' -g '\"'!.noodle'\"' -g '.Codex/**' -g 'adapters/**'; git status --short","timestamp":"2026-09-17T07:15:12.053159Z"}
+        {"provider":"codex","type":"action","message":"$ ls -la; cat .noodle/mise.json; cat .noodle/orders.json; ls -la adapters; test ! -f .Codex/AGENTS.md || cat .Codex/AGENTS.md","timestamp":"2026-09-17T07:15:16.743942Z"}
+        {"provider":"codex","type":"action","message":"$ go run ./adapters/noodles-github schedule","timestamp":"2026-09-17T07:15:20.939652Z"}
+        {"provider":"codex","type":"error","message":"command failed: go run ./adapters/noodles-github schedule","timestamp":"2026-09-17T07:15:20.940744Z"}
+        {"provider":"codex","type":"action","message":"$ git diff --stat; if test -f .noodle/orders-next.json; then cat .noodle/orders-next.json; else printf '%s\\\\n' 'orders-next.json does not exist'; fi","timestamp":"2026-09-17T07:15:25.569055Z"}
+        {"provider":"codex","type":"action","message":"text:排程受阻：已依 `schedule` Skill 執行指定命令，但缺少 `adapters/noodles-github` 目錄，命令失敗。\n\n此外，backlog 項目 `1` 缺少 `execution_skill` 與授權綁定，不能推定為可派發。\n\nSkill 禁止手工重建訂單，因此未產生 `orders-next.json`，也未修改 canonical orders。需先補齊指定 adapter 與符合契約的 backlog 資料。","timestamp":"2026-09-17T07:15:31.586316Z"}
+        {"provider":"codex","type":"result","message":"turn complete","timestamp":"2026-09-17T07:15:31.818182Z"}
+    smoke_test.go:121: diagnostics [schedule-20260917-071453-46065f/raw.ndjson]: 16 lines, type counts: map[item.completed:8 item.started:5 thread.started:1 turn.completed:1 turn.started:1]
+    smoke_test.go:121: diagnostics [schedule-20260917-071453-46065f/raw.ndjson] TAIL:
+        {"_ts":"2026-09-17T07:14:54.050187Z","thread_id":"01a0ae37-e4f5-74a3-bfef-963e3b45db8d","type":"thread.started"}
+        {"_ts":"2026-09-17T07:14:54.060747Z","item":{"id":"item_0","type":"error","message":"clamping SessionEnd hook timeout to 3s in /Users/neon/.codex/plugins/cache/openai-codex/codex/1.0.6/hooks/hooks.json"},"type":"item.completed"}
+        {"_ts":"2026-09-17T07:14:54.146377Z","type":"turn.started"}
+        {"_ts":"2026-09-17T07:15:00.992897Z","item":{"id":"item_1","type":"agent_message","text":"我會先讀取 `schedule` Skill，依其規則檢查排程輸入並產生待提升的訂單檔。\n"},"type":"item.completed"}
+        {"_ts":"2026-09-17T07:15:06.061082Z","item":{"id":"item_2","type":"command_execution","command":"/bin/zsh -lc 'cat .agents/skills/schedule/SKILL.md'","aggregated_output":"","exit_code":null,"status":"in_progress"},"type":"item.started"}
+        {"_ts":"2026-09-17T07:15:06.061535Z","item":{"id":"item_2","type":"command_execution","command":"/bin/zsh -lc 'cat .agents/skills/schedule/SKILL.md'","aggregated_output":"---\nname: schedule\ndescription: Schedule source-authorized ed3c/noodle Issues from this repository's target backlog. Use only for Noodle schedule cycles in ed3c/noodle.\nschedule: \"When an authorized ed3c/noodle Issue is ready and no current order owns it\"\n---\n\n# Target Issue Schedule\n\nRun the target-owned materializer from the repository root:\n\n```bash\ngo run ./adapters/noodles-github schedule\n```\n\nIt reads `.noodle/mise.json` and the read-only canonical `.noodle/orders.json`, then writes only `.noodle/orders-next.json`. Noodle owns promotion into canonical orders, worktrees, and process lifecycle. Do not reconstruct or edit the order JSON yourself.\n\nBefore selecting a backlog row, derive `owned_ids` from every canonical non-`schedule` order ID. A row is actionable only when its exact `id` is not in `owned_ids`. The transient presence or absence of `.noodle/orders-next.json` is never ownership evidence. If every eligible backlog row is already owned, write `{\"orders\":[]}`; do not copy canonical orders into the promotion.\n\nEach eligible backlog row is the target adapter's current provider and authorization projection. For one actionable row:\n\n- use its exact `id` as the order ID;\n- emit exactly one stage;\n- set `do` to the row's exact `execution_skill`;\n- set `runtime` to `process`;\n- set `prompt` to the JSON encoding of the entire row so the target executor receives its body and authorization binding.\n\nNever infer missing fields, replace the execution skill, or schedule a foreign, malformed, unauthorized, blocked, or already-owned item. Do not add planning, review, cleanup, or follow-up stages. Do not write canonical orders directly.\n\nIf no item is actionable, write `{\"orders\":[]}`.\n","exit_code":0,"status":"completed"},"type":"item.completed"}
+        {"_ts":"2026-09-17T07:15:12.053159Z","item":{"id":"item_3","type":"command_execution","command":"/bin/zsh -lc \"pwd; rg --files -g AGENTS.md -g 'go.mod' -g '*schedule*' -g '*main*' -g '\"'!.git'\"' -g '\"'!node_modules'\"' -g '\"'!.noodle'\"' -g '.Codex/**' -g 'adapters/**'; git status --short\"","aggregated_output":"","exit_code":null,"status":"in_progress"},"type":"item.started"}
+        {"_ts":"2026-09-17T07:15:12.054267Z","item":{"id":"item_3","type":"command_execution","command":"/bin/zsh -lc \"pwd; rg --files -g AGENTS.md -g 'go.mod' -g '*schedule*' -g '*main*' -g '\"'!.git'\"' -g '\"'!node_modules'\"' -g '\"'!.noodle'\"' -g '.Codex/**' -g 'adapters/**'; git status --short\"","aggregated_output":"/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3222918283\nmain.go\nadapters/backlog-sync\nadapters/backlog-edit\nadapters/backlog-done\nadapters/backlog-add\ngo.mod\n?? .noodle/\n","exit_code":0,"status":"completed"},"type":"item.completed"}
+        {"_ts":"2026-09-17T07:15:16.743942Z","item":{"id":"item_4","type":"command_execution","command":"/bin/zsh -lc 'ls -la; cat .noodle/mise.json; cat .noodle/orders.json; ls -la adapters; test ! -f .Codex/AGENTS.md || cat .Codex/AGENTS.md'","aggregated_output":"","exit_code":null,"status":"in_progress"},"type":"item.started"}
+        {"_ts":"2026-09-17T07:15:16.746278Z","item":{"id":"item_4","type":"command_execution","command":"/bin/zsh -lc 'ls -la; cat .noodle/mise.json; cat .noodle/orders.json; ls -la adapters; test ! -f .Codex/AGENTS.md || cat .Codex/AGENTS.md'","aggregated_output":"total 32\ndrwx------@   11 neon  staff    352 Sep 17 15:14 .\ndrwx------@ 2747 neon  staff  87904 Sep 17 15:15 ..\ndrwxr-xr-x@    3 neon  staff     96 Sep 17 15:14 .agents\ndrwxr-xr-x@   12 neon  staff    384 Sep 17 15:15 .git\ndrwxr-xr-x@   12 neon  staff    384 Sep 17 15:15 .noodle\n-rw-r--r--@    1 neon  staff    435 Sep 17 15:14 .noodle.toml\ndrwxr-xr-x@    6 neon  staff    192 Sep 17 15:14 adapters\ndrwxr-xr-x@    3 neon  staff     96 Sep 17 15:14 brain\n-rw-r--r--@    1 neon  staff     32 Sep 17 15:14 go.mod\n-rw-r--r--@    1 neon  staff     82 Sep 17 15:14 main.go\n-rw-r--r--@    1 neon  staff    103 Sep 17 15:14 todos.md\n{\n  \"generated_at\": \"2026-09-17T07:14:54.687497Z\",\n  \"backlog\": [\n    {\n      \"id\": \"1\",\n      \"title\": \"Create a hello.txt file containing \\\"hello world\\\"\",\n      \"status\": \"open\"\n    }\n  ],\n  \"active_summary\": {\n    \"total\": 1,\n    \"by_task_key\": {\n      \"schedule\": 1\n    },\n    \"by_status\": {\n      \"active\": 1\n    },\n    \"by_runtime\": {\n      \"process\": 1\n    }\n  },\n  \"tickets\": [],\n  \"resources\": {\n    \"max_concurrency\": 1,\n    \"active\": 1,\n    \"available\": 0\n  },\n  \"recent_history\": [],\n  \"recent_events\": [],\n  \"routing\": {\n    \"defaults\": {\n      \"provider\": \"codex\",\n      \"model\": \"gpt-6-astra\"\n    },\n    \"available_runtimes\": [\n      \"process\"\n    ]\n  },\n  \"task_types\": [\n    {\n      \"key\": \"execute\",\n      \"schedule\": \"When backlog items with linked plans are ready for implementation\"\n    }\n  ]\n}{\n  \"generated_at\": \"2026-09-17T07:14:53.677391Z\",\n  \"orders\": [\n    {\n      \"id\": \"schedule\",\n      \"title\": \"scheduling tasks based on your backlog\",\n      \"stages\": [\n        {\n          \"task_key\": \"schedule\",\n          \"skill\": \"schedule\",\n          \"provider\": \"codex\",\n          \"model\": \"gpt-6-astra\",\n          \"runtime\": \"process\",\n          \"status\": \"active\"\n        }\n      ],\n      \"status\": \"active\"\n    }\n  ]\n}\ntotal 32\ndrwxr-xr-x@  6 neon  staff  192 Sep 17 15:14 .\ndrwx------@ 11 neon  staff  352 Sep 17 15:14 ..\n-rwxr-xr-x@  1 neon  staff   29 Sep 17 15:14 backlog-add\n-rwxr-xr-x@  1 neon  staff   30 Sep 17 15:14 backlog-done\n-rwxr-xr-x@  1 neon  staff   30 Sep 17 15:14 backlog-edit\n-rwxr-xr-x@  1 neon  staff  346 Sep 17 15:14 backlog-sync\n","exit_code":0,"status":"completed"},"type":"item.completed"}
+        {"_ts":"2026-09-17T07:15:20.939652Z","item":{"id":"item_5","type":"command_execution","command":"/bin/zsh -lc 'go run ./adapters/noodles-github schedule'","aggregated_output":"","exit_code":null,"status":"in_progress"},"type":"item.started"}
+        {"_ts":"2026-09-17T07:15:20.940744Z","item":{"id":"item_5","type":"command_execution","command":"/bin/zsh -lc 'go run ./adapters/noodles-github schedule'","aggregated_output":"stat /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3222918283/adapters/noodles-github: directory not found\n","exit_code":1,"status":"failed"},"type":"item.completed"}
+        {"_ts":"2026-09-17T07:15:25.569055Z","item":{"id":"item_6","type":"command_execution","command":"/bin/zsh -lc \"git diff --stat; if test -f .noodle/orders-next.json; then cat .noodle/orders-next.json; else printf '%s\\\\n' 'orders-next.json does not exist'; fi\"","aggregated_output":"","exit_code":null,"status":"in_progress"},"type":"item.started"}
+        {"_ts":"2026-09-17T07:15:25.569964Z","item":{"id":"item_6","type":"command_execution","command":"/bin/zsh -lc \"git diff --stat; if test -f .noodle/orders-next.json; then cat .noodle/orders-next.json; else printf '%s\\\\n' 'orders-next.json does not exist'; fi\"","aggregated_output":"orders-next.json does not exist\n","exit_code":0,"status":"completed"},"type":"item.completed"}
+        {"_ts":"2026-09-17T07:15:31.586316Z","item":{"id":"item_7","type":"agent_message","text":"排程受阻：已依 `schedule` Skill 執行指定命令，但缺少 `adapters/noodles-github` 目錄，命令失敗。\n\n此外，backlog 項目 `1` 缺少 `execution_skill` 與授權綁定，不能推定為可派發。\n\nSkill 禁止手工重建訂單，因此未產生 `orders-next.json`，也未修改 canonical orders。需先補齊指定 adapter 與符合契約的 backlog 資料。"},"type":"item.completed"}
+        {"_ts":"2026-09-17T07:15:31.818182Z","type":"turn.completed","usage":{"input_tokens":122850,"cached_input_tokens":113408,"cache_write_input_tokens":0,"output_tokens":512,"reasoning_output_tokens":49}}
+    smoke_test.go:121: diagnostics [schedule-20260917-071536-749874/prompt.txt]:
+        Use Skill(schedule). The selected skill is the single owner of project scheduling and output policy.
+        
+        Runtime interface:
+        - checkout_mode: primary-checkout
+        - selected_skill: schedule
+        - selected_skill_path: /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3222918283/.agents/skills/schedule
+        - mise_input: /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3222918283/.noodle/mise.json
+        - promotion_input: /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3222918283/.noodle/orders-next.json
+        - canonical_orders: /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3222918283/.noodle/orders.json (read-only; the loop promotes atomically)
+        
+        Supported compact transport schema (the selected skill may impose stricter project policy):
+        orders.json schema (JSON):
+        ```json
+        {
+          "action_needed": [
+            "string - backlog item ID skipped pending user action"
+          ],
+          "initial_revision": "string (optional) - optional current order_revision from Noodle state.snapshot.json; requires every proposed ID to be absent. Stale/replayed proposals refuse before promotion. This is not execution authorization; omit only for the existing legacy scheduling contract.",
+          "orders": [
+            {
+              "id": "string - order ID (plan ID as string, or unique slug)",
+              "plan": [
+                "string - linked plan path(s), e.g. plans/15-bootstrap-onboarding/overview"
+              ],
+              "rationale": "string (optional) - placement reason citing a rule or principle",
+              "stages": [
+                {
+                  "do": "string (optional) - task key (must match a task_types[].key from mise)",
+                  "extra": {
+                    "<key>": "JSON - opaque extension data preserved across round-trips"
+                  },
+                  "extra_prompt": "string (optional) - supplemental instructions for the cook on how to approach the task (max ~1000 chars)",
+                  "group": "number (optional) - parallel group ID; stages in the same group run concurrently, groups execute sequentially (default: 0)",
+                  "model": "string (optional) - model for this stage (optional; defaults from routing config)",
+                  "prompt": "string (optional) - full prompt text for the dispatched session",
+                  "runtime": "string (optional) - runtime for this stage (process, sprites, etc.)",
+                  "with": "string (optional) - provider for this stage (optional; defaults from routing config)"
+                }
+              ],
+              "title": "string (optional) - brief order description"
+            }
+          ]
+        }
+        ```
+        
+        Constraints:
+        - Each order is a pipeline of stage groups executed sequentially. Stages within the same group run concurrently.
+        - Group related stages into one order rather than separate orders.
+        - Stage `do` values must match a `task_types[].key` from mise, or omit `do` and provide a `prompt` for ad-hoc stages.
+        - Each `rationale` should cite a specific scheduling rule or principle.
+        - Do not include `status` or `skill` fields — the loop sets these automatically.
+        
+        Task types you may schedule:
+        - execute: When backlog items with linked plans are ready for implementation
+    smoke_test.go:121: diagnostics [schedule-20260917-071536-749874/stderr.log]:
+        Reading prompt from stdin...
+        2026-09-17T07:15:37.114278Z  WARN codex_skills::interface: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/
+        2026-09-17T07:15:37.114303Z  WARN codex_skills::interface: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/
+        2026-09-17T07:15:37.266494Z  WARN codex_skills::interface: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/
+        2026-09-17T07:15:37.266510Z  WARN codex_skills::interface: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/
+    smoke_test.go:121: diagnostics [schedule-20260917-071536-749874/canonical.ndjson]: 9 lines, type counts: map[action:7 error:1 init:1]
+    smoke_test.go:121: diagnostics [schedule-20260917-071536-749874/canonical.ndjson] TAIL:
+        {"provider":"codex","type":"init","message":"codex session started","timestamp":"2026-09-17T07:15:37.241801Z"}
+        {"provider":"codex","type":"action","message":"text:turn started","timestamp":"2026-09-17T07:15:37.37744Z"}
+        {"provider":"codex","type":"action","message":"text:我會使用 `schedule` skill，先讀取排程規則與輸入資料，再產生供 Noodle 原子提升的排程提案。","timestamp":"2026-09-17T07:15:44.409276Z"}
+        {"provider":"codex","type":"action","message":"$ cat .agents/skills/schedule/SKILL.md","timestamp":"2026-09-17T07:15:45.435587Z"}
+        {"provider":"codex","type":"action","message":"$ cat .noodle/mise.json .noodle/orders.json","timestamp":"2026-09-17T07:15:51.21508Z"}
+        {"provider":"codex","type":"action","message":"$ pwd; rg --files -g AGENTS.md -g '\"'!.git'\"' -g '\"'!vendor'\"' -g '\"'!node_modules'\"' -g '.Codex/**' -g 'adapters/noodles-github/**' -g 'go.mod","timestamp":"2026-09-17T07:15:51.226039Z"}
+        {"provider":"codex","type":"action","message":"$ go run ./adapters/noodles-github schedule","timestamp":"2026-09-17T07:15:54.307839Z"}
+        {"provider":"codex","type":"error","message":"command failed: go run ./adapters/noodles-github schedule","timestamp":"2026-09-17T07:15:54.308928Z"}
+        {"provider":"codex","type":"action","message":"$ ls -la; rg --files --hidden -g '\"'!.git'\"' -g '\"'!.noodle/sessions/**'\"' -g '\"'!node_modules'\"' -g '\"'!vendor'\"' -g '\"'!*.log'\"'; git status --short; git diff -- .noodle/orders-next.json","timestamp":"2026-09-17T07:15:59.664592Z"}
+    smoke_test.go:121: diagnostics [schedule-20260917-071536-749874/raw.ndjson]: 14 lines, type counts: map[item.completed:7 item.started:5 thread.started:1 turn.started:1]
+    smoke_test.go:121: diagnostics [schedule-20260917-071536-749874/raw.ndjson] TAIL:
+        {"_ts":"2026-09-17T07:15:37.241801Z","thread_id":"01a0ae38-8e05-73e1-8a6c-720183fa1828","type":"thread.started"}
+        {"_ts":"2026-09-17T07:15:37.312678Z","item":{"id":"item_0","type":"error","message":"clamping SessionEnd hook timeout to 3s in /Users/neon/.codex/plugins/cache/openai-codex/codex/1.0.6/hooks/hooks.json"},"type":"item.completed"}
+        {"_ts":"2026-09-17T07:15:37.37744Z","type":"turn.started"}
+        {"_ts":"2026-09-17T07:15:44.409276Z","item":{"id":"item_1","type":"agent_message","text":"我會使用 `schedule` skill，先讀取排程規則與輸入資料，再產生供 Noodle 原子提升的排程提案。\n"},"type":"item.completed"}
+        {"_ts":"2026-09-17T07:15:45.435587Z","item":{"id":"item_2","type":"command_execution","command":"/bin/zsh -lc 'cat .agents/skills/schedule/SKILL.md'","aggregated_output":"","exit_code":null,"status":"in_progress"},"type":"item.started"}
+        {"_ts":"2026-09-17T07:15:45.436051Z","item":{"id":"item_2","type":"command_execution","command":"/bin/zsh -lc 'cat .agents/skills/schedule/SKILL.md'","aggregated_output":"---\nname: schedule\ndescription: Schedule source-authorized ed3c/noodle Issues from this repository's target backlog. Use only for Noodle schedule cycles in ed3c/noodle.\nschedule: \"When an authorized ed3c/noodle Issue is ready and no current order owns it\"\n---\n\n# Target Issue Schedule\n\nRun the target-owned materializer from the repository root:\n\n```bash\ngo run ./adapters/noodles-github schedule\n```\n\nIt reads `.noodle/mise.json` and the read-only canonical `.noodle/orders.json`, then writes only `.noodle/orders-next.json`. Noodle owns promotion into canonical orders, worktrees, and process lifecycle. Do not reconstruct or edit the order JSON yourself.\n\nBefore selecting a backlog row, derive `owned_ids` from every canonical non-`schedule` order ID. A row is actionable only when its exact `id` is not in `owned_ids`. The transient presence or absence of `.noodle/orders-next.json` is never ownership evidence. If every eligible backlog row is already owned, write `{\"orders\":[]}`; do not copy canonical orders into the promotion.\n\nEach eligible backlog row is the target adapter's current provider and authorization projection. For one actionable row:\n\n- use its exact `id` as the order ID;\n- emit exactly one stage;\n- set `do` to the row's exact `execution_skill`;\n- set `runtime` to `process`;\n- set `prompt` to the JSON encoding of the entire row so the target executor receives its body and authorization binding.\n\nNever infer missing fields, replace the execution skill, or schedule a foreign, malformed, unauthorized, blocked, or already-owned item. Do not add planning, review, cleanup, or follow-up stages. Do not write canonical orders directly.\n\nIf no item is actionable, write `{\"orders\":[]}`.\n","exit_code":0,"status":"completed"},"type":"item.completed"}
+        {"_ts":"2026-09-17T07:15:51.21508Z","item":{"id":"item_3","type":"command_execution","command":"/bin/zsh -lc 'cat .noodle/mise.json .noodle/orders.json'","aggregated_output":"","exit_code":null,"status":"in_progress"},"type":"item.started"}
+        {"_ts":"2026-09-17T07:15:51.217471Z","item":{"id":"item_3","type":"command_execution","command":"/bin/zsh -lc 'cat .noodle/mise.json .noodle/orders.json'","aggregated_output":"{\n  \"generated_at\": \"2026-09-17T07:15:36.488078Z\",\n  \"backlog\": [\n    {\n      \"id\": \"1\",\n      \"title\": \"Create a hello.txt file containing \\\"hello world\\\"\",\n      \"status\": \"open\"\n    }\n  ],\n  \"active_summary\": {\n    \"total\": 1,\n    \"by_task_key\": {\n      \"schedule\": 1\n    },\n    \"by_status\": {\n      \"active\": 1\n    },\n    \"by_runtime\": {\n      \"process\": 1\n    }\n  },\n  \"tickets\": [],\n  \"resources\": {\n    \"max_concurrency\": 1,\n    \"active\": 1,\n    \"available\": 0\n  },\n  \"recent_history\": [\n    {\n      \"session_id\": \"schedule-20260917-071453-46065f\",\n      \"order_id\": \"schedule\",\n      \"task_key\": \"schedule\",\n      \"status\": \"completed\",\n      \"duration_s\": 42,\n      \"completed_at\": \"2026-09-17T07:15:36.469532Z\"\n    }\n  ],\n  \"recent_events\": null,\n  \"routing\": {\n    \"defaults\": {\n      \"provider\": \"codex\",\n      \"model\": \"gpt-6-astra\"\n    },\n    \"available_runtimes\": [\n      \"process\"\n    ]\n  },\n  \"task_types\": [\n    {\n      \"key\": \"execute\",\n      \"schedule\": \"When backlog items with linked plans are ready for implementation\"\n    }\n  ]\n}{\n  \"generated_at\": \"2026-09-17T07:15:36.479629Z\",\n  \"orders\": [\n    {\n      \"id\": \"schedule\",\n      \"title\": \"scheduling tasks based on your backlog\",\n      \"stages\": [\n        {\n          \"task_key\": \"schedule\",\n          \"skill\": \"schedule\",\n          \"provider\": \"codex\",\n          \"model\": \"gpt-6-astra\",\n          \"runtime\": \"process\",\n          \"status\": \"active\"\n        }\n      ],\n      \"status\": \"active\"\n    }\n  ]\n}\n","exit_code":0,"status":"completed"},"type":"item.completed"}
+        {"_ts":"2026-09-17T07:15:51.226039Z","item":{"id":"item_4","type":"command_execution","command":"/bin/zsh -lc \"pwd; rg --files -g AGENTS.md -g '\"'!.git'\"' -g '\"'!vendor'\"' -g '\"'!node_modules'\"' -g '.Codex/**' -g 'adapters/noodles-github/**' -g 'go.mod'\"","aggregated_output":"","exit_code":null,"status":"in_progress"},"type":"item.started"}
+        {"_ts":"2026-09-17T07:15:51.226935Z","item":{"id":"item_4","type":"command_execution","command":"/bin/zsh -lc \"pwd; rg --files -g AGENTS.md -g '\"'!.git'\"' -g '\"'!vendor'\"' -g '\"'!node_modules'\"' -g '.Codex/**' -g 'adapters/noodles-github/**' -g 'go.mod'\"","aggregated_output":"/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3222918283\ngo.mod\n","exit_code":0,"status":"completed"},"type":"item.completed"}
+        {"_ts":"2026-09-17T07:15:54.307839Z","item":{"id":"item_5","type":"command_execution","command":"/bin/zsh -lc 'go run ./adapters/noodles-github schedule'","aggregated_output":"","exit_code":null,"status":"in_progress"},"type":"item.started"}
+        {"_ts":"2026-09-17T07:15:54.308928Z","item":{"id":"item_5","type":"command_execution","command":"/bin/zsh -lc 'go run ./adapters/noodles-github schedule'","aggregated_output":"stat /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3222918283/adapters/noodles-github: directory not found\n","exit_code":1,"status":"failed"},"type":"item.completed"}
+        {"_ts":"2026-09-17T07:15:59.664592Z","item":{"id":"item_6","type":"command_execution","command":"/bin/zsh -lc \"ls -la; rg --files --hidden -g '\"'!.git'\"' -g '\"'!.noodle/sessions/**'\"' -g '\"'!node_modules'\"' -g '\"'!vendor'\"' -g '\"'!*.log'\"'; git status --short; git diff -- .noodle/orders-next.json\"","aggregated_output":"","exit_code":null,"status":"in_progress"},"type":"item.started"}
+        {"_ts":"2026-09-17T07:15:59.666286Z","item":{"id":"item_6","type":"command_execution","command":"/bin/zsh -lc \"ls -la; rg --files --hidden -g '\"'!.git'\"' -g '\"'!.noodle/sessions/**'\"' -g '\"'!node_modules'\"' -g '\"'!vendor'\"' -g '\"'!*.log'\"'; git status --short; git diff -- .noodle/orders-next.json\"","aggregated_output":"total 32\ndrwx------@   11 neon  staff    352 Sep 17 15:14 .\ndrwx------@ 2749 neon  staff  87968 Sep 17 15:15 ..\ndrwxr-xr-x@    3 neon  staff     96 Sep 17 15:14 .agents\ndrwxr-xr-x@   12 neon  staff    384 Sep 17 15:15 .git\ndrwxr-xr-x@   13 neon  staff    416 Sep 17 15:15 .noodle\n-rw-r--r--@    1 neon  staff    435 Sep 17 15:14 .noodle.toml\ndrwxr-xr-x@    6 neon  staff    192 Sep 17 15:14 adapters\ndrwxr-xr-x@    3 neon  staff     96 Sep 17 15:14 brain\n-rw-r--r--@    1 neon  staff     32 Sep 17 15:14 go.mod\n-rw-r--r--@    1 neon  staff     82 Sep 17 15:14 main.go\n-rw-r--r--@    1 neon  staff    103 Sep 17 15:14 todos.md\nmain.go\nbrain/index.md\ntodos.md\nadapters/backlog-sync\nadapters/backlog-edit\nadapters/backlog-done\nadapters/backlog-add\n.noodle/status.json\n.noodle/state.snapshot.json\n.noodle/tickets.json\n.noodle/orders.json\n.noodle/pending-review.json\n.noodle/loop-events.ndjson\n.noodle/state.json\n.noodle/control.lock\n.noodle/mise.json\n.noodle/noodle.lock\n.agents/skills/execute/SKILL.md\n.agents/skills/execute/references/team-execution.md\n.agents/skills/execute/references/verification.md\n.agents/skills/schedule/SKILL.md\n.agents/skills/schedule/references/events.md\n.agents/skills/schedule/references/model-routing.md\n.agents/skills/schedule/references/examples.md\n.noodle.toml\ngo.mod\n?? .noodle/\n","exit_code":0,"status":"completed"},"type":"item.completed"}
+    smoke_test.go:123: first attempt failed: playwright UI smoke: playwright tests failed: exit status 1 — retrying once
+    smoke_test.go:124: killing noodle process (pid 85317)
+    smoke_test.go:128: retry project dir: /var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3151185793
+    smoke_test.go:146: noodle restarted (pid 86919)
+    smoke_test.go:103: polling milestone: Phase A: orders.json appears (timeout 1m0s)
+    smoke_test.go:103: milestone Phase A: orders.json appears reached
+    smoke_test.go:103: polling milestone: Phase B: session directory appears (timeout 2m0s)
+    smoke_test.go:103: milestone Phase B: session directory appears reached
+    smoke_test.go:106: server ready at http://127.0.0.1:13737
+    smoke_test.go:109: playwright output:
+        
+        Running 9 tests using 1 worker
+        
+          ✓  1 [chromium] › smoke.spec.ts:31:3 › Noodle UI smoke › channel layout loads with sidebar, feed, and context panel (540ms)
+          ✓  2 [chromium] › smoke.spec.ts:52:3 › Noodle UI smoke › sidebar shows scheduler channel (497ms)
+          ✓  3 [chromium] › smoke.spec.ts:61:3 › Noodle UI smoke › dashboard route loads (477ms)
+          ✓  4 [chromium] › smoke.spec.ts:69:3 › Noodle UI smoke › topology route loads (477ms)
+          ✓  5 [chromium] › smoke.spec.ts:77:3 › Noodle UI smoke › steer input is functional (500ms)
+          ✓  6 [chromium] › smoke.spec.ts:88:3 › Noodle UI smoke › snapshot API returns valid data (27ms)
+          ✓  7 [chromium] › smoke.spec.ts:99:3 › Noodle UI smoke › config API returns provider and model (5ms)
+          ✓  8 [chromium] › smoke.spec.ts:108:3 › Noodle UI smoke › WebSocket endpoint is reachable (126ms)
+          ✘  9 [chromium] › smoke.spec.ts:138:3 › Noodle UI smoke › active agent context shows worktree name (30.0s)
+          ✘  10 [chromium] › smoke.spec.ts:138:3 › Noodle UI smoke › active agent context shows worktree name (retry #1) (30.0s)
+        
+        
+          1) [chromium] › smoke.spec.ts:138:3 › Noodle UI smoke › active agent context shows worktree name ─
+        
+            [31mTest timeout of 30000ms exceeded.[39m
+        
+            Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+        
+            [31mTest timeout of 30000ms exceeded.[39m
+        
+          1 failed
+            [chromium] › smoke.spec.ts:138:3 › Noodle UI smoke › active agent context shows worktree name ──
+          8 passed (1.1m)
+    smoke_test.go:149: smoke flow not reached after retry: playwright UI smoke: playwright tests failed: exit status 1
+    smoke_test.go:140: killing noodle process (pid 86919)
+    smoke_test.go:66: killing noodle process (pid 86919)
+2026-09-17T15:17:14.667732+08:00 INFO api: start initialized project=/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3472830931 runtime_dir=/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3472830931/.noodle once=false server_enabled=true
+2026-09-17T15:17:14.668163+08:00 INFO api: listening component=server addr=localhost:13738
+2026-09-17T15:17:14.66823+08:00 INFO api: browser launch skipped component=server reason="NOODLE_NO_BROWSER=1" url=http://localhost:13738
+2026-09-17T15:17:14.669654+08:00 INFO api: startup injected schedule order
+2026-09-17T15:17:14.870917+08:00 INFO api: schedule dispatched session=schedule-20260917-071714-cf7b3d attempt=0
+2026-09-17T15:17:16.114072+08:00 INFO api: start initialized project=/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-2228516426 runtime_dir=/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-2228516426/.noodle once=false server_enabled=true
+2026-09-17T15:17:16.11448+08:00 INFO api: listening component=server addr=localhost:13739
+2026-09-17T15:17:16.114538+08:00 INFO api: browser launch skipped component=server reason="NOODLE_NO_BROWSER=1" url=http://localhost:13739
+2026-09-17T15:17:16.115617+08:00 INFO api: startup injected schedule order
+2026-09-17T15:17:16.271148+08:00 INFO api: schedule dispatched session=schedule-20260917-071716-c23fe2 attempt=0
+--- FAIL: TestSmokeInstallMd (120.17s)
+    smoke_test.go:698: codex output:
+        Reading additional input from stdin...
+        2026-09-17T07:17:16.819146Z  WARN codex_skills::interface: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/
+        2026-09-17T07:17:16.819170Z  WARN codex_skills::interface: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/
+        OpenAI Codex v0.153.4
+        --------
+        workdir: /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3135167154
+        model: gpt-6-astra
+        provider: openai
+        approval: never
+        sandbox: danger-full-access
+        reasoning effort: high
+        reasoning summaries: none
+        session id: 01a0ae3a-137c-7cb3-afac-756cab5d540c
+        --------
+        user
+        Install Noodle and set up this project. Follow /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/INSTALL.md.
+        
+        This run is non-interactive. Do not ask follow-up questions.
+        If INSTALL.md says to ask the user, choose these defaults and continue:
+        - provider: Codex
+        - first backlog item in todos.md: "Initial smoke test task"
+        - brainmaxxing: no
+        
+        Complete the setup end-to-end and then report completion.
+        warning: clamping SessionEnd hook timeout to 3s in /Users/neon/.codex/plugins/cache/openai-codex/codex/1.0.6/hooks/hooks.json
+        2026-09-17T07:17:17.528971Z  WARN codex_skills::interface: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/
+        2026-09-17T07:17:17.528984Z  WARN codex_skills::interface: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/
+        hook: SessionStart
+        hook: SessionStart
+        hook: SessionStart Completed
+        hook: SessionStart Completed
+        codex
+        我會先讀取指定的 INSTALL.md 與專案規則，再依你指定的預設值完成安裝和驗證，全程不追問。
+        hook: PreToolUse
+        hook: PreToolUse Completed
+        exec
+        /bin/zsh -lc "pwd; rg --files --hidden -g AGENTS.md -g '"'!node_modules'"' -g '"'!.git'"' -g '"'!vendor'"' .; cat /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/INSTALL.md" in /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3135167154
+         succeeded in 0ms:
+        /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3135167154
+        # Install Noodle
+        
+        Noodle is a skill-based agent orchestration framework. You write skills (markdown files describing what an agent should do) and Noodle's loop schedules and runs them. Think kitchen brigade: a head chef (the scheduler) reads the backlog, writes orders, and dispatches line cooks (agents) to do the work in isolated worktrees.
+        
+        ## How the loop works
+        
+        The scheduler reads `.noodle/mise.json` (project state: backlog, active agents, history, registered skills) and writes `.noodle/orders-next.json`. The loop promotes orders and spawns agent sessions. Each agent gets a skill loaded as its instructions. When the agent finishes, its worktree merges back.
+        
+        The minimum loop is schedule then execute. Noodle handles merging completed work back to main. You can add more stages (quality review, reflection, etc.) by writing skills for them.
+        
+        ## The `schedule` frontmatter field
+        
+        Noodle adds one thing to skills: a `schedule` field in the YAML frontmatter. Skills without it work normally (agents invoke them directly). Skills with it become autonomous. The scheduler reads the `schedule` value as prose and decides when conditions are met.
+        
+        ```yaml
+        schedule: "After execute completes and all tests pass."
+        ```
+        
+        A working loop needs at least two scheduled skills: a schedule skill (reads backlog, writes orders) and one task-type skill like execute (does the work).
+        
+        ---
+        
+        ## Setup
+        
+        Work through these steps in order. Each has a skip condition. If the check passes, move on.
+        
+        ### 1. Install the binary
+        
+        **Skip if:** `noodle --version` succeeds.
+        
+        Detect the platform and install:
+        
+        - **macOS:** `brew install poteto/tap/noodle`
+        - **Linux/Windows:** Download the binary for your platform from `https://github.com/poteto/noodle/releases/latest` and place it on PATH.
+        
+        Verify: `noodle --version` prints a version string.
+        
+        ### 2. Install the noodle skill
+        
+        **Skip if:** `.agents/skills/noodle/SKILL.md` AND all files in `.agents/skills/noodle/references/` exist.
+        
+        If only some files exist (interrupted install), fetch the missing ones.
+        
+        The noodle skill teaches agents how to use the CLI and write skills. Copy this one verbatim. Everything else you write yourself.
+        
+        Fetch these files from GitHub:
+        
+        ```
+        https://raw.githubusercontent.com/poteto/noodle/main/.agents/skills/noodle/SKILL.md
+        https://raw.githubusercontent.com/poteto/noodle/main/.agents/skills/noodle/references/skill-authoring.md
+        https://raw.githubusercontent.com/poteto/noodle/main/.agents/skills/noodle/references/configuration.md
+        ```
+        
+        Write them to the same paths under the project root (`.agents/skills/noodle/...`). Create directories as needed.
+        
+        ### 3. Configure
+        
+        **Skip if:** `.noodle.toml` exists at the project root.
+        
+        Ask the user which provider they use: **Claude** or **Codex**. Then generate `.noodle.toml`:
+        
+        For **Claude**:
+        ```toml
+        mode = "supervised"
+        
+        [routing.defaults]
+        provider = "claude"
+        model = "claude-opus-4-6"
+        
+        [skills]
+        paths = [".agents/skills"]
+        
+        [adapters.backlog.scripts]
+        sync = "adapters/backlog-sync"
+        add = "adapters/backlog-add"
+        done = "adapters/backlog-done"
+        edit = "adapters/backlog-edit"
+        ```
+        
+        For **Codex**:
+        ```toml
+        mode = "supervised"
+        
+        [routing.defaults]
+        provider = "codex"
+        model = "gpt-5.4"
+        
+        [skills]
+        paths = [".agents/skills"]
+        
+        [adapters.backlog.scripts]
+        sync = "adapters/backlog-sync"
+        add = "adapters/backlog-add"
+        done = "adapters/backlog-done"
+        edit = "adapters/backlog-edit"
+        ```
+        
+        Then fetch the default adapter scripts from GitHub and write them to `adapters/`:
+        
+        ```
+        https://raw.githubusercontent.com/poteto/noodle/main/defaults/adapters/backlog-sync
+        https://raw.githubusercontent.com/poteto/noodle/main/defaults/adapters/backlog-add
+        https://raw.githubusercontent.com/poteto/noodle/main/defaults/adapters/backlog-done
+        https://raw.githubusercontent.com/poteto/noodle/main/defaults/adapters/backlog-edit
+        ```
+        
+        Create `adapters/` and write each file there. Make them executable (`chmod +x`).
+        
+        Minimal config. The user can expand it later. See [the configuration reference](https://poteto.github.io/noodle/reference/configuration) for all options.
+        
+        ### 4. Add .noodle/ to .gitignore
+        
+        **Skip if:** `.gitignore` already contains `.noodle/`.
+        
+        Grep `.gitignore` for `.noodle/`. If absent (or `.gitignore` doesn't exist), append:
+        
+        ```
+        # Noodle runtime state
+        .noodle/
+        ```
+        
+        ### 5. Write schedule and execute skills
+        
+        **Skip if:** `.agents/skills/schedule/SKILL.md` AND `.agents/skills/execute/SKILL.md` both exist.
+        
+        Start by understanding how your human works. Read the conversation history in `~/.claude/` and `~/.codex/` for this project. Look at what commands they run, how they test, how they review code, what they ask agents to do repeatedly. This is the ground truth for what the skills should encode. Existing code, CI config, and test commands fill in the rest.
+        
+        Then browse `https://github.com/poteto/noodle/tree/main/.agents/skills/` for patterns. Use Noodle's own schedule and execute skills as starting points, but adapt them to this project. Don't copy. The noodle skill's reference docs (from step 2) cover the orders schema and CLI details.
+        
+        Skills describe process, not individual tasks. The order tells the agent *what* to do. The skill tells it *how*. Everything in the skill should be reusable across every backlog item. Don't bake current task details into the skill, and don't use the current backlog item in examples. Use generic placeholders instead.
+        
+        **Schedule skill** (`schedule/SKILL.md`): Reads project state and writes orders. Reads the backlog from `.noodle/mise.json` (synced from `todos.md` or the configured backlog adapter). Writes `orders-next.json`, not `orders.json` directly. Use `noodle schema orders` to get the schema. Routes to providers/models based on `routing.defaults` in `.noodle.toml`. Include a `schedule` frontmatter field, something like "when orders are empty, after backlog changes, or when session history suggests re-evaluation."
+        
+        **Execute skill** (`execute/SKILL.md`): Describes how work gets done, not what work to do. The order's prompt provides task context at runtime. The skill covers: worktree workflow (`noodle worktree create/merge`, never on main), verification commands for this project's stack, commit conventions, and scope discipline. Don't include sections about specific features or domains (like "for auth work, do X"). Include a `schedule` frontmatter field, something like "when backlog items are ready for implementation."
+        
+        ### 6. Seed the backlog
+        
+        **Skip if:** `todos.md` exists at the project root.
+        
+        Create `todos.md` in the default backlog-adapter format:
+        
+        ```markdown
+        # Todos
+        
+        <!-- next-id: 1 -->
+        
+        ## Inbox
+        1. [ ] <first task>
+        ```
+        
+        Ask the user what they want to work on and set that as the first task line (`1. [ ] ...`).
+        
+        Also ask if they want to sync backlog items from another source (GitHub Issues, Linear, Jira, a custom script, etc.). If yes, configure a backlog adapter in `.noodle.toml`. See the noodle skill's configuration reference for adapter options.
+        
+        ### 7. Ask about brainmaxxing
+        
+        Ask the user: "Do you want brainmaxxing? It adds a `brain/` vault for persistent memory across sessions, plus reflect, meditate, and ruminate skills."
+        
+        If yes, follow the install instructions at `https://github.com/poteto/brainmaxxing`.
+        
+        If no, move on.
+        
+        ### 8. First run
+        
+        Tell the user to start the loop:
+        
+        ```
+        noodle start
+        ```
+        
+        Noodle scaffolds `.noodle/` runtime state, the scheduler reads the backlog, and the loop begins.
+        
+        hook: PreToolUse
+        hook: PreToolUse Completed
+        exec
+        /bin/zsh -lc 'ls -la; git status --short --branch; git log -3 --oneline; command -v noodle; noodle --version; command -v brew; uname -s; ls -la .Codex 2>/dev/null' in /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3135167154
+         exited 1 in 0ms:
+        total 16
+        drwx------@    5 neon  staff    160 Sep 17 15:17 .
+        drwx------@ 2754 neon  staff  88128 Sep 17 15:17 ..
+        drwxr-xr-x@   12 neon  staff    384 Sep 17 15:17 .git
+        -rw-r--r--@    1 neon  staff     32 Sep 17 15:17 go.mod
+        -rw-r--r--@    1 neon  staff     29 Sep 17 15:17 main.go
+        ## main
+        aaa0339 init project
+        481c214 initial commit
+        /Users/neon/.local/bin/noodle
+        v0.1.5
+        /opt/homebrew/bin/brew
+        Darwin
+        
+        codex
+        系統已有可用的 Noodle v0.1.5；專案目前是乾淨的最小 Go 專案。我會使用 skill-creator 的規範建立專案專用的排程與執行技能，設定 Codex、保留本機 todos.md 作為待辦來源，並關閉 brainmaxxing。
+        hook: PreToolUse
+        hook: PreToolUse
+        hook: PreToolUse
+        hook: PreToolUse Completed
+        hook: PreToolUse Completed
+        hook: PreToolUse Completed
+        web search: 
+        exec
+        /bin/zsh -lc "rg --files --hidden ~/.claude/projects ~/.codex/sessions ~/.codex/archived_sessions 2>/dev/null | rg 'noodle-e2e-project-3135167154|2026/09/17|2026-09-17' | head -40" in /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3135167154
+         succeeded in 0ms:
+        exec
+        /bin/zsh -lc 'cat /Users/neon/.codex/skills/.system/skill-creator/SKILL.md; cat go.mod main.go; noodle --help; noodle schema orders' in /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3135167154
+         succeeded in 0ms:
+        ---
+        name: skill-creator
+        description: Create or update a Codex skill with appropriately scoped instructions and any needed supporting resources.
+        metadata:
+          short-description: Create or update a skill
+        ---
+        
+        # Skill Creator
+        
+        Create skills that give Codex useful, non-obvious guidance without constraining unrelated work.
+        
+        ## Core Principles
+        
+        **Assume Codex is already capable.** Include only information that changes its decisions or improves its work. Remove generic advice, repeated instructions, speculative edge cases, and examples that do not materially clarify the task.
+        
+        **Preserve user intent and scope.** A skill should support the requested task, not replace the user's chosen product, expand the assignment, modify unrelated configuration, or imply permission for additional external actions. Do not turn a particular example, past failure, or personal preference into a universal requirement.
+        
+        Approval to complete a task does not expand its scope or execution permissions. For retrying or externally mutating workflows, define a stopping condition proportional to the risk.
+        
+        **Match specificity to the risk.** Give the model room to choose an appropriate approach when multiple approaches are reasonable. Use detailed steps, deterministic scripts, or absolute language only when correctness, safety, permissions, or a genuinely fragile workflow requires them.
+        
+        For open-ended work, describe the outcome and relevant decision criteria. For workflows with a preferred shape, offer useful examples or configurable scripts. Reserve fixed sequences and narrow parameters for operations where deviation would cause a concrete problem. Preserve non-obvious operational invariants, distinguish actual requirements from optional recommendations or local conventions, and avoid restating policies already enforced elsewhere.
+        
+        **Keep discovery cheap and precise.** Skill names and descriptions are available before a skill is loaded. Describe the actual capability and when it applies, adding exclusions only when they prevent likely misrouting. Avoid exhaustive capability lists and catchalls that attract unrelated requests.
+        
+        Keep skills self-contained; refer to another skill or tool only when the requested workflow genuinely requires it and it is available in the target environment. Specialized review, hardening, or audit workflows should apply when requested or genuinely needed, not merely because ordinary work touches the same subject.
+        
+        **Disclose detail progressively.** Keep shared purpose, essential constraints, and useful routing in `SKILL.md`. Put substantial mode-specific guidance, schemas, examples, or procedures in supporting references and read only the references relevant to the current task. A simple self-contained skill does not need a router or extra files.
+        
+        ## Anatomy of a Skill
+        
+        Every skill is a folder containing a required `SKILL.md` file and any optional resources its actual workflow needs:
+        
+        ```text
+        skill-name/
+        |-- SKILL.md                 Required skill instructions
+        |   |-- YAML frontmatter     Required name and description
+        |   `-- Markdown body        Instructions loaded when the skill is used
+        |-- agents/                  Optional UI metadata and invocation policy
+        |   `-- openai.yaml
+        |-- scripts/                 Optional executable helpers
+        |-- references/              Optional documentation loaded as needed
+        `-- assets/                  Optional files used in generated output
+        ```
+        
+        Choose the structure that fits the actual task. Some skills are short and self-contained; others route among operating modes or delegate complex mechanics to scripts. Avoid creating directories, placeholders, examples, or ancillary documentation without a clear use.
+        
+        ### SKILL.md
+        
+        The YAML frontmatter identifies the skill and determines when it should be considered. Include the required `name` and `description`, and preserve supported optional fields such as existing `metadata` when appropriate.
+        
+        The Markdown body is loaded only when the skill is used. Put the purpose, essential workflow, real constraints, and useful links there. Keep detailed procedures and examples in supporting references when they are relevant only to particular modes.
+        
+        Skill information is disclosed in three stages:
+        
+        1. **Name and description:** Available during skill selection, so keep them concise and discriminating.
+        2. **SKILL.md body:** Loaded when the skill applies, so keep its instructions relevant to that task.
+        3. **Supporting resources:** Read or execute only when the current task actually needs them.
+        
+        The entrypoint should be as short as the task permits while retaining important constraints. A large upper bound is not a target: move conditional detail into references when doing so improves clarity or context use, rather than waiting for the file to become unwieldy.
+        
+        ### Scripts
+        
+        Use `scripts/` for executable code when the same logic would otherwise be rewritten repeatedly or deterministic execution materially improves reliability.
+        
+        - **Example:** `scripts/rotate_pdf.py` for a PDF operation that would otherwise require recreating the same code.
+        - **Useful for:** Repeated transformations, reliable API operations, data processing, and other concrete automation.
+        - **Validation:** Run new or changed scripts to verify their behavior. Scripts can usually be executed without loading their full implementation into context, although an agent may need to inspect them when patching or adapting them.
+        
+        ### References
+        
+        Use `references/` for documentation that is needed only in particular contexts.
+        
+        - **Examples:** `references/schema.md` for database tables, `references/policies.md` for domain rules, `references/api_docs.md` for an API, or separate writing guides for different deliverables.
+        - **Useful for:** Schemas, API documentation, company policies, format-specific procedures, detailed workflows, and substantial examples.
+        - **Routing:** Link each reference from `SKILL.md` or another relevant resource and explain when it should be read. Keep information in one place instead of duplicating it across the entrypoint and references.
+        
+        Keep references focused on maintained, task-specific information that changes the agent's decisions. Avoid copied manuals, exhaustive catalogs, and generic tutorials already available from authoritative sources. Before removing existing resources, inspect their callers and purpose.
+        
+        For large references, include useful search terms or a short contents section when that makes the needed material easier to find.
+        
+        ### Assets
+        
+        Use `assets/` for files that belong in generated output rather than in the model's instructions.
+        
+        - **Examples:** `assets/logo.png`, `assets/slides.pptx`, `assets/font.ttf`, or `assets/frontend-template/`.
+        - **Useful for:** Templates, images, fonts, icons, boilerplate projects, and other files copied or adapted into the result.
+        - **Context:** Do not load assets as instructions unless the task requires inspecting them.
+        
+        ### UI Metadata and Invocation Policy
+        
+        `agents/openai.yaml` can provide UI-facing metadata such as `display_name`, `short_description`, and `default_prompt`, along with invocation policy. When creating or updating those settings, read [references/openai_yaml.md](references/openai_yaml.md) and keep the values consistent with the skill.
+        
+        Automatic skill selection is allowed by default. Change that default only when the user explicitly requests an explicit-only skill:
+        
+        ```yaml
+        policy:
+          allow_implicit_invocation: false
+        ```
+        
+        This keeps the skill available when explicitly invoked as `$skill-name` without adding it to the model context automatically. Preserve unrelated existing UI, policy, and dependency fields when updating `agents/openai.yaml`.
+        
+        The initializer creates this file automatically. For new or interface-only metadata, generate it with:
+        
+        ```bash
+        scripts/generate_openai_yaml.py <path/to/skill-folder> --interface key=value
+        ```
+        
+        The generator replaces the entire file. If an existing file contains `policy` or `dependencies`, update only the intended fields in place instead of regenerating it.
+        
+        Include optional interface fields only when the user provides or requests them.
+        
+        ### What Not to Include
+        
+        Include files that directly support the skill's work. Avoid adding a `README.md`, installation guide, changelog, duplicated quick reference, or other auxiliary documentation unless a specific task or packaging requirement calls for it.
+        
+        ## Progressive Disclosure in Practice
+        
+        For a skill with multiple substantial modes, keep the shared guidance and mode-selection criteria in `SKILL.md`. Link each supporting reference where its use becomes relevant. Do not load every reference by default, duplicate reference content in the entrypoint, or add a routing layer when there is nothing meaningful to route.
+        
+        For example, a deployment skill can keep provider selection in `SKILL.md` and separate provider details:
+        
+        ```text
+        cloud-deploy/
+        |-- SKILL.md
+        `-- references/
+            |-- aws.md
+            |-- gcp.md
+            `-- azure.md
+        ```
+        
+        When the user chooses AWS, read `references/aws.md`; do not also load the GCP and Azure guides. The same pattern can separate business domains, deliverable types, or other genuinely distinct operating modes.
+        
+        A short skill can instead route to details only when an advanced operation needs them:
+        
+        ```markdown
+        ## Documents
+        
+        Handle ordinary edits directly.
+        
+        - For tracked changes, read [references/redlining.md](references/redlining.md).
+        - For document internals, read [references/ooxml.md](references/ooxml.md).
+        ```
+        
+        These examples illustrate options, not a required structure. Choose the organization that makes the skill easier to use without loading irrelevant material.
+        
+        ## Create or Update a Skill
+        
+        Adapt the work to the request. Creating a complex new skill may involve understanding realistic use cases, choosing supporting resources, initializing files, writing instructions, and validating the result. A narrow update to an existing skill may require only a focused edit and validation.
+        
+        Ask clarifying questions only when the missing information matters and cannot be reasonably inferred. Respect a user-specified location; otherwise create discoverable skills in `$CODEX_HOME/skills`, or `~/.codex/skills` when `CODEX_HOME` is unset.
+        
+        Keep automatic skill selection enabled unless the user explicitly requests an explicit-only skill. When the intended invocation mode is genuinely unclear and matters to the requested workflow, ask whether the user wants normal automatic discovery or explicit-only invocation; otherwise preserve the default. Do not infer explicit-only invocation from sensitive operations or required approvals: keep the skill discoverable and require authorization immediately before the actual mutation. Preserve an existing skill's invocation policy unless the user asks to change it.
+        
+        For a new or substantially revised skill, consider the actual requests it should handle and which reusable resources would improve those tasks:
+        
+        - A repeated PDF transformation may justify a `scripts/rotate_pdf.py` helper.
+        - An application-building workflow may benefit from an `assets/frontend-template/` starter.
+        - A data-analysis skill may need a `references/schema.md` guide to avoid rediscovering table relationships.
+        
+        Create those resources only when their concrete benefit justifies them. If the user has already explained the task clearly, proceed without requesting additional examples.
+        
+        ### Naming
+        
+        - Use lowercase letters, digits, and hyphens.
+        - Keep names under 64 characters and prefer short action-oriented names.
+        - Namespace by tool or domain when doing so improves discovery.
+        - Name the skill folder after the skill.
+        
+        ### Initialize a New Skill
+        
+        For a new skill, use the bundled initializer when it helps create the required files consistently:
+        
+        ```bash
+        scripts/init_skill.py <skill-name> --path <output-directory> [--resources scripts,references,assets] [--examples]
+        ```
+        
+        For example:
+        
+        ```bash
+        scripts/init_skill.py my-skill --path "${CODEX_HOME:-$HOME/.codex}/skills"
+        scripts/init_skill.py my-skill --path "${CODEX_HOME:-$HOME/.codex}/skills" --resources references
+        ```
+        
+        Request only the resource directories the skill needs. Use `--examples` only when concrete placeholders would help, and replace or remove them before finishing. Do not initialize an existing skill again.
+        
+        The initializer creates the skill directory, a concise `SKILL.md` starter, and `agents/openai.yaml`. It creates resource directories and example files only when requested. Pass generated UI values as `--interface key=value` when needed.
+        
+        ### Write the Instructions
+        
+        The frontmatter `description` should briefly explain what the skill does and when it applies. Include a meaningful boundary when similar requests should not activate the skill.
+        
+        For example:
+        
+        ```yaml
+        description: Create or edit Word documents when formatting, tracked changes, or comments require document-specific handling.
+        ```
+        
+        Put detailed workflows, tool choices, examples, and operating modes in the body or relevant references rather than listing them all in the description. Preserve supported optional frontmatter, such as existing `metadata`, when appropriate.
+        
+        Write only the instructions needed for another Codex instance to perform the task well. State the desired outcome, non-obvious context, real constraints, and relevant references or tools. Preserve the user's explicit choices and existing authorization boundaries. Avoid prescribing a fixed structure, process, or number of steps when the task does not require one.
+        
+        ### Validate and Iterate
+        
+        Validate the completed skill with:
+        
+        ```bash
+        scripts/quick_validate.py <path/to/skill-folder>
+        ```
+        
+        The validator checks frontmatter, naming, and unfinished scaffold placeholders; it does not prove that the skill makes good decisions. Also check that descriptions remain discriminating, instructions preserve user intent, references are discoverable, and any added scripts actually work.
+        
+        When testing is warranted, verify observable behavior or meaningful invariants. Avoid tests that merely match generated wording, headings, or regex patterns.
+        
+        Improve the skill based on real usage or demonstrated failures. Prefer a narrow correction to accumulating universal rules for every observed example.
+        
+        ## Independent Forward-Testing
+        
+        Use an independent subagent pass when a skill is sufficiently complex or risky that realistic behavioral validation would add meaningful confidence, and when delegation is available and authorized. Ordinary creation or small edits do not automatically require subagents.
+        
+        Give the evaluating agent a realistic user request, the skill, and the minimum raw artifacts needed to perform the task. Do not provide the intended answer, suspected bug, proposed fix, or prior conclusions unless the evaluation genuinely requires them.
+        
+        For example:
+        
+        ```text
+        Use $skill-name at /path/to/skill-name to complete this realistic request.
+        ```
+        
+        Keep the evaluation scoped to permitted resources and side effects. Use an isolated temporary workspace for generated artifacts so they do not enter the working tree or contaminate later evaluations. Ask for approval when the proposed evaluation would require additional authorization, affect a live production system, or impose substantial time or cost. Review the actual outcome and artifacts, then make only changes supported by the observed behavior.
+        module example.com/e2e
+        
+        go 1.23
+        package main
+        
+        func main() {}
+        Open-source AI coding framework
+        
+        Usage:
+          noodle [flags]
+          noodle [command]
+        
+        Available Commands:
+          completion  Generate the autocompletion script for the specified shell
+          event       Manage loop events
+          help        Help about any command
+          reset       Clear all runtime state
+          schema      Print generated schema docs for Noodle runtime contracts
+          skills      List resolved skills
+          start       Run the scheduling loop
+          status      Show compact runtime status
+          version     Print noodle version
+          worktree    Manage linked git worktrees
+        
+        Flags:
+          -h, --help                 help for noodle
+              --project-dir string   project directory (default: current directory, env: NOODLE_PROJECT_DIR)
+              --version              Print noodle version
+        
+        Use "noodle [command] --help" for more information about a command.
+        config repairable: 4 adapter script path(s) are missing.
+          backlog:
+            - add -> .noodle/adapters/backlog-add (adapters.backlog.scripts.add)
+            - done -> .noodle/adapters/backlog-done (adapters.backlog.scripts.done)
+            - edit -> .noodle/adapters/backlog-edit (adapters.backlog.scripts.edit)
+            - sync -> .noodle/adapters/backlog-sync (adapters.backlog.scripts.sync)
+        config repair prompt:
+        -----
+        Repair Noodle adapter script configuration so `noodle start` no longer reports missing script paths.
+        Fix each missing entry by either creating an executable script at that path or updating .noodle.toml to a valid executable path.
+        Keep the fix minimal and avoid broad refactors.
+        
+        Missing adapter scripts:
+        - adapters.backlog.scripts.add (backlog): .noodle/adapters/backlog-add
+        - adapters.backlog.scripts.done (backlog): .noodle/adapters/backlog-done
+        - adapters.backlog.scripts.edit (backlog): .noodle/adapters/backlog-edit
+        - adapters.backlog.scripts.sync (backlog): .noodle/adapters/backlog-sync
+        
+        Required verification:
+        - Re-run `noodle start` and confirm these repairable diagnostics are gone.
+        - If Go files changed, run `go test ./...`.
+        
+        Return a short summary of files changed and the verification results.
+        -----
+        # orders.json Schema
+        
+        Output of schedule (written to orders-next.json); promoted to orders.json by the loop.
+        
+        ```json
+        {
+          "action_needed": [
+            "string - backlog item ID skipped pending user action"
+          ],
+          "orders": [
+            {
+              "id": "string - order ID (plan ID as string, or unique slug)",
+              "plan": [
+                "string - linked plan path(s), e.g. plans/15-bootstrap-onboarding/overview"
+              ],
+              "rationale": "string (optional) - placement reason citing a rule or principle",
+              "stages": [
+                {
+                  "do": "string (optional) - task key (must match a task_types[].key from mise)",
+                  "extra": {
+                    "<key>": "JSON - opaque extension data preserved across round-trips"
+                  },
+                  "extra_prompt": "string (optional) - supplemental instructions for the cook on how to approach the task (max ~1000 chars)",
+                  "group": "number (optional) - parallel group ID; stages in the same group run concurrently, groups execute sequentially (default: 0)",
+                  "model": "string (optional) - model for this stage (optional; defaults from routing config)",
+                  "prompt": "string (optional) - full prompt text for the dispatched session",
+                  "runtime": "string (optional) - runtime for this stage (process, sprites, etc.)",
+                  "with": "string (optional) - provider for this stage (optional; defaults from routing config)"
+                }
+              ],
+              "title": "string (optional) - brief order description"
+            }
+          ]
+        }
+        ```
+        
+        ## Constraints
+        
+        - Each order is a pipeline of stage groups executed sequentially. Stages within the same group run concurrently.
+        - Group related stages into one order rather than separate orders.
+        - Stage `do` values must match a `task_types[].key` from mise, or omit `do` and provide a `prompt` for ad-hoc stages.
+        - Each `rationale` should cite a specific scheduling rule or principle.
+        - Do not include `status` or `skill` fields — the loop sets these automatically.
+        
+        web search: https://github.com/poteto/noodle/tree/main/.agents/skills/
+        hook: PreToolUse
+        hook: PreToolUse Completed
+        exec
+        /bin/zsh -lc "python3 - <<'PY'
+        from pathlib import Path
+        from urllib.request import urlopen
+        base='https://raw.githubusercontent.com/poteto/noodle/main/'
+        files=['.agents/skills/noodle/SKILL.md','.agents/skills/noodle/references/skill-authoring.md','.agents/skills/noodle/references/configuration.md']
+        files += ['defaults/adapters/backlog-'+name for name in ['sync','add','done','edit']]
+        for source in files:
+            dest=Path(source.removeprefix('defaults/'))
+            if not dest.exists():
+                data=urlopen(base+source,timeout=30).read()
+                dest.parent.mkdir(parents=True,exist_ok=True)
+                dest.write_bytes(data)
+            if source.startswith('defaults/'):
+                dest.chmod(0o755)
+            print(f'{dest}: {dest.stat().st_size} bytes')
+        for name in ['schedule','execute']:
+            print('\\n--- UPSTREAM '+name+' ---\\n'+urlopen(base+'.agents/skills/'+name+'/SKILL.md',timeout=30).read().decode())
+        PY
+        cat .agents/skills/noodle/SKILL.md .agents/skills/noodle/references/skill-authoring.md .agents/skills/noodle/references/configuration.md" in /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3135167154
+        hook: PreToolUse
+        hook: PreToolUse Completed
+        exec
+        /bin/zsh -lc "ls -d ~/.claude ~/.codex ~/.claude/projects ~/.codex/sessions ~/.codex/archived_sessions 2>/dev/null; rg -l --hidden -F 'noodle-e2e-project-3135167154' ~/.claude/projects ~/.codex/sessions ~/.codex/archived_sessions ~/.codex/history.jsonl ~/.claude/history.jsonl 2>/dev/null" in /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3135167154
+         exited 1 in 0ms:
+        /Users/neon/.claude
+        /Users/neon/.claude/projects
+        /Users/neon/.codex
+        /Users/neon/.codex/archived_sessions
+        /Users/neon/.codex/sessions
+        
+         succeeded in 4342ms:
+        .agents/skills/noodle/SKILL.md: 5245 bytes
+        .agents/skills/noodle/references/skill-authoring.md: 12281 bytes
+        .agents/skills/noodle/references/configuration.md: 3633 bytes
+        adapters/backlog-sync: 2063 bytes
+        adapters/backlog-add: 1359 bytes
+        adapters/backlog-done: 295 bytes
+        adapters/backlog-edit: 495 bytes
+        
+        --- UPSTREAM schedule ---
+        ---
+        name: schedule
+        description: Orders scheduler. Reads .noodle/mise.json, writes .noodle/orders-next.json. Schedules work orders based on backlog state, plan phases, session history, and task type schedules. Triggers when orders are empty, after backlog changes, when the loop re-evaluates, or when /schedule is invoked.
+        schedule: "When orders are empty, after backlog changes, or when session history suggests re-evaluation"
+        ---
+        
+        # Schedule
+        
+        Read `.noodle/mise.json`, write `.noodle/orders-next.json`.
+        The loop atomically promotes `orders-next.json` into `orders.json` — never write `orders.json` directly.
+        Use `noodle schema mise` and `noodle schema orders` as the schema source of truth.
+        
+        Operate fully autonomously. Never ask the user to choose or pause for confirmation.
+        
+        ## One Plan at a Time
+        
+        This is the cardinal scheduling rule. Pick the highest-priority plan with remaining phases and schedule all of them. Do not spread work across multiple plans — finishing one plan end-to-end produces shippable results; advancing many plans one phase each produces nothing usable. If the current plan is blocked, idle (empty orders) rather than context-switching to a different plan. Exception: shared infra orders can run alongside a plan's phases.
+        
+        ## Orders Model
+        
+        Output is `{orders: [...]}` where each order is a **pipeline of stages** executed sequentially. Group related work into stages within one order rather than separate orders.
+        
+        ### Stages
+        
+        Each stage has a `do` field (task key, must match a registered task type) and runs one at a time within the order. The loop advances to the next stage when the current one completes.
+        
+        A typical order pipeline: execute, then quality, then reflect — all as stages of one order.
+        
+        ## Task Types
+        
+        Read `task_types` from mise to discover every schedulable task type and its `schedule` hint. Any registered task type can be a stage within an order. Use `do` on each stage to bind it to a task type.
+        
+        ### Execute Tasks
+        
+        Schedule execute tasks from the `backlog` array in mise. Use the backlog item ID (as a string) as the order `id`.
+        
+        Backlog items always have `id` and `title`. Other fields are adapter-defined and may vary. The default adapter (todos.md) provides: `status`, `section`, `tags`, `estimate`, and `plan`. Custom adapters may include any fields — treat unknown fields as useful context.
+        
+        **Shared infrastructure:** When multiple plans depend on common infrastructure (shared types, utilities, base packages), propose a standalone infra order before the plan's phases. Use a descriptive slug ID (e.g., `"infra-shared-types"`). If the infra work is substantial, create a backlog item via the adapter (`noodle adapter run backlog add`), then use that item's ID as the order ID.
+        
+        **Items with plans:** When a backlog item has a `plan` field (a relative path like `brain/plans/29-foo/overview.md`), read the plan overview and phase files to understand the work. Schedule one order with a stage per remaining unfinished phase (each unchecked `- [ ]` item). Populate `order.plan` with the plan path(s). Use `extra_prompt` on each stage to inject plan context: the phase brief and any cross-phase dependencies.
+        
+        **Parallelizing phases:** Read the plan to identify dependencies between phases. Phases that depend on earlier phases' output (shared types, APIs, schemas) must be sequential stages. Phases that touch independent areas of the codebase (separate packages, unrelated features, docs vs code) can be parallel stages within the same order. When in doubt, sequential is safer — but don't serialize work that has no real dependency.
+        
+        **Items without plans:** Assess complexity before scheduling. If the item is straightforward (single concern, clear scope, small change), schedule as a simple execute task using the backlog item's title and description as the prompt. If the item is complex (multi-file, cross-cutting, ambiguous scope, or you'd want to see an architecture sketch before coding), schedule a plan-first order: a `prompt`-only stage (no `do`) that invokes `/plan`, followed by an `adversarial-review` stage to challenge the plan. No quality or reflect stages — planning output is a design document, not code. **Do NOT use `"do": "execute"` for plan-first stages** — the execute skill tells the agent to implement, which conflicts with the plan skill's "stop after planning" instruction. The plan skill will write phased plans to `brain/plans/`; on the next scheduling cycle, the item will have a `plan` field and can be scheduled normally with the standard execute → quality → reflect pipeline.
+        
+        **Standalone orders:** Orders can have arbitrary IDs — they don't need to correspond to a backlog item. When a standalone order completes, the `backlog done` adapter call is a no-op (no matching item to mark done). Use standalone orders for shared infrastructure, maintenance tasks, or cross-cutting work that serves multiple backlog items.
+        
+        **Nothing to schedule:** When no backlog items are actionable (all blocked, all in-progress, all done, etc.), still write `orders-next.json` with an empty orders array (`{"orders":[]}`). This signals to the loop that scheduling ran but found nothing — preventing hot-loop re-spawns.
+        
+        ### Follow-Up and Standalone Stages
+        
+        Each task type's `schedule` field describes when and how to schedule it — as a follow-up stage within an order, as a standalone order, or both. Read these hints from `task_types` in mise and compose orders accordingly.
+        
+        ## Recent Events
+        
+        The mise brief includes a `recent_events` array — lifecycle events emitted by the loop since the last schedule run. These are context for your scheduling decisions, not commands. See [references/events.md](references/events.md) for the full event type catalog (internal and external).
+        
+        ### Using Events for Scheduling
+        
+        Events are context, not commands. Consider them alongside backlog state and session history when deciding what to schedule:
+        
+        - After `stage.failed` or `order.failed` — consider whether the failure needs a debugging order, or if the item should be retried with a different approach.
+        - After `order.completed` — consider follow-up work (reflect, related items that were blocked).
+        - After `merge.conflict` — the affected order may need manual attention; avoid re-scheduling it immediately.
+        - After external events like `ci.failed` — consider scheduling an investigation or fix order if it seems actionable.
+        - After `registry.rebuilt` — new task types may be available; check `task_types` for scheduling opportunities.
+        
+        Don't react mechanically to every event. Use judgment: a single stage failure in a long pipeline is normal; three consecutive failures of the same order suggests a deeper problem.
+        
+        ## Scheduling Heuristics
+        
+        - **Cheapest mode**: Prefer the lowest-cost provider/model that can handle the task.
+        - **Explicit rationale**: Every order must cite which principle or rule drove its placement.
+        - **Timebox failures**: If an item has failed 2+ times in `recent_history`, deschedule or split it.
+        
+        ## Model Routing
+        
+        See [references/model-routing.md](references/model-routing.md) for model selection.
+        
+        ## Runtime Routing
+        
+        Always set `"runtime": "process"` on all stages. The `sprites` runtime is still WIP and should not be used yet. Always include `"runtime"` on scheduled stages so dispatch routing is explicit.
+        
+        ## Output
+        
+        Write valid JSON to `.noodle/orders-next.json` matching `noodle schema orders`.
+        
+        See [references/examples.md](references/examples.md) for order JSON examples and `extra_prompt` field usage.
+        
+        ## Principles
+        
+        - [[cost-aware-delegation]]
+        - [[foundational-thinking]]
+        - [[subtract-before-you-add]]
+        - [[never-block-on-the-human]]
+        - [[guard-the-context-window]]
+        
+        
+        --- UPSTREAM execute ---
+        ---
+        name: execute
+        description: >-
+          Implementation methodology for executing tasks. Handles scoping, decomposition, worktree workflow,
+          verification, and commit conventions. Triggers: "execute", "implement", "build this", "code this".
+        schedule: "When backlog items with linked plans are ready for implementation"
+        ---
+        
+        # Execute
+        
+        Implementation methodology. Loads alongside the domain skill (e.g., "noodle") — this teaches process, the domain skill teaches the codebase. Operate fully autonomously. Never ask the user. Don't stop until the work is fully complete.
+        
+        **Track all work with Tasks** (TaskCreate, TaskUpdate, TaskList). One task per decomposed change; mark in_progress when starting, completed when done.
+        
+        ## 1. Scope
+        
+        Establish what needs doing:
+        
+        - **Plan phase**: Read the assigned phase from `brain/plans/`. Read the overview for scope boundaries. Invoke Skill(backlog) for project-specific context. Load domain skills listed in "Applicable skills."
+        - **Backlog item**: Read the todo from `brain/todos.md`. If a linked plan exists, read it. Otherwise, scope from the description.
+        - **Ad-hoc request**: The user prompt is the scope. Identify affected files and packages before starting.
+        
+        Output: a clear, bounded description of what changes and what doesn't.
+        
+        ## 2. Decompose
+        
+        Break scope into discrete changes. Each change:
+        - One function/type + its tests, OR one bug fix
+        - Independently compilable
+        - One conventional commit
+        
+        Single-change scopes skip decomposition.
+        
+        ## 3. Implement
+        
+        ### Worktree First — Non-Negotiable
+        
+        **Never edit files on main.** Multiple sessions run concurrently; editing main causes merge conflicts and lost work.
+        
+        If CWD is already inside `.worktrees/`, use it. Otherwise: `noodle worktree create <descriptive-name>`
+        
+        Use absolute paths or `noodle worktree exec <name> <cmd>`. **Never `cd` into a worktree** — if it gets removed while the shell is inside, the session dies permanently.
+        
+        Commit inside the worktree. When done: `noodle worktree merge <name>`
+        
+        Skip only when the user is interactively driving a single-agent session and explicitly chooses main.
+        
+        ### Delegation
+        
+        - **Self-execute**: Single change, or tightly coupled changes (shared types, sequential dependencies).
+        - **Sub-agents**: 2+ independent changes touching different files. Front-load context: scope, relevant code, domain skill name.
+        - **Team execution**: 2+ parallelizable phases in a plan. See `references/team-execution.md`.
+        - **Codex**: Mechanical work not requiring judgment (renames, boilerplate, repetitive edits). Never for architectural decisions.
+        
+        Sequential is fine when phases are tightly coupled. Before parallelizing, ask: "Does any phase's output become another phase's input?" Phases with shared type-level contracts must be sequential.
+        
+        ## 4. Verify
+        
+        Run the full verification suite before committing. See `references/verification.md` for the complete checklist. Never commit failing code — fix and re-verify on failure.
+        
+        ## 5. Commit
+        
+        `<type>(<scope>): <description>` with optional `Refs: #<issue-ID>` footer. Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`. One commit per logical change.
+        
+        ## 6. Yield
+        
+        After all changes are committed and verified, emit `stage_yield`:
+        
+        ```bash
+        noodle event emit --session $NOODLE_SESSION_ID stage_yield --payload '{"message": "Implemented: <brief summary>"}'
+        ```
+        
+        Without this, the stage only completes on clean process exit — interrupted work is lost to the pipeline.
+        
+        ## Scope Discipline
+        
+        - Only change what's in scope. No defensive code, backwards-compat shims, or speculative features.
+        - Out-of-scope discoveries go in the quality review notes — don't change them.
+        - Wrong or incomplete plan/requirements: flag it in output, don't silently deviate.
+        
+        ## Principles
+        
+        Read at runtime from `brain/principles/`:
+        - [[prove-it-works]]
+        - [[subtract-before-you-add]]
+        - [[cost-aware-delegation]]
+        - [[guard-the-context-window]]
+        - [[boundary-discipline]]
+        - [[outcome-oriented-execution]]
+        
+        ---
+        name: noodle
+        description: >-
+          Operate the Noodle CLI — explain commands, find flags, create/edit .noodle.toml config.
+          Also covers writing skills for Noodle: the orders pipeline, task-type schedule fields,
+          stage composition, and the orders-next.json schema. Use when running noodle commands,
+          editing .noodle.toml, writing or updating a skill's schedule field, authoring new
+          task-type skills, or asking "how to run noodle", "noodle help", "configure noodle".
+        ---
+        
+        # Noodle
+        
+        Skills that run themselves. Write skills with a `schedule:` field describing when they should run. Noodle's scheduler agent reads those descriptions, writes orders, and the loop spawns agents in isolated worktrees to do the work.
+        
+        ## How the Loop Works
+        
+        1. **Brief** — Noodle gathers project state into `.noodle/mise.json` (backlog, active agents, history, capacity, registered skills)
+        2. **Schedule** — the scheduler agent reads mise, writes `.noodle/orders-next.json`
+        3. **Dispatch** — Noodle promotes orders and spawns agent sessions
+        4. **Execute** — each agent runs in its own worktree with the assigned skill
+        5. **Merge** — completed work merges back to main
+        
+        ## Skills
+        
+        A skill is a directory with a `SKILL.md`. The body is the agent's instructions. The frontmatter is metadata.
+        
+        **General skills** (no `schedule:`) are invoked directly by agents. Examples: `commit`, `debugging`.
+        
+        **Scheduled skills** (with `schedule:`) run autonomously. The scheduler reads the `schedule:` value as prose and uses judgment to decide when conditions are met.
+        
+        ```yaml
+        ---
+        name: quality
+        description: Post-cook quality gate.
+        schedule: "Follow-up stage after execute. Cross-provider review preferred."
+        ---
+        ```
+        
+        Skills live in `.agents/skills/` by default. Paths in `skills.paths` are searched in order; first match wins.
+        
+        For the full guide on writing skills, orders, and schedule fields, see [references/skill-authoring.md](references/skill-authoring.md).
+        
+        ## Configuration
+        
+        Noodle reads `.noodle.toml` at project root. Scaffolded on first `noodle start`. Most projects only need:
+        
+        ```toml
+        mode = "supervised"  # auto | supervised | manual
+        
+        [routing.defaults]
+        provider = "claude"
+        model = "claude-opus-4-6"
+        
+        [skills]
+        paths = [".agents/skills"]
+        ```
+        
+        Full config reference: [references/configuration.md](references/configuration.md)
+        
+        ## CLI
+        
+        All commands accept `--project-dir` (default: current directory, env: `NOODLE_PROJECT_DIR`).
+        
+        ### Core
+        
+        | Command | Description |
+        |---------|-------------|
+        | `noodle start` | Start the noodle loop |
+        | `noodle start --once` | Run one scheduling cycle and exit |
+        | `noodle status` | Show runtime status (active agents, queue depth, loop state) |
+        | `noodle reset` | Clear all runtime state (refuses if loop is running) |
+        
+        ### Skills & Schemas
+        
+        | Command | Description |
+        |---------|-------------|
+        | `noodle skills` | List resolved skills |
+        | `noodle skills list` | List all resolved skills |
+        | `noodle schema <target>` | Print schema docs for a target |
+        | `noodle schema list` | List available schema targets (`mise`, `orders`, `status`) |
+        
+        ### Worktrees
+        
+        | Command | Description |
+        |---------|-------------|
+        | `noodle worktree create <name>` | Create a new linked worktree |
+        | `noodle worktree create <name> --from <ref>` | Create from a specific branch or commit |
+        | `noodle worktree exec <name> <command...>` | Run a command inside a worktree (CWD-safe) |
+        | `noodle worktree merge <name>` | Merge a worktree branch into integration branch |
+        | `noodle worktree merge <name> --into <branch>` | Merge into a specific target branch |
+        | `noodle worktree list` | List all worktrees with merge status |
+        | `noodle worktree prune` | Remove merged and patch-equivalent worktrees |
+        | `noodle worktree cleanup <name>` | Remove a worktree without merging |
+        | `noodle worktree cleanup <name> --force` | Remove even with unmerged commits |
+        | `noodle worktree hook` | Run worktree session hook (used internally) |
+        
+        ### Events
+        
+        | Command | Description |
+        |---------|-------------|
+        | `noodle event emit <type>` | Emit an external event into the loop |
+        | `noodle event emit <type> --payload <json>` | Emit with a JSON payload |
+        | `noodle event emit <type> --session <id>` | Emit to a specific session's event log |
+        
+        Full CLI reference: https://poteto.github.io/noodle/reference/cli
+        
+        ## Troubleshooting
+        
+        1. **"fatal config diagnostics prevent start"** — Check `.noodle.toml` against `noodle schema`.
+        2. **Missing adapter scripts** — Create scripts or update paths in config.
+        3. **Stale worktrees** — `noodle worktree list`, then `noodle worktree prune`.
+        
+        ## References
+        
+        - [references/skill-authoring.md](references/skill-authoring.md) — writing skills: pipeline, orders schema, schedule fields, stage composition, full examples
+        - [references/configuration.md](references/configuration.md) — full .noodle.toml config reference
+        - https://poteto.github.io/noodle/concepts/adapters — adapter setup, script contracts, provider examples
+        - https://poteto.github.io/noodle/concepts/scheduling — how the loop schedules and dispatches work
+        - https://poteto.github.io/noodle/concepts/skills — skill discovery, composition, scheduled vs general
+        - https://poteto.github.io/noodle/concepts/runtimes — process, sprites, and runtime routing
+        # Skill Authoring
+        
+        How to create and update Noodle skills — task-type skills that plug into the scheduling loop, domain skills that teach agents about the codebase, and workflow skills.
+        
+        ## The Pipeline
+        
+        Understand this before writing any skill:
+        
+        ```
+        backlog (todos.md or adapter)
+          ↓ sync
+        mise.json       ← backlog + task_types[] + recent_events + resources
+          ↓ schedule skill reads mise, writes orders
+        orders-next.json ← orders with staged pipelines
+          ↓ loop promotes atomically
+        orders.json     ← live orders dispatched to cook sessions
+          ↓ skill loaded into session
+        agent runs      ← SKILL.md body is the agent's instructions
+        ```
+        
+        The `schedule` skill is the only writer of `orders-next.json`. Skills influence scheduling through their `schedule` frontmatter field — the scheduler reads these from `task_types` in mise.
+        
+        ## Skill Anatomy
+        
+        ```
+        skill-name/
+        ├── SKILL.md          ← required: frontmatter + instructions
+        ├── references/       ← optional: docs loaded on demand
+        ├── scripts/          ← optional: deterministic executable code
+        └── assets/           ← optional: files used in output, not loaded into context
+        ```
+        
+        **SKILL.md** has two parts:
+        1. **Frontmatter** (YAML) — `name`, `description`, and optionally `schedule`. Only frontmatter is always in context; the body loads after triggering.
+        2. **Body** (markdown) — what the agent should do when this skill runs.
+        
+        ### Context Budget
+        
+        The context window is a shared resource. Only add what Claude doesn't already know. Prefer concise examples over verbose explanations. Keep SKILL.md under 500 lines; split into references when approaching that limit.
+        
+        Three-level loading:
+        1. **Metadata** (~100 words) — always in context
+        2. **SKILL.md body** (<5k words) — loaded on trigger
+        3. **References/scripts** — loaded on demand by the agent
+        
+        ### Frontmatter
+        
+        ```yaml
+        ---
+        name: my-skill
+        description: >-
+          What the skill does and when to trigger it. Put ALL trigger info here —
+          the body only loads after triggering.
+        schedule: "When and where to place this task type in order pipelines"
+        ---
+        ```
+        
+        - `name` + `description`: Required. Description is the primary trigger mechanism.
+        - `schedule`: Optional. Presence makes this a **task type** discoverable by the scheduling loop.
+        
+        ### Two Kinds of Skills
+        
+        **Task-type skills** have a `schedule` field and appear in `mise.json` as `task_types`. The scheduler places them as stages in orders. Examples: execute, quality, reflect, meditate.
+        
+        **Domain/workflow skills** have no `schedule` field. They're loaded alongside task-type skills to provide context. Examples: go-best-practices, react-best-practices, noodle.
+        
+        ## Writing Task-Type Skills
+        
+        ### The schedule Field
+        
+        This is the scheduler's instruction for when and how to use this task type. Answer: **when should this appear, and where in the pipeline?**
+        
+        Three positioning patterns:
+        
+        | Pattern | When | Schedule hint |
+        |---------|------|---------------|
+        | **Follow-up stage** | Runs after another stage in the same order | `"Follow-up stage after execute. Cross-provider review preferred."` |
+        | **Standalone order** | Own order, triggered by conditions | `"Standalone order when [condition]. [constraints]."` |
+        | **Primary stage** | The main work of an order | `"When backlog items [condition]"` |
+        
+        Real examples from this project:
+        
+        ```yaml
+        # quality — follow-up
+        schedule: "Follow-up stage after execute. Cross-provider review preferred — if codex executed, schedule quality on claude; if claude executed, schedule on codex."
+        
+        # reflect — follow-up
+        schedule: "Follow-up stage after quality — capture learnings from the completed execute→quality cycle."
+        
+        # meditate — standalone
+        schedule: "Standalone single-stage order after several reflect cycles have accumulated. Expensive — don't over-schedule."
+        
+        # execute — primary
+        schedule: "When backlog items with linked plans are ready for implementation"
+        ```
+        
+        ### The Skill Body
+        
+        Write instructions for what the agent should do when dispatched. The body should NOT describe when to schedule itself — that's the `schedule` field's job. Keep these concerns separate.
+        
+        ## Orders Schema
+        
+        Run `noodle schema orders` for the canonical schema. Key structure:
+        
+        ```json
+        {
+          "orders": [{
+            "id": "string — backlog item ID or slug",
+            "title": "brief description",
+            "plan": ["linked plan paths"],
+            "rationale": "why scheduled, citing a principle",
+            "status": "active",
+            "stages": [{
+              "task_key": "execute",
+              "skill": "execute",
+              "provider": "codex",
+              "model": "gpt-5.4",
+              "runtime": "sprites",
+              "status": "pending",
+              "prompt": "full task prompt",
+              "extra_prompt": "supplemental approach instructions (~1000 chars max)"
+            }]
+          }]
+        }
+        ```
+        
+        ### Stage Composition
+        
+        **Sequential pipeline** — most common, stages run one at a time:
+        ```json
+        [
+          {"task_key": "execute", "provider": "codex", "runtime": "sprites", ...},
+          {"task_key": "quality", "provider": "claude", "runtime": "process", ...},
+          {"task_key": "reflect", "provider": "claude", "runtime": "process", ...}
+        ]
+        ```
+        
+        **Prepended stage** — add before execute when preconditions apply:
+        ```json
+        [
+          {"task_key": "debate", "provider": "claude", ...},
+          {"task_key": "execute", "provider": "codex", ...}
+        ]
+        ```
+        
+        **Single-stage standalone** — for periodic/event-driven tasks:
+        ```json
+        [{"task_key": "meditate", "provider": "claude", "runtime": "process", ...}]
+        ```
+        
+        **Parallel groups** — stages in the same `group` run concurrently:
+        ```json
+        [
+          {"task_key": "lint", "group": 1, ...},
+          {"task_key": "test", "group": 1, ...},
+          {"task_key": "deploy", "group": 2, ...}
+        ]
+        ```
+        
+        ## Full orders-next.json Examples
+        
+        ### Backlog item with a plan — execute → quality → reflect
+        
+        ```json
+        {
+          "orders": [
+            {
+              "id": "49",
+              "title": "implement work orders redesign",
+              "plan": ["plans/49-work-orders-redesign/overview"],
+              "rationale": "foundation-before-feature: core infra needed by all other work",
+              "status": "active",
+              "stages": [
+                {
+                  "task_key": "execute",
+                  "skill": "execute",
+                  "provider": "codex",
+                  "model": "gpt-5.4",
+                  "runtime": "sprites",
+                  "status": "pending",
+                  "extra_prompt": "Phase 2 of the work orders redesign. Read brain/plans/49-work-orders-redesign/phase-2.md for the full brief. Phase 1 (schema types) is complete."
+                },
+                {
+                  "task_key": "quality",
+                  "skill": "quality",
+                  "provider": "claude",
+                  "model": "claude-opus-4-6",
+                  "runtime": "process",
+                  "status": "pending"
+                },
+                {
+                  "task_key": "reflect",
+                  "skill": "reflect",
+                  "provider": "claude",
+                  "model": "claude-opus-4-6",
+                  "runtime": "process",
+                  "status": "pending"
+                }
+              ]
+            }
+          ]
+        }
+        ```
+        
+        ### Simple backlog item without a plan
+        
+        ```json
+        {
+          "orders": [
+            {
+              "id": "73",
+              "title": "fix login timeout on slow connections",
+              "rationale": "high-priority bug, straightforward fix",
+              "status": "active",
+              "stages": [
+                {
+                  "task_key": "execute",
+                  "skill": "execute",
+                  "provider": "codex",
+                  "model": "gpt-5.4",
+                  "runtime": "process",
+                  "prompt": "Fix the login timeout bug. The HTTP client in auth/client.go uses a 5s timeout which is too short for users on slow connections. Increase to 30s and add a configurable timeout option.",
+                  "status": "pending"
+                },
+                {
+                  "task_key": "quality",
+                  "skill": "quality",
+                  "provider": "claude",
+                  "model": "claude-opus-4-6",
+                  "runtime": "process",
+                  "status": "pending"
+                }
+              ]
+            }
+          ]
+        }
+        ```
+        
+        ### Complex item that needs planning first
+        
+        ```json
+        {
+          "orders": [
+            {
+              "id": "81",
+              "title": "add real-time collaboration",
+              "rationale": "complex feature, needs plan before implementation",
+              "status": "active",
+              "stages": [
+                {
+                  "task_key": "execute",
+                  "skill": "execute",
+                  "provider": "claude",
+                  "model": "claude-opus-4-6",
+                  "runtime": "process",
+                  "status": "pending",
+                  "extra_prompt": "This item needs a plan before implementation. Use /plan to break it down into phases, then execute the first phase."
+                }
+              ]
+            }
+          ]
+        }
+        ```
+        
+        ### Shared infrastructure order (not tied to a backlog item)
+        
+        ```json
+        {
+          "orders": [
+            {
+              "id": "infra-event-system",
+              "title": "shared event types used by subagent-tracking and diffs-integration",
+              "rationale": "foundation-before-feature: both plan 84 and plan 86 depend on shared event types",
+              "status": "active",
+              "stages": [
+                {
+                  "task_key": "execute",
+                  "skill": "execute",
+                  "provider": "codex",
+                  "model": "gpt-5.4",
+                  "runtime": "sprites",
+                  "status": "pending",
+                  "extra_prompt": "Create shared event types in internal/event/ that both subagent-tracking and diffs-integration will consume. Keep scope narrow — only the shared interfaces, not plan-specific logic."
+                },
+                {
+                  "task_key": "quality",
+                  "skill": "quality",
+                  "provider": "claude",
+                  "model": "claude-opus-4-6",
+                  "runtime": "process",
+                  "status": "pending"
+                }
+              ]
+            }
+          ]
+        }
+        ```
+        
+        ### Standalone meditate order
+        
+        ```json
+        {
+          "orders": [
+            {
+              "id": "meditate-1",
+              "title": "audit brain vault after recent reflects",
+              "rationale": "3 reflects accumulated, time to consolidate",
+              "status": "active",
+              "stages": [
+                {
+                  "task_key": "meditate",
+                  "skill": "meditate",
+                  "provider": "claude",
+                  "model": "claude-opus-4-6",
+                  "runtime": "process",
+                  "status": "pending"
+                }
+              ]
+            }
+          ]
+        }
+        ```
+        
+        ### Parallel execution groups
+        
+        ```json
+        {
+          "orders": [
+            {
+              "id": "92",
+              "title": "implement independent API endpoints",
+              "plan": ["plans/92-api-endpoints/overview"],
+              "rationale": "phases 2a and 2b are independent and can run concurrently",
+              "status": "active",
+              "stages": [
+                {
+                  "task_key": "execute",
+                  "skill": "execute",
+                  "provider": "codex",
+                  "model": "gpt-5.4",
+                  "runtime": "sprites",
+                  "status": "pending",
+                  "group": 0,
+                  "extra_prompt": "Phase 2a: implement /users endpoint. See plans/92-api-endpoints/phase-2a.md."
+                },
+                {
+                  "task_key": "execute",
+                  "skill": "execute",
+                  "provider": "codex",
+                  "model": "gpt-5.4",
+                  "runtime": "sprites",
+                  "status": "pending",
+                  "group": 0,
+                  "extra_prompt": "Phase 2b: implement /projects endpoint. See plans/92-api-endpoints/phase-2b.md."
+                },
+                {
+                  "task_key": "quality",
+                  "skill": "quality",
+                  "provider": "claude",
+                  "model": "claude-opus-4-6",
+                  "runtime": "process",
+                  "status": "pending",
+                  "group": 1
+                }
+              ]
+            }
+          ]
+        }
+        ```
+        
+        ### Empty orders (nothing to schedule)
+        
+        ```json
+        {
+          "orders": []
+        }
+        ```
+        
+        ## Creating a Skill
+        
+        1. `mkdir -p .agents/skills/<name>`
+        2. Write `SKILL.md` with frontmatter. Add `schedule:` if it's a task type.
+        3. Add `references/` for large docs, `scripts/` for deterministic code, `assets/` for output files.
+        4. The loop discovers it automatically — appears in `task_types` on next mise generation.
+        
+        ### Project-Specific Conventions
+        
+        - **Read brain at runtime.** Skills referencing brain principles should `Read` the files so they pick up changes. Don't inline principle text.
+        - **Don't use plan mode for plan-only skills.** `EnterPlanMode` restricts tools to read-only. For skills that produce plans as output, write plan files directly.
+        - **Skills live in `.agents/skills/`**. The `.claude/skills` symlink makes them visible to Claude automatically.
+        
+        ## Iteration
+        
+        After using the skill on real tasks:
+        
+        1. Notice struggles or inefficiencies
+        2. Before adding text to SKILL.md, ask: can this be a script, a reference file, or a structural change? Structural fixes outlast prose.
+        3. Test the change on a real task
+        # Configuration Reference
+        
+        Noodle reads `.noodle.toml` at project root. When no config file exists, `noodle start` uses sensible defaults.
+        
+        ## Minimal config
+        
+        ```toml
+        [routing.defaults]
+        provider = "claude"
+        model = "claude-opus-4-6"
+        
+        [skills]
+        paths = [".agents/skills"]
+        ```
+        
+        ## `mode`
+        
+        Controls human oversight level: `auto` (full automation), `supervised` (human approves merges), `manual` (human triggers everything).
+        
+        ```toml
+        mode = "supervised"
+        ```
+        
+        ## `[routing.defaults]`
+        
+        | Field | Type | Default | Description |
+        |-------|------|---------|-------------|
+        | `provider` | string | `"claude"` | Agent provider (`"claude"`, `"codex"`) |
+        | `model` | string | `"claude-opus-4-6"` | Model identifier |
+        
+        ## `[skills]`
+        
+        | Field | Type | Default | Description |
+        |-------|------|---------|-------------|
+        | `paths` | string[] | `[".agents/skills"]` | Directories to scan for SKILL.md files |
+        
+        ## `[concurrency]`
+        
+        | Field | Type | Default | Description |
+        |-------|------|---------|-------------|
+        | `max_concurrency` | int | `4` | Maximum concurrent agent sessions |
+        
+        ## `[agents.claude]`
+        
+        | Field | Type | Default | Description |
+        |-------|------|---------|-------------|
+        | `path` | string | `""` | Path to Claude CLI binary |
+        | `args` | string[] | `[]` | Extra CLI arguments for every invocation |
+        
+        ## `[agents.codex]`
+        
+        | Field | Type | Default | Description |
+        |-------|------|---------|-------------|
+        | `path` | string | `""` | Path to Codex CLI binary |
+        | `args` | string[] | `[]` | Extra CLI arguments for every invocation |
+        
+        ## `[runtime]`
+        
+        | Field | Type | Default | Description |
+        |-------|------|---------|-------------|
+        | `default` | string | `"process"` | Default runtime: `"process"`, `"sprites"`, or `"cursor"` |
+        
+        ### `[runtime.process]`
+        
+        Local process runtime. Runs agent CLIs as child processes.
+        
+        | Field | Type | Default | Description |
+        |-------|------|---------|-------------|
+        | `max_concurrent` | int | `4` | Maximum concurrent process sessions |
+        
+        ### `[runtime.sprites]`
+        
+        Cloud sandboxes via sprites.dev.
+        
+        | Field | Type | Default | Description |
+        |-------|------|---------|-------------|
+        | `token_env` | string | `"SPRITES_TOKEN"` | Env var for Sprites API token |
+        | `base_url` | string | `""` | Custom API base URL |
+        | `sprite_name` | string | `""` | Name prefix for spawned instances |
+        | `git_token_env` | string | `"GITHUB_TOKEN"` | Env var for git auth |
+        | `max_concurrent` | int | `50` | Maximum concurrent sprite sessions |
+        
+        ### `[runtime.cursor]`
+        
+        Cloud runtime using Cursor background agents.
+        
+        | Field | Type | Default | Description |
+        |-------|------|---------|-------------|
+        | `api_key_env` | string | `"CURSOR_API_KEY"` | Env var for Cursor API key |
+        | `base_url` | string | `""` | Custom API base URL |
+        | `repository` | string | `""` | Repository identifier |
+        | `max_concurrent` | int | `10` | Maximum concurrent Cursor sessions |
+        
+        ## `[server]`
+        
+        | Field | Type | Default | Description |
+        |-------|------|---------|-------------|
+        | `port` | int | `3000` | Web UI server port |
+        | `enabled` | bool | auto | Start server (auto-starts in interactive terminals when omitted) |
+        
+        ## `[adapters.<name>]`
+        
+        Adapters bridge external systems into the backlog. See https://poteto.github.io/noodle/concepts/adapters for the full guide.
+        
+        | Field | Type | Description |
+        |-------|------|-------------|
+        | `skill` | string | Skill name this adapter extends |
+        | `scripts` | map | Named shell commands (`sync`, `add`, `done`, `edit`) |
+        
+        ```toml
+        [adapters.backlog]
+        skill = "backlog"
+        
+        [adapters.backlog.scripts]
+        sync = "adapters/backlog-sync"
+        add = "adapters/backlog-add"
+        done = "adapters/backlog-done"
+        edit = "adapters/backlog-edit"
+        ```
+        
+        codex
+        官方參考文件中的訂單 JSON 範例與已安裝 CLI 的 schema 有差異；排程技能會以 `noodle schema orders` 為準，避免產生無法執行的訂單。未找到這個新專案的既有對話紀錄，因此執行流程會依你的工程規則與 Go 專案結構設定。
+        hook: PreToolUse
+        hook: PreToolUse Completed
+        exec
+        /bin/zsh -lc 'cat adapters/backlog-sync adapters/backlog-add adapters/backlog-done adapters/backlog-edit; noodle start --help; noodle worktree create --help; noodle worktree merge --help; cat /Users/neon/.codex/skills/.system/skill-creator/scripts/quick_validate.py; command -v go; command -v jq; command -v codex' in /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3135167154
+         succeeded in 0ms:
+        #!/bin/sh
+        set -eu
+        
+        TODOS_FILE="${NOODLE_TODOS_FILE:-todos.md}"
+        [ -f "$TODOS_FILE" ] || exit 0
+        
+        json_escape() {
+          printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+        }
+        
+        trim() {
+          printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+        }
+        
+        section=""
+        while IFS= read -r line || [ -n "$line" ]; do
+          case "$line" in
+            '## '*)
+              section=$(trim "${line#'## '}")
+              continue
+              ;;
+          esac
+        
+          if printf '%s\n' "$line" | grep -Eq '^[0-9]+\. \[[ xX]\] '; then
+            id=$(printf '%s\n' "$line" | sed -E 's/^([0-9]+)\..*/\1/')
+            mark=$(printf '%s\n' "$line" | sed -E 's/^[0-9]+\. \[([ xX])\].*/\1/')
+            raw=$(printf '%s\n' "$line" | sed -E 's/^[0-9]+\. \[[ xX]\] //')
+        
+            status="open"
+            [ "$mark" = "x" ] || [ "$mark" = "X" ] && status="done"
+        
+            tags=$(printf '%s\n' "$raw" | grep -oE '#[A-Za-z0-9_-]+' 2>/dev/null | sed 's/^#//' | tr '\n' ',' | sed 's/,$//' || true)
+            estimate=$(printf '%s\n' "$raw" | sed -nE 's/.*~(small|medium|large).*/\1/p' | head -n1)
+        
+            plan=$(printf '%s\n' "$raw" | sed -nE 's/.*\[\[plans\/([0-9]+-[^/]+)\/overview\]\].*/brain\/plans\/\1\/overview.md/p' | head -n1)
+        
+            title=$(printf '%s\n' "$raw" \
+              | sed -E 's/#[A-Za-z0-9_-]+//g; s/~(small|medium|large)//g; s/\[\[plans\/[^]]+\]\]//g; s/[[:space:]]+/ /g; s/^[[:space:]]*//; s/[[:space:]]*$//')
+        
+            printf '{"id":"%s","title":"%s","status":"%s"' \
+              "$(json_escape "$id")" "$(json_escape "$title")" "$status"
+        
+            if [ -n "$section" ]; then
+              printf ',"section":"%s"' "$(json_escape "$section")"
+            fi
+        
+            printf ',"tags":['
+            if [ -n "$tags" ]; then
+              first=1
+              OLDIFS=$IFS
+              IFS=,
+              for tag in $tags; do
+                [ -n "$tag" ] || continue
+                if [ $first -eq 0 ]; then printf ','; fi
+                first=0
+                printf '"%s"' "$(json_escape "$tag")"
+              done
+              IFS=$OLDIFS
+            fi
+            printf ']'
+        
+            if [ -n "$estimate" ]; then
+              printf ',"estimate":"%s"' "$(json_escape "$estimate")"
+            fi
+        
+            if [ -n "$plan" ]; then
+              printf ',"plan":"%s"' "$(json_escape "$plan")"
+            fi
+        
+            printf '}\n'
+          fi
+        done < "$TODOS_FILE"
+        #!/bin/sh
+        set -eu
+        
+        TODOS_FILE="${NOODLE_TODOS_FILE:-todos.md}"
+        mkdir -p "$(dirname "$TODOS_FILE")"
+        [ -f "$TODOS_FILE" ] || {
+          cat > "$TODOS_FILE" <<'INIT'
+        # Todos
+        
+        <!-- next-id: 1 -->
+        
+        ## Inbox
+        INIT
+        }
+        
+        payload=$(cat)
+        title=$(printf '%s' "$payload" | sed -n 's/.*"title"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+        section=$(printf '%s' "$payload" | sed -n 's/.*"section"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+        [ -n "$title" ] || { echo "title required" >&2; exit 1; }
+        [ -n "$section" ] || section="Inbox"
+        
+        next_id=$(sed -n 's/.*next-id:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$TODOS_FILE" | head -n1)
+        if [ -z "$next_id" ]; then
+          max_id=$(sed -n 's/^\([0-9][0-9]*\)\..*/\1/p' "$TODOS_FILE" | sort -n | tail -n1)
+          [ -n "$max_id" ] || max_id=0
+          next_id=$((max_id + 1))
+        fi
+        
+        if ! grep -q "^##[[:space:]]\+$section$" "$TODOS_FILE"; then
+          printf '\n## %s\n' "$section" >> "$TODOS_FILE"
+        fi
+        printf '%s. [ ] %s\n' "$next_id" "$title" >> "$TODOS_FILE"
+        
+        next_next=$((next_id + 1))
+        if grep -q 'next-id:' "$TODOS_FILE"; then
+          tmp="$TODOS_FILE.tmp"
+          sed "s/next-id:[[:space:]]*[0-9][0-9]*/next-id: $next_next/" "$TODOS_FILE" > "$tmp"
+          mv "$tmp" "$TODOS_FILE"
+        else
+          tmp="$TODOS_FILE.tmp"
+          awk -v n="$next_next" 'NR==2{print ""; print "<!-- next-id: " n " -->"} {print}' "$TODOS_FILE" > "$tmp"
+          mv "$tmp" "$TODOS_FILE"
+        fi
+        
+        echo "$next_id"
+        #!/bin/sh
+        set -eu
+        
+        id=${1:-}
+        [ -n "$id" ] || { echo "id required" >&2; exit 1; }
+        TODOS_FILE="${NOODLE_TODOS_FILE:-todos.md}"
+        [ -f "$TODOS_FILE" ] || { echo "todos file not found" >&2; exit 1; }
+        
+        tmp="$TODOS_FILE.tmp"
+        sed "s/^$id\. \[ \]/$id. [x]/" "$TODOS_FILE" > "$tmp"
+        mv "$tmp" "$TODOS_FILE"
+        #!/bin/sh
+        set -eu
+        
+        id=${1:-}
+        [ -n "$id" ] || { echo "id required" >&2; exit 1; }
+        TODOS_FILE="${NOODLE_TODOS_FILE:-todos.md}"
+        [ -f "$TODOS_FILE" ] || { echo "todos file not found" >&2; exit 1; }
+        
+        payload=$(cat)
+        title=$(printf '%s' "$payload" | sed -n 's/.*"title"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+        [ -n "$title" ] || { echo "title required" >&2; exit 1; }
+        
+        tmp="$TODOS_FILE.tmp"
+        sed -E "s/^(${id}\. \[[ xX]\] ).*/\\1${title}/" "$TODOS_FILE" > "$tmp"
+        mv "$tmp" "$TODOS_FILE"
+        Run the scheduling loop
+        
+        Usage:
+          noodle start [flags]
+        
+        Flags:
+          -h, --help   help for start
+              --once   Run one scheduling cycle and exit
+        
+        Global Flags:
+              --project-dir string   project directory (default: current directory, env: NOODLE_PROJECT_DIR)
+        Create a new linked worktree
+        
+        Usage:
+          noodle worktree create <name> [flags]
+        
+        Flags:
+              --from string   Branch or commit to base the new worktree on (default: HEAD)
+          -h, --help          help for create
+        
+        Global Flags:
+              --project-dir string   project directory (default: current directory, env: NOODLE_PROJECT_DIR)
+        Merge a worktree branch into a target branch
+        
+        Usage:
+          noodle worktree merge <name> [flags]
+        
+        Flags:
+          -h, --help          help for merge
+              --into string   Target branch to merge into (default: integration branch)
+        
+        Global Flags:
+              --project-dir string   project directory (default: current directory, env: NOODLE_PROJECT_DIR)
+        #!/usr/bin/env python3
+        """
+        Quick validation script for skills - minimal version
+        """
+        
+        import re
+        import sys
+        from pathlib import Path
+        
+        import yaml
+        
+        MAX_SKILL_NAME_LENGTH = 64
+        
+        
+        def validate_skill(skill_path):
+            """Basic validation of a skill"""
+            skill_path = Path(skill_path)
+        
+            skill_md = skill_path / "SKILL.md"
+            if not skill_md.exists():
+                return False, "SKILL.md not found"
+        
+            content = skill_md.read_text()
+            if not content.startswith("---"):
+                return False, "No YAML frontmatter found"
+        
+            match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
+            if not match:
+                return False, "Invalid frontmatter format"
+        
+            frontmatter_text = match.group(1)
+        
+            try:
+                frontmatter = yaml.safe_load(frontmatter_text)
+                if not isinstance(frontmatter, dict):
+                    return False, "Frontmatter must be a YAML dictionary"
+            except yaml.YAMLError as e:
+                return False, f"Invalid YAML in frontmatter: {e}"
+        
+            allowed_properties = {"name", "description", "license", "allowed-tools", "metadata"}
+        
+            unexpected_keys = set(frontmatter.keys()) - allowed_properties
+            if unexpected_keys:
+                allowed = ", ".join(sorted(allowed_properties))
+                unexpected = ", ".join(sorted(unexpected_keys))
+                return (
+                    False,
+                    f"Unexpected key(s) in SKILL.md frontmatter: {unexpected}. Allowed properties are: {allowed}",
+                )
+        
+            if "name" not in frontmatter:
+                return False, "Missing 'name' in frontmatter"
+            if "description" not in frontmatter:
+                return False, "Missing 'description' in frontmatter"
+        
+            name = frontmatter.get("name", "")
+            if not isinstance(name, str):
+                return False, f"Name must be a string, got {type(name).__name__}"
+            name = name.strip()
+            if name:
+                if not re.match(r"^[a-z0-9-]+$", name):
+                    return (
+                        False,
+                        f"Name '{name}' should be hyphen-case (lowercase letters, digits, and hyphens only)",
+                    )
+                if name.startswith("-") or name.endswith("-") or "--" in name:
+                    return (
+                        False,
+                        f"Name '{name}' cannot start/end with hyphen or contain consecutive hyphens",
+                    )
+                if len(name) > MAX_SKILL_NAME_LENGTH:
+                    return (
+                        False,
+                        f"Name is too long ({len(name)} characters). "
+                        f"Maximum is {MAX_SKILL_NAME_LENGTH} characters.",
+                    )
+        
+            description = frontmatter.get("description", "")
+            if not isinstance(description, str):
+                return False, f"Description must be a string, got {type(description).__name__}"
+            description = description.strip()
+            if description.startswith("[TODO:"):
+                return False, "Description contains an unfinished TODO placeholder"
+            if description:
+                if "<" in description or ">" in description:
+                    return False, "Description cannot contain angle brackets (< or >)"
+                if len(description) > 1024:
+                    return (
+                        False,
+                        f"Description is too long ({len(description)} characters). Maximum is 1024 characters.",
+                    )
+        
+            body = content[match.end() :]
+            fence_marker = None
+            fence_length = 0
+            for line in body.splitlines():
+                fence = re.match(r"^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$", line)
+                if fence:
+                    marker = fence.group(1)
+                    if fence_marker is None:
+                        fence_marker = marker[0]
+                        fence_length = len(marker)
+                    elif (
+                        marker[0] == fence_marker
+                        and len(marker) >= fence_length
+                        and not fence.group(2).strip()
+                    ):
+                        fence_marker = None
+                        fence_length = 0
+                    continue
+        
+                if fence_marker is None and re.fullmatch(
+                    r"[ ]{0,3}\[TODO:[^\n]*\][ \t]*", line
+                ):
+                    return False, "Skill instructions contain an unfinished TODO placeholder"
+        
+            return True, "Skill is valid!"
+        
+        
+        if __name__ == "__main__":
+            if len(sys.argv) != 2:
+                print("Usage: python quick_validate.py <skill_directory>")
+                sys.exit(1)
+        
+            valid, message = validate_skill(sys.argv[1])
+            print(message)
+            sys.exit(0 if valid else 1)
+        /opt/homebrew/bin/go
+        /opt/homebrew/bin/jq
+        /Users/neon/.local/bin/codex
+        
+    smoke_test.go:703: codex exec failed: signal: killed
+FAIL
+FAIL	github.com/poteto/noodle/e2e	265.744s
+FAIL
+ ELIFECYCLE  Command failed with exit code 1.

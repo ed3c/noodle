@@ -1,0 +1,9 @@
+=== RUN   TestAdmissionRetirementPhysicalCrash
+=== RUN   TestAdmissionRetirementPhysicalCrash/after_remove
+    admission_recovery_test.go:375: actual child pid=84869 phase=after_remove exit=signal: killed
+    admission_recovery_test.go:389: readback cannot resume: {Owner:Noodle initial admission Status:no_proposal Subject:{SHA256: InitialRevision: OrderIDs:[]} Revision:004a24a7285ee15a944b9cc6aeb4093f Invalid: Next:{Argv:[] Guidance:Retirement is complete. No executable recovery step remains. The scheduling owner may prepare the next proposal from this readback; do not restart a loop or republish a historical proposal from memory. Required:A separately admitted intent and a fresh INITIAL proposal bound to current_order_revision ProvidedBy:Noodle scheduling owner through the existing schedule skill / orders-next.json admission entry ReadbackArgv:[noodle --project-dir /var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/TestAdmissionRetirementPhysicalCrashafter_remove2026381977/001 admission inspect]}}
+--- FAIL: TestAdmissionRetirementPhysicalCrash (0.06s)
+    --- FAIL: TestAdmissionRetirementPhysicalCrash/after_remove (0.06s)
+FAIL
+FAIL	github.com/poteto/noodle/loop	0.515s
+FAIL

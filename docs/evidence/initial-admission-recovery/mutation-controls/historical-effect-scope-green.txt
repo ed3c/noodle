@@ -1,0 +1,6 @@
+=== RUN   TestAdmissionRecoveryHistoricalEvidenceScope
+=== RUN   TestAdmissionRecoveryHistoricalEvidenceScope/unrelated_pending_effect
+--- PASS: TestAdmissionRecoveryHistoricalEvidenceScope (0.01s)
+    --- PASS: TestAdmissionRecoveryHistoricalEvidenceScope/unrelated_pending_effect (0.01s)
+PASS
+ok  	github.com/poteto/noodle/loop	0.271s

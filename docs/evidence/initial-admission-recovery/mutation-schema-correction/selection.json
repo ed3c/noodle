@@ -1,0 +1,14 @@
+{
+  "selected_at": 1789629291.043114,
+  "cases": [
+    [
+      "canonical-schema",
+      "loop/admission_evidence.go",
+      "snapshot.State.SchemaVersion != statever.Current",
+      "(snapshot.State.SchemaVersion != statever.Current && false)",
+      "TestAdmissionRecoveryRefusalGates/unknown_schema"
+    ]
+  ],
+  "script_sha256": "cf51d2ff62907328b557ff93782bb52a30d6407746adf135047a8a0a75a565dd",
+  "scope": "isolated source-copy planted defects; never candidate or production state edits"
+}

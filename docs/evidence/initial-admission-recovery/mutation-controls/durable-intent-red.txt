@@ -1,0 +1,9 @@
+=== RUN   TestAdmissionRetirementPhysicalCrash
+=== RUN   TestAdmissionRetirementPhysicalCrash/after_intent
+    admission_recovery_test.go:375: actual child pid=84847 phase=after_intent exit=signal: killed
+    admission_recovery_test.go:385: durable original bytes absent
+--- FAIL: TestAdmissionRetirementPhysicalCrash (0.04s)
+    --- FAIL: TestAdmissionRetirementPhysicalCrash/after_intent (0.04s)
+FAIL
+FAIL	github.com/poteto/noodle/loop	0.503s
+FAIL

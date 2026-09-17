@@ -1,0 +1,8 @@
+=== RUN   TestAdmissionPendingIntentBoundaries
+=== RUN   TestAdmissionPendingIntentBoundaries/multiple_intents
+    admission_intent_test.go:62: ambiguous continuation: {Owner:Noodle initial admission Status:recoverable Subject:{SHA256:47c803c5e645698d01a1c7faf7d61bdbff9a6491a86dda326f02f1b4110d08f4 InitialRevision:00000000000000000000000000000000 OrderIDs:[C]} Revision:cd7191a1a082fafbdf710598a6282267 Invalid:invalid initial_revision="00000000000000000000000000000000": current canonical order_revision="cd7191a1a082fafbdf710598a6282267" Next:{Argv:[noodle --project-dir /var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/TestAdmissionPendingIntentBoundariesmultiple_intents4196952354/001 admission retire 47c803c5e645698d01a1c7faf7d61bdbff9a6491a86dda326f02f1b4110d08f4 cd7191a1a082fafbdf710598a6282267] Guidance:Run this exact argv only for this rejected proposal. Retirement does not admit or restart work. Required: ProvidedBy: ReadbackArgv:[noodle --project-dir /var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/TestAdmissionPendingIntentBoundariesmultiple_intents4196952354/001 admission inspect]}}
+--- FAIL: TestAdmissionPendingIntentBoundaries (0.05s)
+    --- FAIL: TestAdmissionPendingIntentBoundaries/multiple_intents (0.05s)
+FAIL
+FAIL	github.com/poteto/noodle/loop	0.483s
+FAIL

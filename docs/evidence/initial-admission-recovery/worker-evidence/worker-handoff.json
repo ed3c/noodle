@@ -1,0 +1,97 @@
+{
+  "status": "blocked",
+  "implementation_committed": false,
+  "actual_commit": "656e9ec73689c523058750e8b0a2388a15bb84fa",
+  "source_parent": "656e9ec73689c523058750e8b0a2388a15bb84fa",
+  "worktree": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute",
+  "order_id": "noodle-84",
+  "stage_index": 0,
+  "session_id": "noodle-84-0-execute-20260917-064248-55f8a7",
+  "blocker": "Sandbox denies writes to tracked .agents/skills/noodle/SKILL.md, through generator and standard apply_patch; approval unavailable. Required generated skill cannot be synchronized.",
+  "checks": [
+    {
+      "name": "initial dependency run",
+      "result": "environment failure; NOT defect RED",
+      "output": "projection-red.txt"
+    },
+    {
+      "name": "offline empty cache run",
+      "result": "environment failure; NOT defect RED",
+      "output": "projection-red-control.txt"
+    },
+    {
+      "name": "actual completed-A projection producer/initial-B consumer control",
+      "result": "defect RED against source parent",
+      "output": "projection-red-cached.txt"
+    },
+    {
+      "name": "same completed projection control and existing TestInitialAdmission controls",
+      "result": "GREEN after narrow projection/ownership separation",
+      "output": "initial-green.txt"
+    },
+    {
+      "name": "recovery refusal, exact-byte archive, binding, legal noncases, actual child kill controls",
+      "result": "partial GREEN, overall FAIL: after_remove inspect returns no_proposal instead of exact intent continuation",
+      "output": "recovery-first-control.txt"
+    },
+    {
+      "name": "pnpm check",
+      "result": "NOT RUN: stopped on concrete capability blocker"
+    },
+    {
+      "name": "pnpm test:smoke",
+      "result": "NOT RUN: stopped on concrete capability blocker"
+    }
+  ],
+  "source_files": [
+    "cmdmeta/cmdmeta.go",
+    "generate/skill_noodle.go",
+    "loop/loop_cycle_pipeline.go",
+    "loop/orders.go",
+    "root.go",
+    "cmd_admission.go",
+    "internal/filex/durable.go",
+    "internal/procx/group_absent_unix.go",
+    "internal/procx/group_absent_windows.go",
+    "loop/admission_evidence.go",
+    "loop/admission_process_unix_test.go",
+    "loop/admission_projection_test.go",
+    "loop/admission_recovery.go",
+    "loop/admission_recovery_test.go"
+  ],
+  "raw_output_paths": [
+    "/Users/neon/.codex/experiments/noodle84-20260917/worker-evidence/initial-green.txt",
+    "/Users/neon/.codex/experiments/noodle84-20260917/worker-evidence/projection-red-cached.txt",
+    "/Users/neon/.codex/experiments/noodle84-20260917/worker-evidence/projection-red-control.txt",
+    "/Users/neon/.codex/experiments/noodle84-20260917/worker-evidence/projection-red.txt",
+    "/Users/neon/.codex/experiments/noodle84-20260917/worker-evidence/recovery-first-control.txt",
+    "/Users/neon/.codex/experiments/noodle84-20260917/worker-evidence/skill-write-blocker.json",
+    "/Users/neon/.codex/experiments/noodle84-20260917/worker-evidence/untracked-sources.json",
+    "/Users/neon/.codex/experiments/noodle84-20260917/worker-evidence/working-tree-status.txt",
+    "/Users/neon/.codex/experiments/noodle84-20260917/worker-evidence/working-tree.diff"
+  ],
+  "known_limitations": [
+    "No implementation commit; all changes remain uncommitted and are not a deliverable candidate.",
+    "Known failing after_remove crash control requires inspection to discover pending durable receipt when mailbox is absent.",
+    "Dead-root/live-process-group test was added but not run before blocker stop.",
+    "Per-gate mutation RED/corrected GREEN matrix is incomplete; only producer/consumer causal RED and crash readback RED are established.",
+    "CLI/full-suite/smoke verification and final diff review remain incomplete.",
+    "Generated skill source and cmdmeta changed, but checked-in SKILL.md is unchanged due denied write.",
+    "Windows process-tree absence intentionally refuses; this choice is unverified.",
+    "Fresh Session consumption, external archived-state controls, exact-head provider checks and landing remain supervisor responsibilities; none claimed.",
+    "No production state, other repository, credential, provider, canonical runtime ledger or managed worktree was modified."
+  ],
+  "supported_next_steps": [
+    "Supervisor provides a worktree stage with legitimate write capability for the tracked generated Noodle skill, preserving this order/worktree identity and uncommitted changes.",
+    "Resume implementation by fixing pending-intent discovery after mailbox removal; rerun the same actual-child crash control.",
+    "Review and complete validation/gate controls, synchronize generated skill from generate source, then run focused controls, pnpm check and pnpm test:smoke.",
+    "Only after all verification passes, self-review diff and commit with authorized author; supervisor handles provider checks and landing."
+  ],
+  "local_go_cache": {
+    "GOMODCACHE": "/private/tmp/codex-go-mod",
+    "GOCACHE": "/private/tmp/codex-go-cache",
+    "GOPROXY": "file:///Users/neon/go/pkg/mod/cache/download",
+    "GOSUMDB": "off"
+  },
+  "recorded_at": "2026-09-17T06:54:05.877218+00:00"
+}

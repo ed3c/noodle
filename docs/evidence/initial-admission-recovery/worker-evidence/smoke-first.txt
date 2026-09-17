@@ -1,0 +1,230 @@
+
+> @ test:smoke /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute
+> go test -tags e2e -timeout 600s -count=1 ./e2e/
+
+2026-09-17T15:10:07.059578+08:00 INFO api: start initialized project=/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-2177697567 runtime_dir=/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-2177697567/.noodle once=false server_enabled=true
+2026-09-17T15:10:07.060597+08:00 INFO api: listening component=server addr=localhost:13737
+2026-09-17T15:10:07.060672+08:00 INFO api: browser launch skipped component=server reason="NOODLE_NO_BROWSER=1" url=http://localhost:13737
+2026-09-17T15:10:07.0623+08:00 INFO api: startup injected schedule order
+2026-09-17T15:10:07.443287+08:00 INFO api: schedule dispatched session=schedule-20260917-071007-312eac attempt=0
+2026-09-17T15:10:12.439474+08:00 INFO api: session meta indicates terminal state; enqueueing completion order=schedule session=schedule-20260917-071007-312eac status=exited
+2026-09-17T15:10:12.441132+08:00 WARN api: cook exited with status failed path=cycle.stage_terminal class=order-hard recoverability=recoverable order_id=schedule stage_index=0 order_class=stage-terminal
+2026-09-17T15:10:12.441186+08:00 INFO api: scheduler not active, event stays in orders for later recovery order=schedule event=stage_failed
+2026-09-17T15:11:19.753094+08:00 INFO api: start initialized project=/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-1238943019 runtime_dir=/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-1238943019/.noodle once=false server_enabled=true
+2026-09-17T15:11:19.75362+08:00 INFO api: listening component=server addr=localhost:13737
+2026-09-17T15:11:19.753677+08:00 INFO api: browser launch skipped component=server reason="NOODLE_NO_BROWSER=1" url=http://localhost:13737
+2026-09-17T15:11:19.754923+08:00 INFO api: startup injected schedule order
+2026-09-17T15:11:19.961808+08:00 INFO api: schedule dispatched session=schedule-20260917-071119-97663e attempt=0
+2026-09-17T15:11:25.060411+08:00 WARN api: cook exited with status failed path=cycle.stage_terminal class=order-hard recoverability=recoverable order_id=schedule stage_index=0 order_class=stage-terminal
+2026-09-17T15:11:25.060466+08:00 INFO api: scheduler not active, event stays in orders for later recovery order=schedule event=stage_failed
+--- FAIL: TestSmokeAgentLoop (144.66s)
+    smoke_test.go:52: noodle binary: /var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-1725866745/noodle
+    smoke_test.go:53: project dir:   /var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-2177697567
+    smoke_test.go:72: noodle started (pid 81593)
+    smoke_test.go:103: polling milestone: Phase A: orders.json appears (timeout 1m0s)
+    smoke_test.go:103: milestone Phase A: orders.json appears reached
+    smoke_test.go:103: polling milestone: Phase B: session directory appears (timeout 2m0s)
+    smoke_test.go:103: milestone Phase B: session directory appears reached
+    smoke_test.go:106: server ready at http://127.0.0.1:13737
+    smoke_test.go:109: playwright output:
+        
+        Running 9 tests using 1 worker
+        
+          ✓  1 [chromium] › smoke.spec.ts:31:3 › Noodle UI smoke › channel layout loads with sidebar, feed, and context panel (599ms)
+          ✓  2 [chromium] › smoke.spec.ts:52:3 › Noodle UI smoke › sidebar shows scheduler channel (488ms)
+          ✓  3 [chromium] › smoke.spec.ts:61:3 › Noodle UI smoke › dashboard route loads (484ms)
+          ✓  4 [chromium] › smoke.spec.ts:69:3 › Noodle UI smoke › topology route loads (472ms)
+          ✓  5 [chromium] › smoke.spec.ts:77:3 › Noodle UI smoke › steer input is functional (486ms)
+          ✓  6 [chromium] › smoke.spec.ts:88:3 › Noodle UI smoke › snapshot API returns valid data (42ms)
+          ✓  7 [chromium] › smoke.spec.ts:99:3 › Noodle UI smoke › config API returns provider and model (5ms)
+          ✓  8 [chromium] › smoke.spec.ts:108:3 › Noodle UI smoke › WebSocket endpoint is reachable (114ms)
+          ✘  9 [chromium] › smoke.spec.ts:138:3 › Noodle UI smoke › active agent context shows worktree name (30.0s)
+          ✘  10 [chromium] › smoke.spec.ts:138:3 › Noodle UI smoke › active agent context shows worktree name (retry #1) (30.0s)
+        
+        
+          1) [chromium] › smoke.spec.ts:138:3 › Noodle UI smoke › active agent context shows worktree name ─
+        
+            [31mTest timeout of 30000ms exceeded.[39m
+        
+            Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+        
+            [31mTest timeout of 30000ms exceeded.[39m
+        
+          1 failed
+            [chromium] › smoke.spec.ts:138:3 › Noodle UI smoke › active agent context shows worktree name ──
+          8 passed (1.1m)
+    smoke_test.go:121: diagnostics [schedule-20260917-071007-312eac/prompt.txt]:
+        Use Skill(schedule). The selected skill is the single owner of project scheduling and output policy.
+        
+        Runtime interface:
+        - checkout_mode: primary-checkout
+        - selected_skill: schedule
+        - selected_skill_path: /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-2177697567/.agents/skills/schedule
+        - mise_input: /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-2177697567/.noodle/mise.json
+        - promotion_input: /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-2177697567/.noodle/orders-next.json
+        - canonical_orders: /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-2177697567/.noodle/orders.json (read-only; the loop promotes atomically)
+        
+        Supported compact transport schema (the selected skill may impose stricter project policy):
+        orders.json schema (JSON):
+        ```json
+        {
+          "action_needed": [
+            "string - backlog item ID skipped pending user action"
+          ],
+          "initial_revision": "string (optional) - optional current order_revision from Noodle state.snapshot.json; requires every proposed ID to be absent. Stale/replayed proposals refuse before promotion. This is not execution authorization; omit only for the existing legacy scheduling contract.",
+          "orders": [
+            {
+              "id": "string - order ID (plan ID as string, or unique slug)",
+              "plan": [
+                "string - linked plan path(s), e.g. plans/15-bootstrap-onboarding/overview"
+              ],
+              "rationale": "string (optional) - placement reason citing a rule or principle",
+              "stages": [
+                {
+                  "do": "string (optional) - task key (must match a task_types[].key from mise)",
+                  "extra": {
+                    "<key>": "JSON - opaque extension data preserved across round-trips"
+                  },
+                  "extra_prompt": "string (optional) - supplemental instructions for the cook on how to approach the task (max ~1000 chars)",
+                  "group": "number (optional) - parallel group ID; stages in the same group run concurrently, groups execute sequentially (default: 0)",
+                  "model": "string (optional) - model for this stage (optional; defaults from routing config)",
+                  "prompt": "string (optional) - full prompt text for the dispatched session",
+                  "runtime": "string (optional) - runtime for this stage (process, sprites, etc.)",
+                  "with": "string (optional) - provider for this stage (optional; defaults from routing config)"
+                }
+              ],
+              "title": "string (optional) - brief order description"
+            }
+          ]
+        }
+        ```
+        
+        Constraints:
+        - Each order is a pipeline of stage groups executed sequentially. Stages within the same group run concurrently.
+        - Group related stages into one order rather than separate orders.
+        - Stage `do` values must match a `task_types[].key` from mise, or omit `do` and provide a `prompt` for ad-hoc stages.
+        - Each `rationale` should cite a specific scheduling rule or principle.
+        - Do not include `status` or `skill` fields — the loop sets these automatically.
+        
+        Task types you may schedule:
+        - execute: When backlog items with linked plans are ready for implementation
+    smoke_test.go:121: diagnostics [schedule-20260917-071007-312eac/stderr.log]:
+        Reading prompt from stdin...
+        2026-09-17T07:10:07.530287Z  WARN codex_models_manager::model_info: Unknown model gpt-5.3-codex-spark is used. This will use fallback model metadata.
+        2026-09-17T07:10:07.558645Z  WARN codex_skills::interface: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/
+        2026-09-17T07:10:07.558660Z  WARN codex_skills::interface: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/
+        2026-09-17T07:10:07.658494Z  WARN codex_models_manager::model_info: Unknown model gpt-5.3-codex-spark is used. This will use fallback model metadata.
+        2026-09-17T07:10:07.665299Z  WARN codex_models_manager::model_info: Unknown model gpt-5.3-codex-spark is used. This will use fallback model metadata.
+        2026-09-17T07:10:08.339943Z  WARN codex_skills::interface: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/
+        2026-09-17T07:10:08.339959Z  WARN codex_skills::interface: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/
+        2026-09-17T07:10:10.058990Z  WARN codex_core::session_startup_prewarm: startup websocket prewarm setup failed: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account."}}
+        2026-09-17T07:10:11.575809Z  WARN codex_models_manager::model_info: Unknown model gpt-5.3-codex-spark is used. This will use fallback model metadata.
+    smoke_test.go:121: diagnostics [schedule-20260917-071007-312eac/canonical.ndjson]: 4 lines, type counts: map[action:1 error:2 init:1]
+    smoke_test.go:121: diagnostics [schedule-20260917-071007-312eac/canonical.ndjson] TAIL:
+        {"provider":"codex","type":"init","message":"codex session started","timestamp":"2026-09-17T07:10:07.664878Z"}
+        {"provider":"codex","type":"action","message":"text:turn started","timestamp":"2026-09-17T07:10:07.722907Z"}
+        {"type":"error","message":"canonical routing failed: provider unresolved for line type \"error\"","timestamp":"2026-09-17T07:10:11.56845Z"}
+        {"type":"error","message":"canonical routing failed: provider unresolved for line type \"turn.failed\"","timestamp":"2026-09-17T07:10:11.5727Z"}
+    smoke_test.go:121: diagnostics [schedule-20260917-071007-312eac/raw.ndjson]: 6 lines, type counts: map[error:1 item.completed:2 thread.started:1 turn.failed:1 turn.started:1]
+    smoke_test.go:121: diagnostics [schedule-20260917-071007-312eac/raw.ndjson] TAIL:
+        {"_ts":"2026-09-17T07:10:07.664878Z","thread_id":"01a0ae33-86aa-7f81-85bb-a764fb2c4403","type":"thread.started"}
+        {"_ts":"2026-09-17T07:10:07.669776Z","item":{"id":"item_0","type":"error","message":"clamping SessionEnd hook timeout to 3s in /Users/neon/.codex/plugins/cache/openai-codex/codex/1.0.6/hooks/hooks.json"},"type":"item.completed"}
+        {"_ts":"2026-09-17T07:10:07.669858Z","item":{"id":"item_1","type":"error","message":"Model metadata for `gpt-5.3-codex-spark` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."},"type":"item.completed"}
+        {"_ts":"2026-09-17T07:10:07.722907Z","type":"turn.started"}
+        {"_ts":"2026-09-17T07:10:11.56845Z","message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account.\"}}","type":"error"}
+        {"_ts":"2026-09-17T07:10:11.5727Z","error":{"message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account.\"}}"},"type":"turn.failed"}
+    smoke_test.go:123: first attempt failed: playwright UI smoke: playwright tests failed: exit status 1 — retrying once
+    smoke_test.go:124: killing noodle process (pid 81593)
+    smoke_test.go:128: retry project dir: /var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-1238943019
+    smoke_test.go:146: noodle restarted (pid 82455)
+    smoke_test.go:103: polling milestone: Phase A: orders.json appears (timeout 1m0s)
+    smoke_test.go:103: milestone Phase A: orders.json appears reached
+    smoke_test.go:103: polling milestone: Phase B: session directory appears (timeout 2m0s)
+    smoke_test.go:103: milestone Phase B: session directory appears reached
+    smoke_test.go:106: server ready at http://127.0.0.1:13737
+    smoke_test.go:109: playwright output:
+        
+        Running 9 tests using 1 worker
+        
+          ✓  1 [chromium] › smoke.spec.ts:31:3 › Noodle UI smoke › channel layout loads with sidebar, feed, and context panel (520ms)
+          ✓  2 [chromium] › smoke.spec.ts:52:3 › Noodle UI smoke › sidebar shows scheduler channel (483ms)
+          ✓  3 [chromium] › smoke.spec.ts:61:3 › Noodle UI smoke › dashboard route loads (476ms)
+          ✓  4 [chromium] › smoke.spec.ts:69:3 › Noodle UI smoke › topology route loads (473ms)
+          ✓  5 [chromium] › smoke.spec.ts:77:3 › Noodle UI smoke › steer input is functional (476ms)
+          ✓  6 [chromium] › smoke.spec.ts:88:3 › Noodle UI smoke › snapshot API returns valid data (29ms)
+          ✓  7 [chromium] › smoke.spec.ts:99:3 › Noodle UI smoke › config API returns provider and model (5ms)
+          ✓  8 [chromium] › smoke.spec.ts:108:3 › Noodle UI smoke › WebSocket endpoint is reachable (118ms)
+          ✘  9 [chromium] › smoke.spec.ts:138:3 › Noodle UI smoke › active agent context shows worktree name (30.0s)
+          ✘  10 [chromium] › smoke.spec.ts:138:3 › Noodle UI smoke › active agent context shows worktree name (retry #1) (30.0s)
+        
+        
+          1) [chromium] › smoke.spec.ts:138:3 › Noodle UI smoke › active agent context shows worktree name ─
+        
+            [31mTest timeout of 30000ms exceeded.[39m
+        
+            Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+        
+            [31mTest timeout of 30000ms exceeded.[39m
+        
+          1 failed
+            [chromium] › smoke.spec.ts:138:3 › Noodle UI smoke › active agent context shows worktree name ──
+          8 passed (1.1m)
+    smoke_test.go:149: smoke flow not reached after retry: playwright UI smoke: playwright tests failed: exit status 1
+    smoke_test.go:140: killing noodle process (pid 82455)
+    smoke_test.go:66: killing noodle process (pid 82455)
+2026-09-17T15:12:30.008389+08:00 INFO api: start initialized project=/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3414453223 runtime_dir=/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3414453223/.noodle once=false server_enabled=true
+2026-09-17T15:12:30.008867+08:00 INFO api: listening component=server addr=localhost:13738
+2026-09-17T15:12:30.008894+08:00 INFO api: browser launch skipped component=server reason="NOODLE_NO_BROWSER=1" url=http://localhost:13738
+2026-09-17T15:12:30.012936+08:00 INFO api: startup injected schedule order
+2026-09-17T15:12:30.467728+08:00 INFO api: schedule dispatched session=schedule-20260917-071230-623fcc attempt=0
+2026-09-17T15:12:31.621983+08:00 INFO api: start initialized project=/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-2247797927 runtime_dir=/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-2247797927/.noodle once=false server_enabled=true
+2026-09-17T15:12:31.622462+08:00 INFO api: listening component=server addr=localhost:13739
+2026-09-17T15:12:31.622524+08:00 INFO api: browser launch skipped component=server reason="NOODLE_NO_BROWSER=1" url=http://localhost:13739
+2026-09-17T15:12:31.623728+08:00 INFO api: startup injected schedule order
+2026-09-17T15:12:31.997198+08:00 INFO api: schedule dispatched session=schedule-20260917-071231-2432c2 attempt=0
+--- FAIL: TestSmokeInstallMd (4.68s)
+    smoke_test.go:698: codex output:
+        Reading additional input from stdin...
+        2026-09-17T07:12:32.278671Z  WARN codex_models_manager::model_info: Unknown model gpt-5.3-codex-spark is used. This will use fallback model metadata.
+        2026-09-17T07:12:32.295428Z  WARN codex_skills::interface: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/
+        2026-09-17T07:12:32.295444Z  WARN codex_skills::interface: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/
+        2026-09-17T07:12:32.403812Z  WARN codex_models_manager::model_info: Unknown model gpt-5.3-codex-spark is used. This will use fallback model metadata.
+        OpenAI Codex v0.153.4
+        --------
+        workdir: /private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle-e2e-project-3034612131
+        model: gpt-5.3-codex-spark
+        provider: openai
+        approval: never
+        sandbox: danger-full-access
+        reasoning effort: high
+        reasoning summaries: none
+        session id: 01a0ae35-bc16-7b01-8908-fe45d5ef670e
+        --------
+        user
+        Install Noodle and set up this project. Follow /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/INSTALL.md.
+        
+        This run is non-interactive. Do not ask follow-up questions.
+        If INSTALL.md says to ask the user, choose these defaults and continue:
+        - provider: Codex
+        - first backlog item in todos.md: "Initial smoke test task"
+        - brainmaxxing: no
+        
+        Complete the setup end-to-end and then report completion.
+        2026-09-17T07:12:32.412544Z  WARN codex_models_manager::model_info: Unknown model gpt-5.3-codex-spark is used. This will use fallback model metadata.
+        warning: clamping SessionEnd hook timeout to 3s in /Users/neon/.codex/plugins/cache/openai-codex/codex/1.0.6/hooks/hooks.json
+        warning: Model metadata for `gpt-5.3-codex-spark` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.
+        2026-09-17T07:12:33.118904Z  WARN codex_skills::interface: ignoring interface.icon_small: icon path with '..' must resolve under plugin assets/
+        2026-09-17T07:12:33.118919Z  WARN codex_skills::interface: ignoring interface.icon_large: icon path with '..' must resolve under plugin assets/
+        2026-09-17T07:12:34.543248Z  WARN codex_core::session_startup_prewarm: startup websocket prewarm setup failed: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account."}}
+        hook: SessionStart
+        hook: SessionStart
+        hook: SessionStart Completed
+        hook: SessionStart Completed
+        ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account."}}
+        ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account."}}
+        2026-09-17T07:12:36.103186Z  WARN codex_models_manager::model_info: Unknown model gpt-5.3-codex-spark is used. This will use fallback model metadata.
+    smoke_test.go:703: codex exec failed: exit status 1
+FAIL
+FAIL	github.com/poteto/noodle/e2e	152.072s
+FAIL
+ ELIFECYCLE  Command failed with exit code 1.

@@ -1,0 +1,22 @@
+=== RUN   TestAdmissionNoProposalEndsRecovery
+--- PASS: TestAdmissionNoProposalEndsRecovery (0.06s)
+=== RUN   TestInitialAdmissionCompletedProjectionBoundary
+--- PASS: TestInitialAdmissionCompletedProjectionBoundary (0.01s)
+=== RUN   TestAdmissionRecoveryLegalNoncases
+=== RUN   TestAdmissionRecoveryLegalNoncases/valid_initial_remains_admissible
+=== RUN   TestAdmissionRecoveryLegalNoncases/no_proposal
+=== RUN   TestAdmissionRecoveryLegalNoncases/dead_terminal_session
+=== RUN   TestAdmissionRecoveryLegalNoncases/completed_A_stale_B
+--- PASS: TestAdmissionRecoveryLegalNoncases (0.07s)
+    --- PASS: TestAdmissionRecoveryLegalNoncases/valid_initial_remains_admissible (0.01s)
+    --- PASS: TestAdmissionRecoveryLegalNoncases/no_proposal (0.01s)
+    --- PASS: TestAdmissionRecoveryLegalNoncases/dead_terminal_session (0.01s)
+    --- PASS: TestAdmissionRecoveryLegalNoncases/completed_A_stale_B (0.05s)
+=== RUN   TestAdmissionRecoveryHistoricalEvidenceScope
+=== RUN   TestAdmissionRecoveryHistoricalEvidenceScope/unrelated_pending_effect
+=== RUN   TestAdmissionRecoveryHistoricalEvidenceScope/stale_running_metadata
+--- PASS: TestAdmissionRecoveryHistoricalEvidenceScope (0.02s)
+    --- PASS: TestAdmissionRecoveryHistoricalEvidenceScope/unrelated_pending_effect (0.01s)
+    --- PASS: TestAdmissionRecoveryHistoricalEvidenceScope/stale_running_metadata (0.01s)
+PASS
+ok  	github.com/poteto/noodle/loop	0.789s

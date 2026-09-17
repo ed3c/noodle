@@ -1,0 +1,15 @@
+{
+  "selected_at": 1789629525.507471,
+  "prompt_sha256": "c682e16f953572ac9d4ce0aceed25d73926c8820db0e1560d9df97e101609e79",
+  "required": [
+    "actual Codex recorder wait/exit",
+    "actual tool/harness trace",
+    "skill path/digest",
+    "positive owner next argv",
+    "valid proposal refused with no mutation",
+    "canonical bytes unchanged",
+    "original proposal archived losslessly",
+    "owned fixture cleanup, evidence retained"
+  ],
+  "authorizes_landing": false
+}

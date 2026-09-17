@@ -1,0 +1,4 @@
+=== RUN   TestAdmissionRecoveryRetiresExactBytes
+--- PASS: TestAdmissionRecoveryRetiresExactBytes (0.08s)
+PASS
+ok  	github.com/poteto/noodle/loop	0.341s

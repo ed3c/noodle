@@ -1,0 +1,6 @@
+=== RUN   TestAdmissionPendingIntentBoundaries
+=== RUN   TestAdmissionPendingIntentBoundaries/multiple_intents
+--- PASS: TestAdmissionPendingIntentBoundaries (0.05s)
+    --- PASS: TestAdmissionPendingIntentBoundaries/multiple_intents (0.05s)
+PASS
+ok  	github.com/poteto/noodle/loop	0.311s

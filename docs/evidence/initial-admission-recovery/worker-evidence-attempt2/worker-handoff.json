@@ -1,0 +1,68 @@
+{
+  "status": "blocked",
+  "implementation_committed": false,
+  "actual_commit": "656e9ec73689c523058750e8b0a2388a15bb84fa",
+  "source_parent": "656e9ec73689c523058750e8b0a2388a15bb84fa",
+  "worktree": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute",
+  "order_id": "noodle-84",
+  "stage_index": 0,
+  "session_id": "noodle-84-0-execute-20260917-070217-b3d88a",
+  "blocker": "The original worktree is clean at source parent; prior implementation and supervisor-corrected candidate are absent. admission_recovery.go and cmd_admission.go do not exist, and generated skill digest differs from continuation-selection.json. No candidate exists to review or verify; protected skill regeneration is expressly prohibited for this child.",
+  "checks": [
+    {
+      "name": "candidate continuity readback",
+      "result": "BLOCKED: absent source files and generated skill digest mismatch",
+      "output": "candidate-readback.json"
+    },
+    {
+      "name": "focused controls / mutation matrix / pnpm check / pnpm test:smoke",
+      "result": "NOT RUN: authorized candidate missing"
+    }
+  ],
+  "raw_output_paths": [
+    "/Users/neon/.codex/experiments/noodle84-20260917/worker-evidence-attempt2/candidate-readback.json"
+  ],
+  "source_files": {
+    "loop/admission_recovery.go": {
+      "exists": false,
+      "expected_supervisor_sha256": "44113f202eb74883f115b999ea5194ad5f8a25fe896013ade03808d262924b14",
+      "actual_sha256": null
+    },
+    "cmd_admission.go": {
+      "exists": false,
+      "expected_supervisor_sha256": null,
+      "actual_sha256": null
+    },
+    "loop/admission_recovery_test.go": {
+      "exists": false,
+      "expected_supervisor_sha256": null,
+      "actual_sha256": null
+    },
+    "loop/admission_evidence.go": {
+      "exists": false,
+      "expected_supervisor_sha256": null,
+      "actual_sha256": null
+    },
+    "generate/skill_noodle.go": {
+      "exists": true,
+      "expected_supervisor_sha256": null,
+      "actual_sha256": "fe4efee7db9ec971089dcddc180e71d1fac551e211853e35072a9b5a05ffccf1"
+    },
+    ".agents/skills/noodle/SKILL.md": {
+      "exists": true,
+      "expected_supervisor_sha256": "3fe3269f7a61cee54fd72e114005211cd3c8b08568b875a0e68c2c4a0c2da192",
+      "actual_sha256": "f13fb6356115aaca0b227ed691f724ca899b7946d21a4f84d6d816cb14611253"
+    }
+  },
+  "known_limitations": [
+    "No implementation or repository modifications made in attempt2.",
+    "Prior supervisor GREEN is historical evidence only and does not validate the current clean source checkout.",
+    "Cause of candidate disappearance is unproven; no reset, restoration, permission change, provider write or local merge attempted.",
+    "No commit, completion, process exit or Issue resolution claimed."
+  ],
+  "supported_next_steps": [
+    "Supervisor investigates candidate loss across same-order requeue/worktree preparation and restores the exact original implementation plus supervisor changes through an authorized path.",
+    "Supervisor verifies candidate file digests, generated skill synchronization and worktree identity before another same-order writer starts.",
+    "Next writer completes causal tests, isolated mutant controls, full pnpm check and smoke, then commits passing code."
+  ]
+}

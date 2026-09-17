@@ -1,0 +1,151 @@
+{
+  "classification": "GREEN",
+  "binary": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+  "binary_sha256": "85bd747fc7f408844b1c61199fa36a7b7e96cb02ffe9ac502e33fd9ca88e6919",
+  "input_selection_sha256": "9b5c6505bcd023fb1a872d44d8a33880e862046883349bd032c4b830ccf18e14",
+  "observer_sha256": "19e18b0ab048b17db26aeb3c31147d3bb605e6971205d7ef992876c6f800e84b",
+  "records": [
+    {
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+        "--project-dir",
+        "/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-external-v65bv8dw/control",
+        "admission",
+        "inspect"
+      ],
+      "exit": 0,
+      "stdout": "{\"owner\":\"Noodle initial admission\",\"status\":\"recoverable\",\"subject\":{\"proposal_sha256\":\"c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088\",\"initial_revision\":\"970e887025e1afec651ffdd8f8b42f76\",\"order_ids\":[\"soodles-39\"]},\"current_order_revision\":\"dfb96fcf7d8d776ea177173c4c0c717d\",\"invalid\":\"invalid initial_revision=\\\"970e887025e1afec651ffdd8f8b42f76\\\": current canonical order_revision=\\\"dfb96fcf7d8d776ea177173c4c0c717d\\\"\",\"next\":{\"argv\":[\"/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle\",\"--project-dir\",\"/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-external-v65bv8dw/control\",\"admission\",\"retire\",\"c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088\",\"dfb96fcf7d8d776ea177173c4c0c717d\"],\"guidance\":\"Run this exact argv only for this rejected proposal. Retirement does not admit or restart work.\",\"required\":\"\",\"provided_by\":\"\",\"readback_argv\":[\"/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle\",\"--project-dir\",\"/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-external-v65bv8dw/control\",\"admission\",\"inspect\"]}}\n",
+      "stderr": "config repairable: adapters.backlog: no backlog adapter configured Fix: Add [adapters.backlog] to .noodle.toml with adapter scripts.\n",
+      "json": {
+        "owner": "Noodle initial admission",
+        "status": "recoverable",
+        "subject": {
+          "proposal_sha256": "c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088",
+          "initial_revision": "970e887025e1afec651ffdd8f8b42f76",
+          "order_ids": [
+            "soodles-39"
+          ]
+        },
+        "current_order_revision": "dfb96fcf7d8d776ea177173c4c0c717d",
+        "invalid": "invalid initial_revision=\"970e887025e1afec651ffdd8f8b42f76\": current canonical order_revision=\"dfb96fcf7d8d776ea177173c4c0c717d\"",
+        "next": {
+          "argv": [
+            "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+            "--project-dir",
+            "/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-external-v65bv8dw/control",
+            "admission",
+            "retire",
+            "c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088",
+            "dfb96fcf7d8d776ea177173c4c0c717d"
+          ],
+          "guidance": "Run this exact argv only for this rejected proposal. Retirement does not admit or restart work.",
+          "required": "",
+          "provided_by": "",
+          "readback_argv": [
+            "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+            "--project-dir",
+            "/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-external-v65bv8dw/control",
+            "admission",
+            "inspect"
+          ]
+        }
+      }
+    },
+    {
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+        "--project-dir",
+        "/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-external-v65bv8dw/control",
+        "admission",
+        "retire",
+        "c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088",
+        "dfb96fcf7d8d776ea177173c4c0c717d"
+      ],
+      "exit": 0,
+      "stdout": "{\"owner\":\"Noodle initial admission\",\"status\":\"retired\",\"subject\":{\"proposal_sha256\":\"c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088\",\"initial_revision\":\"970e887025e1afec651ffdd8f8b42f76\",\"order_ids\":[\"soodles-39\"]},\"current_order_revision\":\"dfb96fcf7d8d776ea177173c4c0c717d\",\"invalid\":\"\",\"next\":{\"argv\":[\"/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle\",\"--project-dir\",\"/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-external-v65bv8dw/control\",\"admission\",\"inspect\"],\"guidance\":\"Read fresh canonical revision and ownership before preparing a new initial proposal through the existing scheduling/admission flow. Retirement grants no execution or provider authority.\",\"required\":\"\",\"provided_by\":\"\",\"readback_argv\":[\"/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle\",\"--project-dir\",\"/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-external-v65bv8dw/control\",\"admission\",\"inspect\"]}}\n",
+      "stderr": "config repairable: adapters.backlog: no backlog adapter configured Fix: Add [adapters.backlog] to .noodle.toml with adapter scripts.\n",
+      "json": {
+        "owner": "Noodle initial admission",
+        "status": "retired",
+        "subject": {
+          "proposal_sha256": "c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088",
+          "initial_revision": "970e887025e1afec651ffdd8f8b42f76",
+          "order_ids": [
+            "soodles-39"
+          ]
+        },
+        "current_order_revision": "dfb96fcf7d8d776ea177173c4c0c717d",
+        "invalid": "",
+        "next": {
+          "argv": [
+            "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+            "--project-dir",
+            "/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-external-v65bv8dw/control",
+            "admission",
+            "inspect"
+          ],
+          "guidance": "Read fresh canonical revision and ownership before preparing a new initial proposal through the existing scheduling/admission flow. Retirement grants no execution or provider authority.",
+          "required": "",
+          "provided_by": "",
+          "readback_argv": [
+            "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+            "--project-dir",
+            "/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-external-v65bv8dw/control",
+            "admission",
+            "inspect"
+          ]
+        }
+      }
+    },
+    {
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+        "--project-dir",
+        "/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-external-v65bv8dw/control",
+        "admission",
+        "retire",
+        "c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088",
+        "dfb96fcf7d8d776ea177173c4c0c717d"
+      ],
+      "exit": 0,
+      "stdout": "{\"owner\":\"Noodle initial admission\",\"status\":\"retired\",\"subject\":{\"proposal_sha256\":\"c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088\",\"initial_revision\":\"970e887025e1afec651ffdd8f8b42f76\",\"order_ids\":[\"soodles-39\"]},\"current_order_revision\":\"dfb96fcf7d8d776ea177173c4c0c717d\",\"invalid\":\"\",\"next\":{\"argv\":[\"/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle\",\"--project-dir\",\"/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-external-v65bv8dw/control\",\"admission\",\"inspect\"],\"guidance\":\"Read fresh canonical revision and ownership before preparing a new initial proposal through the existing scheduling/admission flow. Retirement grants no execution or provider authority.\",\"required\":\"\",\"provided_by\":\"\",\"readback_argv\":[\"/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle\",\"--project-dir\",\"/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-external-v65bv8dw/control\",\"admission\",\"inspect\"]}}\n",
+      "stderr": "config repairable: adapters.backlog: no backlog adapter configured Fix: Add [adapters.backlog] to .noodle.toml with adapter scripts.\n",
+      "json": {
+        "owner": "Noodle initial admission",
+        "status": "retired",
+        "subject": {
+          "proposal_sha256": "c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088",
+          "initial_revision": "970e887025e1afec651ffdd8f8b42f76",
+          "order_ids": [
+            "soodles-39"
+          ]
+        },
+        "current_order_revision": "dfb96fcf7d8d776ea177173c4c0c717d",
+        "invalid": "",
+        "next": {
+          "argv": [
+            "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+            "--project-dir",
+            "/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-external-v65bv8dw/control",
+            "admission",
+            "inspect"
+          ],
+          "guidance": "Read fresh canonical revision and ownership before preparing a new initial proposal through the existing scheduling/admission flow. Retirement grants no execution or provider authority.",
+          "required": "",
+          "provided_by": "",
+          "readback_argv": [
+            "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+            "--project-dir",
+            "/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-external-v65bv8dw/control",
+            "admission",
+            "inspect"
+          ]
+        }
+      }
+    }
+  ],
+  "errors": [],
+  "scratch_removed": true,
+  "production_mutations": 0,
+  "authorizes_landing": false
+}

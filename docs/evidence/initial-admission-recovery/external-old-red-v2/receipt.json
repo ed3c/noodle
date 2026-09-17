@@ -1,0 +1,28 @@
+{
+  "classification": "RED",
+  "binary": "/Users/neon/.codex/experiments/noodle82-20260916/noodle",
+  "binary_sha256": "c299d2bce4e33ddd0b1c6295bd3cbeb1d29b32782fdcc9bcc9ffac2cf87ab35c",
+  "input_selection_sha256": "9b5c6505bcd023fb1a872d44d8a33880e862046883349bd032c4b830ccf18e14",
+  "observer_sha256": "19e18b0ab048b17db26aeb3c31147d3bb605e6971205d7ef992876c6f800e84b",
+  "records": [
+    {
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle82-20260916/noodle",
+        "--project-dir",
+        "/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/noodle84-external-zijobtm6/control",
+        "admission",
+        "inspect"
+      ],
+      "exit": 1,
+      "stdout": "",
+      "stderr": "unknown command \"admission\" for \"noodle\"\n",
+      "json": null
+    }
+  ],
+  "errors": [
+    "inspection did not return structured continuation"
+  ],
+  "scratch_removed": true,
+  "production_mutations": 0,
+  "authorizes_landing": false
+}

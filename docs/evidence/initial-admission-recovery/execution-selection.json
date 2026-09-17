@@ -1,0 +1,38 @@
+{
+  "repository": "ed3c/noodle",
+  "issue": 84,
+  "base": "656e9ec73689c523058750e8b0a2388a15bb84fa",
+  "control_root": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control",
+  "order_id": "noodle-84",
+  "worktree": "noodle-84-0-execute",
+  "stage_index": 0,
+  "implementation_writer_started": false,
+  "carrier": "native macOS Noodle \u2192 Codex CLI with recorded terminal delivery",
+  "deadline_seconds": 1800,
+  "files": {
+    "/Users/neon/.codex/experiments/noodle82-20260916/noodle": "c299d2bce4e33ddd0b1c6295bd3cbeb1d29b32782fdcc9bcc9ffac2cf87ab35c",
+    "/Users/neon/.codex/packages/standalone/releases/0.153.4-aarch64-apple-darwin/bin/codex": "b973d440acac501fd2594a43e7ca9ce41e0a65b9dfb28d0d7a7837c99e1261e3",
+    "/Users/neon/.codex/experiments/noodle84-20260917/record_process.py": "e2d63af93afccaa463efe63f8790613877a6e113c04d7ce4c9b70d7f550f2126",
+    "/Users/neon/.codex/experiments/noodle84-20260917/task.txt": "c2a254ee90de00c91efffd640618d99d51369866f1fb6a40cf9c0a24e316bd6c",
+    "/Users/neon/.codex/experiments/noodle84-20260917/issue-admitted.json": "9788ad919ef689f5b4332e44797ec175fb13d65d7c16a76910027f4b13cd194f"
+  },
+  "provider_argv": [
+    "exec",
+    "--skip-git-repo-check",
+    "--json",
+    "--model",
+    "gpt-6-astra",
+    "-c",
+    "default_permissions=\"agent-default\"",
+    "-c",
+    "approval_policy=\"never\"",
+    "-c",
+    "model_reasoning_effort=\"high\"",
+    "--add-dir",
+    "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.noodle",
+    "--add-dir",
+    "/Users/neon/.codex/experiments/noodle84-20260917"
+  ],
+  "config_sha256": "93fd85dc42d7b3b20aca0df42bc302eaba8684abf20be33520c20c68cb15cff8",
+  "authorizes_landing": false
+}

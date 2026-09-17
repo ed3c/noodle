@@ -1,0 +1,28 @@
+{
+  "order_id": "noodle-84",
+  "stage_index": 0,
+  "candidate_head": "5d1e9fefd902bec53b260b22abf3b55c3caf0203",
+  "task_sha256": "ceac1c81eb547ff57357c2d6aa833284db1cadaecd31724d7c28f986a9759950",
+  "binary": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+  "binary_sha256": "85bd747fc7f408844b1c61199fa36a7b7e96cb02ffe9ac502e33fd9ca88e6919",
+  "skill": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/.agents/skills/noodle/SKILL.md",
+  "skill_sha256": "0dda11c1b839400686168505ce56cdd359e595ea78b9129a2761243959c496d0",
+  "cases": {
+    "stale-proposal": "/Users/neon/.codex/experiments/noodle84-20260917/attempt3-fixtures/stale-proposal",
+    "valid-proposal": "/Users/neon/.codex/experiments/noodle84-20260917/attempt3-fixtures/valid-proposal"
+  },
+  "fixture_digests_before": {
+    "stale-proposal": {
+      "orders-next.json": "c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088",
+      "orders.json": "5d3631b493687c08bebd5e39e19548dd94e713b6178e63799dc545d16c9f049b",
+      "state.snapshot.json": "3ef9e4f32535d5729c6eae0bf1de59c36c290c25e28ef467959e426bd330aee9"
+    },
+    "valid-proposal": {
+      "orders-next.json": "f4e3c252e98f7f30d00399410b07f99a1cafd93c3f194857f6abdd5dac5d2d23",
+      "orders.json": "5d3631b493687c08bebd5e39e19548dd94e713b6178e63799dc545d16c9f049b",
+      "state.snapshot.json": "3ef9e4f32535d5729c6eae0bf1de59c36c290c25e28ef467959e426bd330aee9"
+    }
+  },
+  "selected_at": 1789630367.212597,
+  "authorizes_landing": false
+}

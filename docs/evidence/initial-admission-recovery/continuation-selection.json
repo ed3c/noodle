@@ -1,0 +1,14 @@
+{
+  "order_id": "noodle-84",
+  "stage_index": 0,
+  "previous_outcome": "blocked",
+  "previous_attempt_evidence": "writer-run",
+  "task_sha256": "0921ed8b6dae553f8b1e9d6352fff2c2b31811a1671d1ccd5bad7bc1e7df64df",
+  "supervisor_corrected_files": {
+    "loop/admission_recovery.go": "44113f202eb74883f115b999ea5194ad5f8a25fe896013ade03808d262924b14",
+    ".agents/skills/noodle/SKILL.md": "3fe3269f7a61cee54fd72e114005211cd3c8b08568b875a0e68c2c4a0c2da192"
+  },
+  "same_carrier_permissions": true,
+  "authorizes_landing": false,
+  "selected_at": "2026-09-17T07:02:16.714328+00:00"
+}

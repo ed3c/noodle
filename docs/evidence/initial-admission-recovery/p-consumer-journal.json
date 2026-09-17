@@ -1,0 +1,111 @@
+{
+  "selection_path": "/Users/neon/.codex/experiments/noodle84-20260917/p-consumer-selection.json",
+  "started_at": 1789629886.7809331,
+  "carrier": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "calls": [
+    {
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+        "--project-dir",
+        "/Users/neon/.codex/experiments/noodle84-20260917/p-consumer-fixtures/stale-proposal",
+        "admission",
+        "--help"
+      ],
+      "stdout": "Use the existing Noodle owner with a known project and a stopped loop.\nRun noodle --project-dir <known-project> admission inspect and consume its JSON.\nFor recoverable, execute next.argv exactly as an argv array. Never reconstruct\nthe digest, revision or command from memory or a historical checkpoint.\nFor refused, preserve evidence and report next.required to next.provided_by.\nAfter that owner resolves the condition, use next.readback_argv to inspect again.\nA valid initial proposal remains available for normal admission; do not retire it.\nFor retired, follow next.argv once for fresh canonical readback. For no_proposal,\nrecovery is finished: next.argv is empty and next names the scheduling owner\nand inputs for a separately admitted intent. Do not loop inspection indefinitely.\nRetirement does not dispatch, restart, complete an order or authorize provider\nwrites. Record the actual JSON, argv and operation results. Missing owner/project\ninputs must be supplied by the supervising operator, not guessed by the Session.\n\nUsage:\n  noodle admission [command]\n\nAvailable Commands:\n  inspect     Read admission evidence and exact supported continuation\n  retire      Retire an unchanged rejected initial proposal\n\nFlags:\n  -h, --help   help for admission\n\nGlobal Flags:\n      --project-dir string   project directory (default: current directory, env: NOODLE_PROJECT_DIR)\n\nUse \"noodle admission [command] --help\" for more information about a command.\n",
+      "stderr": "",
+      "returncode": 0
+    },
+    {
+      "case": "stale-proposal",
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+        "--project-dir",
+        "/Users/neon/.codex/experiments/noodle84-20260917/p-consumer-fixtures/stale-proposal",
+        "admission",
+        "inspect"
+      ],
+      "stdout": "{\"owner\":\"Noodle initial admission\",\"status\":\"recoverable\",\"subject\":{\"proposal_sha256\":\"c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088\",\"initial_revision\":\"970e887025e1afec651ffdd8f8b42f76\",\"order_ids\":[\"soodles-39\"]},\"current_order_revision\":\"dfb96fcf7d8d776ea177173c4c0c717d\",\"invalid\":\"invalid initial_revision=\\\"970e887025e1afec651ffdd8f8b42f76\\\": current canonical order_revision=\\\"dfb96fcf7d8d776ea177173c4c0c717d\\\"\",\"next\":{\"argv\":[\"/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle\",\"--project-dir\",\"/Users/neon/.codex/experiments/noodle84-20260917/p-consumer-fixtures/stale-proposal\",\"admission\",\"retire\",\"c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088\",\"dfb96fcf7d8d776ea177173c4c0c717d\"],\"guidance\":\"Run this exact argv only for this rejected proposal. Retirement does not admit or restart work.\",\"required\":\"\",\"provided_by\":\"\",\"readback_argv\":[\"/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle\",\"--project-dir\",\"/Users/neon/.codex/experiments/noodle84-20260917/p-consumer-fixtures/stale-proposal\",\"admission\",\"inspect\"]}}\n",
+      "stderr": "config repairable: adapters.backlog: no backlog adapter configured Fix: Add [adapters.backlog] to .noodle.toml with adapter scripts.\n",
+      "returncode": 0
+    },
+    {
+      "case": "valid-proposal",
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+        "--project-dir",
+        "/Users/neon/.codex/experiments/noodle84-20260917/p-consumer-fixtures/valid-proposal",
+        "admission",
+        "inspect"
+      ],
+      "stdout": "{\"owner\":\"Noodle initial admission\",\"status\":\"refused\",\"subject\":{\"proposal_sha256\":\"f4e3c252e98f7f30d00399410b07f99a1cafd93c3f194857f6abdd5dac5d2d23\",\"initial_revision\":\"dfb96fcf7d8d776ea177173c4c0c717d\",\"order_ids\":[\"soodles-39\"]},\"current_order_revision\":\"dfb96fcf7d8d776ea177173c4c0c717d\",\"invalid\":\"initial proposal is currently valid; retain it for normal admission\",\"next\":{\"argv\":[],\"guidance\":\"Preserve the reported evidence. The named operator must supply the missing evidence or resolve the reported owner state; then use readback_argv to inspect again. Inspection is not permission to restart or repeat a write.\",\"required\":\"initial proposal is currently valid; retain it for normal admission\",\"provided_by\":\"Noodle operator supervising this project and its original session records\",\"readback_argv\":[\"/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle\",\"--project-dir\",\"/Users/neon/.codex/experiments/noodle84-20260917/p-consumer-fixtures/valid-proposal\",\"admission\",\"inspect\"]}}\n",
+      "stderr": "config repairable: adapters.backlog: no backlog adapter configured Fix: Add [adapters.backlog] to .noodle.toml with adapter scripts.\nadmission refused: initial proposal is currently valid; retain it for normal admission\n",
+      "returncode": 1
+    },
+    {
+      "case": "stale-proposal",
+      "source": "current inspect next.argv",
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+        "--project-dir",
+        "/Users/neon/.codex/experiments/noodle84-20260917/p-consumer-fixtures/stale-proposal",
+        "admission",
+        "retire",
+        "c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088",
+        "dfb96fcf7d8d776ea177173c4c0c717d"
+      ],
+      "stdout": "{\"owner\":\"Noodle initial admission\",\"status\":\"retired\",\"subject\":{\"proposal_sha256\":\"c715406cd22b04ed125e6c7f98e8c2fa3267518e6ae5b84b46a9088c455b8088\",\"initial_revision\":\"970e887025e1afec651ffdd8f8b42f76\",\"order_ids\":[\"soodles-39\"]},\"current_order_revision\":\"dfb96fcf7d8d776ea177173c4c0c717d\",\"invalid\":\"\",\"next\":{\"argv\":[\"/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle\",\"--project-dir\",\"/Users/neon/.codex/experiments/noodle84-20260917/p-consumer-fixtures/stale-proposal\",\"admission\",\"inspect\"],\"guidance\":\"Read fresh canonical revision and ownership before preparing a new initial proposal through the existing scheduling/admission flow. Retirement grants no execution or provider authority.\",\"required\":\"\",\"provided_by\":\"\",\"readback_argv\":[\"/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle\",\"--project-dir\",\"/Users/neon/.codex/experiments/noodle84-20260917/p-consumer-fixtures/stale-proposal\",\"admission\",\"inspect\"]}}\n",
+      "stderr": "config repairable: adapters.backlog: no backlog adapter configured Fix: Add [adapters.backlog] to .noodle.toml with adapter scripts.\n",
+      "returncode": 0
+    },
+    {
+      "case": "stale-proposal",
+      "source": "retired next.argv, one canonical readback",
+      "argv": [
+        "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+        "--project-dir",
+        "/Users/neon/.codex/experiments/noodle84-20260917/p-consumer-fixtures/stale-proposal",
+        "admission",
+        "inspect"
+      ],
+      "stdout": "{\"owner\":\"Noodle initial admission\",\"status\":\"no_proposal\",\"subject\":{\"proposal_sha256\":\"\",\"initial_revision\":\"\",\"order_ids\":null},\"current_order_revision\":\"dfb96fcf7d8d776ea177173c4c0c717d\",\"invalid\":\"\",\"next\":{\"argv\":[],\"guidance\":\"Retirement is complete. No executable recovery step remains. The scheduling owner may prepare the next proposal from this readback; do not restart a loop or republish a historical proposal from memory.\",\"required\":\"A separately admitted intent and a fresh INITIAL proposal bound to current_order_revision\",\"provided_by\":\"Noodle scheduling owner through the existing schedule skill / orders-next.json admission entry\",\"readback_argv\":[\"/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle\",\"--project-dir\",\"/Users/neon/.codex/experiments/noodle84-20260917/p-consumer-fixtures/stale-proposal\",\"admission\",\"inspect\"]}}\n",
+      "stderr": "config repairable: adapters.backlog: no backlog adapter configured Fix: Add [adapters.backlog] to .noodle.toml with adapter scripts.\n",
+      "returncode": 0
+    }
+  ],
+  "statuses": [
+    "Validated native macOS carrier, selected binary and skill digests, and distinct disposable fixture roots.",
+    {
+      "case": "valid-proposal",
+      "status": "refused",
+      "assessment": "GREEN: valid proposal retained for normal admission; no write attempted.",
+      "required": "initial proposal is currently valid; retain it for normal admission",
+      "provided_by": "Noodle operator supervising this project and its original session records"
+    },
+    {
+      "case": "stale-proposal",
+      "observed_sequence": [
+        "recoverable",
+        "retired",
+        "no_proposal"
+      ],
+      "required": "A separately admitted intent and a fresh INITIAL proposal bound to current_order_revision",
+      "provided_by": "Noodle scheduling owner through the existing schedule skill / orders-next.json admission entry",
+      "next_argv": []
+    },
+    "CLI stderr reported missing adapters.backlog configuration; no configuration repair attempted."
+  ],
+  "skill": {
+    "resolved_path": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/.agents/skills/noodle/SKILL.md",
+    "sha256": "0dda11c1b839400686168505ce56cdd359e595ea78b9129a2761243959c496d0"
+  },
+  "binary": {
+    "resolved_path": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+    "sha256": "85bd747fc7f408844b1c61199fa36a7b7e96cb02ffe9ac502e33fd9ca88e6919"
+  },
+  "fixtures": {
+    "stale-proposal": "/Users/neon/.codex/experiments/noodle84-20260917/p-consumer-fixtures/stale-proposal",
+    "valid-proposal": "/Users/neon/.codex/experiments/noodle84-20260917/p-consumer-fixtures/valid-proposal"
+  },
+  "ended_at": 1789629931.0192928,
+  "scope": "P-class consumption evidence on selected disposable fixtures and native macOS only."
+}

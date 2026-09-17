@@ -1,0 +1,35 @@
+[
+  {
+    "gate": "canonical-schema",
+    "control": "TestAdmissionRecoveryRefusalGates/unknown_schema",
+    "mutated_file": "loop/admission_evidence.go",
+    "original_sha256": "2f768faa20dce60744848bfa4a48d57e35f9587e588d7a964b90376227a8ec84",
+    "mutant_sha256": "ced789e7f1e4c5016781b53e690589b3c6c1bcc4cd671c8a2fcac9fb321bd840",
+    "replacement": {
+      "before": "snapshot.State.SchemaVersion != statever.Current",
+      "after": "(snapshot.State.SchemaVersion != statever.Current && false)"
+    },
+    "red": {
+      "exit": 1,
+      "log": "canonical-schema-red.txt",
+      "sha256": "4c89ce2f69d0302847e7386adf53335f983b0d1f6d79740bc091f4992602d76f",
+      "assertion_failed": true,
+      "build_failed": false
+    },
+    "green": {
+      "exit": 0,
+      "log": "canonical-schema-green.txt",
+      "sha256": "c3f4654a7bf44ce25b3ed6437075f5b877e1829404e364daa4bfe522829bf706",
+      "assertion_failed": false,
+      "build_failed": false
+    },
+    "legal_noncase": {
+      "exit": 0,
+      "log": "legal-noncases.txt",
+      "sha256": "4d0179b95bd66b113355b97ce29c9fce4b48464ae3746888a536a34302dd8569",
+      "assertion_failed": false,
+      "build_failed": false
+    },
+    "passed": true
+  }
+]

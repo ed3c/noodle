@@ -1,0 +1,126 @@
+
+> @ check /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute
+> pnpm run build && pnpm run test && pnpm run vet && pnpm run lint:arch && pnpm run fixtures:loop && pnpm run fixtures:hash
+
+
+> @ build /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute
+> pnpm --filter noodle-ui build && go build -o ./bin/noodle .
+
+
+> noodle-ui@ build /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/ui
+> vite build
+
+You are using Node.js 22.11.0. Vite requires Node.js version 20.19+ or 22.12+. Please upgrade your Node.js version.
+vite v7.3.1 building client environment for production...
+transforming...
+✓ 3220 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/client/index.html                     0.85 kB │ gzip:   0.45 kB
+dist/client/assets/index-BjOVM1mD.css     54.21 kB │ gzip:  10.51 kB
+dist/client/assets/index-CnvJVP-F.js      31.85 kB │ gzip:  11.46 kB
+dist/client/assets/d3-xKNfCkBH.js         51.62 kB │ gzip:  17.62 kB
+dist/client/assets/router-BPmgOIxi.js     94.36 kB │ gzip:  30.83 kB
+dist/client/assets/index-BzrgpmJZ.js     334.99 kB │ gzip: 105.38 kB
+dist/client/assets/index-wNhTF6hF.js   1,330.95 kB │ gzip: 268.73 kB
+✓ built in 4.04s
+
+> @ test /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute
+> go test ./...
+
+ok  	github.com/poteto/noodle	28.413s
+ok  	github.com/poteto/noodle/adapter	(cached)
+?   	github.com/poteto/noodle/adapters	[no test files]
+ok  	github.com/poteto/noodle/adapters/noodles-github	4.100s
+?   	github.com/poteto/noodle/cmdmeta	[no test files]
+ok  	github.com/poteto/noodle/config	(cached)
+ok  	github.com/poteto/noodle/dispatcher	(cached)
+ok  	github.com/poteto/noodle/event	(cached)
+ok  	github.com/poteto/noodle/generate	0.381s
+?   	github.com/poteto/noodle/generate/cmd/gen-skill	[no test files]
+ok  	github.com/poteto/noodle/internal/dispatch	(cached)
+ok  	github.com/poteto/noodle/internal/failure	(cached)
+ok  	github.com/poteto/noodle/internal/filex	(cached)
+ok  	github.com/poteto/noodle/internal/ingest	(cached)
+ok  	github.com/poteto/noodle/internal/integration	(cached)
+ok  	github.com/poteto/noodle/internal/jsonx	(cached)
+ok  	github.com/poteto/noodle/internal/lockfile	(cached)
+ok  	github.com/poteto/noodle/internal/mode	(cached)
+ok  	github.com/poteto/noodle/internal/orderx	(cached)
+?   	github.com/poteto/noodle/internal/procx	[no test files]
+ok  	github.com/poteto/noodle/internal/projection	(cached)
+ok  	github.com/poteto/noodle/internal/reducer	(cached)
+ok  	github.com/poteto/noodle/internal/rtcap	(cached)
+ok  	github.com/poteto/noodle/internal/schemadoc	(cached)
+ok  	github.com/poteto/noodle/internal/shellx	(cached)
+ok  	github.com/poteto/noodle/internal/snapshot	(cached)
+ok  	github.com/poteto/noodle/internal/state	(cached)
+ok  	github.com/poteto/noodle/internal/statever	(cached)
+?   	github.com/poteto/noodle/internal/statusfile	[no test files]
+ok  	github.com/poteto/noodle/internal/stringx	(cached)
+ok  	github.com/poteto/noodle/internal/taskreg	(cached)
+ok  	github.com/poteto/noodle/internal/testutil/fixturedir	(cached)
+ok  	github.com/poteto/noodle/loop	26.799s
+ok  	github.com/poteto/noodle/mise	(cached)
+ok  	github.com/poteto/noodle/monitor	(cached)
+ok  	github.com/poteto/noodle/parse	(cached)
+ok  	github.com/poteto/noodle/runtime	(cached)
+?   	github.com/poteto/noodle/scripts	[no test files]
+?   	github.com/poteto/noodle/scripts/fixturehash	[no test files]
+ok  	github.com/poteto/noodle/server	(cached)
+ok  	github.com/poteto/noodle/skill	(cached)
+ok  	github.com/poteto/noodle/stamp	(cached)
+ok  	github.com/poteto/noodle/startup	7.775s
+ok  	github.com/poteto/noodle/worktree	(cached)
+
+> @ vet /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute
+> go vet ./...
+
+
+> @ lint:arch /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute
+> sh scripts/lint-arch.sh
+
+[ARCH][WARN] internal/reducer/reducer.go:867
+  Violation: File exceeds 500 lines (867 lines).
+  Fix: Consider splitting by concern to improve readability.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] loop/loop.go:668
+  Violation: File exceeds 500 lines (668 lines).
+  Fix: Consider splitting by concern to improve readability.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] loop/loop_cycle_pipeline.go:553
+  Violation: File exceeds 500 lines (553 lines).
+  Fix: Consider splitting by concern to improve readability.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] loop/reconcile.go:773
+  Violation: File exceeds 500 lines (773 lines).
+  Fix: Consider splitting by concern to improve readability.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] internal/integration/resilience_test.go:1233
+  Violation: Go test file exceeds 1200 lines (1233 lines).
+  Fix: Consider splitting by feature and extracting shared fixtures/helpers.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] loop/control_test.go:1222
+  Violation: Go test file exceeds 1200 lines (1222 lines).
+  Fix: Consider splitting by feature and extracting shared fixtures/helpers.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] loop/loop_test.go:1318
+  Violation: Go test file exceeds 1200 lines (1318 lines).
+  Fix: Consider splitting by feature and extracting shared fixtures/helpers.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] worktree/worktree_test.go:1234
+  Violation: Go test file exceeds 1200 lines (1234 lines).
+  Fix: Consider splitting by feature and extracting shared fixtures/helpers.
+  See brain/principles/boundary-discipline.md
+[ARCH] Passed with 8 warning(s).
+
+> @ fixtures:loop /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute
+> NOODLE_LOOP_FIXTURE_MODE=check go test ./loop -run TestLoopDirectoryFixtures -count=1 && go run ./scripts/fixturehash check --root loop/testdata
+
+ok  	github.com/poteto/noodle/loop	1.583s
+fixture hash check: up to date
+
+> @ fixtures:hash /Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute
+> go run ./scripts/fixturehash check
+
+fixture hash check: up to date

@@ -1,0 +1,6 @@
+=== RUN   TestAdmissionRecoveryHistoricalEvidenceScope
+=== RUN   TestAdmissionRecoveryHistoricalEvidenceScope/stale_running_metadata
+--- PASS: TestAdmissionRecoveryHistoricalEvidenceScope (0.02s)
+    --- PASS: TestAdmissionRecoveryHistoricalEvidenceScope/stale_running_metadata (0.02s)
+PASS
+ok  	github.com/poteto/noodle/loop	0.276s

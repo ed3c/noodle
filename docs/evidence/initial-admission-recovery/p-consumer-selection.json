@@ -1,0 +1,14 @@
+{
+  "binary": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/bin/noodle",
+  "binary_sha256": "85bd747fc7f408844b1c61199fa36a7b7e96cb02ffe9ac502e33fd9ca88e6919",
+  "skill": "/Users/neon/.codex/experiments/noodle78-delivery-20260916/control/.worktrees/issue84-control/.worktrees/noodle-84-0-execute/.agents/skills/noodle/SKILL.md",
+  "skill_sha256": "0dda11c1b839400686168505ce56cdd359e595ea78b9129a2761243959c496d0",
+  "cases": {
+    "stale-proposal": "/Users/neon/.codex/experiments/noodle84-20260917/p-consumer-fixtures/stale-proposal",
+    "valid-proposal": "/Users/neon/.codex/experiments/noodle84-20260917/p-consumer-fixtures/valid-proposal"
+  },
+  "prompt_sha256": "c682e16f953572ac9d4ce0aceed25d73926c8820db0e1560d9df97e101609e79",
+  "selected_at": 1789629848.8774898,
+  "carrier": "native macOS Codex CLI fresh P consumer; disposable fixtures",
+  "authorizes_landing": false
+}

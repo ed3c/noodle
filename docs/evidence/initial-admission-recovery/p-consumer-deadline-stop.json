@@ -1,0 +1,6 @@
+{
+  "elapsed_seconds": 256.86524,
+  "target_recorder_pid": 96171,
+  "signal": "SIGTERM",
+  "reason": "Bounded P consumer deadline; CLI journal completed but natural Codex exit not observed; wait receipt required, no exit synthesized"
+}
