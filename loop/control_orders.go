@@ -91,6 +91,9 @@ func (l *Loop) controlEditItem(cmd ControlCommand) error {
 	if _, active := l.cooks.activeCooksByOrder[orderID]; active {
 		return fmt.Errorf("order %q is currently cooking", orderID)
 	}
+	if node, ok := l.canonical.Orders[orderID]; ok && node.Status == state.OrderFailed {
+		return l.editRequestChanges(cmd)
+	}
 	return l.mutateOrdersState(func(orders *OrdersFile) (bool, error) {
 		for i := range orders.Orders {
 			if orders.Orders[i].ID != orderID {
@@ -158,6 +161,16 @@ func (l *Loop) controlRequeue(orderID string) error {
 	if orderID == "" {
 		return fmt.Errorf("requeue requires order_id")
 	}
+	if node, ok := l.canonical.Orders[orderID]; ok && node.Status == state.OrderFailed {
+		for _, stage := range node.Stages {
+			if _, bound := stage.Extra[requestChangesKey]; bound {
+				if _, err := l.requestChangesReview(orderID); err != nil {
+					return err
+				}
+				break
+			}
+		}
+	}
 	if err := l.releaseTypedBlockedReviewForRequeue(orderID); err != nil {
 		return err
 	}
@@ -171,6 +184,13 @@ func (l *Loop) controlRequeue(orderID string) error {
 			wasFailed := orders.Orders[i].Status == OrderStatusFailed
 			orders.Orders[i].Status = OrderStatusActive
 			changed := resetStages(&orders.Orders[i].Stages)
+			// The custody binding belongs to the terminal attempt just released.
+			// Retire it so a later, unrelated failure cannot inherit recovery authority.
+			if changed {
+				for si := range orders.Orders[i].Stages {
+					delete(orders.Orders[i].Stages[si].Extra, requestChangesKey)
+				}
+			}
 			updated := changed || wasFailed
 			if !updated {
 				return false, fmt.Errorf("order %q not in failed state", orderID)
@@ -240,6 +260,16 @@ func (l *Loop) releaseTypedBlockedReviewForRequeue(orderID string) error {
 	}
 	if outcome.Outcome != event.StageOutcomeBlocked {
 		return fmt.Errorf("requeue pending review for %q requires typed outcome %q, got %q", orderID, event.StageOutcomeBlocked, outcome.Outcome)
+	}
+	if node := l.canonical.Orders[orderID]; node.Status == state.OrderFailed {
+		if _, err := l.requestChangesReview(orderID); err != nil {
+			return err
+		}
+		delete(l.canonical.PendingReviews, orderID)
+		if err := l.persistCanonicalCheckpoint(); err != nil {
+			return err
+		}
+		return l.syncPendingReviewProjection()
 	}
 	if err := l.emitEventChecked(ingest.EventStageReviewChangesRequested, map[string]any{
 		"order_id":    orderID,

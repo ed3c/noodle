@@ -338,7 +338,7 @@ func (l *Loop) reconcileFailedOrders() error {
 		if order.Status != OrderStatusFailed {
 			continue
 		}
-		if isScheduleOrder(order) {
+		if isScheduleOrder(order) || l.preserveRequestChanges(order.ID) {
 			continue
 		}
 		f := reconciledFailure{
@@ -373,7 +373,7 @@ func (l *Loop) reconcileFailedOrders() error {
 	if err := l.mutateOrdersState(func(orders *OrdersFile) (bool, error) {
 		kept := orders.Orders[:0]
 		for _, order := range orders.Orders {
-			if order.Status == OrderStatusFailed && !isScheduleOrder(order) {
+			if order.Status == OrderStatusFailed && !isScheduleOrder(order) && !l.preserveRequestChanges(order.ID) {
 				continue
 			}
 			kept = append(kept, order)
