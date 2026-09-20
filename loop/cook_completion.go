@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -80,6 +81,10 @@ func (l *Loop) applyStageResult(ctx context.Context, result StageResult) error {
 	l.trackCookCompleted(cook, result)
 	delete(l.cooks.activeCooksByOrder, cook.orderID)
 	if err := l.handleCompletion(ctx, cook, result.Status, string(result.Status)); err != nil {
+		var adapterErr *completionAdapterError
+		if errors.As(err, &adapterErr) {
+			return err
+		}
 		if conflictErr := l.handleMergeConflict(cook, err); conflictErr != nil {
 			return conflictErr
 		}
@@ -163,6 +168,14 @@ func (l *Loop) handleCompletion(ctx context.Context, cook *cookHandle, resultSta
 			return l.parkPendingReview(cook, reason)
 		}
 		mergeable := canMerge && canAutoMerge
+		if !mergeable {
+			if err := l.runDoneBeforeTerminal(ctx, cook); err != nil {
+				if parkErr := l.parkPendingReview(cook, "backlog.done refused completion: "+err.Error()); parkErr != nil {
+					return parkErr
+				}
+				return err
+			}
+		}
 		if err := l.emitEventChecked(ingest.EventStageCompleted, l.mergeLifecyclePayload(cook, mergeable)); err != nil {
 			return err
 		}
@@ -218,6 +231,9 @@ func (l *Loop) completeWithMerge(ctx context.Context, cook *cookHandle, msg *str
 		return nil
 	}
 	if err := l.mergeCookWorktree(ctx, cook); err != nil {
+		return err
+	}
+	if err := l.runDoneBeforeTerminal(ctx, cook); err != nil {
 		return err
 	}
 	if err := l.emitEventChecked(ingest.EventMergeCompleted, map[string]any{
@@ -362,15 +378,33 @@ func (l *Loop) advanceAndPersist(ctx context.Context, cook *cookHandle, message 
 				l.logger.Warn("schedule bootstrap completed but schedule skill is still missing")
 			}
 		}
-		// Final stage of a non-failing order — fire adapter "done".
-		if _, err := l.deps.Adapter.Run(ctx, "backlog", "done", adapter.RunOptions{Args: []string{cook.orderID}}); err != nil {
-			if !isMissingAdapter(err) {
-				return err
-			}
-		}
 	}
 	return nil
 }
+
+// runDoneBeforeTerminal invokes backlog.done only when completing this stage
+// would make the order terminal. A refusal must be observed before the
+// canonical event that commits stage/order completion.
+func (l *Loop) runDoneBeforeTerminal(ctx context.Context, cook *cookHandle) error {
+	order, ok := l.canonical.Orders[cook.orderID]
+	if !ok || order.Status.IsTerminal() || cook.stageIndex < 0 || cook.stageIndex >= len(order.Stages) {
+		return nil
+	}
+	for i, stage := range order.Stages {
+		if i != cook.stageIndex && !stage.Status.IsTerminal() {
+			return nil
+		}
+	}
+	if _, err := l.deps.Adapter.Run(ctx, "backlog", "done", adapter.RunOptions{Args: []string{cook.orderID}}); err != nil && !isMissingAdapter(err) {
+		return &completionAdapterError{err: err}
+	}
+	return nil
+}
+
+type completionAdapterError struct{ err error }
+
+func (e *completionAdapterError) Error() string { return e.err.Error() }
+func (e *completionAdapterError) Unwrap() error { return e.err }
 
 // forwardToScheduler sends a message to the scheduler session about an event.
 // Best-effort — if the scheduler is not alive, the message is dropped and the

@@ -14,6 +14,7 @@ import (
 	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/event"
 	"github.com/poteto/noodle/internal/failure"
+	"github.com/poteto/noodle/internal/state"
 	loopruntime "github.com/poteto/noodle/runtime"
 	"github.com/poteto/noodle/worktree"
 )
@@ -813,6 +814,61 @@ func TestControlMergeFinalStageActiveOrderFiresDone(t *testing.T) {
 	}
 	if ar.doneCalls[0] != "42" {
 		t.Fatalf("done call arg = %q, want 42", ar.doneCalls[0])
+	}
+}
+
+func TestControlMergeCompletionAdapterRefusalPrecedesTerminalState(t *testing.T) {
+	projectDir := t.TempDir()
+	runtimeDir := filepath.Join(projectDir, ".noodle")
+	ordersPath := filepath.Join(runtimeDir, "orders.json")
+	orders := OrdersFile{Orders: []Order{{
+		ID: "42", Title: "test", Status: OrderStatusActive,
+		Stages: []Stage{{TaskKey: "execute", Status: StageStatusActive}},
+	}}}
+	if err := writeOrdersAtomic(ordersPath, orders); err != nil {
+		t.Fatalf("write orders: %v", err)
+	}
+	ar := &fakeAdapterRunner{doneErr: errors.New("exit status 17: stale admission")}
+	l := New(projectDir, "noodle", config.DefaultConfig(), Dependencies{
+		Runtimes: map[string]loopruntime.Runtime{"process": newMockRuntime()}, Worktree: &fakeWorktree{},
+		Adapter: ar, Mise: &fakeMise{}, Monitor: fakeMonitor{}, Registry: testLoopRegistry(),
+		Now: time.Now, OrdersFile: ordersPath,
+	})
+	l.cooks.pendingReview["42"] = &pendingReviewCook{
+		cookIdentity: cookIdentity{orderID: "42", stageIndex: 0, stage: Stage{TaskKey: "execute"}},
+		worktreeName: "42-0-execute", sessionID: "sess-42",
+	}
+
+	err := l.controlMerge("42")
+	if err == nil || !strings.Contains(err.Error(), "exit status 17: stale admission") {
+		t.Fatalf("controlMerge error = %v, want adapter diagnostic", err)
+	}
+	order := l.canonical.Orders["42"]
+	if order.Status.IsTerminal() || order.Stages[0].Status.IsTerminal() {
+		t.Fatalf("adapter refusal committed terminal state: order=%q stage=%q", order.Status, order.Stages[0].Status)
+	}
+	if order.Stages[0].Status != state.StageMerging || order.Stages[0].Merge == nil {
+		t.Fatalf("merge recovery = %#v, want nonterminal merging state", order.Stages[0])
+	}
+
+	ar.doneErr = nil
+	md := mergeRecoveryStage{orderID: "42", stage: order.Stages[0], checkBranch: "42-0-execute"}
+	if err := l.handleAlreadyMergedStage(md); err != nil {
+		t.Fatalf("retry already-merged completion: %v", err)
+	}
+	order = l.canonical.Orders["42"]
+	if order.Status != state.OrderCompleted || order.Stages[0].Status != state.StageCompleted {
+		t.Fatalf("retry state: order=%q stage=%q, want completed", order.Status, order.Stages[0].Status)
+	}
+	if len(ar.doneCalls) != 2 {
+		t.Fatalf("done attempts = %v, want one refusal and one success", ar.doneCalls)
+	}
+	events := readNDJSON(t, filepath.Join(runtimeDir, "loop-events.ndjson"))
+	if got := len(findEvents(events, LoopEventStageCompleted)); got != 1 {
+		t.Fatalf("stage.completed events = %d, want 1", got)
+	}
+	if got := len(findEvents(events, LoopEventOrderCompleted)); got != 1 {
+		t.Fatalf("order.completed events = %d, want 1", got)
 	}
 }
 

@@ -24,6 +24,9 @@ func (l *Loop) drainMergeResults(ctx context.Context) error {
 				}
 				continue
 			}
+			if err := l.runDoneBeforeTerminal(ctx, cook); err != nil {
+				return err
+			}
 			// Emit V2 canonical merge completion on the main goroutine.
 			if err := l.emitEventChecked(ingest.EventMergeCompleted, map[string]any{
 				"order_id":    cook.orderID,

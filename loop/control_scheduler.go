@@ -18,19 +18,6 @@ func (l *Loop) controlAdvance(orderID string) error {
 		return fmt.Errorf("advance requires order_id")
 	}
 
-	// Kill the active session to prevent double-processing when it exits.
-	if cook, ok := l.cooks.activeCooksByOrder[orderID]; ok {
-		if err := cook.session.ForceKill(); err != nil {
-			return fmt.Errorf("force kill active session for order %q failed: %w", orderID, err)
-		}
-		l.trackCookCompleted(cook, StageResult{
-			SessionID:   cook.session.ID(),
-			Status:      StageResultCancelled,
-			CompletedAt: l.deps.Now(),
-		})
-		delete(l.cooks.activeCooksByOrder, orderID)
-	}
-
 	orders, err := l.currentOrders()
 	if err != nil {
 		return err
@@ -54,6 +41,21 @@ func (l *Loop) controlAdvance(orderID string) error {
 		}
 		if err := l.ensureCanonicalOrderFromOrders(orderID); err != nil {
 			return err
+		}
+		if err := l.runDoneBeforeTerminal(context.Background(), cook); err != nil {
+			return err
+		}
+		// Only stop the existing owner after completion prerequisites succeed.
+		if active, ok := l.cooks.activeCooksByOrder[orderID]; ok {
+			if err := active.session.ForceKill(); err != nil {
+				return fmt.Errorf("force kill active session for order %q failed: %w", orderID, err)
+			}
+			l.trackCookCompleted(active, StageResult{
+				SessionID:   active.session.ID(),
+				Status:      StageResultCancelled,
+				CompletedAt: l.deps.Now(),
+			})
+			delete(l.cooks.activeCooksByOrder, orderID)
 		}
 		if err := l.emitEventChecked(ingest.EventStageCompleted, map[string]any{
 			"order_id":    orderID,

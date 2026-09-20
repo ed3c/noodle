@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -417,6 +418,45 @@ func TestIntegrationSuccessPipeline(t *testing.T) {
 	}
 	if stageDispatches != 3 {
 		t.Fatalf("total stage dispatches = %d, want 3", stageDispatches)
+	}
+}
+
+func TestDirectCompletionAdapterRefusalKeepsExistingOwnerRetryable(t *testing.T) {
+	orders := OrdersFile{Orders: []Order{{
+		ID: "direct-1", Title: "direct completion", Status: OrderStatusActive,
+		Stages: []Stage{{TaskKey: "review", Status: StageStatusActive}},
+	}}}
+	env := newIntegrationEnv(t, orders, func(*integrationCfg) {})
+	seedCanonicalFromOrders(env.loop, orders)
+	env.wt.hasUnmergedCommits = map[string]bool{"direct-1-0-review": false}
+	env.ar.doneErr = errors.New("exit status 23: provider refused")
+	cook := &cookHandle{
+		cookIdentity: cookIdentity{orderID: "direct-1", stageIndex: 0, stage: orders.Orders[0].Stages[0]},
+		worktreeName: "direct-1-0-review", session: &adoptedSession{id: "sess-direct", status: "completed"},
+	}
+
+	err := env.loop.handleCompletion(context.Background(), cook, StageResultCompleted, "completed")
+	if err == nil || !strings.Contains(err.Error(), "exit status 23: provider refused") {
+		t.Fatalf("completion error = %v, want adapter diagnostic", err)
+	}
+	order := env.loop.canonical.Orders["direct-1"]
+	if order.Status.IsTerminal() || order.Stages[0].Status.IsTerminal() {
+		t.Fatalf("adapter refusal committed terminal state: order=%q stage=%q", order.Status, order.Stages[0].Status)
+	}
+	if _, ok := env.loop.canonical.PendingReviews["direct-1"]; !ok {
+		t.Fatal("adapter refusal removed the existing owner's retry state")
+	}
+
+	env.ar.doneErr = nil
+	if err := env.loop.controlMerge("direct-1"); err != nil {
+		t.Fatalf("retry completion: %v", err)
+	}
+	order = env.loop.canonical.Orders["direct-1"]
+	if order.Status != state.OrderCompleted || order.Stages[0].Status != state.StageCompleted {
+		t.Fatalf("retry state: order=%q stage=%q, want completed", order.Status, order.Stages[0].Status)
+	}
+	if got := len(env.ar.doneCalls); got != 2 {
+		t.Fatalf("done attempts = %d, want one refusal and one success", got)
 	}
 }
 
