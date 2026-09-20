@@ -36,6 +36,11 @@ func (l *Loop) controlMerge(orderID string) error {
 	if err != nil {
 		return fmt.Errorf("merge check: %w", err)
 	}
+	if !canMerge {
+		if err := l.runDoneBeforeTerminal(context.Background(), cook); err != nil {
+			return err
+		}
+	}
 	if err := l.emitEventChecked(ingest.EventStageReviewApproved, map[string]any{
 		"order_id":    cook.orderID,
 		"stage_index": cook.stageIndex,
@@ -54,6 +59,9 @@ func (l *Loop) controlMerge(orderID string) error {
 	} else {
 		if l.mergeQueue == nil {
 			if err := l.mergeCookWorktree(context.Background(), cook); err != nil {
+				return err
+			}
+			if err := l.runDoneBeforeTerminal(context.Background(), cook); err != nil {
 				return err
 			}
 			if err := l.emitEventChecked(ingest.EventMergeCompleted, map[string]any{

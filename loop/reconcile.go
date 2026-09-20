@@ -519,16 +519,19 @@ func (l *Loop) handleAlreadyMergedStage(md mergeRecoveryStage) error {
 		"order", md.orderID, "stage", md.stage.StageIndex, "branch", md.checkBranch)
 	cook := &cookHandle{
 		cookIdentity: cookIdentity{
-				orderID:    md.orderID,
-				stageIndex: md.stage.StageIndex,
-				stage: Stage{
-					TaskKey: md.stage.TaskKey,
-					Skill:   md.stage.Skill,
-					Runtime: md.stage.Runtime,
-				},
+			orderID:    md.orderID,
+			stageIndex: md.stage.StageIndex,
+			stage: Stage{
+				TaskKey: md.stage.TaskKey,
+				Skill:   md.stage.Skill,
+				Runtime: md.stage.Runtime,
+			},
 		},
 		worktreeName: md.stage.Merge.WorktreeName,
 		worktreePath: l.worktreePath(md.stage.Merge.WorktreeName),
+	}
+	if err := l.runDoneBeforeTerminal(context.Background(), cook); err != nil {
+		return err
 	}
 	if err := l.emitEventChecked(ingest.EventMergeCompleted, map[string]any{
 		"order_id":    md.orderID,
@@ -546,13 +549,13 @@ func (l *Loop) requeueStaleMerge(md mergeRecoveryStage) error {
 		"order", md.orderID, "stage", md.stage.StageIndex, "branch", md.checkBranch)
 	cook := &cookHandle{
 		cookIdentity: cookIdentity{
-				orderID:    md.orderID,
-				stageIndex: md.stage.StageIndex,
-				stage: Stage{
-					TaskKey: md.stage.TaskKey,
-					Skill:   md.stage.Skill,
-					Runtime: md.stage.Runtime,
-				},
+			orderID:    md.orderID,
+			stageIndex: md.stage.StageIndex,
+			stage: Stage{
+				TaskKey: md.stage.TaskKey,
+				Skill:   md.stage.Skill,
+				Runtime: md.stage.Runtime,
+			},
 		},
 		worktreeName: md.stage.Merge.WorktreeName,
 		worktreePath: l.worktreePath(md.stage.Merge.WorktreeName),
@@ -567,6 +570,9 @@ func (l *Loop) requeueStaleMerge(md mergeRecoveryStage) error {
 			return conflictErr
 		}
 		return nil
+	}
+	if err := l.runDoneBeforeTerminal(context.Background(), cook); err != nil {
+		return err
 	}
 	if err := l.emitEventChecked(ingest.EventMergeCompleted, map[string]any{
 		"order_id":    md.orderID,
@@ -599,13 +605,13 @@ func (l *Loop) failMergingStage(orderID string, stageIdx int, reason string) err
 	stage := order.Stages[stageIdx]
 	cook := &cookHandle{
 		cookIdentity: cookIdentity{
-				orderID:    orderID,
-				stageIndex: stageIdx,
-				stage: Stage{
-					TaskKey: stage.TaskKey,
-					Skill:   stage.Skill,
-					Runtime: stage.Runtime,
-				},
+			orderID:    orderID,
+			stageIndex: stageIdx,
+			stage: Stage{
+				TaskKey: stage.TaskKey,
+				Skill:   stage.Skill,
+				Runtime: stage.Runtime,
+			},
 		},
 		worktreeName: latestStageMergeWorktree(stage),
 	}
