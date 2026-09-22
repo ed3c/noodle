@@ -91,6 +91,18 @@ inputs must be supplied by the supervising operator, not guessed by the Session.
 | noodle admission inspect | Inspect owner, subject, revision, invalid and exact next argv |
 | noodle admission retire PROPOSAL_SHA256 CURRENT_ORDER_REVISION | Archive and retire only the unchanged rejected initial proposal |
 
+### Stopped completed review (P-class)
+
+For an externally authorized rejection of one stopped completed review,
+run noodle --project-dir <known-project> review inspect ORDER_ID SUBJECT.
+Consume fresh next.argv unchanged; do not infer custody hashes or restart the
+scheduler. The owner locks the project, rechecks process absence and exact clean
+Git/session custody, archives the candidate, applies the existing rejection and
+reads cleanup back. After interruption use inspect before any continuation.
+For refused, preserve evidence and report next.required. Rejected means local
+non-delivery only: it neither closes a provider Issue nor reconciles an outer
+supervisor checkpoint. Initial proposals still use admission inspect/retire.
+
 ### Skills & Schemas
 
 | Command | Description |

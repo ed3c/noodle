@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "pnpm",
+    "check"
+  ],
+  "cwd": "/Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery",
+  "time_ns": 1790096446746578000,
+  "files_before": {},
+  "timeout_seconds": 60
+}

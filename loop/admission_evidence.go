@@ -187,6 +187,10 @@ func validateAdmissionSnapshot(snapshot reducer.DurableSnapshot) error {
 }
 
 func validateAdmissionProjection(s state.State, orders OrdersFile) error {
+	return validateStoppedProjection(s, orders, false)
+}
+
+func validateStoppedProjection(s state.State, orders OrdersFile, allowReview bool) error {
 	ids := map[string]struct{}{}
 	for _, order := range orders.Orders {
 		if _, ok := ids[order.ID]; ok {
@@ -216,7 +220,12 @@ func validateAdmissionProjection(s state.State, orders OrdersFile) error {
 			}
 			switch stage.Status {
 			case StageStatusActive, StageStatusMerging:
-				return fmt.Errorf("orders projection has active stage %s/%d", order.ID, i)
+				if !allowReview || node.Stages[i].Status != state.StageReview || stage.Status != StageStatusActive {
+					return fmt.Errorf("orders projection has active stage %s/%d", order.ID, i)
+				}
+			}
+			if allowReview && stage.Status != canonicalStageStatusToLegacy(node.Stages[i].Status) {
+				return fmt.Errorf("orders projection stage status differs for %s/%d", order.ID, i)
 			}
 			if stage.TaskKey != node.Stages[i].TaskKey || stage.Prompt != node.Stages[i].Prompt {
 				return fmt.Errorf("orders projection stage identity differs for %s/%d", order.ID, i)

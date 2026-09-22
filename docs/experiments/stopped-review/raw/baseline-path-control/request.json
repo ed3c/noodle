@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "go",
+    "test",
+    "./loop",
+    "-run",
+    "TestInspectPublicationClaimBindsCompletedSupervisedWorktree",
+    "-count=1"
+  ],
+  "cwd": "/Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source",
+  "time_ns": 1790096542998254000,
+  "files_before": {},
+  "timeout_seconds": 600
+}

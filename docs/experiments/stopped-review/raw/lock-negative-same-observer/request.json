@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "env",
+    "TMPDIR=/private/tmp/noodle-review-validation.qoPg10",
+    "GOFLAGS=-overlay=/Users/neon/.codex/experiments/noodle-stopped-review.f0mm1Y/mutant-overlay.json",
+    "go",
+    "test",
+    "-race",
+    "./loop",
+    "-run",
+    "TestStoppedReview",
+    "-count=1"
+  ],
+  "cwd": "/Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery",
+  "time_ns": 1790096927617731000,
+  "files_before": {},
+  "timeout_seconds": 600
+}

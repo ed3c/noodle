@@ -1,0 +1,19 @@
+{
+  "exit_code": 1,
+  "timed_out": false,
+  "error": null,
+  "authorizes_landing": false,
+  "scope": "one_subprocess",
+  "elapsed_seconds": 0.02983200002927333,
+  "files_after": {
+    "/Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/bin/noodle": {
+      "bytes": 16445842,
+      "sha256": "965cfd6f985e207551d0664e728ae9fae10ae0cc8cd2885a816415823d9d103d",
+      "observed_from": [
+        "argv"
+      ]
+    }
+  },
+  "stdout_sha256": "a30439cbdd31a9ca5fbdc54ce98fb79c95eba61c217f11c90cf5517019d6cec5",
+  "stderr_sha256": "100300b7a3c13dd31bdf7883625eaa5983e32d90ed2308166029fd2f1538fdd6"
+}

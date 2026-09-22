@@ -1,0 +1,21 @@
+{
+  "argv": [
+    "bin/noodle",
+    "--project-dir",
+    "/Users/neon/soodles",
+    "admission",
+    "inspect"
+  ],
+  "cwd": "/Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source",
+  "time_ns": 1790095916208694000,
+  "files_before": {
+    "/Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/bin/noodle": {
+      "bytes": 16445842,
+      "sha256": "965cfd6f985e207551d0664e728ae9fae10ae0cc8cd2885a816415823d9d103d",
+      "observed_from": [
+        "argv"
+      ]
+    }
+  },
+  "timeout_seconds": 60
+}

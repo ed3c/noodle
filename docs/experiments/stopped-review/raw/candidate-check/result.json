@@ -1,0 +1,11 @@
+{
+  "exit_code": -9,
+  "timed_out": true,
+  "error": null,
+  "authorizes_landing": false,
+  "scope": "one_subprocess",
+  "elapsed_seconds": 60.01347529201303,
+  "files_after": {},
+  "stdout_sha256": "39fb409454000bac8141c6d1b68b7d7696c55f73994db16eacdcb443b2e474c7",
+  "stderr_sha256": "834942bac46bfcbb66cf53dd774688f4a974faa118fb666d3b3e0a7f8fcc9c29"
+}

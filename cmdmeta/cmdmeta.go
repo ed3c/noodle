@@ -3,6 +3,17 @@
 // for command names and descriptions.
 package cmdmeta
 
+// StoppedReviewGuide is the single P-class route for stopped review rejection.
+const StoppedReviewGuide = `For an externally authorized rejection of one stopped completed review,
+run noodle --project-dir <known-project> review inspect ORDER_ID SUBJECT.
+Consume fresh next.argv unchanged; do not infer custody hashes or restart the
+scheduler. The owner locks the project, rechecks process absence and exact clean
+Git/session custody, archives the candidate, applies the existing rejection and
+reads cleanup back. After interruption use inspect before any continuation.
+For refused, preserve evidence and report next.required. Rejected means local
+non-delivery only: it neither closes a provider Issue nor reconciles an outer
+supervisor checkpoint. Initial proposals still use admission inspect/retire.`
+
 // AdmissionRecoveryGuide is shared by CLI help and the generated P-class skill.
 const AdmissionRecoveryGuide = `Use the existing Noodle owner with a known project and a stopped loop.
 Run noodle --project-dir <known-project> admission inspect and consume its JSON.
@@ -77,6 +88,10 @@ func Commands() []Command {
 			{Name: "claim", Short: "Emit one exact read-only publication claim", Flags: []Flag{
 				{Name: "output", Type: "string", Desc: "Fresh absolute path for the claim JSON"},
 			}},
+		}},
+		{Name: "review", Short: "Inspect or reject one exact stopped completed review", Subcommands: []Command{
+			{Name: "inspect", Short: "Read stopped review custody and exact continuation"},
+			{Name: "reject", Short: "Archive and reject unchanged stopped review custody"},
 		}},
 		{Name: "reset", Short: "Clear all runtime state"},
 	}
