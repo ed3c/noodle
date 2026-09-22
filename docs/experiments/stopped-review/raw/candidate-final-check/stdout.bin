@@ -1,0 +1,129 @@
+
+> @ check /Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery
+> pnpm run build && pnpm run test && pnpm run vet && pnpm run lint:arch && pnpm run fixtures:loop && pnpm run fixtures:hash
+
+
+> @ build /Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery
+> pnpm --filter noodle-ui build && go build -o ./bin/noodle .
+
+
+> noodle-ui@ build /Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery/ui
+> vite build
+
+vite v7.3.1 building client environment for production...
+transforming...
+✓ 3220 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/client/index.html                     0.85 kB │ gzip:   0.45 kB
+dist/client/assets/index-BjOVM1mD.css     54.21 kB │ gzip:  10.51 kB
+dist/client/assets/index-CnvJVP-F.js      31.85 kB │ gzip:  11.46 kB
+dist/client/assets/d3-xKNfCkBH.js         51.62 kB │ gzip:  17.62 kB
+dist/client/assets/router-BPmgOIxi.js     94.36 kB │ gzip:  30.83 kB
+dist/client/assets/index-BzrgpmJZ.js     334.99 kB │ gzip: 105.38 kB
+dist/client/assets/index-wNhTF6hF.js   1,330.95 kB │ gzip: 268.73 kB
+✓ built in 3.91s
+
+> @ test /Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery
+> go test ./...
+
+ok  	github.com/poteto/noodle	80.228s
+ok  	github.com/poteto/noodle/adapter	2.022s
+?   	github.com/poteto/noodle/adapters	[no test files]
+ok  	github.com/poteto/noodle/adapters/noodles-github	4.071s
+?   	github.com/poteto/noodle/cmdmeta	[no test files]
+ok  	github.com/poteto/noodle/config	2.086s
+ok  	github.com/poteto/noodle/dispatcher	3.569s
+ok  	github.com/poteto/noodle/event	3.966s
+ok  	github.com/poteto/noodle/generate	(cached)
+?   	github.com/poteto/noodle/generate/cmd/gen-skill	[no test files]
+ok  	github.com/poteto/noodle/internal/dispatch	(cached)
+ok  	github.com/poteto/noodle/internal/failure	(cached)
+ok  	github.com/poteto/noodle/internal/filex	2.801s
+ok  	github.com/poteto/noodle/internal/ingest	(cached)
+ok  	github.com/poteto/noodle/internal/integration	3.955s
+ok  	github.com/poteto/noodle/internal/jsonx	3.931s
+ok  	github.com/poteto/noodle/internal/lockfile	3.554s
+ok  	github.com/poteto/noodle/internal/mode	(cached)
+ok  	github.com/poteto/noodle/internal/orderx	(cached)
+?   	github.com/poteto/noodle/internal/procx	[no test files]
+ok  	github.com/poteto/noodle/internal/projection	3.186s
+ok  	github.com/poteto/noodle/internal/reducer	3.766s
+ok  	github.com/poteto/noodle/internal/rtcap	3.413s
+ok  	github.com/poteto/noodle/internal/schemadoc	(cached)
+ok  	github.com/poteto/noodle/internal/shellx	(cached)
+ok  	github.com/poteto/noodle/internal/snapshot	3.835s
+ok  	github.com/poteto/noodle/internal/state	3.316s
+ok  	github.com/poteto/noodle/internal/statever	3.690s
+?   	github.com/poteto/noodle/internal/statusfile	[no test files]
+ok  	github.com/poteto/noodle/internal/stringx	(cached)
+ok  	github.com/poteto/noodle/internal/taskreg	(cached)
+ok  	github.com/poteto/noodle/internal/testutil/fixturedir	4.432s
+ok  	github.com/poteto/noodle/loop	73.873s
+ok  	github.com/poteto/noodle/mise	7.239s
+ok  	github.com/poteto/noodle/monitor	4.629s
+ok  	github.com/poteto/noodle/parse	(cached)
+ok  	github.com/poteto/noodle/runtime	3.842s
+?   	github.com/poteto/noodle/scripts	[no test files]
+?   	github.com/poteto/noodle/scripts/fixturehash	[no test files]
+ok  	github.com/poteto/noodle/server	3.994s
+ok  	github.com/poteto/noodle/skill	5.853s
+ok  	github.com/poteto/noodle/stamp	(cached)
+ok  	github.com/poteto/noodle/startup	12.781s
+ok  	github.com/poteto/noodle/worktree	8.578s
+
+> @ vet /Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery
+> go vet ./...
+
+
+> @ lint:arch /Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery
+> sh scripts/lint-arch.sh
+
+[ARCH][WARN] internal/reducer/reducer.go:867
+  Violation: File exceeds 500 lines (867 lines).
+  Fix: Consider splitting by concern to improve readability.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] loop/cook_completion.go:515
+  Violation: File exceeds 500 lines (515 lines).
+  Fix: Consider splitting by concern to improve readability.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] loop/loop.go:668
+  Violation: File exceeds 500 lines (668 lines).
+  Fix: Consider splitting by concern to improve readability.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] loop/loop_cycle_pipeline.go:553
+  Violation: File exceeds 500 lines (553 lines).
+  Fix: Consider splitting by concern to improve readability.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] loop/reconcile.go:779
+  Violation: File exceeds 500 lines (779 lines).
+  Fix: Consider splitting by concern to improve readability.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] internal/integration/resilience_test.go:1233
+  Violation: Go test file exceeds 1200 lines (1233 lines).
+  Fix: Consider splitting by feature and extracting shared fixtures/helpers.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] loop/control_test.go:1278
+  Violation: Go test file exceeds 1200 lines (1278 lines).
+  Fix: Consider splitting by feature and extracting shared fixtures/helpers.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] loop/loop_test.go:1319
+  Violation: Go test file exceeds 1200 lines (1319 lines).
+  Fix: Consider splitting by feature and extracting shared fixtures/helpers.
+  See brain/principles/boundary-discipline.md
+[ARCH][WARN] worktree/worktree_test.go:1234
+  Violation: Go test file exceeds 1200 lines (1234 lines).
+  Fix: Consider splitting by feature and extracting shared fixtures/helpers.
+  See brain/principles/boundary-discipline.md
+[ARCH] Passed with 9 warning(s).
+
+> @ fixtures:loop /Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery
+> NOODLE_LOOP_FIXTURE_MODE=check go test ./loop -run TestLoopDirectoryFixtures -count=1 && go run ./scripts/fixturehash check --root loop/testdata
+
+ok  	github.com/poteto/noodle/loop	1.901s
+fixture hash check: up to date
+
+> @ fixtures:hash /Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery
+> go run ./scripts/fixturehash check
+
+fixture hash check: up to date

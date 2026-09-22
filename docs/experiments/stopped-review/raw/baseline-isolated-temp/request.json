@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "env",
+    "TMPDIR=/private/tmp/noodle-review-validation.qoPg10",
+    "go",
+    "test",
+    "./loop",
+    "./internal/testutil/fixturedir",
+    "-run",
+    "TestInspectPublicationClaimBindsCompletedSupervisedWorktree|TestDiscoverRejectsOutOfDateExpectedMarkdown|TestSyncExpectedMarkdownCheckMode",
+    "-count=1"
+  ],
+  "cwd": "/Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source",
+  "time_ns": 1790096744598710000,
+  "files_before": {},
+  "timeout_seconds": 600
+}

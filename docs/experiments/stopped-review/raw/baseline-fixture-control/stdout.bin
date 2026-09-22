@@ -1,0 +1,7 @@
+--- FAIL: TestDiscoverRejectsOutOfDateExpectedMarkdown (0.07s)
+    fixturedir_test.go:272: discover err = <nil>
+--- FAIL: TestSyncExpectedMarkdownCheckMode (0.04s)
+    sync_test.go:72: expected check mode error for stale fixture
+FAIL
+FAIL	github.com/poteto/noodle/internal/testutil/fixturedir	0.495s
+FAIL

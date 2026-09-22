@@ -1,0 +1,263 @@
+{
+  "schema_version": 1,
+  "issue": "ed3c/noodle#92",
+  "baseline": "3732a02f9994c23bbb2be30c31801b7a2da586af",
+  "qualified_product_tree": "785cea3889754cac57c47187e0b553ff4885d282",
+  "classification": "deterministic correction; no fresh Agent comparison",
+  "authorizes_landing": false,
+  "runner": {
+    "os": "darwin",
+    "arch": "arm64",
+    "node": "22.17.1",
+    "TMPDIR": "/private/tmp/noodle-review-validation.qoPg10"
+  },
+  "frozen_protocol_sha256": "0ef84298d6abc78286f397dcd47257f3c9e9ed4d6f3dd4284217dec410432e4e",
+  "control_source_sha256": "046f61cb1ad3e40c521d64725cda5e063a4ed4b5bda7aabdf8b71b24e468643d",
+  "source_dispatch": {
+    "repository": "ed3c/noodles",
+    "revision": "d4fa0da322cbb7a581328398906a4f04deaf0a69",
+    "identity": "465bb665579c904971cf1b3a4600f39cbee2e4f5cd2adc43fd1230b538724adc",
+    "target_authorization_comment": 5780736003
+  },
+  "encoded_raw": [
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-check/stdout.bin.base64",
+      "encoding": "base64",
+      "decoded_sha256": "39fb409454000bac8141c6d1b68b7d7696c55f73994db16eacdcb443b2e474c7"
+    }
+  ],
+  "files": [
+    {
+      "path": ".agents/skills/noodle/SKILL.md",
+      "sha256": "6074a1824608d6d7d5c769f0c1fe2d058622b7b8ae3b6d02c611709081e4b536"
+    },
+    {
+      "path": "brain/codebase/stopped-review-recovery.md",
+      "sha256": "aff5ee07114ee4ede57adc05a240ccdd2f012558d41b1c611586a87f65ab311f"
+    },
+    {
+      "path": "cmd_review.go",
+      "sha256": "57bae869fbba67744b9f445638dde133200310b8222f0e804558f3bac646df24"
+    },
+    {
+      "path": "cmdmeta/cmdmeta.go",
+      "sha256": "a43660a45a867104923de979e29a1b9f999642c688efdf2898711d7ed52f6692"
+    },
+    {
+      "path": "docs/experiments/stopped-review/protocol.md",
+      "sha256": "0ef84298d6abc78286f397dcd47257f3c9e9ed4d6f3dd4284217dec410432e4e"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-admission/request.json",
+      "sha256": "5e240ce3f7f5df36a512737672140daa583f3e7e77933df7ba6957580dbaa38c"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-admission/result.json",
+      "sha256": "3811af40b588be01ffee053e69edd08c15edaf6aa2f30a402dac4bea0083e8c4"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-admission/stderr.bin",
+      "sha256": "100300b7a3c13dd31bdf7883625eaa5983e32d90ed2308166029fd2f1538fdd6"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-admission/stdout.bin",
+      "sha256": "a30439cbdd31a9ca5fbdc54ce98fb79c95eba61c217f11c90cf5517019d6cec5"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-fixture-control/request.json",
+      "sha256": "b023cef164ce2ce36cbd5fac54a53c5e1f23893c1f04cf62fdc36ca76ca79a38"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-fixture-control/result.json",
+      "sha256": "0a13e26ff8a352dd4af28f019e521fb47f9da923a2f80653865c785d1c0fc7fb"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-fixture-control/stderr.bin",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-fixture-control/stdout.bin",
+      "sha256": "3fe40df2457dbfd447a9837a103a6ad187b8ef853aba71d17d9c0a7ca3fef3c1"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-isolated-temp/request.json",
+      "sha256": "4c2712574f7fd2518a755620911e691a56b90152b37da2fdc18008f0f92a2b1d"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-isolated-temp/result.json",
+      "sha256": "7b80a7d2d2ec9a6aa8b2d544fd286adf963f4c31caf2fe1b151138946c88321c"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-isolated-temp/stderr.bin",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-isolated-temp/stdout.bin",
+      "sha256": "0a3267d1b708814593818c83728c2d1b01ae96d8e14636bf56640163595160e1"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-path-control/request.json",
+      "sha256": "3b11de4a4ee76f4a6e0b347100559439f7e55b3ce934919c50b924323eb1807a"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-path-control/result.json",
+      "sha256": "0ce8e8f66a2d2f8dd62fddb3a7fff5e71c584bfa6183614ac3ecbd9e8e1ab48c"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-path-control/stderr.bin",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-path-control/stdout.bin",
+      "sha256": "a41b6cb500b2a06332f8ba2d557a71e54b8fd29dad1153cd908710d21dbfddae"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-review/request.json",
+      "sha256": "cd2f174e8b21ce48d2e0e817ee49aa214ffcb2c336ed8e4b49d54c3501efa35a"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-review/result.json",
+      "sha256": "1aab7a0c6aa576ae75f1007a54d1d86aadce23628155a22ac89d7f128bf308b0"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-review/stderr.bin",
+      "sha256": "30c0f94fae59e7e2d3cf9410e257fb3099fa8d6c839869f4a7487aa0bbd31ddc"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/baseline-review/stdout.bin",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-check/request.json",
+      "sha256": "088a5ef54f85489a143d86e9f21184dbbdc6a341c798793dcd729eeb111dab8e"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-check/result.json",
+      "sha256": "e1391b789b71455e4dfef80c5e1561b092ea681d648b5638ae49a5a9f31f1772"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-check/stderr.bin",
+      "sha256": "834942bac46bfcbb66cf53dd774688f4a974faa118fb666d3b3e0a7f8fcc9c29"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-check/stdout.bin.base64",
+      "sha256": "b4d1571c2bc5efcddc7b0c707141c3203033b424ace18ebdc0f48e2a04439a64"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-final-check/request.json",
+      "sha256": "f65c500f0f57a34fe666bbaaae54e0c3f447b917c97f32088d20a77f26ca2ba7"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-final-check/result.json",
+      "sha256": "ff5d9e79af4fa2b19546ffbf9475c254ce0dab40822d51be9597995ba4e641d3"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-final-check/stderr.bin",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-final-check/stdout.bin",
+      "sha256": "f1dd607c233671796118cdacb5aa6e34b632de3fb77642ea3aa30ce8b9fea63c"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-native-check/request.json",
+      "sha256": "d57e6c47a3ab17358ba7d14b1bbf2343ebee34b2099ec54a02c51f9ebf0c6f71"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-native-check/result.json",
+      "sha256": "5539d96726eb69d30e397c583c92f99396954f4cac18830e1b755481530b7ae5"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-native-check/stderr.bin",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-native-check/stdout.bin",
+      "sha256": "029dec2e35ea2bbfd9eb167cab75137e59d8272f2e8298acd810e45861910920"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-review/request.json",
+      "sha256": "d9c531e74d6c49263eabc439fc633ec3f5b878e93acf9da0666bcafdc0771e3a"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-review/result.json",
+      "sha256": "e77deee0524f1a172636e73c26d115bce57bd8ec7cb7c5b961431526d8809072"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-review/stderr.bin",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/candidate-review/stdout.bin",
+      "sha256": "f1995237ba587387b7879c90a740cad313772c43c5ba1cb5db28220c753ca184"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/final-race-control/request.json",
+      "sha256": "d0e399e5696039ae1ca5d752615b3afe3b2873cd0e268a56b1a4eb00599322e9"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/final-race-control/result.json",
+      "sha256": "06e1ad1f588a4f2ad149f6db8e599658c93d9d812bcbaba22891d2b1ba5bc205"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/final-race-control/stderr.bin",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/final-race-control/stdout.bin",
+      "sha256": "c226ab9e81b44ea1267f580e310626266d02e3984e1bca28bc4e1d59d53927e2"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/lock-negative-same-observer/request.json",
+      "sha256": "c483e445d2a4af25d38ded6d6370f5752d9e1801001bd08b07d7d164400a21e1"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/lock-negative-same-observer/result.json",
+      "sha256": "63ec5f7e094ae874761f53e2ce4c94aa2c87d54589f4d9757ec268f813c1d112"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/lock-negative-same-observer/stderr.bin",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/lock-negative-same-observer/stdout.bin",
+      "sha256": "002a503ef0de3c35075bcb3cb49433ea81712dc3e0b139efc3fb8ac575e76f82"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/lock-omission.go.txt",
+      "sha256": "a58adbb3adbd5a797976aa5a7d79a9538fcb82685c7689a0ceaa0bce170c9c83"
+    },
+    {
+      "path": "docs/experiments/stopped-review/raw/mutant-overlay.json",
+      "sha256": "31cd0596412d64fec74f30402d925de7b95d29a827ced6199da3de676c5acecf"
+    },
+    {
+      "path": "docs/experiments/stopped-review/results.md",
+      "sha256": "6c4bf825f69aefeb13e3ec6eec391d30f95f5b990054deadfcb468432fb77184"
+    },
+    {
+      "path": "generate/skill_noodle.go",
+      "sha256": "485c2d8c9465e82f28345598dcd7c76a5af1f565c620c3c0d28fd89226472dce"
+    },
+    {
+      "path": "loop/admission_evidence.go",
+      "sha256": "9fd995f99f1b4dbef04ea5f391f66d9fd39a8591504438e436fa1d46d031ad53"
+    },
+    {
+      "path": "loop/stopped_review.go",
+      "sha256": "a166feada997508f4e34fe967f86e3afbb6774d049de26e771a2ee4c26c58fad"
+    },
+    {
+      "path": "loop/stopped_review_evidence.go",
+      "sha256": "55c82711654c504d4ab5535eb06bec83c23b7cba96ce0dbbdadb1b9b898b67e2"
+    },
+    {
+      "path": "loop/stopped_review_test.go",
+      "sha256": "046f61cb1ad3e40c521d64725cda5e063a4ed4b5bda7aabdf8b71b24e468643d"
+    },
+    {
+      "path": "root.go",
+      "sha256": "e700dba23f79c0e9b338866587a8db6397fb6adbe49f8d88fef2392fffb5e9c2"
+    }
+  ]
+}

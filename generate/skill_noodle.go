@@ -94,6 +94,10 @@ All commands accept ` + "`--project-dir`" + ` (default: current directory, env: 
 | noodle admission inspect | Inspect owner, subject, revision, invalid and exact next argv |
 | noodle admission retire PROPOSAL_SHA256 CURRENT_ORDER_REVISION | Archive and retire only the unchanged rejected initial proposal |
 
+### Stopped completed review (P-class)
+
+` + cmdmeta.StoppedReviewGuide + `
+
 ### Skills & Schemas
 
 | Command | Description |

@@ -1,0 +1,23 @@
+{
+  "argv": [
+    "bin/noodle",
+    "--project-dir",
+    "/Users/neon/soodles",
+    "review",
+    "inspect",
+    "soodles-145",
+    "ed3c/soodles#145"
+  ],
+  "cwd": "/Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery",
+  "time_ns": 1790096875530052000,
+  "files_before": {
+    "/Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery/bin/noodle": {
+      "bytes": 16513346,
+      "sha256": "00229dde3fc0c4506396db91158da6d1f449d1b538012effd0dc69a2eb4a56df",
+      "observed_from": [
+        "argv"
+      ]
+    }
+  },
+  "timeout_seconds": 600
+}

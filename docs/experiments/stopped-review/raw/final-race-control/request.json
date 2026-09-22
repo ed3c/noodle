@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "env",
+    "TMPDIR=/private/tmp/noodle-review-validation.qoPg10",
+    "go",
+    "test",
+    "-race",
+    "./loop",
+    "-run",
+    "TestStoppedReview|TestAdmissionRecovery|TestInspectPublicationClaim",
+    "-count=1"
+  ],
+  "cwd": "/Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery",
+  "time_ns": 1790096903201957000,
+  "files_before": {},
+  "timeout_seconds": 600
+}

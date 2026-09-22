@@ -1,0 +1,5 @@
+--- FAIL: TestInspectPublicationClaimBindsCompletedSupervisedWorktree (0.66s)
+    publication_claim_test.go:29: worktree identity = "/private/var/folders/l6/44bf7nvs64j60f1mpyy88hdm0000gn/T/TestInspectPublicationClaimBindsCompletedSupervisedWorktree1061506379/001/project/.worktrees/claim-1" "claim-1"
+FAIL
+FAIL	github.com/poteto/noodle/loop	1.144s
+FAIL

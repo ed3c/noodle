@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "env",
+    "TMPDIR=/Users/neon/.codex/experiments/noodle-validation-tmp.z7zNM3",
+    "PATH=/Users/neon/.nvm/versions/node/v22.17.1/bin:/Users/neon/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/Apple/usr/bin:/Users/neon/.codex/tmp/arg0/codex-arg0tarml4:/Users/neon/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/override:/Users/neon/.rbenv/shims:/Users/neon/.local/bin:/Users/neon/.antigravity-ide/antigravity-ide/bin:/Users/neon/.bun/bin:/Users/neon/.antigravity/antigravity/bin:/Users/neon/.nvm/versions/node/v22.17.1/bin:/Users/neon/.npm-global/bin:/Users/neon/.cargo/bin:/Users/neon/.orbstack/bin:/Users/neon/sdk_tools/flutter/bin:/Users/neon/Library/Android/sdk/tools:/Users/neon/Library/Android/sdk/platform-tools:/Users/neon/depot_tools:/Users/neon/.maestro/bin:/Users/neon/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/fallback:/Applications/ChatGPT.app/Contents/Resources:/Users/neon/.local/bin:/Users/neon/.orbstack/bin",
+    "pnpm",
+    "check"
+  ],
+  "cwd": "/Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery",
+  "time_ns": 1790096584730503000,
+  "files_before": {},
+  "timeout_seconds": 600
+}

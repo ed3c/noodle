@@ -1,0 +1,81 @@
+
+> @ check /Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery
+> pnpm run build && pnpm run test && pnpm run vet && pnpm run lint:arch && pnpm run fixtures:loop && pnpm run fixtures:hash
+
+
+> @ build /Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery
+> pnpm --filter noodle-ui build && go build -o ./bin/noodle .
+
+
+> noodle-ui@ build /Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery/ui
+> vite build
+
+vite v7.3.1 building client environment for production...
+transforming...
+✓ 3220 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/client/index.html                     0.85 kB │ gzip:   0.45 kB
+dist/client/assets/index-BjOVM1mD.css     54.21 kB │ gzip:  10.51 kB
+dist/client/assets/index-CnvJVP-F.js      31.85 kB │ gzip:  11.46 kB
+dist/client/assets/d3-xKNfCkBH.js         51.62 kB │ gzip:  17.62 kB
+dist/client/assets/router-BPmgOIxi.js     94.36 kB │ gzip:  30.83 kB
+dist/client/assets/index-BzrgpmJZ.js     334.99 kB │ gzip: 105.38 kB
+dist/client/assets/index-wNhTF6hF.js   1,330.95 kB │ gzip: 268.73 kB
+✓ built in 4.02s
+
+> @ test /Users/neon/.codex/experiments/soodles133-bootstrap.QpepPK/noodle-source/.worktrees/stopped-review-recovery
+> go test ./...
+
+ok  	github.com/poteto/noodle	73.682s
+ok  	github.com/poteto/noodle/adapter	0.608s
+?   	github.com/poteto/noodle/adapters	[no test files]
+ok  	github.com/poteto/noodle/adapters/noodles-github	2.401s
+?   	github.com/poteto/noodle/cmdmeta	[no test files]
+ok  	github.com/poteto/noodle/config	0.535s
+ok  	github.com/poteto/noodle/dispatcher	1.390s
+ok  	github.com/poteto/noodle/event	1.594s
+ok  	github.com/poteto/noodle/generate	(cached)
+?   	github.com/poteto/noodle/generate/cmd/gen-skill	[no test files]
+ok  	github.com/poteto/noodle/internal/dispatch	(cached)
+ok  	github.com/poteto/noodle/internal/failure	(cached)
+ok  	github.com/poteto/noodle/internal/filex	0.668s
+ok  	github.com/poteto/noodle/internal/ingest	(cached)
+ok  	github.com/poteto/noodle/internal/integration	1.559s
+ok  	github.com/poteto/noodle/internal/jsonx	1.328s
+ok  	github.com/poteto/noodle/internal/lockfile	1.509s
+ok  	github.com/poteto/noodle/internal/mode	(cached)
+ok  	github.com/poteto/noodle/internal/orderx	(cached)
+?   	github.com/poteto/noodle/internal/procx	[no test files]
+ok  	github.com/poteto/noodle/internal/projection	1.318s
+ok  	github.com/poteto/noodle/internal/reducer	1.430s
+ok  	github.com/poteto/noodle/internal/rtcap	1.516s
+ok  	github.com/poteto/noodle/internal/schemadoc	(cached)
+ok  	github.com/poteto/noodle/internal/shellx	(cached)
+ok  	github.com/poteto/noodle/internal/snapshot	2.802s
+ok  	github.com/poteto/noodle/internal/state	2.348s
+ok  	github.com/poteto/noodle/internal/statever	2.322s
+?   	github.com/poteto/noodle/internal/statusfile	[no test files]
+ok  	github.com/poteto/noodle/internal/stringx	(cached)
+ok  	github.com/poteto/noodle/internal/taskreg	(cached)
+--- FAIL: TestDiscoverRejectsOutOfDateExpectedMarkdown (0.06s)
+    fixturedir_test.go:272: discover err = <nil>
+--- FAIL: TestSyncExpectedMarkdownCheckMode (0.05s)
+    sync_test.go:72: expected check mode error for stale fixture
+FAIL
+FAIL	github.com/poteto/noodle/internal/testutil/fixturedir	3.083s
+ok  	github.com/poteto/noodle/loop	73.947s
+ok  	github.com/poteto/noodle/mise	4.527s
+ok  	github.com/poteto/noodle/monitor	3.425s
+ok  	github.com/poteto/noodle/parse	3.356s
+ok  	github.com/poteto/noodle/runtime	2.634s
+?   	github.com/poteto/noodle/scripts	[no test files]
+?   	github.com/poteto/noodle/scripts/fixturehash	[no test files]
+ok  	github.com/poteto/noodle/server	1.645s
+ok  	github.com/poteto/noodle/skill	4.268s
+ok  	github.com/poteto/noodle/stamp	1.861s
+ok  	github.com/poteto/noodle/startup	10.946s
+ok  	github.com/poteto/noodle/worktree	6.481s
+FAIL
+ ELIFECYCLE  Test failed. See above for more details.
+ ELIFECYCLE  Command failed with exit code 1.
