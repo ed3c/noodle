@@ -73,6 +73,11 @@ func Commands() []Command {
 			{Name: "inspect", Short: "Read admission evidence and exact supported continuation"},
 			{Name: "retire", Short: "Retire an unchanged rejected initial proposal"},
 		}},
+		{Name: "publication", Short: "Bind supervised worktree custody for publication", Subcommands: []Command{
+			{Name: "claim", Short: "Emit one exact read-only publication claim", Flags: []Flag{
+				{Name: "output", Type: "string", Desc: "Fresh absolute path for the claim JSON"},
+			}},
+		}},
 		{Name: "reset", Short: "Clear all runtime state"},
 	}
 }
