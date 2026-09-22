@@ -76,6 +76,7 @@ func NewRootCmd() *cobra.Command {
 		newEventCmd(&app),
 		newResetCmd(&app),
 		newAdmissionCmd(&app),
+		newPublicationCmd(&app),
 	)
 
 	return root

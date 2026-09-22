@@ -22,8 +22,14 @@ func (l *Loop) requiresTypedOutcome(cook *cookHandle) bool {
 }
 
 func (l *Loop) readRequiredStageOutcome(cook *cookHandle) (*event.StageMessagePayload, error) {
-	reader := event.NewEventReader(l.runtimeDir)
-	events, err := reader.ReadSession(cook.session.ID(), event.EventFilter{
+	return readRequiredStageOutcomeForIdentity(
+		l.runtimeDir, cook.session.ID(), cook.orderID, cook.stageIndex,
+	)
+}
+
+func readRequiredStageOutcomeForIdentity(runtimeDir, sessionID, orderID string, stageIndex int) (*event.StageMessagePayload, error) {
+	reader := event.NewEventReader(runtimeDir)
+	events, err := reader.ReadSession(sessionID, event.EventFilter{
 		Types: map[event.EventType]struct{}{event.EventStageMessage: {}},
 	})
 	if err != nil {
@@ -43,8 +49,8 @@ func (l *Loop) readRequiredStageOutcome(cook *cookHandle) (*event.StageMessagePa
 		if payload.Outcome == "" {
 			continue
 		}
-		if recorded.SessionID != cook.session.ID() {
-			return nil, fmt.Errorf("typed stage outcome session %q does not match %q", recorded.SessionID, cook.session.ID())
+		if recorded.SessionID != sessionID {
+			return nil, fmt.Errorf("typed stage outcome session %q does not match %q", recorded.SessionID, sessionID)
 		}
 		if typedIndex >= 0 {
 			return nil, fmt.Errorf("duplicate typed stage outcomes")
@@ -64,11 +70,11 @@ func (l *Loop) readRequiredStageOutcome(cook *cookHandle) (*event.StageMessagePa
 	if strings.TrimSpace(typed.Message) == "" {
 		return nil, fmt.Errorf("typed stage outcome message is empty")
 	}
-	if typed.OrderID != cook.orderID {
-		return nil, fmt.Errorf("typed stage outcome order %q does not match %q", typed.OrderID, cook.orderID)
+	if typed.OrderID != orderID {
+		return nil, fmt.Errorf("typed stage outcome order %q does not match %q", typed.OrderID, orderID)
 	}
-	if typed.StageIndex == nil || *typed.StageIndex != cook.stageIndex {
-		return nil, fmt.Errorf("typed stage outcome stage does not match %d", cook.stageIndex)
+	if typed.StageIndex == nil || *typed.StageIndex != stageIndex {
+		return nil, fmt.Errorf("typed stage outcome stage does not match %d", stageIndex)
 	}
 	if typed.Outcome == event.StageOutcomeCompleted && typed.IsBlocking() {
 		return nil, fmt.Errorf("completed typed stage outcome is blocking")
