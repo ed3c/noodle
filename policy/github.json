@@ -3,8 +3,9 @@
   "repository": "ed3c/noodle",
   "allowed_repositories": [
     "ed3c/noodle",
-    "ed3c/noodles"
+    "ed3c/soodles"
   ],
+  "source_repositories": ["ed3c/soodles"],
   "default_branch": "main",
   "push_remote": "fork",
   "cross_repository_status": "TARGET_INSTALLATION_AND_TOKEN_READBACK_RECORDED",

@@ -188,7 +188,7 @@ func currentAuthorization(comments []Comment, policy Policy, subject, body, base
 			return Authorization{}, err
 		}
 		d := receipt.Declaration
-		if receipt.Sender == policy.RepositoryDispatchSender && d.SourceRepository == sourceRepository && d.Target == targetRepository && d.Subject == subject && d.SubjectBodySHA256 == hex.EncodeToString(digest[:]) && d.BaseSHA == base && d.Runtime == contract.Runtime && d.Evidence == contract.Evidence && reflect.DeepEqual(d.WriteBoundary, contract.WriteBoundary) {
+		if sourceAdmitted(policy, d.SourceRepository, receipt.Sender) && d.Target == targetRepository && d.Subject == subject && d.SubjectBodySHA256 == hex.EncodeToString(digest[:]) && d.BaseSHA == base && d.Runtime == contract.Runtime && d.Evidence == contract.Evidence && reflect.DeepEqual(d.WriteBoundary, contract.WriteBoundary) {
 			matches = append(matches, receipt)
 		}
 	}

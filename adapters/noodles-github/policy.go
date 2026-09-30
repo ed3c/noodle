@@ -6,9 +6,24 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 )
+
+var sourceRepositoryPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+
+func sourceAdmitted(policy Policy, repository, sender string) bool {
+	if sender != policy.RepositoryDispatchSender {
+		return false
+	}
+	for _, source := range policy.SourceRepositories {
+		if source == repository {
+			return true
+		}
+	}
+	return false
+}
 
 type requiredCapability struct {
 	available bool
@@ -66,7 +81,18 @@ func validatePolicy(policy Policy) error {
 	if policy.CrossRepositoryStatus != crossRepositoryAdmitted {
 		return fmt.Errorf("target policy keeps cross-repository admission held at %q", policy.CrossRepositoryStatus)
 	}
-	want := []string{targetRepository, sourceRepository}
+	if len(policy.SourceRepositories) == 0 {
+		return fmt.Errorf("target policy has no source_repositories")
+	}
+	want := []string{targetRepository}
+	seen := map[string]bool{targetRepository: true}
+	for _, source := range policy.SourceRepositories {
+		if !sourceRepositoryPattern.MatchString(source) || seen[source] {
+			return fmt.Errorf("target policy has invalid or duplicate source repository %q", source)
+		}
+		seen[source] = true
+		want = append(want, source)
+	}
 	got := append([]string(nil), policy.AllowedRepositories...)
 	sort.Strings(want)
 	sort.Strings(got)

@@ -4,7 +4,6 @@ import "encoding/json"
 
 const (
 	targetRepository        = "ed3c/noodle"
-	sourceRepository        = "ed3c/noodles"
 	defaultBranch           = "main"
 	dispatchEventType       = "noodles-execution"
 	crossRepositoryAdmitted = "TARGET_INSTALLATION_AND_TOKEN_READBACK_RECORDED"
@@ -34,6 +33,7 @@ type Policy struct {
 	SchemaVersion              int      `json:"schema_version"`
 	Repository                 string   `json:"repository"`
 	AllowedRepositories        []string `json:"allowed_repositories"`
+	SourceRepositories         []string `json:"source_repositories"`
 	DefaultBranch              string   `json:"default_branch"`
 	PushRemote                 string   `json:"push_remote"`
 	CrossRepositoryStatus      string   `json:"cross_repository_status"`
