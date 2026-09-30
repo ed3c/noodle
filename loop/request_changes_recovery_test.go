@@ -71,6 +71,10 @@ func TestRequestChangesRestartEditRequeue(t *testing.T) {
 // Use real Git custody and disk-backed canonical/legacy evidence. The runtime
 // spy observes dispatch without starting a provider process.
 func newRequestChangesRecovery(t *testing.T) (*Loop, *cookHandle, requestChangesPacket) {
+	return newRequestChangesRecoveryWithOutcome(t, event.StageOutcomeBlocked)
+}
+
+func newRequestChangesRecoveryWithOutcome(t *testing.T, typed event.StageOutcome) (*Loop, *cookHandle, requestChangesPacket) {
 	t.Helper()
 	l, _, cook := newTypedOutcomeTestLoop(t)
 	runGitInRepo(t, l.projectDir, "init", "-b", "main")
@@ -79,12 +83,12 @@ func newRequestChangesRecovery(t *testing.T) (*Loop, *cookHandle, requestChanges
 	runGitInRepo(t, l.projectDir, "commit", "--allow-empty", "-m", "base")
 	runGitInRepo(t, l.projectDir, "worktree", "add", "-b", cook.worktreeName, cook.worktreePath)
 	runGitInRepo(t, cook.worktreePath, "commit", "--allow-empty", "-m", "candidate")
-	appendTypedOutcome(t, l, cook, event.StageOutcomeBlocked, true, cook.orderID, cook.stageIndex)
+	appendTypedOutcome(t, l, cook, typed, typed == event.StageOutcomeBlocked, cook.orderID, cook.stageIndex)
 	dir := filepath.Join(l.runtimeDir, "sessions", cook.session.ID())
 	recoveryWriteJSON(t, filepath.Join(dir, "spawn.json"), map[string]any{"session_id": cook.session.ID(), "worktree_path": cook.worktreePath, "retry_count": 0})
 	recoveryWriteJSON(t, filepath.Join(dir, "process.json"), map[string]any{"session_id": cook.session.ID(), "pid": 99999999})
 	requestChangesWrite(t, filepath.Join(dir, "prompt.txt"), []byte("original terminal prompt"))
-	if err := l.parkPendingReview(cook, "typed blocked"); err != nil {
+	if err := l.parkPendingReview(cook, "supervised review"); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.recordInitialAdmissions([]string{cook.orderID}); err != nil {
@@ -106,6 +110,63 @@ func newRequestChangesRecovery(t *testing.T) (*Loop, *cookHandle, requestChanges
 		}
 	}
 	return l, cook, p
+}
+
+func TestRequestChangesCompletedOutcomeSurvivesRestart(t *testing.T) {
+	l, cook, p := newRequestChangesRecoveryWithOutcome(t, event.StageOutcomeCompleted)
+	priorSession := recoverySessionBytes(t, l, cook.session.ID())
+	if _, ok := l.canonical.PendingReviews[cook.orderID]; !ok {
+		t.Fatal("request-changes lost the completed writer's review")
+	}
+	l = New(l.projectDir, "noodle", l.config, l.deps)
+	if err := l.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := l.canonical.Orders[cook.orderID]; !ok {
+		t.Fatal("startup archived a completed writer's request-changes order")
+	}
+	l = archiveRequestChangesLikeOldStartup(t, l)
+	if ack := recoveryControl(t, l, recoveryCommand(t, l, p)); ack.Status != "ok" {
+		t.Fatalf("archived completed writer could not recover: %+v", ack)
+	}
+	if err := l.controlEditItem(ControlCommand{OrderID: cook.orderID, Prompt: "corrected writer"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.controlRequeue(cook.orderID); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	next := l.cooks.activeCooksByOrder[cook.orderID]
+	if next == nil || next.attempt != 1 || next.session.ID() == cook.session.ID() || next.worktreePath != cook.worktreePath {
+		t.Fatalf("completed writer did not resume as attempt 1: %#v", next)
+	}
+	if !reflect.DeepEqual(priorSession, recoverySessionBytes(t, l, cook.session.ID())) {
+		t.Fatal("original completed session bytes changed")
+	}
+	if got := gitOutputInRepo(t, cook.worktreePath, "rev-parse", "HEAD"); got != p.Binding.Head {
+		t.Fatal("candidate HEAD changed")
+	}
+}
+
+func TestRequestChangesCompletedArchiveWithoutAdmissionRefuses(t *testing.T) {
+	l, _, p := newRequestChangesRecoveryWithOutcome(t, event.StageOutcomeCompleted)
+	l = archiveRequestChangesLikeOldStartup(t, l)
+	l.effectLedger = reducer.NewEffectLedger()
+	if err := l.persistCanonicalCheckpoint(); err != nil {
+		t.Fatal(err)
+	}
+	before := recoveryRefusalBytes(t, l)
+	if ack := recoveryControl(t, l, recoveryCommand(t, l, p)); ack.Status != "error" || !strings.Contains(ack.Message, "initial-admission effect mismatch") {
+		t.Fatalf("missing original admission accepted: %+v", ack)
+	}
+	if !reflect.DeepEqual(before, recoveryRefusalBytes(t, l)) {
+		t.Fatal("refusal mutated owner or session data")
+	}
+	if len(l.deps.Runtimes["process"].(*mockRuntime).calls) != 0 {
+		t.Fatal("refusal dispatched a new writer")
+	}
 }
 
 func recoveryRead(t *testing.T, path string) []byte {

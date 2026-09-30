@@ -47,6 +47,10 @@ type requestChangesPacket struct {
 
 var recoverySessionFiles = []string{"spawn.json", "prompt.txt", "events.ndjson", "process.json"}
 
+func recoverableReviewOutcome(outcome event.StageOutcome) bool {
+	return outcome == event.StageOutcomeBlocked || outcome == event.StageOutcomeCompleted
+}
+
 func recoveryDigest(data []byte) string { return fmt.Sprintf("%x", sha256.Sum256(data)) }
 
 func recoveryGit(path string, args ...string) (string, error) {
@@ -164,8 +168,8 @@ func (l *Loop) validateRecovery(order state.OrderNode, review state.PendingRevie
 	if err != nil {
 		return err
 	}
-	if outcome.Outcome != event.StageOutcomeBlocked {
-		return fmt.Errorf("recovery requires exact typed blocked outcome")
+	if !recoverableReviewOutcome(outcome.Outcome) {
+		return fmt.Errorf("recovery requires exact typed blocked or completed outcome")
 	}
 	top, err := recoveryGit(b.WorktreePath, "rev-parse", "--show-toplevel")
 	if err != nil {
@@ -251,7 +255,7 @@ func (l *Loop) preserveRequestChanges(orderID string) bool {
 		return false
 	}
 	outcome, err := l.readRequiredStageOutcome(&cookHandle{cookIdentity: cookIdentity{orderID: orderID, stageIndex: review.StageIndex}, session: &adoptedSession{id: b.SessionID}})
-	if err != nil || outcome.Outcome != event.StageOutcomeBlocked || b.Attempt < 0 || b.Attempt >= len(stage.Attempts) {
+	if err != nil || !recoverableReviewOutcome(outcome.Outcome) || b.Attempt < 0 || b.Attempt >= len(stage.Attempts) {
 		return false
 	}
 	data, err := os.ReadFile(filepath.Join(l.runtimeDir, "loop-events.ndjson"))
