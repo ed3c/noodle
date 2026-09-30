@@ -30,15 +30,19 @@ type Authorization struct {
 }
 
 type Policy struct {
-	SchemaVersion              int      `json:"schema_version"`
-	Repository                 string   `json:"repository"`
-	AllowedRepositories        []string `json:"allowed_repositories"`
-	SourceRepositories         []string `json:"source_repositories"`
-	DefaultBranch              string   `json:"default_branch"`
-	PushRemote                 string   `json:"push_remote"`
-	CrossRepositoryStatus      string   `json:"cross_repository_status"`
-	RepositoryDispatchSender   string   `json:"repository_dispatch_sender"`
-	AuthorizationCommentAuthor string   `json:"authorization_comment_author"`
+	SchemaVersion              int             `json:"schema_version"`
+	Repository                 string          `json:"repository"`
+	AllowedRepositories        []string        `json:"allowed_repositories"`
+	SourceBindings             []SourceBinding `json:"source_bindings"`
+	DefaultBranch              string          `json:"default_branch"`
+	PushRemote                 string          `json:"push_remote"`
+	CrossRepositoryStatus      string          `json:"cross_repository_status"`
+	AuthorizationCommentAuthor string          `json:"authorization_comment_author"`
+}
+
+type SourceBinding struct {
+	Repository string `json:"repository"`
+	Sender     string `json:"sender"`
 }
 
 type Capabilities struct {

@@ -14,11 +14,8 @@ import (
 var sourceRepositoryPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
 func sourceAdmitted(policy Policy, repository, sender string) bool {
-	if sender != policy.RepositoryDispatchSender {
-		return false
-	}
-	for _, source := range policy.SourceRepositories {
-		if source == repository {
+	for _, source := range policy.SourceBindings {
+		if source.Repository == repository && source.Sender == sender {
 			return true
 		}
 	}
@@ -72,26 +69,23 @@ func validatePolicy(policy Policy) error {
 	if strings.TrimSpace(policy.PushRemote) == "" {
 		return fmt.Errorf("policy/github.json push_remote must name one target push remote")
 	}
-	if policy.RepositoryDispatchSender == "" {
-		return fmt.Errorf("target policy repository_dispatch_sender is empty")
-	}
 	if policy.AuthorizationCommentAuthor == "" {
 		return fmt.Errorf("target policy authorization_comment_author is empty")
 	}
 	if policy.CrossRepositoryStatus != crossRepositoryAdmitted {
 		return fmt.Errorf("target policy keeps cross-repository admission held at %q", policy.CrossRepositoryStatus)
 	}
-	if len(policy.SourceRepositories) == 0 {
-		return fmt.Errorf("target policy has no source_repositories")
+	if len(policy.SourceBindings) == 0 {
+		return fmt.Errorf("target policy has no source_bindings")
 	}
 	want := []string{targetRepository}
 	seen := map[string]bool{targetRepository: true}
-	for _, source := range policy.SourceRepositories {
-		if !sourceRepositoryPattern.MatchString(source) || seen[source] {
-			return fmt.Errorf("target policy has invalid or duplicate source repository %q", source)
+	for _, source := range policy.SourceBindings {
+		if !sourceRepositoryPattern.MatchString(source.Repository) || seen[source.Repository] || strings.TrimSpace(source.Sender) != source.Sender || source.Sender == "" {
+			return fmt.Errorf("target policy has invalid or duplicate source binding %#v", source)
 		}
-		seen[source] = true
-		want = append(want, source)
+		seen[source.Repository] = true
+		want = append(want, source.Repository)
 	}
 	got := append([]string(nil), policy.AllowedRepositories...)
 	sort.Strings(want)

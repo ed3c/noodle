@@ -307,11 +307,10 @@ func testPolicy() Policy {
 		SchemaVersion:              1,
 		Repository:                 targetRepository,
 		AllowedRepositories:        []string{targetRepository, testSourceRepository},
-		SourceRepositories:         []string{testSourceRepository},
+		SourceBindings:             []SourceBinding{{Repository: testSourceRepository, Sender: testSender}},
 		DefaultBranch:              defaultBranch,
 		PushRemote:                 "provider",
 		CrossRepositoryStatus:      crossRepositoryAdmitted,
-		RepositoryDispatchSender:   testSender,
 		AuthorizationCommentAuthor: testCommentAuthor,
 	}
 }
@@ -350,13 +349,17 @@ func TestNoodlesDispatchAdmission(t *testing.T) {
 
 func TestConfiguredSourceFlowsThroughReceiveSyncAndSchedule(t *testing.T) {
 	policy := testPolicy()
-	policy.SourceRepositories = append(policy.SourceRepositories, "ed3c/another-source")
+	const anotherSender = "another-source[bot]"
+	policy.SourceBindings = append(policy.SourceBindings, SourceBinding{Repository: "ed3c/another-source", Sender: anotherSender})
 	policy.AllowedRepositories = append(policy.AllowedRepositories, "ed3c/another-source")
 	body := issueBody(17)
 	fake := newFakeGitHub(t, Issue{Number: 17, Title: "Target issue", State: "open", Body: body})
 	payload := testPayload(17, body)
 	payload.SourceRepository = "ed3c/another-source"
-	if _, err := Receive(context.Background(), fake.client(), policy, testCapabilities(), testEvent(t, payload, testSender), testBaseSHA); err != nil {
+	if _, err := Receive(context.Background(), fake.client(), policy, testCapabilities(), testEvent(t, payload, testSender), testBaseSHA); err == nil || fake.commentPosts != 0 {
+		t.Fatalf("source/sender cross-pair must refuse without a write, err=%v posts=%d", err, fake.commentPosts)
+	}
+	if _, err := Receive(context.Background(), fake.client(), policy, testCapabilities(), testEvent(t, payload, anotherSender), testBaseSHA); err != nil {
 		t.Fatal(err)
 	}
 	items, diagnostics, err := Sync(context.Background(), fake.client(), policy, testCapabilities())
@@ -380,10 +383,13 @@ func TestConfiguredSourceFlowsThroughReceiveSyncAndSchedule(t *testing.T) {
 
 func TestSourcePolicyRejectsUnlistedAndDuplicateRepositories(t *testing.T) {
 	for _, mutate := range []func(*Policy){
-		func(p *Policy) { p.SourceRepositories = nil },
-		func(p *Policy) { p.SourceRepositories = append(p.SourceRepositories, testSourceRepository) },
+		func(p *Policy) { p.SourceBindings = nil },
+		func(p *Policy) {
+			p.SourceBindings = append(p.SourceBindings, SourceBinding{Repository: testSourceRepository, Sender: "other[bot]"})
+		},
 		func(p *Policy) { p.AllowedRepositories = append(p.AllowedRepositories, "ed3c/other") },
-		func(p *Policy) { p.SourceRepositories = []string{"bad source"} },
+		func(p *Policy) { p.SourceBindings = []SourceBinding{{Repository: "bad source", Sender: testSender}} },
+		func(p *Policy) { p.SourceBindings[0].Sender = " " },
 	} {
 		policy := testPolicy()
 		mutate(&policy)
