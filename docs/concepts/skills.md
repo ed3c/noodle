@@ -84,32 +84,37 @@ Skills compose naturally. You can call skills from other skills. For example, if
 
 If you want skills to be scheduled in a certain order, you specify that in the `schedule:` field. For example, you can say that `review` skill should always follow `execute`. See [Scheduling > Stages](/concepts/scheduling#composition-and-concurrency) for more details on how the `schedule` skill can compose skills and control concurrency.
 
-## Vendored pstack
+## Global pstack for Codex
 
-This repository includes the complete pstack 0.15.5 package from
-[cursor/plugins](https://github.com/cursor/plugins/tree/2eb7ed4613cfc8f098dfe464a23680ea44d84c5e/pstack)
-at `skills/pstack/`, including all 47 skills, their references, documentation,
-agent definitions and dormant automation source. `skills/pstack-source.json`
-records the immutable upstream revision and SHA-256 of every upstream file;
-the vendored files are unchanged. The MIT license remains in the package.
+Keep one complete pstack package at `~/.local/share/pstack`. This host uses
+[pstack 0.15.5](https://github.com/cursor/plugins/tree/2eb7ed4613cfc8f098dfe464a23680ea44d84c5e/pstack).
+The package includes all 47 skills and their supporting files. Store the pinned
+revision, file hashes and executable modes in `~/.local/share/pstack-source.json`.
+Do not vendor another copy into the repository.
 
-The repository's `.noodle.toml` adds `skills/pstack/skills` after `.agents/skills`.
-Run `noodle skills list` to inspect the resolved paths. The `pstack` entry
-explains the mapping. Existing Noodle `reflect` and `unslop` retain precedence;
-`pstack-reflect` and `pstack-unslop` explicitly select the upstream alternatives.
-All other pstack names resolve directly, including `architect`, `how`,
-`maintain-verification-skill` and `poteto-mode`.
+Codex CLI discovers the skills through `~/.agents/skills/<skill>` symlinks to
+`~/.local/share/pstack/skills/<skill>`. This uses Codex's native user skill
+location and supported symlink discovery. Start a new session after installation.
+Use `/skills` to inspect the names reported by the installed CLI. Codex 0.156.1
+reports `pstack:architect`, `pstack:how` and `pstack:maintain-verification-skill`.
+Select those exact names, or use their absolute `SKILL.md` paths.
 
-These are on-demand skills. No new automatic task types or scheduling triggers
-are installed. Cursor-specific agents, rules, tools and model defaults require
-actual host support; including their source does not activate a Cursor plugin
-inside Noodle or Codex. Benny remains unconfigured and inactive.
+Noodle's `.noodle.toml` also searches `~/.local/share/pstack/skills`, after the
+repository's `.agents/skills`. Noodle scans the actual directories because its
+list operation skips symlink directory entries. `noodle skills list` shows its
+resolved paths. Noodle's first-match rule preserves the local `reflect` and
+`unslop`; select the global pstack `SKILL.md` by its absolute path when those
+upstream alternatives are required. Codex 0.156.1 exposes these alternatives
+as `pstack:reflect` and `pstack:unslop`; Noodle uses directory names instead.
+Do not assume that Noodle's precedence also applies to Codex.
 
-This is a repository installation, not a change to Noodle's global defaults or
-binary. Another project's control root must explicitly include the vendored
-skill path or receive the selected skill through its admitted task context.
-In particular, Soodles' isolated admission bundle has its own skill paths.
+This host installation requires no pstack runtime loader or automatic task
+types. It does not activate the bundled Benny automations or provide missing
+Cursor tools. Other hosts must provision the same package and links before use.
+Soodles admission bundles retain their own Noodle search paths; the Codex child
+can independently discover the global skills under the same home directory.
 
-To update, select another immutable upstream revision, replace the package and
-regenerate its source manifest. Check name collisions, skill resolution and
-unchanged automatic task types before adopting the update.
+Update the canonical package and source manifest together, preserving the
+symlink targets. Remove older pstack copies from `~/.codex/skills` only after
+checking for local edits. Verify Codex discovery and Noodle resolution after an
+update; neither result proves that every bundled workflow can run on the host.
