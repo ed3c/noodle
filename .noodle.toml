@@ -10,7 +10,7 @@ model = "gpt-5.6-sol"
 # model = "claude-opus-4-6"
 
 [skills]
-paths = [".agents/skills"]
+paths = [".agents/skills", "~/.local/share/pstack/skills"]
 
 [agents.claude]
 path = "~/.claude"
