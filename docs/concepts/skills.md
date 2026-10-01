@@ -83,3 +83,33 @@ This means you can override any built-in skill. Put your replacement in a higher
 Skills compose naturally. You can call skills from other skills. For example, if you want your `review` skill to use the `debugging` skill, you can ask your agent to include it. `Skill(name)` seems to work best as a way to reliably get skills invoked.
 
 If you want skills to be scheduled in a certain order, you specify that in the `schedule:` field. For example, you can say that `review` skill should always follow `execute`. See [Scheduling > Stages](/concepts/scheduling#composition-and-concurrency) for more details on how the `schedule` skill can compose skills and control concurrency.
+
+## Vendored pstack
+
+This repository includes the complete pstack 0.15.5 package from
+[cursor/plugins](https://github.com/cursor/plugins/tree/2eb7ed4613cfc8f098dfe464a23680ea44d84c5e/pstack)
+at `skills/pstack/`, including all 47 skills, their references, documentation,
+agent definitions and dormant automation source. `skills/pstack-source.json`
+records the immutable upstream revision and SHA-256 of every upstream file;
+the vendored files are unchanged. The MIT license remains in the package.
+
+The repository's `.noodle.toml` adds `skills/pstack/skills` after `.agents/skills`.
+Run `noodle skills list` to inspect the resolved paths. The `pstack` entry
+explains the mapping. Existing Noodle `reflect` and `unslop` retain precedence;
+`pstack-reflect` and `pstack-unslop` explicitly select the upstream alternatives.
+All other pstack names resolve directly, including `architect`, `how`,
+`maintain-verification-skill` and `poteto-mode`.
+
+These are on-demand skills. No new automatic task types or scheduling triggers
+are installed. Cursor-specific agents, rules, tools and model defaults require
+actual host support; including their source does not activate a Cursor plugin
+inside Noodle or Codex. Benny remains unconfigured and inactive.
+
+This is a repository installation, not a change to Noodle's global defaults or
+binary. Another project's control root must explicitly include the vendored
+skill path or receive the selected skill through its admitted task context.
+In particular, Soodles' isolated admission bundle has its own skill paths.
+
+To update, select another immutable upstream revision, replace the package and
+regenerate its source manifest. Check name collisions, skill resolution and
+unchanged automatic task types before adopting the update.
