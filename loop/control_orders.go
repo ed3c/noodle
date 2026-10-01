@@ -171,7 +171,7 @@ func (l *Loop) controlRequeue(orderID string) error {
 			}
 		}
 	}
-	if err := l.releaseTypedBlockedReviewForRequeue(orderID); err != nil {
+	if err := l.releaseTypedReviewForRequeue(orderID); err != nil {
 		return err
 	}
 
@@ -221,7 +221,7 @@ func (l *Loop) controlRequeue(orderID string) error {
 	return nil
 }
 
-func (l *Loop) releaseTypedBlockedReviewForRequeue(orderID string) error {
+func (l *Loop) releaseTypedReviewForRequeue(orderID string) error {
 	pending, ok := l.cooks.pendingReview[orderID]
 	if !ok {
 		return nil
@@ -256,10 +256,21 @@ func (l *Loop) releaseTypedBlockedReviewForRequeue(orderID string) error {
 	}
 	outcome, err := l.readRequiredStageOutcome(cook)
 	if err != nil {
-		return fmt.Errorf("requeue pending review for %q requires an exact typed blocked outcome: %w", orderID, err)
+		return fmt.Errorf("requeue pending review for %q requires an exact typed outcome: %w", orderID, err)
 	}
 	if outcome.Outcome != event.StageOutcomeBlocked {
-		return fmt.Errorf("requeue pending review for %q requires typed outcome %q, got %q", orderID, event.StageOutcomeBlocked, outcome.Outcome)
+		// Completion alone does not authorize requeue from an ordinary review.
+		// Only request-changes that bound the failed order and its custody can.
+		if outcome.Outcome != event.StageOutcomeCompleted {
+			return fmt.Errorf("requeue pending review for %q requires typed outcome %q", orderID, event.StageOutcomeBlocked)
+		}
+		node, ok := l.canonical.Orders[orderID]
+		if !ok || node.Status != state.OrderFailed || pending.stageIndex < 0 || pending.stageIndex >= len(node.Stages) {
+			return fmt.Errorf("requeue pending review for %q requires typed outcome %q", orderID, event.StageOutcomeBlocked)
+		}
+		if _, err := recoveryBinding(node.Stages[pending.stageIndex]); err != nil {
+			return fmt.Errorf("requeue pending review for %q requires typed outcome %q", orderID, event.StageOutcomeBlocked)
+		}
 	}
 	if node := l.canonical.Orders[orderID]; node.Status == state.OrderFailed {
 		if _, err := l.requestChangesReview(orderID); err != nil {
@@ -274,7 +285,7 @@ func (l *Loop) releaseTypedBlockedReviewForRequeue(orderID string) error {
 	if err := l.emitEventChecked(ingest.EventStageReviewChangesRequested, map[string]any{
 		"order_id":    orderID,
 		"stage_index": pending.stageIndex,
-		"reason":      "requeue typed blocked outcome",
+		"reason":      "requeue typed reviewed outcome",
 	}); err != nil {
 		return err
 	}

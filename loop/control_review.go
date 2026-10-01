@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/poteto/noodle/event"
 	"github.com/poteto/noodle/internal/ingest"
 	"github.com/poteto/noodle/worktree"
 )
@@ -147,11 +146,12 @@ func (l *Loop) controlRequestChanges(orderID, feedback string) error {
 		return nil
 	}
 
-	// Only an exact typed blocked terminal attempt gains restart recovery.
+	// A reviewed terminal attempt retains its exact typed outcome and custody
+	// across request-changes, whether the writer completed or blocked.
 	recoverable := false
 	review := l.canonical.PendingReviews[orderID]
 	outcome, outcomeErr := l.readRequiredStageOutcome(&cookHandle{cookIdentity: pending.cookIdentity, session: &adoptedSession{id: pending.sessionID}})
-	if outcomeErr == nil && outcome.Outcome == event.StageOutcomeBlocked {
+	if outcomeErr == nil && recoverableReviewOutcome(outcome.Outcome) {
 		if l.canonical.Orders[orderID].Status.IsTerminal() {
 			return fmt.Errorf("request-changes order already failed; use edit-item then requeue")
 		}
