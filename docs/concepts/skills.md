@@ -44,10 +44,6 @@ schedule: >
   When backlog items with linked plans
   are ready for implementation
 
-# reflect: captures learnings after a session
-schedule: >
-  After an agent session completes
-
 # quality: reviews output before merge
 schedule: >
   After each agent session completes
@@ -95,18 +91,21 @@ Do not vendor another copy into the repository.
 Codex CLI discovers the skills through `~/.agents/skills/<skill>` symlinks to
 `~/.local/share/pstack/skills/<skill>`. This uses Codex's native user skill
 location and supported symlink discovery. Start a new session after installation.
-Use `/skills` to inspect the names reported by the installed CLI. Codex 0.156.1
-reports `pstack:architect`, `pstack:how` and `pstack:maintain-verification-skill`.
-Select those exact names, or use their absolute `SKILL.md` paths.
+Use `/skills` to inspect the names reported by the installed CLI. Select
+`architect`, `how`, `reflect`, `unslop` or `maintain-verification-skill` directly,
+without a `pstack:` prefix. Keep `.cursor-plugin/plugin.json` as the inert file
+`.cursor-plugin/plugin.json.upstream`; its active filename makes Codex infer a
+plugin namespace. Record this path relocation in the source manifest while
+preserving the upstream bytes. No skill frontmatter or body needs rewriting.
 
 Noodle's `.noodle.toml` also searches `~/.local/share/pstack/skills`, after the
 repository's `.agents/skills`. Noodle scans the actual directories because its
 list operation skips symlink directory entries. `noodle skills list` shows its
-resolved paths. Noodle's first-match rule preserves the local `reflect` and
-`unslop`; select the global pstack `SKILL.md` by its absolute path when those
-upstream alternatives are required. Codex 0.156.1 exposes these alternatives
-as `pstack:reflect` and `pstack:unslop`; Noodle uses directory names instead.
-Do not assume that Noodle's precedence also applies to Codex.
+resolved paths. The repository has no local `reflect` or `unslop` override;
+both names resolve to the global pstack skill. pstack `reflect` has no Noodle
+`schedule:` trigger and is invoked on request. It does not replace the former
+automatic reflection stage in existing orders. Do not add it to new scheduled
+pipelines; preserve any running order's admitted inputs.
 
 This host installation requires no pstack runtime loader or automatic task
 types. It does not activate the bundled Benny automations or provide missing
