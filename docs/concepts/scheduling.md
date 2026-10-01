@@ -93,12 +93,6 @@ Stages run sequentially by default. The first stage finishes before the second s
       "with": "claude",
       "model": "claude-opus-4-6",
       "runtime": "process"
-    },
-    {
-      "do": "reflect",
-      "with": "claude",
-      "model": "claude-opus-4-6",
-      "runtime": "process"
     }
   ]
 }

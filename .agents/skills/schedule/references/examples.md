@@ -23,8 +23,7 @@ Use cases:
       "rationale": "foundation-before-feature: core infra needed by all other work",
       "stages": [
         {"do": "execute", "with": "codex", "model": "gpt-5.4", "runtime": "process"},
-        {"do": "quality", "with": "claude", "model": "claude-opus-4-6", "runtime": "process"},
-        {"do": "reflect", "with": "claude", "model": "claude-opus-4-6", "runtime": "process"}
+        {"do": "quality", "with": "claude", "model": "claude-opus-4-6", "runtime": "process"}
       ]
     }
   ]
@@ -123,8 +122,8 @@ One order, three execute stages. Phase 1 is sequential (phases 2 and 3 depend on
   "orders": [
     {
       "id": "meditate-1",
-      "title": "audit brain vault after recent reflects",
-      "rationale": "3 reflects accumulated, time to consolidate",
+      "title": "audit accumulated brain notes",
+      "rationale": "Related brain notes accumulated, time to consolidate",
       "stages": [
         {"do": "meditate", "with": "claude", "model": "claude-opus-4-6", "runtime": "process"}
       ]
