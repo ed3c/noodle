@@ -273,6 +273,9 @@ func (l *Loop) reconcileStaleDispatchStages() error {
 			if stage.Status != state.StageDispatching && stage.Status != state.StageRunning {
 				continue
 			}
+			if _, interrupted := stage.Extra[interruptionKey]; interrupted {
+				return fmt.Errorf("interrupted execution %s/%d requires original dispatch readback", orderID, i)
+			}
 			stage.Status = state.StagePending
 			if len(stage.Attempts) > 0 {
 				last := len(stage.Attempts) - 1

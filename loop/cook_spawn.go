@@ -47,6 +47,10 @@ func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Orde
 	}
 
 	stage := cand.Stage
+	interruption, err := l.interruptionForDispatch(cand, opts.attempt)
+	if err != nil {
+		return err
+	}
 
 	// Belt-and-suspenders: give the registry one last chance to pick up
 	// the skill before dispatch, in case fsnotify missed an event.
@@ -69,9 +73,12 @@ func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Orde
 	}
 
 	resumePrompt := opts.resume
+	if interruption != nil {
+		resumePrompt = stringx.JoinNonEmpty("\n\n", resumePrompt, fmt.Sprintf("Continue original order after owner-confirmed interruption of session %s. Retain existing tracked and untracked work. Original evidence: %s. No terminal outcome was observed. Recheck unknown effects before repeating them.", interruption.Custody.SessionID, interruptionPath(l.projectDir, cand.OrderID, interruption.Custody.Subject)))
+	}
 	worktreePath := l.worktreePath(name)
 	if !created {
-		if opts.attempt > 0 {
+		if opts.attempt > 0 && interruption == nil {
 			resetWorktreeState(worktreePath)
 		}
 		if hint := worktreeResumeContext(worktreePath, name); hint != "" {
@@ -100,6 +107,11 @@ func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Orde
 		},
 	}
 	attemptID := dispatchAttemptID(cand.OrderID, cand.StageIndex, opts.attempt)
+	if interruption != nil {
+		if err := offerInterruptionDispatch(l.projectDir, *interruption, attemptID); err != nil {
+			return err
+		}
+	}
 	l.emitEvent(ingest.EventDispatchRequested, map[string]any{
 		"order_id":    cand.OrderID,
 		"stage_index": cand.StageIndex,
@@ -108,6 +120,9 @@ func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Orde
 
 	session, fallbackOutcome, err := l.dispatchSession(ctx, req)
 	if err != nil {
+		if interruption != nil {
+			return fmt.Errorf("interruption dispatch outcome requires readback: %w", err)
+		}
 		return l.handleCookDispatchFailure(cand, stage, name, created, attemptID, err)
 	}
 	if err := l.ensureOrderStageStatus(cand.OrderID, cand.StageIndex, StageStatusActive); err != nil {
@@ -151,13 +166,23 @@ func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Orde
 	l.startSessionWatcher(ctx, cook, false)
 
 	// Emit V2 canonical state events for dispatch.
-	l.emitEvent(ingest.EventDispatchCompleted, map[string]any{
+	completed := map[string]any{
 		"order_id":      cand.OrderID,
 		"stage_index":   cand.StageIndex,
 		"attempt_id":    attemptID,
 		"session_id":    session.ID(),
 		"worktree_name": name,
-	})
+	}
+	if interruption != nil {
+		if err := l.emitEventChecked(ingest.EventDispatchCompleted, completed); err != nil {
+			return err
+		}
+		if err := recordInterruptionDispatch(l.projectDir, *interruption, attemptID, session.ID()); err != nil {
+			return err
+		}
+	} else {
+		l.emitEvent(ingest.EventDispatchCompleted, completed)
+	}
 
 	l.logger.Info("cook dispatched", "order", cand.OrderID, "stage", cand.StageIndex, "session", session.ID(), "worktree", name, "attempt", opts.attempt)
 	return nil

@@ -93,6 +93,10 @@ func Commands() []Command {
 			{Name: "inspect", Short: "Read stopped review custody and exact continuation"},
 			{Name: "reject", Short: "Archive and reject unchanged stopped review custody"},
 		}},
+		{Name: "interruption", Short: "Inspect or prepare one stopped interrupted execution", Subcommands: []Command{
+			{Name: "inspect", Short: "Read interrupted execution custody and exact continuation"},
+			{Name: "prepare", Short: "Preserve unchanged interrupted execution for one successor attempt"},
+		}},
 		{Name: "reset", Short: "Clear all runtime state"},
 	}
 }
