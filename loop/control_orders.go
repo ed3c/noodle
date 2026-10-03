@@ -161,13 +161,17 @@ func (l *Loop) controlRequeue(orderID string) error {
 	if orderID == "" {
 		return fmt.Errorf("requeue requires order_id")
 	}
+	if node, ok := l.canonical.Orders[orderID]; ok && node.Status == state.OrderActive {
+		for _, stage := range node.Stages {
+			if _, requeued := stage.Extra[requestChangesRequeuedKey]; requeued && stage.Status == state.StagePending {
+				return l.readbackRequeuedRequestChanges(node, stage)
+			}
+		}
+	}
 	if node, ok := l.canonical.Orders[orderID]; ok && node.Status == state.OrderFailed {
 		for _, stage := range node.Stages {
 			if _, bound := stage.Extra[requestChangesKey]; bound {
-				if _, err := l.requestChangesReview(orderID); err != nil {
-					return err
-				}
-				break
+				return l.requeueRequestChanges(orderID)
 			}
 		}
 	}
@@ -189,6 +193,7 @@ func (l *Loop) controlRequeue(orderID string) error {
 			if changed {
 				for si := range orders.Orders[i].Stages {
 					delete(orders.Orders[i].Stages[si].Extra, requestChangesKey)
+					delete(orders.Orders[i].Stages[si].Extra, requestChangesRequeuedKey)
 				}
 			}
 			updated := changed || wasFailed

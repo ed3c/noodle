@@ -102,6 +102,8 @@ type OrderNode struct {
 	Metadata  map[string]string    `json:"metadata"`
 }
 
+const RequestChangesKey = "request_changes_recovery"
+
 // StageNode represents a stage within an order.
 type StageNode struct {
 	StageIndex  int                        `json:"stage_index"`

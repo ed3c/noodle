@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/poteto/noodle/event"
 	"github.com/poteto/noodle/internal/ingest"
 	"github.com/poteto/noodle/worktree"
 )
@@ -96,6 +95,15 @@ func (l *Loop) controlReject(orderID string) error {
 	if err := l.ensureCanonicalOrderFromOrders(orderID); err != nil {
 		return err
 	}
+	// Explicit rejection revokes custody even when a prior request-changes
+	// already made the canonical order terminal and the reducer is a no-op.
+	node := l.canonical.Orders[orderID]
+	if pending.stageIndex >= 0 && pending.stageIndex < len(node.Stages) {
+		delete(node.Stages[pending.stageIndex].Extra, requestChangesKey)
+		delete(node.Stages[pending.stageIndex].Extra, requestChangesRequeuedKey)
+		l.canonical.Orders[orderID] = node
+	}
+	delete(l.canonical.PendingReviews, orderID)
 	if strings.TrimSpace(pending.worktreeName) != "" {
 		_ = l.deps.Worktree.Cleanup(pending.worktreeName, worktree.CleanupOpts{Force: true})
 	}
@@ -147,22 +155,52 @@ func (l *Loop) controlRequestChanges(orderID, feedback string) error {
 		return nil
 	}
 
-	// Only an exact typed blocked terminal attempt gains restart recovery.
+	reason := "changes requested"
+	trimmedFeedback := strings.TrimSpace(feedback)
+	if trimmedFeedback != "" {
+		reason += ": " + trimmedFeedback
+	}
 	recoverable := false
 	review := l.canonical.PendingReviews[orderID]
 	outcome, outcomeErr := l.readRequiredStageOutcome(&cookHandle{cookIdentity: pending.cookIdentity, session: &adoptedSession{id: pending.sessionID}})
-	if outcomeErr == nil && outcome.Outcome == event.StageOutcomeBlocked {
+	_, hasIntent := l.canonical.Orders[orderID].Stages[pending.stageIndex].Extra[requestChangesKey]
+	if hasIntent || (outcomeErr == nil && recoverableReviewOutcome(outcome)) {
 		if l.canonical.Orders[orderID].Status.IsTerminal() {
-			return fmt.Errorf("request-changes order already failed; use edit-item then requeue")
+			review, err := l.requestChangesReview(orderID)
+			if err != nil {
+				return err
+			}
+			binding, err := recoveryBinding(l.canonical.Orders[orderID].Stages[review.StageIndex])
+			if err != nil || binding.Reason != reason {
+				return fmt.Errorf("request-changes prior intent differs")
+			}
+			if err := l.projectRecoveredOrder(orderID); err != nil {
+				return err
+			}
+			return l.syncPendingReviewProjection()
 		}
-		captured, err := l.captureRequestChanges(pending)
+		var captured requestChangesBinding
+		var err error
+		if _, exists := l.canonical.Orders[orderID].Stages[pending.stageIndex].Extra[requestChangesKey]; exists {
+			captured, err = recoveryBinding(l.canonical.Orders[orderID].Stages[pending.stageIndex])
+			if err == nil && captured.Reason != reason {
+				return fmt.Errorf("request-changes prior intent differs")
+			}
+		} else {
+			captured, err = l.captureRequestChanges(pending)
+		}
 		if err != nil {
 			return err
 		}
 		if err := l.validateRecovery(l.canonical.Orders[orderID], review, captured); err != nil {
 			return err
 		}
+		history, err := l.interruptionRetirement(review)
+		if err != nil {
+			return err
+		}
 		recoverable = true
+		captured.Reason = reason
 		raw, err := json.Marshal(captured)
 		if err != nil {
 			return err
@@ -172,17 +210,20 @@ func (l *Loop) controlRequestChanges(orderID, feedback string) error {
 			node.Stages[pending.stageIndex].Extra = map[string]json.RawMessage{}
 		}
 		node.Stages[pending.stageIndex].Extra[requestChangesKey] = raw
+		delete(node.Stages[pending.stageIndex].Extra, requestChangesRequeuedKey)
+		if history != nil {
+			node.Stages[pending.stageIndex].Extra[interruptionHistoryKey] = history
+			delete(node.Stages[pending.stageIndex].Extra, interruptionKey)
+		}
 		l.canonical.Orders[orderID] = node
 		if err := l.persistCanonicalCheckpoint(); err != nil {
 			return err
 		}
 	}
-
-	reason := "changes requested"
-	trimmedFeedback := strings.TrimSpace(feedback)
-	if trimmedFeedback != "" {
-		reason += ": " + trimmedFeedback
+	if recoverable && l.TestRequestChangesBarrier != nil {
+		l.TestRequestChangesBarrier()
 	}
+
 	mistake := newCookMistakeEnvelope(CookMistakeReasonRequestChanges, orderID, pending.stageIndex)
 	if err := l.emitEventChecked(ingest.EventStageReviewChangesRequested, map[string]any{
 		"order_id":    orderID,

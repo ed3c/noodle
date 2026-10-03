@@ -28,6 +28,9 @@ func (l *Loop) reconcile(ctx context.Context) error {
 			)
 		}
 	}
+	if err := l.reconcileRequestChangesProjection(); err != nil {
+		return fmt.Errorf("reconcile request-changes projection: %w", err)
+	}
 	if err := l.loadPendingReview(); err != nil {
 		return l.classifySystemHard(
 			"reconcile.load_pending_review",

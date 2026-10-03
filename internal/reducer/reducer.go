@@ -679,7 +679,9 @@ func reduceStageReviewChangesRequested(current state.State, event ingest.StateEv
 	order.Status = state.OrderFailed
 	order.UpdatedAt = event.Timestamp
 	next.Orders[payload.OrderID] = order
-	delete(next.PendingReviews, payload.OrderID)
+	if _, bound := stage.Extra[state.RequestChangesKey]; !bound {
+		delete(next.PendingReviews, payload.OrderID)
+	}
 	next.LastEventID = strconv.FormatUint(uint64(event.ID), 10)
 	return next, nil, nil
 }
