@@ -235,8 +235,10 @@ func captureInterruption(project, orderID, subject string) (interruptionIntent, 
 		}
 	}
 	for _, entry := range entries {
-		if !known[entry.Name()] && loopruntime.ReadSessionTarget(filepath.Join(dir, "sessions", entry.Name(), "prompt.txt")) != scheduleOrderID {
-			return i, fmt.Errorf("foreign session %s", entry.Name())
+		if !known[entry.Name()] {
+			if err := validateHistoricalScheduleSession(project, filepath.Join(dir, "sessions", entry.Name())); err != nil {
+				return i, fmt.Errorf("foreign session %s: %w", entry.Name(), err)
+			}
 		}
 	}
 	for _, name := range []string{"spawn.json", "prompt.txt", "events.ndjson", "process.json", "raw.ndjson"} {
@@ -364,6 +366,37 @@ func validateInterruptionLedger(s reducer.DurableSnapshot, orderID string) error
 		if !matched || (p.OrderID != orderID && p.OrderID != scheduleOrderID && !o.Status.IsTerminal()) {
 			return fmt.Errorf("pending dispatch requires original session readback")
 		}
+	}
+	return nil
+}
+
+func validateHistoricalScheduleSession(project, sessionDir string) error {
+	promptPath := filepath.Join(sessionDir, "prompt.txt")
+	if loopruntime.ReadSessionTarget(promptPath) != scheduleOrderID {
+		return fmt.Errorf("prompt does not identify scheduling owner")
+	}
+	data, err := readAdmissionFile(filepath.Join(sessionDir, "spawn.json"))
+	if err != nil {
+		return err
+	}
+	var spawn struct {
+		SessionID    string `json:"session_id"`
+		Skill        string `json:"skill"`
+		Runtime      string `json:"runtime"`
+		WorktreePath string `json:"worktree_path"`
+	}
+	if err := json.Unmarshal(data, &spawn); err != nil {
+		return err
+	}
+	if spawn.SessionID != filepath.Base(sessionDir) || spawn.Runtime != "process" || spawn.WorktreePath != project || strings.TrimSpace(spawn.Skill) == "" {
+		return fmt.Errorf("schedule spawn does not identify this control root")
+	}
+	prompt, err := readAdmissionFile(promptPath)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(string(prompt), "Use Skill("+spawn.Skill+")") {
+		return fmt.Errorf("schedule prompt differs from spawn skill")
 	}
 	return nil
 }
