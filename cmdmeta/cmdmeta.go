@@ -85,6 +85,7 @@ func Commands() []Command {
 			{Name: "retire", Short: "Retire an unchanged rejected initial proposal"},
 		}},
 		{Name: "publication", Short: "Bind supervised worktree custody for publication", Subcommands: []Command{
+			{Name: "reconcile", Short: "Complete the stopped original order from an already merged publication"},
 			{Name: "claim", Short: "Emit one exact read-only publication claim", Flags: []Flag{
 				{Name: "output", Type: "string", Desc: "Fresh absolute path for the claim JSON"},
 			}},
