@@ -98,6 +98,20 @@ All commands accept ` + "`--project-dir`" + ` (default: current directory, env: 
 
 ` + cmdmeta.StoppedReviewGuide + `
 
+### Already merged publication
+
+After the external landing owner confirms provider merge and closure and
+synchronizes the control checkout, stop the original loop and use:
+
+noodle --project-dir PROJECT publication reconcile CLAIM_PATH CLAIM_SHA256 MERGE_HEAD
+
+The claim is the original Noodle publication claim. This stopped owner verifies
+session absence, completed writer outcome, unchanged candidate custody and exact
+Git ancestry. It preserves failed attempts, cancels only an obsolete pending
+merge and records original-order completion. Re-enter the same command after an
+interrupted local projection; no merge, scheduler, writer or provider write runs.
+This local receipt does not authorize landing or replace provider readback.
+
 ### Skills & Schemas
 
 | Command | Description |

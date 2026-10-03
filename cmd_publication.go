@@ -20,6 +20,22 @@ func newPublicationCmd(app *App) *cobra.Command {
 		Short: cmdmeta.Short("publication"),
 	}
 	command.AddCommand(newPublicationClaimCmd(app))
+	command.AddCommand(&cobra.Command{
+		Use:   "reconcile CLAIM_PATH CLAIM_SHA256 MERGE_HEAD",
+		Short: cmdmeta.Short("publication", "reconcile"),
+		Args:  exactTrimmedArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			project, err := app.ProjectDir()
+			if err != nil {
+				return err
+			}
+			r, reconcileErr := loop.ReconcilePublication(project, args[0], args[1], args[2])
+			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(r); err != nil {
+				return err
+			}
+			return reconcileErr
+		},
+	})
 	return command
 }
 
