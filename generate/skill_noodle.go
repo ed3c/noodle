@@ -84,6 +84,8 @@ All commands accept ` + "`--project-dir`" + ` (default: current directory, env: 
 | ` + "`noodle start --once`" + ` | Run one scheduling cycle and exit |
 | ` + "`noodle status`" + ` | Show runtime status (active agents, queue depth, loop state) |
 | ` + "`noodle reset`" + ` | Clear all runtime state (refuses if loop is running) |
+| ` + "`noodle interruption inspect ORDER_ID SUBJECT`" + ` | Read original interruption custody and successor evidence |
+| ` + "`noodle interruption prepare ORDER_ID SUBJECT CUSTODY_SHA256`" + ` | Prepare one exact stopped execution for a successor without dispatching |
 
 ### Initial proposal recovery (P-class)
 
