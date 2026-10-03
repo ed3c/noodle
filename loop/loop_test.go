@@ -1120,6 +1120,33 @@ func TestReadSessionTargetDetectsSchedulePrompt(t *testing.T) {
 	}
 }
 
+func TestReadSessionTargetDetectsCurrentScheduleProducer(t *testing.T) {
+	for _, skill := range []string{"schedule", "project-planner"} {
+		t.Run(skill, func(t *testing.T) {
+			prompt := buildSchedulePrompt(skill, "/selected/skill", "", Order{}, "", "/project/.noodle", "", nil, nil)
+			cases := []struct{ name, prompt, want string }{
+				{"producer", prompt, "schedule"},
+				{"explicit_order", "[order:foreign]\n" + prompt, "foreign"},
+				{"bare_skill", "Use Skill(" + skill + ").", ""},
+				{"quoted_producer", "Task context:\n" + prompt, ""},
+				{"different_skill", strings.Replace(prompt, "- selected_skill: "+skill, "- selected_skill: execute", 1), ""},
+				{"wrong_checkout", strings.Replace(prompt, "primary-checkout", "worktree", 1), ""},
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					path := filepath.Join(t.TempDir(), "prompt.txt")
+					if err := os.WriteFile(path, []byte(tc.prompt), 0600); err != nil {
+						t.Fatal(err)
+					}
+					if got := loopruntime.ReadSessionTarget(path); got != tc.want {
+						t.Fatalf("target = %q, want %q", got, tc.want)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestCycleRemovesStaleAdoptedSlotsBeforeScheduling(t *testing.T) {
 	projectDir := t.TempDir()
 	runtimeDir := filepath.Join(projectDir, ".noodle")

@@ -89,9 +89,9 @@ func (s *recoveredSessionHandle) ID() string              { return s.id }
 func (s *recoveredSessionHandle) Status() string          { return s.status }
 func (s *recoveredSessionHandle) Outcome() SessionOutcome { return SessionOutcome{} }
 func (s *recoveredSessionHandle) TotalCost() float64      { return 0 }
-func (s *recoveredSessionHandle) Terminate() error    { return nil }
-func (s *recoveredSessionHandle) ForceKill() error    { return nil }
-func (s *recoveredSessionHandle) VerdictPath() string { return "" }
+func (s *recoveredSessionHandle) Terminate() error        { return nil }
+func (s *recoveredSessionHandle) ForceKill() error        { return nil }
+func (s *recoveredSessionHandle) VerdictPath() string     { return "" }
 func (s *recoveredSessionHandle) Controller() AgentController {
 	return dispatcher.NoopController()
 }
@@ -107,8 +107,9 @@ const scheduleOrderID = "schedule"
 
 // Prompt parsing patterns for extracting order IDs from session prompts.
 var (
-	promptOrderRegexp    = regexp.MustCompile(`(?im)^\[order:([^\]]+)\]`)
-	schedulePromptRegexp = regexp.MustCompile(`(?im)^\s*use skill\([^)]+\)\s+to refresh .+from \.noodle/mise\.json\.`)
+	promptOrderRegexp           = regexp.MustCompile(`(?im)^\[order:([^\]]+)\]`)
+	schedulePromptRegexp        = regexp.MustCompile(`(?im)^\s*use skill\([^)]+\)\s+to refresh .+from \.noodle/mise\.json\.`)
+	currentSchedulePromptRegexp = regexp.MustCompile(`\AUse Skill\(([^)\r\n]+)\)\. The selected skill is the single owner of project scheduling and output policy\.\n\nRuntime interface:\n- checkout_mode: primary-checkout\n- selected_skill: ([^\r\n]+)\n`)
 )
 
 // ReadSessionTarget extracts the order ID from a session's prompt file.
@@ -121,6 +122,10 @@ func ReadSessionTarget(promptPath string) string {
 	orderMatches := promptOrderRegexp.FindStringSubmatch(string(data))
 	if len(orderMatches) == 2 {
 		return strings.TrimSpace(orderMatches[1])
+	}
+
+	if matches := currentSchedulePromptRegexp.FindStringSubmatch(string(data)); len(matches) == 3 && matches[1] == matches[2] {
+		return scheduleOrderID
 	}
 
 	if schedulePromptRegexp.Match(data) {

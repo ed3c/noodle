@@ -447,7 +447,43 @@ func TestInterruptionRetainsDeclarativeScheduleDispatchHistory(t *testing.T) {
 	}
 	recoveryJSON(t, filepath.Join(session, "meta.json"), map[string]any{"session_id": "schedule-prior", "status": "exited", "runtime": "process"})
 	recoveryJSON(t, filepath.Join(session, "process.json"), map[string]any{"session_id": "schedule-prior", "pid": publicationTestProcess(t)})
-	recoveryWrite(t, filepath.Join(session, "prompt.txt"), []byte("[order:schedule] schedule original order"))
+	spawn := map[string]any{"session_id": "schedule-prior", "skill": "schedule", "runtime": "process", "worktree_path": project}
+	spawnPath := filepath.Join(session, "spawn.json")
+	promptPath := filepath.Join(session, "prompt.txt")
+	prompt := buildSchedulePrompt("schedule", "/selected/schedule", "", Order{}, "", dir, "", nil, nil)
+	recoveryJSON(t, spawnPath, spawn)
+	recoveryWrite(t, promptPath, []byte(prompt))
+	for _, field := range []string{"session_id", "skill", "runtime", "worktree_path"} {
+		t.Run("foreign_"+field, func(t *testing.T) {
+			original := spawn[field]
+			spawn[field] = "foreign"
+			recoveryJSON(t, spawnPath, spawn)
+			read := InspectInterruption(project, "/exact/noodle", "order-1", "example/project#7")
+			if read.Status != "refused" || !strings.Contains(read.Invalid, "foreign session schedule-prior") {
+				t.Fatalf("foreign schedule spawn accepted: %+v", read)
+			}
+			spawn[field] = original
+			recoveryJSON(t, spawnPath, spawn)
+		})
+	}
+	t.Run("missing_spawn", func(t *testing.T) {
+		if err := os.Remove(spawnPath); err != nil {
+			t.Fatal(err)
+		}
+		read := InspectInterruption(project, "/exact/noodle", "order-1", "example/project#7")
+		if read.Status != "refused" {
+			t.Fatalf("missing spawn accepted: %+v", read)
+		}
+		recoveryJSON(t, spawnPath, spawn)
+	})
+	t.Run("foreign_explicit_order", func(t *testing.T) {
+		recoveryWrite(t, promptPath, []byte("[order:foreign]\n"+prompt))
+		read := InspectInterruption(project, "/exact/noodle", "order-1", "example/project#7")
+		if read.Status != "refused" {
+			t.Fatalf("foreign order accepted: %+v", read)
+		}
+		recoveryWrite(t, promptPath, []byte(prompt))
+	})
 	read := InspectInterruption(project, "/exact/noodle", "order-1", "example/project#7")
 	if read.Status != "recoverable" {
 		t.Fatalf("declarative history rejected: %+v", read)
