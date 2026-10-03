@@ -14,6 +14,8 @@ import (
 	"github.com/poteto/noodle/internal/state"
 )
 
+const interruptionHistoryKey = "interrupted_execution_history"
+
 type InterruptionSuccessor struct {
 	AttemptID string `json:"attempt_id"`
 	SessionID string `json:"session_id"`
@@ -28,7 +30,21 @@ type interruptionDispatch struct {
 func interruptionStage(s state.State, i interruptionIntent) (state.StageNode, interruptionBinding, error) {
 	var b interruptionBinding
 	o, st, ok := s.LookupStage(i.Custody.OrderID, i.Custody.StageIndex)
-	if !ok || json.Unmarshal(st.Extra[interruptionKey], &b) != nil || b.Digest != i.Digest || b.Subject != i.Custody.Subject || b.PriorAttemptID != i.Custody.AttemptID {
+	raw := st.Extra[interruptionKey]
+	if len(raw) == 0 {
+		var history []interruptionBinding
+		if err := json.Unmarshal(st.Extra[interruptionHistoryKey], &history); err == nil {
+			for _, previous := range history {
+				if previous.Digest == i.Digest {
+					if len(raw) != 0 {
+						return st, b, fmt.Errorf("duplicate interruption history")
+					}
+					raw, _ = json.Marshal(previous)
+				}
+			}
+		}
+	}
+	if !ok || json.Unmarshal(raw, &b) != nil || b.Digest != i.Digest || b.Subject != i.Custody.Subject || b.PriorAttemptID != i.Custody.AttemptID {
 		return st, b, fmt.Errorf("original interruption binding differs")
 	}
 	var after reducer.DurableSnapshot
@@ -183,4 +199,48 @@ func interruptionProcessAbsent(dir, session string) error {
 		return fmt.Errorf("original session process or group is present")
 	}
 	return nil
+}
+
+func (l *Loop) interruptionRetirement(review state.PendingReviewNode) (json.RawMessage, error) {
+	stage := l.canonical.Orders[review.OrderID].Stages[review.StageIndex]
+	raw, active := stage.Extra[interruptionKey]
+	if !active {
+		return nil, nil
+	}
+	var binding interruptionBinding
+	if err := decodeStoppedReview(raw, &binding); err != nil {
+		return nil, err
+	}
+	path := interruptionPath(l.projectDir, review.OrderID, binding.Subject)
+	intent, err := readInterruptionIntent(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateInterruptionSession(l.projectDir, intent.Custody); err != nil {
+		return nil, err
+	}
+	current, err := readAdmissionFile(filepath.Join(l.runtimeDir, "state.snapshot.json"))
+	if err != nil {
+		return nil, err
+	}
+	successor, err := interruptionDispatchReadback(l.runtimeDir, path, intent, current)
+	if err != nil {
+		return nil, err
+	}
+	attempt := stage.Attempts[len(stage.Attempts)-1]
+	if successor == nil || successor.SessionID != review.SessionID || successor.AttemptID != attempt.AttemptID || attempt.Status != state.AttemptCompleted {
+		return nil, fmt.Errorf("interruption retirement requires its exact completed successor")
+	}
+	var history []interruptionBinding
+	if raw := stage.Extra[interruptionHistoryKey]; len(raw) != 0 {
+		if err := decodeStoppedReview(raw, &history); err != nil {
+			return nil, err
+		}
+	}
+	for _, previous := range history {
+		if previous.Digest == binding.Digest {
+			return nil, fmt.Errorf("interruption binding already retired")
+		}
+	}
+	return json.Marshal(append(history, binding))
 }

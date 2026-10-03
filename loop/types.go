@@ -232,4 +232,5 @@ type Loop struct {
 	TestFlushBarrier            func() // called between file writes in flushState()
 	TestInitialAdmissionBarrier func() // after initial admission checkpoint, before proposal removal
 	TestControlAckBarrier       func() // called between command processing and ack write in processControlCommands()
+	TestRequestChangesBarrier   func() // after custody checkpoint, before the review transition
 }

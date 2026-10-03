@@ -20,11 +20,18 @@ import (
 	"github.com/poteto/noodle/internal/state"
 )
 
-const requestChangesKey = "request_changes_recovery"
+const requestChangesKey = state.RequestChangesKey
+const requestChangesRequeuedKey = "request_changes_requeued"
+
+type requestChangesRequeued struct {
+	Binding requestChangesBinding   `json:"binding"`
+	Review  state.PendingReviewNode `json:"review"`
+}
 
 // Stored in existing stage Extra, so the checkpoint and order projection carry
 // the same custody binding. It authorizes only explicit edit-item and requeue.
 type requestChangesBinding struct {
+	Reason       string            `json:"reason,omitempty"`
 	SessionID    string            `json:"session_id"`
 	AttemptID    string            `json:"attempt_id"`
 	Attempt      int               `json:"attempt"`
@@ -164,8 +171,8 @@ func (l *Loop) validateRecovery(order state.OrderNode, review state.PendingRevie
 	if err != nil {
 		return err
 	}
-	if outcome.Outcome != event.StageOutcomeBlocked {
-		return fmt.Errorf("recovery requires exact typed blocked outcome")
+	if !recoverableReviewOutcome(outcome) {
+		return fmt.Errorf("recovery requires exact typed blocked or nonblocking completed outcome")
 	}
 	top, err := recoveryGit(b.WorktreePath, "rev-parse", "--show-toplevel")
 	if err != nil {
@@ -230,6 +237,12 @@ func (l *Loop) requestChangesReview(orderID string) (state.PendingReviewNode, er
 	if err := l.validateRecovery(order, review, b); err != nil {
 		return review, err
 	}
+	if b.Reason != "" {
+		if order.Stages[review.StageIndex].Attempts[b.Attempt].Error != b.Reason {
+			return review, fmt.Errorf("request-changes disposition differs from custody intent")
+		}
+		return review, nil
+	}
 	data, err := os.ReadFile(filepath.Join(l.runtimeDir, "loop-events.ndjson"))
 	if err != nil {
 		return review, err
@@ -250,8 +263,14 @@ func (l *Loop) preserveRequestChanges(orderID string) bool {
 	if err != nil || stage.Status != state.StageFailed || review.SessionID != b.SessionID {
 		return false
 	}
+	if b.Attempt < 0 || b.Attempt >= len(stage.Attempts) {
+		return false
+	}
+	if b.Reason != "" {
+		return stage.Attempts[b.Attempt].Error == b.Reason
+	}
 	outcome, err := l.readRequiredStageOutcome(&cookHandle{cookIdentity: cookIdentity{orderID: orderID, stageIndex: review.StageIndex}, session: &adoptedSession{id: b.SessionID}})
-	if err != nil || outcome.Outcome != event.StageOutcomeBlocked || b.Attempt < 0 || b.Attempt >= len(stage.Attempts) {
+	if err != nil || !recoverableReviewOutcome(outcome) {
 		return false
 	}
 	data, err := os.ReadFile(filepath.Join(l.runtimeDir, "loop-events.ndjson"))
@@ -475,7 +494,11 @@ func (l *Loop) editRequestChanges(cmd ControlCommand) error {
 // review mirror only copies lifecycle statuses and cannot restore absent orders.
 func (l *Loop) projectRecoveredOrder(id string) error {
 	node := l.canonical.Orders[id]
-	order := Order{ID: node.OrderID, Title: node.Title, Plan: node.Plan, Rationale: node.Rationale, Status: OrderStatusFailed}
+	status, remove := canonicalOrderStatusToLegacy(node.Status)
+	if remove {
+		return l.mirrorLegacyOrderFromCanonical(id)
+	}
+	order := Order{ID: node.OrderID, Title: node.Title, Plan: node.Plan, Rationale: node.Rationale, Status: status}
 	for _, s := range node.Stages {
 		order.Stages = append(order.Stages, Stage{TaskKey: s.TaskKey, Prompt: s.Prompt, Skill: s.Skill, Provider: s.Provider, Model: s.Model, Runtime: s.Runtime, Group: s.Group, Status: canonicalStageStatusToLegacy(s.Status), Extra: cloneLegacyExtra(s.Extra), ExtraPrompt: s.ExtraPrompt})
 	}
@@ -497,4 +520,87 @@ func recoveryJSONEqual(a, b any) bool {
 	left, leftErr := json.Marshal(a)
 	right, rightErr := json.Marshal(b)
 	return leftErr == nil && rightErr == nil && bytes.Equal(left, right)
+}
+
+func recoverableReviewOutcome(outcome *event.StageMessagePayload) bool {
+	return outcome != nil && (outcome.Outcome == event.StageOutcomeBlocked ||
+		(outcome.Outcome == event.StageOutcomeCompleted && !outcome.IsBlocking()))
+}
+
+func (l *Loop) requeueRequestChanges(orderID string) error {
+	review, err := l.requestChangesReview(orderID)
+	if err != nil {
+		return err
+	}
+	next := l.canonical.Clone()
+	order := next.Orders[orderID]
+	stage := &order.Stages[review.StageIndex]
+	binding, err := recoveryBinding(*stage)
+	if err != nil {
+		return err
+	}
+	if binding.Reason == "" {
+		// Legacy custody was validated against the original failure events above.
+		binding.Reason = stage.Attempts[binding.Attempt].Error
+	}
+	receipt, err := json.Marshal(requestChangesRequeued{Binding: binding, Review: review})
+	if err != nil {
+		return err
+	}
+	stage.Extra[requestChangesRequeuedKey] = receipt
+	stage.Status = state.StagePending
+	stage.Merge = nil
+	delete(stage.Extra, requestChangesKey)
+	order.Status = state.OrderActive
+	next.Orders[orderID] = order
+	delete(next.PendingReviews, orderID)
+	l.canonical = next
+	if err := l.persistCanonicalCheckpoint(); err != nil {
+		return err
+	}
+	if err := l.projectRecoveredOrder(orderID); err != nil {
+		return err
+	}
+	if err := l.syncPendingReviewProjection(); err != nil {
+		return err
+	}
+	return l.events.Emit(LoopEventOrderRequeued, OrderRequeuedPayload{OrderID: orderID})
+}
+
+func (l *Loop) readbackRequeuedRequestChanges(order state.OrderNode, stage state.StageNode) error {
+	var receipt requestChangesRequeued
+	if err := decodeStoppedReview(stage.Extra[requestChangesRequeuedKey], &receipt); err != nil {
+		return err
+	}
+	if receipt.Binding.Attempt < 0 || stage.Status != state.StagePending || len(stage.Attempts) != receipt.Binding.Attempt+1 || stage.Attempts[receipt.Binding.Attempt].Error != receipt.Binding.Reason {
+		return fmt.Errorf("request-changes requeue already progressed; original owner readback required")
+	}
+	if _, exists := l.canonical.PendingReviews[order.OrderID]; exists {
+		return fmt.Errorf("request-changes requeue still has pending review")
+	}
+	if err := l.validateRecovery(order, receipt.Review, receipt.Binding); err != nil {
+		return err
+	}
+	if err := l.projectRecoveredOrder(order.OrderID); err != nil {
+		return err
+	}
+	return l.syncPendingReviewProjection()
+}
+
+// Restore custody projections before startup can merge stale legacy orders back
+// into the checkpoint. A crash can leave the intent ahead of either projection.
+func (l *Loop) reconcileRequestChangesProjection() error {
+	for id, order := range l.canonical.Orders {
+		for _, stage := range order.Stages {
+			_, captured := stage.Extra[requestChangesKey]
+			_, requeued := stage.Extra[requestChangesRequeuedKey]
+			if captured || requeued {
+				if err := l.projectRecoveredOrder(id); err != nil {
+					return err
+				}
+				break
+			}
+		}
+	}
+	return nil
 }

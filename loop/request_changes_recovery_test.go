@@ -72,6 +72,11 @@ func TestRequestChangesRestartEditRequeue(t *testing.T) {
 // spy observes dispatch without starting a provider process.
 func newRequestChangesRecovery(t *testing.T) (*Loop, *cookHandle, requestChangesPacket) {
 	t.Helper()
+	return newRequestChangesRecoveryOutcome(t, event.StageOutcomeBlocked)
+}
+
+func newRequestChangesRecoveryOutcome(t *testing.T, outcome event.StageOutcome) (*Loop, *cookHandle, requestChangesPacket) {
+	t.Helper()
 	l, _, cook := newTypedOutcomeTestLoop(t)
 	runGitInRepo(t, l.projectDir, "init", "-b", "main")
 	runGitInRepo(t, l.projectDir, "config", "user.email", "test@noodle.dev")
@@ -79,7 +84,7 @@ func newRequestChangesRecovery(t *testing.T) (*Loop, *cookHandle, requestChanges
 	runGitInRepo(t, l.projectDir, "commit", "--allow-empty", "-m", "base")
 	runGitInRepo(t, l.projectDir, "worktree", "add", "-b", cook.worktreeName, cook.worktreePath)
 	runGitInRepo(t, cook.worktreePath, "commit", "--allow-empty", "-m", "candidate")
-	appendTypedOutcome(t, l, cook, event.StageOutcomeBlocked, true, cook.orderID, cook.stageIndex)
+	appendTypedOutcome(t, l, cook, outcome, outcome == event.StageOutcomeBlocked, cook.orderID, cook.stageIndex)
 	dir := filepath.Join(l.runtimeDir, "sessions", cook.session.ID())
 	recoveryWriteJSON(t, filepath.Join(dir, "spawn.json"), map[string]any{"session_id": cook.session.ID(), "worktree_path": cook.worktreePath, "retry_count": 0})
 	recoveryWriteJSON(t, filepath.Join(dir, "process.json"), map[string]any{"session_id": cook.session.ID(), "pid": 99999999})
@@ -618,5 +623,33 @@ func TestRequestChangesRecoveryAuthorityEndsAtRequeue(t *testing.T) {
 	}
 	if err := l.controlRequeue(c.orderID); err != nil {
 		t.Fatalf("stale recovery binding blocked generic requeue: %v", err)
+	}
+}
+
+func TestCompletedReviewCorrectionRestart(t *testing.T) {
+	l, cook, packet := newRequestChangesRecoveryOutcome(t, event.StageOutcomeCompleted)
+	before := recoverySessionBytes(t, l, cook.session.ID())
+	l = New(l.projectDir, "noodle", l.config, l.deps)
+	if err := l.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.controlEditItem(ControlCommand{OrderID: cook.orderID, Prompt: "integrate selected base"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.controlRequeue(cook.orderID); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	next := l.cooks.activeCooksByOrder[cook.orderID]
+	if next == nil || next.attempt != 1 || next.worktreePath != cook.worktreePath || next.session.ID() == cook.session.ID() {
+		t.Fatalf("successor: %+v", next)
+	}
+	if head := publicationOutput(t, cook.worktreePath, "git", "rev-parse", "HEAD"); head != packet.Binding.Head {
+		t.Fatalf("candidate moved: %s", head)
+	}
+	if !reflect.DeepEqual(before, recoverySessionBytes(t, l, cook.session.ID())) {
+		t.Fatal("rewrote completed outcome")
 	}
 }
