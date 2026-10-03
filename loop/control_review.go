@@ -95,6 +95,15 @@ func (l *Loop) controlReject(orderID string) error {
 	if err := l.ensureCanonicalOrderFromOrders(orderID); err != nil {
 		return err
 	}
+	// Explicit rejection revokes custody even when a prior request-changes
+	// already made the canonical order terminal and the reducer is a no-op.
+	node := l.canonical.Orders[orderID]
+	if pending.stageIndex >= 0 && pending.stageIndex < len(node.Stages) {
+		delete(node.Stages[pending.stageIndex].Extra, requestChangesKey)
+		delete(node.Stages[pending.stageIndex].Extra, requestChangesRequeuedKey)
+		l.canonical.Orders[orderID] = node
+	}
+	delete(l.canonical.PendingReviews, orderID)
 	if strings.TrimSpace(pending.worktreeName) != "" {
 		_ = l.deps.Worktree.Cleanup(pending.worktreeName, worktree.CleanupOpts{Force: true})
 	}

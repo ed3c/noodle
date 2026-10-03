@@ -388,3 +388,20 @@ func TestLegacyRequestChangesRequeueAckReadback(t *testing.T) {
 		t.Fatal("readback added attempt")
 	}
 }
+
+func TestCompletedReviewExplicitRejectionRevokesCustody(t *testing.T) {
+	l, cook, _ := newRequestChangesRecoveryOutcome(t, event.StageOutcomeCompleted)
+	if err := l.controlReject(cook.orderID); err != nil {
+		t.Fatal(err)
+	}
+	l = New(l.projectDir, "noodle", l.config, l.deps)
+	if err := l.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := l.canonical.Orders[cook.orderID]; exists {
+		t.Fatal("rejected correction retained")
+	}
+	if err := l.controlRequeue(cook.orderID); err == nil {
+		t.Fatal("rejected correction requeued")
+	}
+}

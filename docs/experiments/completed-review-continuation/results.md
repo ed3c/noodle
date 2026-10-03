@@ -74,3 +74,15 @@ Observed results on 2026-10-03:
 Old bindings omit reason. The requeue owner first validates their original
 failure events, then copies the exact attempt disposition into the new requeue
 receipt. This preserves legacy readback without accepting an arbitrary error.
+
+The final compatibility selection also ran TestControlRequestChanges*,
+TestControlReject*, TestReconcileFailedRequestChangesLegalTerminalArchive and
+TestCompletedReviewExplicitRejectionRevokesCustody. It passed under race checking
+in 4.443 s. The unbound review control confirms ordinary review removal.
+
+The legacy archive fixture now explicitly omits reason. Legacy diagnostic-event
+validation remains unchanged. A new persisted intent retains invalid session
+evidence for diagnosis and refuses further edits or requeue. An explicit reject
+revokes that custody through the existing reject owner. A diagnostic log alone
+does not revoke a durable intent. This distinction closes the checkpoint-to-log
+interruption window without turning missing evidence into continuation authority.

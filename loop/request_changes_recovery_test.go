@@ -444,6 +444,18 @@ func TestReconcileFailedRequestChangesLegalTerminalArchive(t *testing.T) {
 	for _, terminal := range []string{"explicit rejection", "nonrecoverable failure", "missing typed outcome", "mismatched typed outcome"} {
 		t.Run(terminal, func(t *testing.T) {
 			l, c, p := newRequestChangesRecovery(t)
+			// Legacy custody used diagnostic events instead of a persisted reason.
+			p.Binding.Reason = ""
+			raw, _ := json.Marshal(p.Binding)
+			node := l.canonical.Orders[c.orderID]
+			node.Stages[0].Extra[requestChangesKey] = raw
+			l.canonical.Orders[c.orderID] = node
+			if err := l.persistCanonicalCheckpoint(); err != nil {
+				t.Fatal(err)
+			}
+			if err := l.projectRecoveredOrder(c.orderID); err != nil {
+				t.Fatal(err)
+			}
 			switch terminal {
 			case "explicit rejection":
 				if err := l.controlReject(c.orderID); err != nil {
