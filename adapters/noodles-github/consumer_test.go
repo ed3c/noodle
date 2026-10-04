@@ -19,9 +19,10 @@ import (
 )
 
 const (
-	testBaseSHA       = "1111111111111111111111111111111111111111"
-	testSender        = "ed3c-noodles-protection-audit[bot]"
-	testCommentAuthor = "github-actions[bot]"
+	testBaseSHA          = "1111111111111111111111111111111111111111"
+	testSourceRepository = "ed3c/soodles"
+	testSender           = "ed3c-noodles-protection-audit[bot]"
+	testCommentAuthor    = "github-actions[bot]"
 )
 
 type fakeGitHub struct {
@@ -276,7 +277,7 @@ func bodySHA(body string) string {
 
 func testPayload(number int, body string) DispatchPayload {
 	return DispatchPayload{
-		SourceRepository:  sourceRepository,
+		SourceRepository:  testSourceRepository,
 		Target:            targetRepository,
 		Subject:           fmt.Sprintf("%s#%d", targetRepository, number),
 		SubjectBodySHA256: bodySHA(body),
@@ -305,11 +306,11 @@ func testPolicy() Policy {
 	return Policy{
 		SchemaVersion:              1,
 		Repository:                 targetRepository,
-		AllowedRepositories:        []string{targetRepository, sourceRepository},
+		AllowedRepositories:        []string{targetRepository, testSourceRepository},
+		SourceBindings:             []SourceBinding{{Repository: testSourceRepository, Sender: testSender}},
 		DefaultBranch:              defaultBranch,
 		PushRemote:                 "provider",
 		CrossRepositoryStatus:      crossRepositoryAdmitted,
-		RepositoryDispatchSender:   testSender,
 		AuthorizationCommentAuthor: testCommentAuthor,
 	}
 }
@@ -346,6 +347,58 @@ func TestNoodlesDispatchAdmission(t *testing.T) {
 	}
 }
 
+func TestConfiguredSourceFlowsThroughReceiveSyncAndSchedule(t *testing.T) {
+	policy := testPolicy()
+	const anotherSender = "another-source[bot]"
+	policy.SourceBindings = append(policy.SourceBindings, SourceBinding{Repository: "ed3c/another-source", Sender: anotherSender})
+	policy.AllowedRepositories = append(policy.AllowedRepositories, "ed3c/another-source")
+	body := issueBody(17)
+	fake := newFakeGitHub(t, Issue{Number: 17, Title: "Target issue", State: "open", Body: body})
+	payload := testPayload(17, body)
+	payload.SourceRepository = "ed3c/another-source"
+	if _, err := Receive(context.Background(), fake.client(), policy, testCapabilities(), testEvent(t, payload, testSender), testBaseSHA); err == nil || fake.commentPosts != 0 {
+		t.Fatalf("source/sender cross-pair must refuse without a write, err=%v posts=%d", err, fake.commentPosts)
+	}
+	if _, err := Receive(context.Background(), fake.client(), policy, testCapabilities(), testEvent(t, payload, anotherSender), testBaseSHA); err != nil {
+		t.Fatal(err)
+	}
+	items, diagnostics, err := Sync(context.Background(), fake.client(), policy, testCapabilities())
+	if err != nil || len(items) != 1 || len(diagnostics) != 0 {
+		t.Fatalf("items=%#v diagnostics=%#v err=%v", items, diagnostics, err)
+	}
+	root := t.TempDir()
+	writeTargetScheduleInputs(t, root, items, orderx.OrdersFile{Orders: []orderx.Order{{ID: "schedule"}}})
+	if err := scheduleTargetOrder(root, policy); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".noodle", "orders-next.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	orders, err := orderx.ParseCompactOrders(data)
+	if err != nil || len(orders.Orders) != 1 || orders.Orders[0].ID != payload.Subject {
+		t.Fatalf("orders=%#v err=%v", orders, err)
+	}
+}
+
+func TestSourcePolicyRejectsUnlistedAndDuplicateRepositories(t *testing.T) {
+	for _, mutate := range []func(*Policy){
+		func(p *Policy) { p.SourceBindings = nil },
+		func(p *Policy) {
+			p.SourceBindings = append(p.SourceBindings, SourceBinding{Repository: testSourceRepository, Sender: "other[bot]"})
+		},
+		func(p *Policy) { p.AllowedRepositories = append(p.AllowedRepositories, "ed3c/other") },
+		func(p *Policy) { p.SourceBindings = []SourceBinding{{Repository: "bad source", Sender: testSender}} },
+		func(p *Policy) { p.SourceBindings[0].Sender = " " },
+	} {
+		policy := testPolicy()
+		mutate(&policy)
+		if err := validatePolicy(policy); err == nil {
+			t.Fatalf("invalid source policy accepted: %#v", policy)
+		}
+	}
+}
+
 func TestNoodlesDispatchAdmissionDoesNotReuseForgedComment(t *testing.T) {
 	body := issueBody(17)
 	fake := newFakeGitHub(t, Issue{Number: 17, Title: "Target issue", State: "open", Body: body})
@@ -376,7 +429,8 @@ func TestNoodlesDispatchAdmissionPlantedNegativesLeaveNoResidue(t *testing.T) {
 		mutate func(*DispatchPayload, *Policy, *string)
 	}{
 		{"wrong target", func(p *DispatchPayload, _ *Policy, _ *string) { p.Target = "ed3c/other" }},
-		{"foreign subject", func(p *DispatchPayload, _ *Policy, _ *string) { p.Subject = "ed3c/noodles#17" }},
+		{"foreign subject", func(p *DispatchPayload, _ *Policy, _ *string) { p.Subject = "ed3c/other#17" }},
+		{"unlisted source", func(p *DispatchPayload, _ *Policy, _ *string) { p.SourceRepository = "ed3c/other" }},
 		{"stale digest", func(p *DispatchPayload, _ *Policy, _ *string) { p.SubjectBodySHA256 = strings.Repeat("0", 64) }},
 		{"stale base", func(p *DispatchPayload, _ *Policy, _ *string) { p.BaseSHA = strings.Repeat("2", 40) }},
 		{"wrong sender", func(_ *DispatchPayload, _ *Policy, sender *string) { *sender = "wrong[bot]" }},
@@ -416,7 +470,7 @@ func TestNoodlesGitHubTargetConsumerRejectsForeignSubject(t *testing.T) {
 		Sender:        testSender,
 		Declaration:   testPayload(17, body),
 	}
-	receipt.Declaration.Subject = "ed3c/noodles#17"
+	receipt.Declaration.Subject = "ed3c/other#17"
 	receipt.DispatchIdentity, _ = DispatchIdentity(receipt.Declaration)
 	fake.comments[17] = []Comment{trustedComment(1, FormatAuthorization(receipt))}
 
@@ -462,6 +516,15 @@ func TestNoodlesGitHubTargetConsumer(t *testing.T) {
 
 func TestTargetScheduleMaterializesExactAuthorizedRow(t *testing.T) {
 	root := t.TempDir()
+	policyPath := filepath.Join(root, "github-policy.json")
+	policyBytes, err := json.Marshal(testPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(policyPath, policyBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NOODLES_GITHUB_POLICY", policyPath)
 	item := testBacklogItem(t, 17)
 	writeTargetScheduleInputs(t, root, []BacklogItem{item}, orderx.OrdersFile{Orders: []orderx.Order{{ID: "schedule"}}})
 	t.Chdir(root)
@@ -497,7 +560,7 @@ func TestTargetScheduleWritesEmptyWhenAuthorizedRowsAreOwned(t *testing.T) {
 	root := t.TempDir()
 	item := testBacklogItem(t, 17)
 	writeTargetScheduleInputs(t, root, []BacklogItem{item}, orderx.OrdersFile{Orders: []orderx.Order{{ID: item.ID}}})
-	if err := scheduleTargetOrder(root); err != nil {
+	if err := scheduleTargetOrder(root, testPolicy()); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(root, ".noodle", "orders-next.json"))
@@ -516,7 +579,13 @@ func TestTargetScheduleRefusesInvalidRowsBeforeReplacement(t *testing.T) {
 		backlog any
 	}{
 		{name: "literal row placeholder", backlog: []any{"__ROW__"}},
-		{name: "foreign row", backlog: []BacklogItem{func() BacklogItem { item := valid; item.ID = "ed3c/noodles#17"; return item }()}},
+		{name: "foreign row", backlog: []BacklogItem{func() BacklogItem { item := valid; item.ID = "ed3c/other#17"; return item }()}},
+		{name: "unlisted source", backlog: []BacklogItem{func() BacklogItem {
+			item := valid
+			item.Authorization.Declaration.SourceRepository = "ed3c/other"
+			item.Authorization.DispatchIdentity, _ = DispatchIdentity(item.Authorization.Declaration)
+			return item
+		}()}},
 		{name: "missing execution skill", backlog: []BacklogItem{func() BacklogItem { item := valid; item.ExecutionSkill = ""; return item }()}},
 		{name: "authorization mismatch", backlog: []BacklogItem{func() BacklogItem {
 			item := valid
@@ -547,7 +616,7 @@ func TestTargetScheduleRefusesInvalidRowsBeforeReplacement(t *testing.T) {
 			if err := os.WriteFile(nextPath, []byte(sentinel), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := scheduleTargetOrder(root); err == nil {
+			if err := scheduleTargetOrder(root, testPolicy()); err == nil {
 				t.Fatal("invalid target row must be rejected")
 			}
 			got, err := os.ReadFile(nextPath)
@@ -584,7 +653,7 @@ func TestTargetScheduleRejectsMalformedMiseBeforeReplacement(t *testing.T) {
 	if err := os.WriteFile(nextPath, []byte(sentinel), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := scheduleTargetOrder(root); err == nil || !strings.Contains(err.Error(), "decode target mise") {
+	if err := scheduleTargetOrder(root, testPolicy()); err == nil || !strings.Contains(err.Error(), "decode target mise") {
 		t.Fatalf("malformed mise refusal = %v", err)
 	}
 	got, err := os.ReadFile(nextPath)
@@ -714,7 +783,7 @@ func TestDispatchIdentityMatchesSourceCanonicalJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if identity != "72755299ac23feef9c801a685ef64691870ae654857296fefe37e5cfb177b63b" {
+	if identity != "840683e5d5fb78fcbeb1494eed6cc36e226a8b8227bf75edcb728e638bf1fc21" {
 		t.Fatalf("identity = %s", identity)
 	}
 }
@@ -750,7 +819,7 @@ func TestDoneIsProviderReadOnlyAndTargetScoped(t *testing.T) {
 	if err := run(context.Background(), []string{"done", "ed3c/noodle#17"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := run(context.Background(), []string{"done", "ed3c/noodles#17"}); err == nil {
+	if err := run(context.Background(), []string{"done", "ed3c/other#17"}); err == nil {
 		t.Fatal("foreign completion subject must be rejected")
 	}
 }
