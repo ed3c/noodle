@@ -143,10 +143,12 @@ func TestProcessDispatcherWritesActualSelectedMethodAtOSLaunch(t *testing.T) {
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	required := sha256.Sum256([]byte(entry))
 	session, err := d.Dispatch(ctx, DispatchRequest{
 		Name: "fixture", Prompt: "a bounded synthetic issue",
 		Skill: "poteto-mode", Provider: "codex", Model: "test-model",
 		WorktreePath: worktree,
+		RequiredSkillSHA256: hex.EncodeToString(required[:]),
 	})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
@@ -156,6 +158,8 @@ func TestProcessDispatcherWritesActualSelectedMethodAtOSLaunch(t *testing.T) {
 	receipt := decodeSkillInputReceipt(t, filepath.Join(path, "skill-input.json"))
 	if !receipt.OSProcessLaunched || receipt.ProcessPID <= 0 ||
 		receipt.WorktreePath != worktree ||
+		!receipt.RequiredSkillPinMatched ||
+		receipt.RequiredSkillSHA256 != hex.EncodeToString(required[:]) ||
 		receipt.SelectionMode != "RESOLVED_SKILL_EMBEDDED" ||
 		receipt.SelectedSkillPath != dir || receipt.SelectedSourcePath != search {
 		t.Fatalf("worker dispatch receipt is not actual selected method: %+v", receipt)
