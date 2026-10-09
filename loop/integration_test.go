@@ -210,6 +210,10 @@ func seedCanonicalFromOrders(l *Loop, orders OrdersFile) {
 				Status:     legacyStageToCanonicalStatus(string(stage.Status)),
 				Skill:      stage.Skill,
 				Runtime:    stage.Runtime,
+				// Match production synthesizeCanonicalState. Omitting Extra
+				// silently dropped Stage-level pin/owner metadata on the
+				// next projection in an otherwise correct integration test.
+				Extra:      cloneLegacyExtra(stage.Extra),
 			})
 		}
 		canonicalOrders[order.ID] = state.OrderNode{
