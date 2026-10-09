@@ -36,6 +36,9 @@ jobs:
       - name: Verify normalized Skill tree pins
         run: go test ./skill -run '^TestTreeSHA256' -count=1 -v
 
+      - name: Verify strict Skill dispatch refusal controls
+        run: go test ./dispatcher -run '^TestRequiredSkill' -count=1 -v
+
       - name: Test
         run: go test ./...
 
