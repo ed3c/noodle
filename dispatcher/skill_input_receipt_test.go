@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -113,7 +114,27 @@ func TestProcessDispatcherWritesActualSelectedMethodAtOSLaunch(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "references", "guide.md"), []byte("guide text"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	worktree := t.TempDir()
+	// Exercise the actual Noodle linked-worktree admission boundary,
+	// not the opt-in primary checkout exception.
+	repository := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		command := exec.Command("git", args...)
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	git("init", "-q", "-b", "main", repository)
+	git("-C", repository, "config", "user.email", "fixture@example.invalid")
+	git("-C", repository, "config", "user.name", "Noodle Test")
+	if err := os.WriteFile(filepath.Join(repository, "README.md"), []byte("base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("-C", repository, "add", "README.md")
+	git("-C", repository, "commit", "-qm", "initial")
+	worktree := filepath.Join(t.TempDir(), "selected-worktree")
+	git("-C", repository, "worktree", "add", "-q", "-b", "selected", worktree)
 	runtimeDir := filepath.Join(t.TempDir(), ".noodle")
 	d := NewProcessDispatcher(ProcessDispatcherConfig{
 		ProjectDir: worktree, RuntimeDir: runtimeDir,
@@ -125,7 +146,7 @@ func TestProcessDispatcherWritesActualSelectedMethodAtOSLaunch(t *testing.T) {
 	session, err := d.Dispatch(ctx, DispatchRequest{
 		Name: "fixture", Prompt: "a bounded synthetic issue",
 		Skill: "poteto-mode", Provider: "codex", Model: "test-model",
-		WorktreePath: worktree, AllowPrimaryCheckout: true,
+		WorktreePath: worktree,
 	})
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
@@ -134,6 +155,7 @@ func TestProcessDispatcherWritesActualSelectedMethodAtOSLaunch(t *testing.T) {
 	path := filepath.Join(runtimeDir, "sessions", session.ID())
 	receipt := decodeSkillInputReceipt(t, filepath.Join(path, "skill-input.json"))
 	if !receipt.OSProcessLaunched || receipt.ProcessPID <= 0 ||
+		receipt.WorktreePath != worktree ||
 		receipt.SelectionMode != "RESOLVED_SKILL_EMBEDDED" ||
 		receipt.SelectedSkillPath != dir || receipt.SelectedSourcePath != search {
 		t.Fatalf("worker dispatch receipt is not actual selected method: %+v", receipt)
