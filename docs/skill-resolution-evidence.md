@@ -30,6 +30,14 @@ This path only pins the **Noodle Stage's directly selected `Skill`**. For Soodle
 
 The focused Noodle test executes a real original `orders.json → Loop.Cycle → spawnCook → Runtime.Dispatch` using the existing mock runtime, and verifies the original Stage pair is preserved byte-for-byte in the emitted request and retained Order. A malformed half-pair refuses before any Worktree or runtime interaction. These are bounded ordering/serialization controls, not a full live-agent delivery.
 
+## Strict Skill pins and the independent Schedule Stage
+
+The Noodle `schedule` Stage has a **separate `spawnSchedule` route**, not the same direct Worktree/ProcessDispatcher path as a normal Issue Worker. Previously its special-case entry bypassed `stageRequiredSkillPins`, so a selected Schedule Stage carrying mandatory raw/tree Skill Pins could silently proceed with its legacy behavior.
+
+The original `spawnSchedule` now checks the Stage pin pair **before resetting promotion state, rebuilding the Skill registry, bootstrapping or dispatching**. A malformed pair gives the existing named Stage-input error; even a valid pair is refused with `schedule Stage does not support mandatory Skill pins`. This is deliberate: the scheduler's own prompt/bootstrap/lifecycle has not been independently shown to implement these strict pin constraints. Existing unpinned scheduling remains unchanged, with no newly granted authority. Negative tests exercise both direct `spawnSchedule` and the special `spawnCook` path, and confirm no Worker/Worktree effects.
+
+**Trust ceiling:** A Stage `Extra` field is not proof that the Soodles Supervisor selected these values; orders may be prepared by other producers. Enforcing the supplied digest prevents changed method bytes, but cannot authenticate who selected the digest. Original Soodles Owner selection and actual Worker Skill-readback are independent gates.
+
 ## Actual Noodle OS process input receipt (new bounded stage)
 
 Noodle's **process dispatcher** additionally stores `.noodle/sessions/<session>/skill-input.json` with:
