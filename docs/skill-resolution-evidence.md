@@ -14,6 +14,14 @@ An empty discovered set gives `NO_SKILLS_DISCOVERED` and a nonzero exit status. 
 
 Old `noodle skills list` without `--json` is unchanged: TSV with the winning source and first-match-wins behavior. A machine consumer should explicitly request `--json` and check its status and exit code, not parse human output.
 
+## Optional required Factory Skill policy at original Noodle dispatch
+
+The existing `dispatcher.DispatchRequest` now accepts **two jointly required original-dispatch-input pins**, `RequiredSkillSHA256` (raw `SKILL.md`) and `RequiredSkillTreeSHA256` (entire normalized Skill folder). When **both are absent**, the original Noodle behavior, including its warning-only missing-method fallback and explicit `SystemPrompt` override, remains unchanged for general tasks.
+
+When either pin is supplied, the original `resolveSkillBundle` refuses before OS process launch unless **both** are valid lowercase 64-hex SHA256 values, the named Skill is present, its `SKILL.md` and entire tree match the pins, no second search-path provider shadows it, no `SystemPrompt` override is present, and the selected method had no incomplete/truncated reference warnings. The checked raw and tree digests are recorded as required inputs in the same original `skill-input.json` session receipt.
+
+**Authority boundary:** This is an opt-in Noodle dispatcher *capability*, not currently activated for Soodles #305. A Writer/Agent-supplied pin is not original Owner authority, and the public FactoryWeaver Profile is still a Draft. The original Soodles Supervisor/Carrier owner must independently select the exact pins and ensure its native Noodle launch actually passes them. This does not prove global/user/system Agent Skill exclusion, nor grant any PR effect.
+
 ## Actual Noodle OS process input receipt (new bounded stage)
 
 Noodle's **process dispatcher** additionally stores `.noodle/sessions/<session>/skill-input.json` with:
