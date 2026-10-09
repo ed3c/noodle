@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/poteto/noodle/internal/filex"
+	"github.com/poteto/noodle/skill"
 )
 
 // skillInputReceipt describes Noodle's prompt assembly and OS process-launch
@@ -26,6 +27,7 @@ type skillInputReceipt struct {
 	SelectedSkillPath              string   `json:"selected_skill_path,omitempty"`
 	SelectedSkillMDSHA256          string   `json:"selected_skill_md_sha256,omitempty"`
 	RequiredSkillSHA256            string   `json:"required_skill_sha256,omitempty"`
+	RequiredSkillTreeSHA256        string   `json:"required_skill_tree_sha256,omitempty"`
 	RequiredSkillPinMatched        bool     `json:"required_skill_pin_matched"`
 	MethodologyPromptSHA256        string   `json:"methodology_prompt_sha256"`
 	ComposedInputSHA256            string   `json:"composed_input_sha256"`
@@ -67,6 +69,7 @@ func writePreparedSkillInputReceipt(sessionDir, sessionID string, req DispatchRe
 		SelectedSkillPath: loaded.ResolvedPath,
 		SelectedSkillMDSHA256: loaded.EntrySHA256,
 		RequiredSkillSHA256: req.RequiredSkillSHA256,
+		RequiredSkillTreeSHA256: req.RequiredSkillTreeSHA256,
 		RequiredSkillPinMatched: req.RequiredSkillSHA256 != "" &&
 			loaded.EntrySHA256 == req.RequiredSkillSHA256 &&
 			loaded.ResolvedPath != "" && len(loaded.Warnings) == 0 &&
@@ -179,10 +182,16 @@ func readSkillInputReadback(sessionDir, sessionID, expectedSkill, expectedWorktr
 		prepared.SelectedSkillPath == "" || prepared.SelectedSkillMDSHA256 == "" {
 		return skillInputReadback{}, fmt.Errorf("session mandatory selected Skill not embedded")
 	}
-	if prepared.RequiredSkillSHA256 != "" &&
-		(!prepared.RequiredSkillPinMatched ||
-			prepared.RequiredSkillSHA256 != prepared.SelectedSkillMDSHA256) {
-		return skillInputReadback{}, fmt.Errorf("session required Skill source pin mismatch")
+	if prepared.RequiredSkillSHA256 != "" || prepared.RequiredSkillTreeSHA256 != "" {
+		if !prepared.RequiredSkillPinMatched ||
+			prepared.RequiredSkillSHA256 != prepared.SelectedSkillMDSHA256 ||
+			prepared.RequiredSkillTreeSHA256 == "" {
+			return skillInputReadback{}, fmt.Errorf("session required Skill source pin mismatch")
+		}
+		tree, err := skill.TreeSHA256(prepared.SelectedSkillPath)
+		if err != nil || tree != prepared.RequiredSkillTreeSHA256 {
+			return skillInputReadback{}, fmt.Errorf("session required Skill tree pin mismatch")
+		}
 	}
 	selectedBytes, err := os.ReadFile(filepath.Join(prepared.SelectedSkillPath, "SKILL.md"))
 	if err != nil {
