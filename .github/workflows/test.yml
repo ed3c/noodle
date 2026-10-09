@@ -34,6 +34,9 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Verify fixed private oracle reader without network or credentials
+        run: python3 -m unittest discover -s scripts -p 'test_fixed_soodles_oracle.py' -v
+
       - name: Vet
         run: go vet ./...
 
