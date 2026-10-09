@@ -74,6 +74,51 @@ func TestSkillInputReceiptKeepsPreparedAndLaunchedEvidenceSeparate(t *testing.T)
 	}
 }
 
+func TestSkillInputReceiptRejectsAmbiguousLaunchFields(t *testing.T) {
+	dir := t.TempDir()
+	if err := writePreparedSkillInputReceipt(dir, "session-test", DispatchRequest{}, loadedSkill{}, "input"); err != nil {
+		t.Fatal(err)
+	}
+	path := skillReceiptPath(dir)
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, extra string }{
+		{"conflicting-session", `"session_id":"foreign-session",`},
+		{"identical-session", `"session_id":"session-test",`},
+		{"case-alias-session", `"SESSION_ID":"foreign-session",`},
+		{"unicode-case-alias-session", `"ſeſſion_id":"foreign-session",`},
+		{"escaped-session", `"session\u005fid":"foreign-session",`},
+		{"conflicting-phase", `"phase":"OS_PROCESS_LAUNCHED_NOT_AGENT_ATTESTED",`},
+		{"conflicting-pid", `"process_pid":999,`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tampered := append([]byte("{"+tc.extra), original[1:]...)
+			if err := os.WriteFile(path, tampered, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := markSkillInputProcessLaunched(dir, "session-test", 77); err == nil || !strings.Contains(err.Error(), "ambiguous receipt field") {
+				t.Errorf("ambiguous prepared receipt was promoted to launched: %v", err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != string(tampered) {
+				t.Error("refused receipt was rewritten")
+			}
+		})
+	}
+	compatible := append([]byte(`{"future_extension":{"note":"compatible"},`), original[1:]...)
+	if err := os.WriteFile(path, compatible, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := markSkillInputProcessLaunched(dir, "session-test", 77); err != nil {
+		t.Fatalf("unambiguous extended producer receipt was refused: %v", err)
+	}
+}
+
 func TestSkillInputReceiptDisclosesMissingMethodAndOverrides(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -201,6 +246,29 @@ func TestProcessDispatcherWritesActualSelectedMethodAtOSLaunch(t *testing.T) {
 				t.Fatal("foreign input identity was promoted into original Noodle receipt")
 			}
 		})
+	}
+	for _, file := range []string{"skill-input.json", "spawn.json", "process.json"} {
+		for _, field := range []string{"session_id", "SESSION_ID", "ſeſſion_id", `session\u005fid`} {
+			t.Run("ambiguous-"+file+"-"+field, func(t *testing.T) {
+				filePath := filepath.Join(path, file)
+				original, err := os.ReadFile(filePath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					if err := os.WriteFile(filePath, original, 0o644); err != nil {
+						t.Error(err)
+					}
+				}()
+				tampered := append([]byte(`{"`+field+`":"foreign-session",`), original[1:]...)
+				if err := os.WriteFile(filePath, tampered, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := readSkillInputReadback(path, session.ID(), "poteto-mode", worktree); err == nil || !strings.Contains(err.Error(), "ambiguous receipt field") {
+					t.Errorf("ambiguous session evidence was accepted: %v", err)
+				}
+			})
+		}
 	}
 	// Independent falsifiers: alter each on-disk source and prove the reader
 	// refuses, then restore it without changing the original session.
