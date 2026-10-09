@@ -24,6 +24,8 @@ func TestRequiredSkillRefusesBeforeProcessLaunch(t *testing.T) {
 	}
 	digest := sha256.Sum256(source)
 	pin := hex.EncodeToString(digest[:])
+	treePin, err := skill.TreeSHA256(method)
+	if err != nil { t.Fatal(err) }
 	root := filepath.Join(t.TempDir(), ".noodle")
 	d := NewProcessDispatcher(ProcessDispatcherConfig{
 		ProjectDir: t.TempDir(), RuntimeDir: root, RuntimeKind: "process",
@@ -35,12 +37,16 @@ func TestRequiredSkillRefusesBeforeProcessLaunch(t *testing.T) {
 		Provider: "codex", Model: "test-model",
 		WorktreePath: t.TempDir(), AllowPrimaryCheckout: true,
 		Skill: "poteto-mode", RequiredSkillSHA256: pin,
+		RequiredSkillTreeSHA256: treePin,
 	}
 	cases := []struct {
 		name string
 		mutate func(*DispatchRequest)
 	}{
 		{"wrong_pin", func(req *DispatchRequest) { req.RequiredSkillSHA256 = strings.Repeat("0", 64) }},
+		{"wrong_tree_pin", func(req *DispatchRequest) { req.RequiredSkillTreeSHA256 = strings.Repeat("0", 64) }},
+		{"missing_tree_pin", func(req *DispatchRequest) { req.RequiredSkillTreeSHA256 = "" }},
+		{"tree_without_raw_pin", func(req *DispatchRequest) { req.RequiredSkillSHA256 = "" }},
 		{"unversioned_pin", func(req *DispatchRequest) { req.RequiredSkillSHA256 = "main" }},
 		{"wrong_skill", func(req *DispatchRequest) { req.Skill = "builder-bug-factory" }},
 		{"missing_skill_name", func(req *DispatchRequest) { req.Skill = "" }},
@@ -85,7 +91,11 @@ func TestRequiredSkillRejectsShadowedProvidersAndTruncatedRefs(t *testing.T) {
 		}
 	}
 	h := sha256.Sum256([]byte("identical entry"))
-	req := DispatchRequest{Skill: name, Provider: "codex", RequiredSkillSHA256: hex.EncodeToString(h[:])}
+	firstTree, err := skill.TreeSHA256(filepath.Join(first, name))
+	if err != nil { t.Fatal(err) }
+	req := DispatchRequest{Skill: name, Provider: "codex",
+		RequiredSkillSHA256: hex.EncodeToString(h[:]),
+		RequiredSkillTreeSHA256: firstTree}
 	// Same content digest must not legitimize an ambiguous first-match provider.
 	_, err := resolveSkillBundle(skill.Resolver{SearchPaths: []string{first, second}}, req)
 	if err == nil || !strings.Contains(err.Error(), "shadowed") {
@@ -93,11 +103,13 @@ func TestRequiredSkillRejectsShadowedProvidersAndTruncatedRefs(t *testing.T) {
 	}
 	// Existing no-pin tasks retain the original first-match winner.
 	req.RequiredSkillSHA256 = ""
+	req.RequiredSkillTreeSHA256 = ""
 	legacy, err := resolveSkillBundle(skill.Resolver{SearchPaths: []string{first, second}}, req)
 	if err != nil || legacy.ResolvedPath != filepath.Join(first, name) {
 		t.Fatalf("legacy first-match behavior changed: %+v %v", legacy, err)
 	}
 	req.RequiredSkillSHA256 = hex.EncodeToString(h[:])
+	req.RequiredSkillTreeSHA256 = firstTree
 	dir := filepath.Join(first, name, "references")
 	if err := os.MkdirAll(dir, 0o755); err != nil { t.Fatal(err) }
 	if err := os.WriteFile(filepath.Join(dir, "oversized.md"), []byte(strings.Repeat("x", codexSkillRefsLimitBytes+32)), 0o644); err != nil {
