@@ -43,6 +43,14 @@ class OracleAccessTests(unittest.TestCase):
         self.assertEqual(checks, [(oracle.API_URL, "Bearer test-token", 30)])
         self.assertIn("0256f2923e978b989e25df07c74db4370d343312", oracle.API_URL)
 
+    def test_untrusted_pr_workflow_never_receives_private_oracle_token(self):
+        from pathlib import Path
+        workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows"
+                    / "codex-actions-capability.yml").read_text()
+        self.assertNotIn("secrets.SOODLES_ORACLE_READ_TOKEN", workflow)
+        self.assertNotIn("fetch_fixed_oracle(os.environ", workflow)
+        self.assertIn("SOODLES_ORACLE_OWNER_READBACK_REQUIRED", workflow)
+
     def test_absent_token_refuses_before_network(self):
         def prohibited(*_args, **_kwargs):
             raise AssertionError("network must not be contacted")
