@@ -177,6 +177,52 @@ func TestProcessDispatcherWritesActualSelectedMethodAtOSLaunch(t *testing.T) {
 		receipt.OriginalOwnerVerified || receipt.EffectAuthority {
 		t.Fatalf("OS process boundary falsely attested Agent internals: %+v", receipt)
 	}
+	checked, err := readSkillInputReadback(path, session.ID(), "poteto-mode", worktree)
+	if err != nil || checked.Status != "NOODLE_LOCAL_OS_BOUND_INPUT_READBACK" ||
+		checked.PID != receipt.ProcessPID || checked.AgentCatalogVerified ||
+		checked.OriginalOwnerVerified || checked.EffectAuthority {
+		t.Fatalf("three independent native session files disagree: %+v; %v", checked, err)
+	}
+	for _, scenario := range []struct {name, session, method, worktree string}{
+		{"other-session", "not-the-dispatched-session", "poteto-mode", worktree},
+		{"other-method", session.ID(), "builder-bug-factory", worktree},
+		{"other-worktree", session.ID(), "poteto-mode", repository},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			if _, err := readSkillInputReadback(path, scenario.session, scenario.method, scenario.worktree); err == nil {
+				t.Fatal("foreign input identity was promoted into original Noodle receipt")
+			}
+		})
+	}
+	// Independent falsifiers: alter each on-disk source and prove the reader
+	// refuses, then restore it without changing the original session.
+	originalProcess, err := os.ReadFile(filepath.Join(path, "process.json"))
+	if err != nil { t.Fatal(err) }
+	var proc processMetadata
+	if err := json.Unmarshal(originalProcess, &proc); err != nil { t.Fatal(err) }
+	proc.PID++
+	tamperedProcess, err := json.Marshal(proc)
+	if err != nil { t.Fatal(err) }
+	if err := os.WriteFile(filepath.Join(path, "process.json"), tamperedProcess, 0o644); err != nil { t.Fatal(err) }
+	if _, err := readSkillInputReadback(path, session.ID(), "poteto-mode", worktree); err == nil {
+		t.Fatal("wrong process PID was accepted")
+	}
+	if err := os.WriteFile(filepath.Join(path, "process.json"), originalProcess, 0o644); err != nil { t.Fatal(err) }
+	inputFile := filepath.Join(path, "input.txt")
+	if err := os.WriteFile(inputFile, append(append([]byte{}, input...), 'x'), 0o644); err != nil { t.Fatal(err) }
+	if _, err := readSkillInputReadback(path, session.ID(), "poteto-mode", worktree); err == nil {
+		t.Fatal("changed composed prompt bytes were accepted")
+	}
+	if err := os.WriteFile(inputFile, input, 0o644); err != nil { t.Fatal(err) }
+	source := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(source, []byte("# changed method"), 0o644); err != nil { t.Fatal(err) }
+	if _, err := readSkillInputReadback(path, session.ID(), "poteto-mode", worktree); err == nil {
+		t.Fatal("changed selected method bytes were accepted")
+	}
+	if err := os.WriteFile(source, []byte(entry), 0o644); err != nil { t.Fatal(err) }
+	if _, err := readSkillInputReadback(path, session.ID(), "poteto-mode", worktree); err != nil {
+		t.Fatalf("restored original session readback failed: %v", err)
+	}
 	select {
 	case <-session.Done():
 	case <-time.After(10 * time.Second):
