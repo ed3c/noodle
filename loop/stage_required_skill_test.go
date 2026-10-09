@@ -158,3 +158,51 @@ func TestRequiredSkillPinDoesNotFallThroughToUnverifiedRuntime(t *testing.T) {
 		t.Fatalf("legacy unpinned Sprite task route regressed: %v %+v", err, sprites.calls)
 	}
 }
+
+func TestScheduleStageDoesNotBypassMandatorySkillPins(t *testing.T) {
+	const rawPin = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const treePin = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	for _, tc := range []struct {
+		name string
+		extra map[string]json.RawMessage
+		want string
+	}{
+		{"valid_pair_unimplemented_route", stageExtraPins(rawPin, treePin), "does not support mandatory Skill pins"},
+		{"incomplete_pair", map[string]json.RawMessage{
+			stageRequiredSkillSHA256: json.RawMessage(`"`+rawPin+`"`),
+		}, "pin pair incomplete"},
+		{"mutable_pin", map[string]json.RawMessage{
+			stageRequiredSkillSHA256: json.RawMessage(`"main"`),
+			stageRequiredSkillTreeSHA256: json.RawMessage(`"`+treePin+`"`),
+		}, "lowercase SHA-256"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stage := Stage{
+				TaskKey: "schedule", Skill: "schedule", Provider: "codex",
+				Model: "test-model", Status: StageStatusPending, Extra: tc.extra,
+			}
+			order := Order{ID: scheduleOrderID, Status: OrderStatusActive, Stages: []Stage{stage}}
+			env := newIntegrationEnv(t, OrdersFile{Orders: []Order{order}})
+			env.loop.schedulePromoted = true
+
+			// Direct schedule invocation and the regular spawnCook special
+			// route must apply the same fail-closed boundary.
+			err := env.loop.spawnSchedule(context.Background(), order, 0, "")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("direct schedule stage accepted unsupported pins: %v", err)
+			}
+			if !env.loop.schedulePromoted {
+				t.Fatal("rejected schedule selection changed promotion state")
+			}
+			cand := dispatchCandidate{OrderID: scheduleOrderID, StageIndex: 0, Stage: stage}
+			err = env.loop.spawnCook(context.Background(), cand, order, spawnOptions{})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("cook route accepted unsupported schedule pins: %v", err)
+			}
+			if len(env.rt.calls) != 0 || len(env.wt.created) != 0 {
+				t.Fatalf("unsupported schedule pin caused runtime/worktree effects: calls=%d worktrees=%d",
+					len(env.rt.calls), len(env.wt.created))
+			}
+		})
+	}
+}
