@@ -101,6 +101,15 @@ func TestRequiredSkillRejectsShadowedProvidersAndTruncatedRefs(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "shadowed") {
 		t.Fatalf("same-named providers were accepted: %v", err)
 	}
+	req.Skill = " poteto-mode "
+	_, err = resolveSkillBundle(skill.Resolver{SearchPaths: []string{first, second}}, req)
+	if err == nil || !strings.Contains(err.Error(), "shadowed") {
+		t.Fatalf("padded same-named providers were accepted: %v", err)
+	}
+	selected, err := resolveSkillBundle(skill.Resolver{SearchPaths: []string{first}}, req)
+	if err != nil || selected.ResolvedPath != filepath.Join(first, name) {
+		t.Fatalf("padded unambiguous Skill unexpectedly rejected: %+v %v", selected, err)
+	}
 	// Existing no-pin tasks retain the original first-match winner.
 	req.RequiredSkillSHA256 = ""
 	req.RequiredSkillTreeSHA256 = ""
@@ -108,6 +117,7 @@ func TestRequiredSkillRejectsShadowedProvidersAndTruncatedRefs(t *testing.T) {
 	if err != nil || legacy.ResolvedPath != filepath.Join(first, name) {
 		t.Fatalf("legacy first-match behavior changed: %+v %v", legacy, err)
 	}
+	req.Skill = name
 	req.RequiredSkillSHA256 = hex.EncodeToString(h[:])
 	req.RequiredSkillTreeSHA256 = firstTree
 	dir := filepath.Join(first, name, "references")
