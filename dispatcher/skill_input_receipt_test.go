@@ -1,0 +1,307 @@
+package dispatcher
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/poteto/noodle/skill"
+)
+
+func decodeSkillInputReceipt(t *testing.T, path string) skillInputReceipt {
+	t.Helper()
+	var value skillInputReceipt
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &value); err != nil {
+		t.Fatal(err)
+	}
+	return value
+}
+
+func TestSkillInputReceiptKeepsPreparedAndLaunchedEvidenceSeparate(t *testing.T) {
+	dir := t.TempDir()
+	req := DispatchRequest{Skill: "pstack", WorktreePath: "/tmp/fictional/worktree"}
+	loaded := loadedSkill{
+		SystemPrompt: "# Selected method\nactual bytes",
+		ResolvedPath: "/tmp/fictional/skills/pstack",
+		SourcePath: "/tmp/fictional/skills",
+		EntrySHA256: strings.Repeat("a", 64),
+	}
+	if err := writePreparedSkillInputReceipt(dir, "session-test", req, loaded, "full composed input"); err != nil {
+		t.Fatal(err)
+	}
+	path := skillReceiptPath(dir)
+	r := decodeSkillInputReceipt(t, path)
+	if r.Phase != "PREPARED_BEFORE_OS_LAUNCH" || r.OSProcessLaunched || r.ProcessPID != 0 ||
+		r.SelectionMode != "RESOLVED_SKILL_EMBEDDED" || r.SelectedSkill != "pstack" {
+		t.Fatalf("prepared metadata granted nonexistent process: %+v", r)
+	}
+	hash := sha256.Sum256([]byte(loaded.SystemPrompt))
+	if r.MethodologyPromptSHA256 != hex.EncodeToString(hash[:]) {
+		t.Fatalf("incorrect loaded method digest: %+v", r)
+	}
+	if r.EffectiveAgentCatalogVerified || r.GlobalSkillInheritanceExcluded ||
+		r.OriginalOwnerVerified || r.EffectAuthority {
+		t.Fatalf("candidate data claimed external authority: %+v", r)
+	}
+	if err := markSkillInputProcessLaunched(dir, "foreign-session", 77); err == nil {
+		t.Fatal("foreign session got a launch receipt")
+	}
+	if err := markSkillInputProcessLaunched(dir, "session-test", 0); err == nil {
+		t.Fatal("invalid PID got a launch receipt")
+	}
+	if err := markSkillInputProcessLaunched(dir, "session-test", 77); err != nil {
+		t.Fatal(err)
+	}
+	after := decodeSkillInputReceipt(t, path)
+	if after.Phase != "OS_PROCESS_LAUNCHED_NOT_AGENT_ATTESTED" ||
+		!after.OSProcessLaunched || after.ProcessPID != 77 ||
+		after.EffectiveAgentCatalogVerified || after.EffectAuthority {
+		t.Fatalf("OS launch became model or authorization proof: %+v", after)
+	}
+	if err := markSkillInputProcessLaunched(dir, "session-test", 77); err == nil {
+		t.Fatal("replayed launch must not overwrite exact receipt")
+	}
+}
+
+func TestSkillInputReceiptRejectsAmbiguousLaunchFields(t *testing.T) {
+	dir := t.TempDir()
+	if err := writePreparedSkillInputReceipt(dir, "session-test", DispatchRequest{}, loadedSkill{}, "input"); err != nil {
+		t.Fatal(err)
+	}
+	path := skillReceiptPath(dir)
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, extra string }{
+		{"conflicting-session", `"session_id":"foreign-session",`},
+		{"identical-session", `"session_id":"session-test",`},
+		{"case-alias-session", `"SESSION_ID":"foreign-session",`},
+		{"unicode-case-alias-session", `"ſeſſion_id":"foreign-session",`},
+		{"escaped-session", `"session\u005fid":"foreign-session",`},
+		{"conflicting-phase", `"phase":"OS_PROCESS_LAUNCHED_NOT_AGENT_ATTESTED",`},
+		{"conflicting-pid", `"process_pid":999,`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tampered := append([]byte("{"+tc.extra), original[1:]...)
+			if err := os.WriteFile(path, tampered, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := markSkillInputProcessLaunched(dir, "session-test", 77); err == nil || !strings.Contains(err.Error(), "ambiguous receipt field") {
+				t.Errorf("ambiguous prepared receipt was promoted to launched: %v", err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != string(tampered) {
+				t.Error("refused receipt was rewritten")
+			}
+		})
+	}
+	compatible := append([]byte(`{"future_extension":{"note":"compatible"},`), original[1:]...)
+	if err := os.WriteFile(path, compatible, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := markSkillInputProcessLaunched(dir, "session-test", 77); err != nil {
+		t.Fatalf("unambiguous extended producer receipt was refused: %v", err)
+	}
+}
+
+func TestSkillInputReceiptDisclosesMissingMethodAndOverrides(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		req DispatchRequest
+		loaded loadedSkill
+		want string
+	}{
+		{"missing", DispatchRequest{Skill: "not-installed"}, loadedSkill{Warnings: []string{"method missing"}}, "SELECTED_SKILL_MISSING_WARNING"},
+		{"override", DispatchRequest{Skill: "pstack", SystemPrompt: "replacement"}, loadedSkill{SystemPrompt: "replacement"}, "SYSTEM_PROMPT_OVERRIDE"},
+		{"none", DispatchRequest{}, loadedSkill{}, "NO_SKILL_SELECTED"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := writePreparedSkillInputReceipt(dir, "session", tc.req, tc.loaded, "input"); err != nil {
+				t.Fatal(err)
+			}
+			r := decodeSkillInputReceipt(t, skillReceiptPath(dir))
+			if r.SelectionMode != tc.want || r.OSProcessLaunched ||
+				r.EffectiveAgentCatalogVerified || r.OriginalOwnerVerified {
+				t.Fatalf("missing/overridden method concealed: %+v", r)
+			}
+		})
+	}
+}
+
+func TestProcessDispatcherWritesActualSelectedMethodAtOSLaunch(t *testing.T) {
+	// A real OS child process with a fake text consumer. This does not launch
+	// Codex or prove that an Agent obeyed the selected methodology.
+	search := t.TempDir()
+	dir := filepath.Join(search, "poteto-mode")
+	if err := os.MkdirAll(filepath.Join(dir, "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	entry := "# actual method bytes\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(entry), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "references", "guide.md"), []byte("guide text"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Exercise the actual Noodle linked-worktree admission boundary,
+	// not the opt-in primary checkout exception.
+	repository := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		command := exec.Command("git", args...)
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	git("init", "-q", "-b", "main", repository)
+	git("-C", repository, "config", "user.email", "fixture@example.invalid")
+	git("-C", repository, "config", "user.name", "Noodle Test")
+	if err := os.WriteFile(filepath.Join(repository, "README.md"), []byte("base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("-C", repository, "add", "README.md")
+	git("-C", repository, "commit", "-qm", "initial")
+	worktree := filepath.Join(t.TempDir(), "selected-worktree")
+	git("-C", repository, "worktree", "add", "-q", "-b", "selected", worktree)
+	runtimeDir := filepath.Join(t.TempDir(), ".noodle")
+	d := NewProcessDispatcher(ProcessDispatcherConfig{
+		ProjectDir: worktree, RuntimeDir: runtimeDir,
+		RuntimeKind: "process", RuntimeDefault: "cat >/dev/null",
+		SkillResolver: skill.Resolver{SearchPaths: []string{search}},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	required := sha256.Sum256([]byte(entry))
+	selectedTree, err := skill.TreeSHA256(dir)
+	if err != nil { t.Fatal(err) }
+	session, err := d.Dispatch(ctx, DispatchRequest{
+		Name: "fixture", Prompt: "a bounded synthetic issue",
+		Skill: "poteto-mode", Provider: "codex", Model: "test-model",
+		WorktreePath: worktree,
+		RequiredSkillSHA256: hex.EncodeToString(required[:]),
+		RequiredSkillTreeSHA256: selectedTree,
+	})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	defer func() { _ = session.ForceKill() }()
+	path := filepath.Join(runtimeDir, "sessions", session.ID())
+	receipt := decodeSkillInputReceipt(t, filepath.Join(path, "skill-input.json"))
+	if !receipt.OSProcessLaunched || receipt.ProcessPID <= 0 ||
+		receipt.WorktreePath != worktree ||
+		!receipt.RequiredSkillPinMatched ||
+		receipt.RequiredSkillSHA256 != hex.EncodeToString(required[:]) ||
+		receipt.RequiredSkillTreeSHA256 != selectedTree ||
+		receipt.SelectionMode != "RESOLVED_SKILL_EMBEDDED" ||
+		receipt.SelectedSkillPath != dir || receipt.SelectedSourcePath != search {
+		t.Fatalf("worker dispatch receipt is not actual selected method: %+v", receipt)
+	}
+	sum := sha256.Sum256([]byte(entry))
+	if receipt.SelectedSkillMDSHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("wrong source bytes: %+v", receipt)
+	}
+	input, err := os.ReadFile(filepath.Join(path, "input.txt"))
+	if err != nil {
+		t.Fatalf("missing composed input: %v", err)
+	}
+	digest := sha256.Sum256(input)
+	if receipt.ComposedInputSHA256 != hex.EncodeToString(digest[:]) ||
+		receipt.MethodologyPromptSHA256 == "" {
+		t.Fatalf("actual composed input bytes not bound: %+v", receipt)
+	}
+	if receipt.EffectiveAgentCatalogVerified || receipt.GlobalSkillInheritanceExcluded ||
+		receipt.OriginalOwnerVerified || receipt.EffectAuthority {
+		t.Fatalf("OS process boundary falsely attested Agent internals: %+v", receipt)
+	}
+	checked, err := readSkillInputReadback(path, session.ID(), "poteto-mode", worktree)
+	if err != nil || checked.Status != "NOODLE_LOCAL_OS_BOUND_INPUT_READBACK" ||
+		checked.PID != receipt.ProcessPID || checked.AgentCatalogVerified ||
+		checked.OriginalOwnerVerified || checked.EffectAuthority {
+		t.Fatalf("three independent native session files disagree: %+v; %v", checked, err)
+	}
+	for _, scenario := range []struct {name, session, method, worktree string}{
+		{"other-session", "not-the-dispatched-session", "poteto-mode", worktree},
+		{"other-method", session.ID(), "builder-bug-factory", worktree},
+		{"other-worktree", session.ID(), "poteto-mode", repository},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			if _, err := readSkillInputReadback(path, scenario.session, scenario.method, scenario.worktree); err == nil {
+				t.Fatal("foreign input identity was promoted into original Noodle receipt")
+			}
+		})
+	}
+	for _, file := range []string{"skill-input.json", "spawn.json", "process.json"} {
+		for _, field := range []string{"session_id", "SESSION_ID", "ſeſſion_id", `session\u005fid`} {
+			t.Run("ambiguous-"+file+"-"+field, func(t *testing.T) {
+				filePath := filepath.Join(path, file)
+				original, err := os.ReadFile(filePath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					if err := os.WriteFile(filePath, original, 0o644); err != nil {
+						t.Error(err)
+					}
+				}()
+				tampered := append([]byte(`{"`+field+`":"foreign-session",`), original[1:]...)
+				if err := os.WriteFile(filePath, tampered, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := readSkillInputReadback(path, session.ID(), "poteto-mode", worktree); err == nil || !strings.Contains(err.Error(), "ambiguous receipt field") {
+					t.Errorf("ambiguous session evidence was accepted: %v", err)
+				}
+			})
+		}
+	}
+	// Independent falsifiers: alter each on-disk source and prove the reader
+	// refuses, then restore it without changing the original session.
+	originalProcess, err := os.ReadFile(filepath.Join(path, "process.json"))
+	if err != nil { t.Fatal(err) }
+	var proc processMetadata
+	if err := json.Unmarshal(originalProcess, &proc); err != nil { t.Fatal(err) }
+	proc.PID++
+	tamperedProcess, err := json.Marshal(proc)
+	if err != nil { t.Fatal(err) }
+	if err := os.WriteFile(filepath.Join(path, "process.json"), tamperedProcess, 0o644); err != nil { t.Fatal(err) }
+	if _, err := readSkillInputReadback(path, session.ID(), "poteto-mode", worktree); err == nil {
+		t.Fatal("wrong process PID was accepted")
+	}
+	if err := os.WriteFile(filepath.Join(path, "process.json"), originalProcess, 0o644); err != nil { t.Fatal(err) }
+	inputFile := filepath.Join(path, "input.txt")
+	if err := os.WriteFile(inputFile, append(append([]byte{}, input...), 'x'), 0o644); err != nil { t.Fatal(err) }
+	if _, err := readSkillInputReadback(path, session.ID(), "poteto-mode", worktree); err == nil {
+		t.Fatal("changed composed prompt bytes were accepted")
+	}
+	if err := os.WriteFile(inputFile, input, 0o644); err != nil { t.Fatal(err) }
+	source := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(source, []byte("# changed method"), 0o644); err != nil { t.Fatal(err) }
+	if _, err := readSkillInputReadback(path, session.ID(), "poteto-mode", worktree); err == nil {
+		t.Fatal("changed selected method bytes were accepted")
+	}
+	if err := os.WriteFile(source, []byte(entry), 0o644); err != nil { t.Fatal(err) }
+	if _, err := readSkillInputReadback(path, session.ID(), "poteto-mode", worktree); err != nil {
+		t.Fatalf("restored original session readback failed: %v", err)
+	}
+	select {
+	case <-session.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("test child process did not terminate")
+	}
+}

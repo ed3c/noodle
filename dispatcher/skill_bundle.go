@@ -1,6 +1,8 @@
 package dispatcher
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +16,9 @@ import (
 type loadedSkill struct {
 	SystemPrompt string
 	Warnings     []string
+	ResolvedPath string
+	SourcePath   string
+	EntrySHA256  string
 }
 
 func loadSkillBundle(
@@ -91,9 +96,13 @@ func loadSkillBundle(
 		)
 	}
 
+	entryHash := sha256.Sum256(skillMarkdown)
 	return loadedSkill{
 		SystemPrompt: strings.Join(sections, "\n\n"),
 		Warnings:     warnings,
+		ResolvedPath: resolved.Path,
+		SourcePath:   resolved.SourcePath,
+		EntrySHA256:  hex.EncodeToString(entryHash[:]),
 	}, nil
 }
 

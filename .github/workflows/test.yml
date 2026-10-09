@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: actions/setup-go@v5
         with:
@@ -31,8 +33,19 @@ jobs:
       - name: Install tmux
         run: sudo apt-get install -y tmux
 
+      - name: Verify normalized Skill tree pins
+        run: go test ./skill -run '^TestTreeSHA256' -count=1 -v
+
+      - name: Verify Skill dispatch and receipt controls
+        run: go test ./dispatcher -run '^(TestRequiredSkill|TestSkillInputReceipt|TestProcessDispatcherWritesActualSelectedMethodAtOSLaunch)' -count=1 -v
+
       - name: Test
         run: go test ./...
+
+      - name: Verify fixed private oracle reader without network or credentials
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_fixed_soodles_oracle.py' -v
+          python3 -m unittest discover -s scripts -p 'test_actions_runtime_coverage.py' -v
 
       - name: Vet
         run: go vet ./...

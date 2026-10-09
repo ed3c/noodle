@@ -47,6 +47,12 @@ func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Orde
 	}
 
 	stage := cand.Stage
+	// Refuse malformed source-pinning intent *before* offering interruption
+	// or creating a worktree. Neither a prompt nor a candidate can repair it.
+	requiredSkillSHA, requiredSkillTreeSHA, pinErr := stageRequiredSkillPins(stage)
+	if pinErr != nil {
+		return fmt.Errorf("original order stage required Skill selection: %w", pinErr)
+	}
 	interruption, err := l.interruptionForDispatch(cand, opts.attempt)
 	if err != nil {
 		return err
@@ -94,6 +100,8 @@ func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Orde
 		Provider:     nonEmpty(stage.Provider, l.config.Routing.Defaults.Provider),
 		Model:        nonEmpty(stage.Model, l.config.Routing.Defaults.Model),
 		Skill:        stage.Skill,
+		RequiredSkillSHA256: requiredSkillSHA,
+		RequiredSkillTreeSHA256: requiredSkillTreeSHA,
 		WorktreePath: worktreePath,
 		TaskKey:      taskType.Key,
 		Runtime:      nonEmpty(stage.Runtime, "process"),
@@ -195,6 +203,13 @@ func (l *Loop) dispatchSession(ctx context.Context, req loopruntime.DispatchRequ
 	}
 	if runtimeName == "" {
 		runtimeName = "process"
+	}
+	// Only the Noodle process dispatcher currently implements the strict
+	// selected-Skill raw/tree gate. Sprites/Cursor and other runtimes must
+	// never silently ignore those pins or be treated as equivalent owners.
+	if (req.RequiredSkillSHA256 != "" || req.RequiredSkillTreeSHA256 != "") && runtimeName != "process" {
+		return nil, RuntimeFallbackOutcome{}, classifyAgentStartFailure(
+			runtimeName, fmt.Errorf("required Skill pins need verified process runtime, got %s", runtimeName))
 	}
 
 	runtime := l.deps.Runtimes[runtimeName]
