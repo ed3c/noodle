@@ -45,6 +45,15 @@ func resolveSkillBundle(resolver skill.Resolver, req DispatchRequest) (loadedSki
 				return loadedSkill{}, fmt.Errorf("required Skill has shadowed providers")
 			}
 		}
+		for path := range seen {
+			tree, err := skill.TreeSHA256(path)
+			if err != nil {
+				return loadedSkill{}, fmt.Errorf("required Skill tree cannot be verified: %w", err)
+			}
+			if tree != req.RequiredSkillTreeSHA256 {
+				return loadedSkill{}, fmt.Errorf("required Skill tree SHA-256 mismatch")
+			}
+		}
 		loaded, err := loadSkillBundle(resolver, req.Provider, req.Skill)
 		if err != nil {
 			return loadedSkill{}, err
