@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/poteto/noodle/config"
+	loopruntime "github.com/poteto/noodle/runtime"
 )
 
 func stageExtraPins(rawSHA, treeSHA string) map[string]json.RawMessage {
@@ -118,5 +120,41 @@ func TestBadStagePinStopsBeforeWorktreeOrRuntime(t *testing.T) {
 	if len(env.rt.calls) != 0 || len(env.wt.created) != 0 {
 		t.Fatalf("bad Stage got process/worktree effects: calls=%d worktrees=%d",
 			len(env.rt.calls), len(env.wt.created))
+	}
+}
+
+func TestRequiredSkillPinDoesNotFallThroughToUnverifiedRuntime(t *testing.T) {
+	process := newMockRuntime()
+	sprites := newMockRuntime()
+	l := New(t.TempDir(), "noodle", config.DefaultConfig(), Dependencies{
+		Runtimes: map[string]loopruntime.Runtime{
+			"process": process,
+			"sprites": sprites,
+		},
+		Worktree: &fakeWorktree{},
+		Adapter: &fakeAdapterRunner{},
+		Mise: &fakeMise{},
+		Monitor: fakeMonitor{},
+		Registry: testLoopRegistry(),
+	})
+	strict := loopruntime.DispatchRequest{
+		Name: "bounded", Prompt: "synthetic", Runtime: "sprites",
+		Skill: "execute",
+		RequiredSkillSHA256: strings.Repeat("a", 64),
+		RequiredSkillTreeSHA256: strings.Repeat("b", 64),
+	}
+	_, _, err := l.dispatchSession(context.Background(), strict)
+	if err == nil || !strings.Contains(err.Error(), "required Skill pins need verified process runtime") {
+		t.Fatalf("unverified Sprite carrier bypassed original strict method: %v", err)
+	}
+	if len(sprites.calls) != 0 || len(process.calls) != 0 {
+		t.Fatalf("wrong-runtime Stage dispatched a process: sprites=%d process=%d",
+			len(sprites.calls), len(process.calls))
+	}
+	strict.RequiredSkillSHA256 = ""
+	strict.RequiredSkillTreeSHA256 = ""
+	_, _, err = l.dispatchSession(context.Background(), strict)
+	if err != nil || len(sprites.calls) != 1 {
+		t.Fatalf("legacy unpinned Sprite task route regressed: %v %+v", err, sprites.calls)
 	}
 }
