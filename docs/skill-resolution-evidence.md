@@ -14,6 +14,20 @@ An empty discovered set gives `NO_SKILLS_DISCOVERED` and a nonzero exit status. 
 
 Old `noodle skills list` without `--json` is unchanged: TSV with the winning source and first-match-wins behavior. A machine consumer should explicitly request `--json` and check its status and exit code, not parse human output.
 
+## Actual Noodle OS process input receipt (new bounded stage)
+
+Noodle's **process dispatcher** additionally stores `.noodle/sessions/<session>/skill-input.json` with:
+
+- `selected_skill`, `selection_mode` (selected Skill, missing-method warning, no Skill or System Prompt override), the resolved selected file path/source path and raw `SKILL.md` SHA-256;
+- `methodology_prompt_sha256` and `composed_input_sha256` calculated from the **actual assembled in-memory prompt** that the dispatcher prepares for the child process;
+- `session_id`, selected `worktree_path` and `process_pid` after the OS process has started.
+
+The lifecycle states are deliberately narrow. `PREPARED_BEFORE_OS_LAUNCH` is written before dispatch. Only after the Noodle OS child starts and its original process/spawn metadata is written does the receipt advance to `OS_PROCESS_LAUNCHED_NOT_AGENT_ATTESTED`. If that final receipt cannot be persisted, the dispatcher terminates its own just-started child and refuses completion. It does not create a second Worker, retry a failed session or replace any Soodles owner.
+
+A warning that a selected Skill was not found is made visible as `SELECTED_SKILL_MISSING_WARNING`, not silently promoted to methodology success. A supplied `SystemPrompt` that bypasses the Skill Resolver is explicitly classified `SYSTEM_PROMPT_OVERRIDE`. The older Noodle fallback behavior remains unchanged for compatibility; an original Soodles supervisor still needs a separate policy gate to reject a missing mandatory method.
+
+**Proof ceiling:** PID and exact assembled prompt digest demonstrate *Noodle's OS process launch and prompt preparation*, not whether Codex/Claude consumed stdin, interpreted any Skill, discovered other global/user/system Skills, or accepted a Factory Profile. These facts also lack the independent Soodles Owner Admission and Provider landing receipt. Real worker use must compare this receipt and current binary/config with the original Supervisor-selected Work Order/Skill Profile and a separately captured Agent-effective Skill Catalog.
+
 ## Provenance ceiling
 
 This proves only the paths that **that CLI invocation** resolves, at that time, under its current working directory/configuration. It is not an atomic source snapshot, an original-owner attestation, a configured Profile admission, a native Worker Session, or proof that global Skills are excluded. The result intentionally reports `actual_worker_session_observed=false`, `effective_agent_catalog_verified=false`, `global_skill_inheritance_excluded=false` and `effect_authority=false`.
