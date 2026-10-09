@@ -1,6 +1,8 @@
 package dispatcher
 
 import (
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -11,6 +13,49 @@ import (
 // resolveSkillBundle resolves the skill bundle for a dispatch request: uses
 // SystemPrompt verbatim if set, or falls back to loading the named skill bundle.
 func resolveSkillBundle(resolver skill.Resolver, req DispatchRequest) (loadedSkill, error) {
+	pin := req.RequiredSkillSHA256
+	if pin != "" {
+		digest, err := hex.DecodeString(pin)
+		if err != nil || len(digest) != 32 || strings.ToLower(pin) != pin {
+			return loadedSkill{}, fmt.Errorf("required Skill SHA-256 is not exact lowercase hex")
+		}
+		if strings.TrimSpace(req.Skill) == "" {
+			return loadedSkill{}, fmt.Errorf("required Skill cannot have an empty name")
+		}
+		if strings.TrimSpace(req.SystemPrompt) != "" {
+			return loadedSkill{}, fmt.Errorf("required Skill cannot be replaced by SystemPrompt")
+		}
+		// A first-match-wins resolver alone cannot prove the required method
+		// was unambiguous across configured project/user/global providers.
+		seen := make(map[string]struct{})
+		for _, source := range resolver.SearchPaths {
+			found, err := (skill.Resolver{SearchPaths: []string{source}}).Resolve(req.Skill)
+			if errors.Is(err, skill.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return loadedSkill{}, err
+			}
+			seen[found.Path] = struct{}{}
+			if len(seen) > 1 {
+				return loadedSkill{}, fmt.Errorf("required Skill has shadowed providers")
+			}
+		}
+		loaded, err := loadSkillBundle(resolver, req.Provider, req.Skill)
+		if err != nil {
+			return loadedSkill{}, err
+		}
+		if loaded.ResolvedPath == "" || loaded.EntrySHA256 == "" {
+			return loadedSkill{}, fmt.Errorf("required Skill missing from resolver")
+		}
+		if loaded.EntrySHA256 != pin {
+			return loadedSkill{}, fmt.Errorf("required Skill source SHA-256 mismatch")
+		}
+		if len(loaded.Warnings) != 0 {
+			return loadedSkill{}, fmt.Errorf("required Skill was incomplete: %s", strings.Join(loaded.Warnings, ", "))
+		}
+		return loaded, nil
+	}
 	if sp := strings.TrimSpace(req.SystemPrompt); sp != "" {
 		return loadedSkill{SystemPrompt: sp}, nil
 	}
