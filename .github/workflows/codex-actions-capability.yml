@@ -39,6 +39,7 @@ jobs:
           CANDIDATE_HEAD: ${{ github.event.pull_request.head.sha }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
           TARGET_REPOSITORY: ${{ github.repository }}
+          SOODLES_ORACLE_READ_TOKEN: ${{ secrets.SOODLES_ORACLE_READ_TOKEN }}
         run: |
           python3 -B - <<'PYTHON'
           import hashlib
@@ -47,7 +48,7 @@ jobs:
           from pathlib import Path
           import runpy
           import subprocess
-          import urllib.request
+          from scripts.fixed_soodles_oracle import COMMIT, SHA256, fetch_fixed_oracle
 
           oracle_commit = "0256f2923e978b989e25df07c74db4370d343312"
           oracle_digest = "d65b8ba15f2cdbfdd43c4fc0bf267c78ccb2b38208171623b1291704b144c6d9"
@@ -74,9 +75,9 @@ jobs:
                   raise RuntimeError(f"candidate_head mismatch: {head}")
               receipt["candidate_tree"] = subprocess.check_output(
                   ["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
-              url = f"https://raw.githubusercontent.com/ed3c/soodles/{oracle_commit}/soodles.py"
-              with urllib.request.urlopen(url, timeout=30) as response:
-                  source = response.read()
+              if COMMIT != oracle_commit or SHA256 != oracle_digest:
+                  raise RuntimeError("fixed oracle source pin mismatch")
+              source = fetch_fixed_oracle(os.environ.get("SOODLES_ORACLE_READ_TOKEN"))
               if hashlib.sha256(source).hexdigest() != oracle_digest:
                   raise RuntimeError("fixed external oracle SHA-256 mismatch")
               oracle_path = Path(os.environ["RUNNER_TEMP"]) / "fixed-soodles-oracle.py"
