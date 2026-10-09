@@ -22,6 +22,14 @@ When either pin is supplied, the original `resolveSkillBundle` refuses before OS
 
 **Authority boundary:** This is an opt-in Noodle dispatcher *capability*, not currently activated for Soodles #305. A Writer/Agent-supplied pin is not original Owner authority, and the public FactoryWeaver Profile is still a Draft. The original Soodles Supervisor/Carrier owner must independently select the exact pins and ensure its native Noodle launch actually passes them. This does not prove global/user/system Agent Skill exclusion, nor grant any PR effect.
 
+## Current Noodle Order → Worker pin propagation
+
+The original Noodle `Stage.extra` JSON can optionally carry **both** `required_skill_sha256` and `required_skill_tree_sha256` as lowercase 64-digit strings. The original `loop.spawnCook` now parses and validates that exact pair *before* interruption offering or Worktree creation, and passes it without modification into the existing `dispatcher.DispatchRequest.RequiredSkillSHA256` / `RequiredSkillTreeSHA256` fields. The ProcessDispatcher applies the physical source/raw/tree checks before OS launch; an incomplete or invalid pair is refused before a Worktree or process is created. Existing stages with neither key keep the original legacy behavior.
+
+This path only pins the **Noodle Stage's directly selected `Skill`**. For Soodles, that is usually `execute`, while pstack `poteto-mode` is currently selected **inside the Agent's engineering method discovery**. Pinning `execute` does not verify that the Agent subsequently loaded `poteto-mode` or that it could not discover Builder/HumanLayer/global Skills. That requires separate Supervisor-selected effective Agent Skill catalog evidence. A Stage extra field by itself is not authorization; the original Supervisor must ensure this Stage and both pins originate in its exact admitted order and are preserved through resume/revisions.
+
+The focused Noodle test executes a real original `orders.json → Loop.Cycle → spawnCook → Runtime.Dispatch` using the existing mock runtime, and verifies the original Stage pair is preserved byte-for-byte in the emitted request and retained Order. A malformed half-pair refuses before any Worktree or runtime interaction. These are bounded ordering/serialization controls, not a full live-agent delivery.
+
 ## Actual Noodle OS process input receipt (new bounded stage)
 
 Noodle's **process dispatcher** additionally stores `.noodle/sessions/<session>/skill-input.json` with:
