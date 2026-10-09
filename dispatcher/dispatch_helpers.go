@@ -33,7 +33,7 @@ func resolveSkillBundle(resolver skill.Resolver, req DispatchRequest) (loadedSki
 		// was unambiguous across configured project/user/global providers.
 		seen := make(map[string]struct{})
 		for _, source := range resolver.SearchPaths {
-			found, err := (skill.Resolver{SearchPaths: []string{source}}).Resolve(req.Skill)
+			found, err := (skill.Resolver{SearchPaths: []string{source}}).Resolve(strings.TrimSpace(req.Skill))
 			if errors.Is(err, skill.ErrNotFound) {
 				continue
 			}
