@@ -168,6 +168,11 @@ func (d *ProcessDispatcher) prepareSessionDir(
 	if _, err := writePromptFiles(sessionDir, promptPath, req.Prompt, composedPrompt); err != nil {
 		return nil, loadedSkill{}, "", "", err
 	}
+	// Bind actual selected methodology and composed bytes to this native
+	// session before allowing a child process to start.
+	if err := writePreparedSkillInputReceipt(sessionDir, sessionID, req, skillBundle, composedPrompt); err != nil {
+		return nil, loadedSkill{}, "", "", err
+	}
 	return eventWriter, skillBundle, systemPrompt, composedPrompt, nil
 }
 
@@ -215,6 +220,14 @@ func (d *ProcessDispatcher) startSessionProcess(
 		_ = process.Stdout().Close()
 		_ = process.Stderr().Close()
 		return nil, nil, fmt.Errorf("write spawn metadata: %w", err)
+	}
+	// PID is a real OS launch readback, not a model's internal Skill catalog.
+	// Refuse a session whose prepared prompt evidence cannot be committed.
+	if err := markSkillInputProcessLaunched(sessionDir, sessionID, process.PID()); err != nil {
+		_ = process.ForceKill()
+		_ = process.Stdout().Close()
+		_ = process.Stderr().Close()
+		return nil, nil, fmt.Errorf("mark skill input process launch: %w", err)
 	}
 	return controller, process, nil
 }
