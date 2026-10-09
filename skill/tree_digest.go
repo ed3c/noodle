@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // TreeSHA256 is the read-only digest of a selected Skill's file contents.
@@ -44,7 +45,7 @@ func TreeSHA256(root string) (string, error) {
 			return err
 		}
 		relative = filepath.ToSlash(relative)
-		if strings.ContainsAny(relative, "\u2028\u2029") {
+		if !utf8.ValidString(relative) || strings.ContainsAny(relative, "\u2028\u2029") {
 			return fmt.Errorf("skill path cannot be represented consistently: %s", relative)
 		}
 		size, err := entry.Info()
