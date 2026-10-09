@@ -94,6 +94,9 @@ func runSkillsListJSON(app *App) error {
 		SearchPaths: append([]string{}, app.Config.Skills.Paths...),
 		Skills: make([]resolvedSkillReceipt, 0, len(infos)),
 	}
+	if len(infos) == 0 {
+		out.Status = "NO_SKILLS_DISCOVERED"
+	}
 	for _, info := range infos {
 		raw, err := os.ReadFile(filepath.Join(info.Path, "SKILL.md"))
 		if err != nil {
@@ -142,6 +145,9 @@ func runSkillsListJSON(app *App) error {
 	// count a first-match-wins collision as an unambiguous Skill resolution.
 	if out.CollisionDetected {
 		return fmt.Errorf("duplicate Skill providers; resolution is shadowed")
+	}
+	if len(infos) == 0 {
+		return fmt.Errorf("no Skills discovered from configured resolver paths")
 	}
 	return nil
 }
