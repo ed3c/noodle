@@ -97,7 +97,7 @@ func TestRequiredSkillRejectsShadowedProvidersAndTruncatedRefs(t *testing.T) {
 		RequiredSkillSHA256: hex.EncodeToString(h[:]),
 		RequiredSkillTreeSHA256: firstTree}
 	// Same content digest must not legitimize an ambiguous first-match provider.
-	_, err := resolveSkillBundle(skill.Resolver{SearchPaths: []string{first, second}}, req)
+	_, err = resolveSkillBundle(skill.Resolver{SearchPaths: []string{first, second}}, req)
 	if err == nil || !strings.Contains(err.Error(), "shadowed") {
 		t.Fatalf("same-named providers were accepted: %v", err)
 	}
@@ -115,6 +115,9 @@ func TestRequiredSkillRejectsShadowedProvidersAndTruncatedRefs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "oversized.md"), []byte(strings.Repeat("x", codexSkillRefsLimitBytes+32)), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Isolate incomplete-reference refusal from the distinct tree-digest gate.
+	req.RequiredSkillTreeSHA256, err = skill.TreeSHA256(filepath.Join(first, name))
+	if err != nil { t.Fatal(err) }
 	_, err = resolveSkillBundle(skill.Resolver{SearchPaths: []string{first}}, req)
 	if err == nil || !strings.Contains(err.Error(), "incomplete") {
 		t.Fatalf("truncated method was accepted in strict mode: %v", err)
