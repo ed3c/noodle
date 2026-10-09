@@ -47,6 +47,40 @@ func TestSkillsListRespectsPrecedence(t *testing.T) {
 	}
 }
 
+func TestSkillsListJSONCLIFlagAndEmptyResolverRefusal(t *testing.T) {
+	project := t.TempDir()
+	app := &App{Config: config.Config{Skills: config.SkillsConfig{Paths: []string{project}}}}
+	cmd := newSkillsListCmd(app)
+	cmd.SetArgs([]string{"--json"})
+	var resultErr error
+	out := captureStdout(t, func() { resultErr = cmd.Execute() })
+	if resultErr == nil || !strings.Contains(resultErr.Error(), "no Skills discovered") {
+		t.Fatalf("empty resolver must refuse: %v", resultErr)
+	}
+	var receipt skillResolutionReceipt
+	if err := json.Unmarshal([]byte(out), &receipt); err != nil {
+		t.Fatalf("empty resolver refusal must be machine-readable: %v", err)
+	}
+	if receipt.Status != "NO_SKILLS_DISCOVERED" || len(receipt.Skills) != 0 ||
+		receipt.EffectAuthority || receipt.ActualWorkerSessionObserved {
+		t.Fatalf("empty resolution was promoted to proof: %+v", receipt)
+	}
+	mustMkdirAll(t, filepath.Join(project, "poteto-mode"))
+	mustWriteFile(t, filepath.Join(project, "poteto-mode", "SKILL.md"), "# poteto")
+	second := newSkillsListCmd(app)
+	second.SetArgs([]string{"--json"})
+	out = captureStdout(t, func() { resultErr = second.Execute() })
+	if resultErr != nil {
+		t.Fatalf("flag wiring must use json command: %v", resultErr)
+	}
+	if err := json.Unmarshal([]byte(out), &receipt); err != nil {
+		t.Fatalf("actual CLI flag route did not return JSON: %v", err)
+	}
+	if receipt.Status != "CONFIGURED_RESOLVER_SNAPSHOT" || len(receipt.Skills) != 1 {
+		t.Fatalf("route did not observe configured skill: %+v", receipt)
+	}
+}
+
 func TestSkillsListJSONProvidesExactWinnerEvidence(t *testing.T) {
 	project := t.TempDir()
 	user := t.TempDir()
