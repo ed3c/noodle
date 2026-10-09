@@ -204,6 +204,13 @@ func (l *Loop) dispatchSession(ctx context.Context, req loopruntime.DispatchRequ
 	if runtimeName == "" {
 		runtimeName = "process"
 	}
+	// Only the Noodle process dispatcher currently implements the strict
+	// selected-Skill raw/tree gate. Sprites/Cursor and other runtimes must
+	// never silently ignore those pins or be treated as equivalent owners.
+	if (req.RequiredSkillSHA256 != "" || req.RequiredSkillTreeSHA256 != "") && runtimeName != "process" {
+		return nil, RuntimeFallbackOutcome{}, classifyAgentStartFailure(
+			runtimeName, fmt.Errorf("required Skill pins need verified process runtime, got %s", runtimeName))
+	}
 
 	runtime := l.deps.Runtimes[runtimeName]
 	if runtime == nil {
