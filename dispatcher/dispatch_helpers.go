@@ -14,10 +14,14 @@ import (
 // SystemPrompt verbatim if set, or falls back to loading the named skill bundle.
 func resolveSkillBundle(resolver skill.Resolver, req DispatchRequest) (loadedSkill, error) {
 	pin := req.RequiredSkillSHA256
-	if pin != "" {
+	if pin != "" || req.RequiredSkillTreeSHA256 != "" {
 		digest, err := hex.DecodeString(pin)
 		if err != nil || len(digest) != 32 || strings.ToLower(pin) != pin {
 			return loadedSkill{}, fmt.Errorf("required Skill SHA-256 is not exact lowercase hex")
+		}
+		treePin, treeErr := hex.DecodeString(req.RequiredSkillTreeSHA256)
+		if treeErr != nil || len(treePin) != 32 || strings.ToLower(req.RequiredSkillTreeSHA256) != req.RequiredSkillTreeSHA256 {
+			return loadedSkill{}, fmt.Errorf("required Skill tree SHA-256 is not exact lowercase hex")
 		}
 		if strings.TrimSpace(req.Skill) == "" {
 			return loadedSkill{}, fmt.Errorf("required Skill cannot have an empty name")
@@ -50,6 +54,13 @@ func resolveSkillBundle(resolver skill.Resolver, req DispatchRequest) (loadedSki
 		}
 		if loaded.EntrySHA256 != pin {
 			return loadedSkill{}, fmt.Errorf("required Skill source SHA-256 mismatch")
+		}
+		tree, err := skill.TreeSHA256(loaded.ResolvedPath)
+		if err != nil {
+			return loadedSkill{}, fmt.Errorf("required Skill tree cannot be verified: %w", err)
+		}
+		if tree != req.RequiredSkillTreeSHA256 {
+			return loadedSkill{}, fmt.Errorf("required Skill tree SHA-256 mismatch")
 		}
 		if len(loaded.Warnings) != 0 {
 			return loadedSkill{}, fmt.Errorf("required Skill was incomplete: %s", strings.Join(loaded.Warnings, ", "))
