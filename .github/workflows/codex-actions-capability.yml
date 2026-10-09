@@ -5,6 +5,10 @@ on:
     paths:
       - .github/workflows/codex-actions-capability.yml
       - dispatcher/**
+      - cmd_worktree.go
+      - worktree/**
+      - go.mod
+      - go.sum
 
 permissions:
   contents: read
