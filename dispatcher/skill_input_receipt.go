@@ -1,6 +1,7 @@
 package dispatcher
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -47,6 +48,39 @@ func receiptSHA256(payload string) string {
 
 func skillReceiptPath(sessionDir string) string {
 	return filepath.Join(sessionDir, "skill-input.json")
+}
+
+func decodeSessionReceipt(raw []byte, out any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	opening, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	if opening != json.Delim('{') {
+		return fmt.Errorf("session receipt must be a JSON object")
+	}
+	var seen []string
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		field := token.(string)
+		for _, prior := range seen {
+			if strings.EqualFold(prior, field) {
+				return fmt.Errorf("ambiguous receipt field %q", field)
+			}
+		}
+		seen = append(seen, field)
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return err
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, out)
 }
 
 func writePreparedSkillInputReceipt(sessionDir, sessionID string, req DispatchRequest, loaded loadedSkill, composed string) error {
@@ -98,7 +132,7 @@ func markSkillInputProcessLaunched(sessionDir, sessionID string, pid int) error 
 		return err
 	}
 	var receipt skillInputReceipt
-	if err := json.Unmarshal(raw, &receipt); err != nil {
+	if err := decodeSessionReceipt(raw, &receipt); err != nil {
 		return err
 	}
 	if receipt.Protocol != "noodle/skill-input-v1" ||
@@ -151,7 +185,7 @@ func readSkillInputReadback(sessionDir, sessionID, expectedSkill, expectedWorktr
 		if err != nil {
 			return skillInputReadback{}, fmt.Errorf("session %s missing: %w", spec.filename, err)
 		}
-		if err := json.Unmarshal(raw, spec.out); err != nil {
+		if err := decodeSessionReceipt(raw, spec.out); err != nil {
 			return skillInputReadback{}, fmt.Errorf("session %s invalid: %w", spec.filename, err)
 		}
 	}
