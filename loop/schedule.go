@@ -131,13 +131,23 @@ func scheduleBootstrapOopsOrder(cfg config.Config) Order {
 }
 
 func (l *Loop) spawnSchedule(ctx context.Context, order Order, attempt int, resumePrompt string) error {
-	l.schedulePromoted = false // reset: new schedule dispatch invalidates prior promotion
 	name := scheduleOrderID
 	stageIndex, stagePtr := activeStageForOrder(order)
 	if stageIndex < 0 || stagePtr == nil {
 		return fmt.Errorf("schedule order has no active or pending stage")
 	}
 	stage := *stagePtr
+	// Schedule uses its own invocation path; it does not promise the process
+	// dispatcher's mandatory Skill byte/tree checks. Never silently ignore
+	// original order pins or let malformed pins reach schedule effects.
+	rawPin, treePin, err := stageRequiredSkillPins(stage)
+	if err != nil {
+		return fmt.Errorf("schedule original order stage required Skill selection: %w", err)
+	}
+	if rawPin != "" || treePin != "" {
+		return fmt.Errorf("schedule Stage does not support mandatory Skill pins")
+	}
+	l.schedulePromoted = false // reset only after stage selection is accepted
 
 	skillName := nonEmpty(stage.Skill, "schedule")
 	if _, ok := l.registry.ByKey(skillName); !ok && l.bootstrapInFlight != nil {
