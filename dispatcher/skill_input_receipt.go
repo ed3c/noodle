@@ -105,3 +105,88 @@ func markSkillInputProcessLaunched(sessionDir, sessionID string, pid int) error 
 	}
 	return filex.WriteFileAtomic(path, data)
 }
+
+
+// skillInputReadback compares three Noodle-owned session files with the
+// composed prompt file. It is read-only and never attests an Agent's effective
+// Skill catalog or the independent Soodles Supervisor's authorization.
+type skillInputReadback struct {
+	Status                  string `json:"status"`
+	SessionID               string `json:"session_id"`
+	WorktreePath            string `json:"worktree_path"`
+	SelectedSkill           string `json:"selected_skill"`
+	SelectionMode           string `json:"selection_mode"`
+	SkillMDSHA256           string `json:"skill_md_sha256"`
+	ComposedInputSHA256     string `json:"composed_input_sha256"`
+	PID                     int    `json:"pid"`
+	OriginalOwnerVerified   bool   `json:"original_owner_verified"`
+	AgentCatalogVerified    bool   `json:"agent_catalog_verified"`
+	EffectAuthority         bool   `json:"effect_authority"`
+}
+
+func readSkillInputReadback(sessionDir, sessionID, expectedSkill, expectedWorktree string) (skillInputReadback, error) {
+	// A caller selects the session path and claims, never the candidate JSON.
+	var prepared skillInputReceipt
+	var spawned dispatchMetadata
+	var process processMetadata
+	for _, spec := range []struct {
+		filename string
+		out      any
+	}{
+		{"skill-input.json", &prepared},
+		{"spawn.json", &spawned},
+		{"process.json", &process},
+	} {
+		raw, err := os.ReadFile(filepath.Join(sessionDir, spec.filename))
+		if err != nil {
+			return skillInputReadback{}, fmt.Errorf("session %s missing: %w", spec.filename, err)
+		}
+		if err := json.Unmarshal(raw, spec.out); err != nil {
+			return skillInputReadback{}, fmt.Errorf("session %s invalid: %w", spec.filename, err)
+		}
+	}
+	if prepared.Protocol != "noodle/skill-input-v1" ||
+		prepared.Phase != "OS_PROCESS_LAUNCHED_NOT_AGENT_ATTESTED" ||
+		!prepared.OSProcessLaunched || prepared.ProcessPID <= 0 ||
+		prepared.SessionID != sessionID || spawned.SessionID != sessionID ||
+		process.SessionID != sessionID || process.PID != prepared.ProcessPID {
+		return skillInputReadback{}, fmt.Errorf("session skill input, spawn or PID identity mismatch")
+	}
+	if prepared.WorktreePath != expectedWorktree || spawned.WorktreePath != expectedWorktree ||
+		prepared.SelectedSkill != expectedSkill || spawned.Skill != expectedSkill {
+		return skillInputReadback{}, fmt.Errorf("session worktree or method identity mismatch")
+	}
+	inputFile := filepath.Join(sessionDir, "input.txt")
+	raw, err := os.ReadFile(inputFile)
+	if os.IsNotExist(err) {
+		raw, err = os.ReadFile(filepath.Join(sessionDir, "prompt.txt"))
+	}
+	if err != nil {
+		return skillInputReadback{}, fmt.Errorf("session composed input missing: %w", err)
+	}
+	actualInputHash := sha256.Sum256(raw)
+	if prepared.ComposedInputSHA256 != hex.EncodeToString(actualInputHash[:]) {
+		return skillInputReadback{}, fmt.Errorf("session composed prompt digest drift")
+	}
+	if prepared.SelectionMode != "RESOLVED_SKILL_EMBEDDED" ||
+		prepared.SelectedSkillPath == "" || prepared.SelectedSkillMDSHA256 == "" {
+		return skillInputReadback{}, fmt.Errorf("session mandatory selected Skill not embedded")
+	}
+	selectedBytes, err := os.ReadFile(filepath.Join(prepared.SelectedSkillPath, "SKILL.md"))
+	if err != nil {
+		return skillInputReadback{}, fmt.Errorf("session selected SKILL.md absent: %w", err)
+	}
+	digest := sha256.Sum256(selectedBytes)
+	if prepared.SelectedSkillMDSHA256 != hex.EncodeToString(digest[:]) {
+		return skillInputReadback{}, fmt.Errorf("session selected SKILL.md digest drift")
+	}
+	// This confirms the original file/prompt/process artifacts are consistent
+	// at read time; self-consistency is not provider/host authentication.
+	return skillInputReadback{
+		Status: "NOODLE_LOCAL_OS_BOUND_INPUT_READBACK",
+		SessionID: sessionID, WorktreePath: expectedWorktree,
+		SelectedSkill: expectedSkill, SelectionMode: prepared.SelectionMode,
+		SkillMDSHA256: prepared.SelectedSkillMDSHA256,
+		ComposedInputSHA256: prepared.ComposedInputSHA256, PID: prepared.ProcessPID,
+	}, nil
+}
