@@ -25,6 +25,8 @@ type skillInputReceipt struct {
 	SelectedSourcePath             string   `json:"selected_source_path,omitempty"`
 	SelectedSkillPath              string   `json:"selected_skill_path,omitempty"`
 	SelectedSkillMDSHA256          string   `json:"selected_skill_md_sha256,omitempty"`
+	RequiredSkillSHA256            string   `json:"required_skill_sha256,omitempty"`
+	RequiredSkillPinMatched        bool     `json:"required_skill_pin_matched"`
 	MethodologyPromptSHA256        string   `json:"methodology_prompt_sha256"`
 	ComposedInputSHA256            string   `json:"composed_input_sha256"`
 	Warnings                       []string `json:"warnings"`
@@ -64,6 +66,11 @@ func writePreparedSkillInputReceipt(sessionDir, sessionID string, req DispatchRe
 		SelectedSourcePath: loaded.SourcePath,
 		SelectedSkillPath: loaded.ResolvedPath,
 		SelectedSkillMDSHA256: loaded.EntrySHA256,
+		RequiredSkillSHA256: req.RequiredSkillSHA256,
+		RequiredSkillPinMatched: req.RequiredSkillSHA256 != "" &&
+			loaded.EntrySHA256 == req.RequiredSkillSHA256 &&
+			loaded.ResolvedPath != "" && len(loaded.Warnings) == 0 &&
+			strings.TrimSpace(req.SystemPrompt) == "",
 		MethodologyPromptSHA256: receiptSHA256(loaded.SystemPrompt),
 		ComposedInputSHA256: receiptSHA256(composed),
 		Warnings: append([]string{}, loaded.Warnings...),
@@ -171,6 +178,11 @@ func readSkillInputReadback(sessionDir, sessionID, expectedSkill, expectedWorktr
 	if prepared.SelectionMode != "RESOLVED_SKILL_EMBEDDED" ||
 		prepared.SelectedSkillPath == "" || prepared.SelectedSkillMDSHA256 == "" {
 		return skillInputReadback{}, fmt.Errorf("session mandatory selected Skill not embedded")
+	}
+	if prepared.RequiredSkillSHA256 != "" &&
+		(!prepared.RequiredSkillPinMatched ||
+			prepared.RequiredSkillSHA256 != prepared.SelectedSkillMDSHA256) {
+		return skillInputReadback{}, fmt.Errorf("session required Skill source pin mismatch")
 	}
 	selectedBytes, err := os.ReadFile(filepath.Join(prepared.SelectedSkillPath, "SKILL.md"))
 	if err != nil {
