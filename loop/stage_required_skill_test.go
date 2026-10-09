@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/poteto/noodle/config"
 )
 
 func stageExtraPins(rawSHA, treeSHA string) map[string]json.RawMessage {
