@@ -28,6 +28,7 @@ type DispatchRequest struct {
 	Provider             string
 	Model                string
 	Skill                string
+	RequiredSkillSHA256  string // owner-selected raw SKILL.md pin; empty preserves legacy fallback
 	ReasoningLevel       string
 	WorktreePath         string
 	MaxTurns             int
