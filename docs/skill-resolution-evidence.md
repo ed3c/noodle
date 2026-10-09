@@ -28,6 +28,14 @@ A warning that a selected Skill was not found is made visible as `SELECTED_SKILL
 
 **Proof ceiling:** PID and exact assembled prompt digest demonstrate *Noodle's OS process launch and prompt preparation*, not whether Codex/Claude consumed stdin, interpreted any Skill, discovered other global/user/system Skills, or accepted a Factory Profile. These facts also lack the independent Soodles Owner Admission and Provider landing receipt. Real worker use must compare this receipt and current binary/config with the original Supervisor-selected Work Order/Skill Profile and a separately captured Agent-effective Skill Catalog.
 
+## Fixed private Soodles oracle authorization
+
+The separate `Noodle Actions runtime` workflow uses a fixed private Soodles source at commit `0256f2923e978b989e25df07c74db4370d343312` and expected raw SHA-256 `d65b8ba15f2cdbfdd43c4fc0bf267c78ccb2b38208171623b1291704b144c6d9`. Anonymous `raw.githubusercontent.com` may return HTTP 404 for a private repository, which is **not evidence that the fixed source does not exist**. The workflow now classifies 401/403/404 as `SOODLES_ORACLE_OWNER_READBACK_REQUIRED` and preserves its failed runtime result.
+
+There is a separate source-locked `scripts/fixed_soodles_oracle.py` reader with an exact Git commit/blob/content hash and no unpinned fallback. It is only appropriate inside an independently trusted original-owner environment after review and pinning. **Do not expose the private Soodles repository's read credential as a GitHub Actions secret inside a `pull_request` job that checks out and runs candidate code.** An untrusted candidate could execute code that reads or transmits that secret. The PR-run test deliberately verifies no `SOODLES_ORACLE_READ_TOKEN` secret is injected.
+
+The original Soodles Oracle Owner needs to provide a trusted, separately authenticated **oracle execution/readback** for the fixed source. Until that capability is available, Noodle runtime verification remains `FAILED / NOT_EVALUATED` and is not replaceable with a candidate-produced fixture or a stale public copy. Go Test success and any Noodle Skill file receipt are separate evidence dimensions.
+
 ## Provenance ceiling
 
 This proves only the paths that **that CLI invocation** resolves, at that time, under its current working directory/configuration. It is not an atomic source snapshot, an original-owner attestation, a configured Profile admission, a native Worker Session, or proof that global Skills are excluded. The result intentionally reports `actual_worker_session_observed=false`, `effective_agent_catalog_verified=false`, `global_skill_inheritance_excluded=false` and `effect_authority=false`.
