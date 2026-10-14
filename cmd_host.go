@@ -531,7 +531,7 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 	if req.Operation == "once" {
 		req.Mode = "manual"
 	}
-	if req.BinarySHA256 != h.binarySHA {
+	if req.BinarySHA256 != h.binarySHA && req.Operation != "status" && req.Operation != "detach" {
 		return hostError("binary_mismatch", errors.New("client and host binaries differ"))
 	}
 	if req.Operation == "status" || req.Operation == "detach" {
@@ -542,6 +542,17 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 			r := h.receipts[i]
 			if !hostReceiptMatches(req, r) {
 				continue
+			}
+			// finish retains the current context when saving its detached receipt
+			// fails. Only earlier detached contexts are already durable.
+			if r.ContextState == "detached" && (h.active == nil || h.active.receipt.ContextID != r.ContextID) {
+				if req.BinarySHA256 != r.BinarySHA256 || (req.BinarySHA256 != h.binarySHA && req.RequestID == "" && req.ContextID == "") {
+					return hostError("binary_mismatch", errors.New("historical readback requires the original binary and exact context or request identity"))
+				}
+				return hostResponse{r, "ok", ""}
+			}
+			if req.BinarySHA256 != h.binarySHA {
+				return hostError("binary_mismatch", errors.New("client and host binaries differ"))
 			}
 			if h.blocked {
 				return hostResponse{r, "unknown_effect", "prior context is unresolved; no replay was attempted"}
@@ -555,7 +566,11 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 			releaseCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 			if err := h.active.runtime.Release(releaseCtx); err != nil {
-				return hostResponse{r, "busy", err.Error()}
+				status := "unknown_effect"
+				if errors.Is(err, loop.ErrReleaseBusy) {
+					status = "busy"
+				}
+				return hostResponse{r, status, err.Error()}
 			}
 			select {
 			case err := <-h.active.done:

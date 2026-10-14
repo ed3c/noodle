@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,13 +17,14 @@ import (
 )
 
 type fakeHostRuntime struct {
-	ready     chan struct{}
-	released  chan struct{}
-	busy      bool
-	cycles    int
-	runErr    error
-	cycleErr  error
-	shutdowns int
+	ready      chan struct{}
+	released   chan struct{}
+	busy       bool
+	cycles     int
+	runErr     error
+	cycleErr   error
+	shutdowns  int
+	releaseErr error
 }
 
 func (f *fakeHostRuntime) Run(ctx context.Context) error {
@@ -38,6 +41,9 @@ func (f *fakeHostRuntime) Run(ctx context.Context) error {
 }
 func (f *fakeHostRuntime) Ready() <-chan struct{} { return f.ready }
 func (f *fakeHostRuntime) Release(context.Context) error {
+	if f.releaseErr != nil {
+		return f.releaseErr
+	}
 	if f.busy {
 		return loop.ErrReleaseBusy
 	}
@@ -156,7 +162,7 @@ func TestHostSerialContextsKeepPIDAndIsolateEnvironment(t *testing.T) {
 	}
 }
 
-func TestHostOnceIsManualAndUnresolvedContextNeverReplays(t *testing.T) {
+func TestHostOnceIsManualAndCompletedContextNeverReplays(t *testing.T) {
 	h := &noodleHost{dir: t.TempDir(), instanceID: "instance", binarySHA: "test-binary"}
 	created := 0
 	h.newRuntime = func(root, bin string, cfg config.Config, deps loop.Dependencies) hostRuntime {
@@ -173,13 +179,8 @@ func TestHostOnceIsManualAndUnresolvedContextNeverReplays(t *testing.T) {
 	if got.Status != "ok" || got.Mode != "manual" || got.ContextState != "detached" || created != 1 {
 		t.Fatalf("once: %+v", got)
 	}
-	h.blocked = true
-	if got := h.handle(context.Background(), req); got.Status != "unknown_effect" || created != 1 {
-		t.Fatalf("unresolved replay: %+v", got)
-	}
-	lookup := hostRequest{Operation: "status", ProjectDir: req.ProjectDir, ContextID: got.ContextID, InstanceID: got.HostInstanceID, BinarySHA256: h.binarySHA}
-	if got := h.handle(context.Background(), lookup); got.Status != "unknown_effect" {
-		t.Fatalf("unresolved readback: %+v", got)
+	if got := h.handle(context.Background(), req); got.Status != "ok" || got.ContextState != "detached" || created != 1 {
+		t.Fatalf("completed once was replayed: %+v", got)
 	}
 }
 
@@ -240,5 +241,160 @@ func TestHostRuntimeFailuresShutdownAndNeverReuseContext(t *testing.T) {
 				t.Fatalf("failed receipt missing: %s %v", persisted, err)
 			}
 		})
+	}
+}
+
+func TestHostDetachClassifiesOnlyQuiescenceRefusalAsBusy(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status string
+	}{
+		{"active-worker", fmt.Errorf("workers: %w", loop.ErrReleaseBusy), "busy"},
+		{"accepted-timeout", context.DeadlineExceeded, "unknown_effect"},
+		{"cancelled", context.Canceled, "unknown_effect"},
+		{"flush-failed", errors.New("checkpoint write failed"), "unknown_effect"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := hostTestRequest(t, t.TempDir())
+			rt := &fakeHostRuntime{ready: make(chan struct{}), released: make(chan struct{}), releaseErr: tc.err}
+			h := &noodleHost{dir: t.TempDir(), binarySHA: req.BinarySHA256, instanceID: "instance", newRuntime: func(string, string, config.Config, loop.Dependencies) hostRuntime { return rt }}
+			attached := h.handle(context.Background(), req)
+			if attached.Status != "ok" {
+				t.Fatalf("attach: %+v", attached)
+			}
+			defer func() {
+				h.active.cancel()
+				runErr := <-h.active.done
+				h.finish(runErr)
+				h.active.restore()
+				h.active.lock.Close()
+			}()
+			detach := hostRequest{Operation: "detach", ProjectDir: req.ProjectDir, ContextID: attached.ContextID, InstanceID: attached.HostInstanceID, BinarySHA256: req.BinarySHA256}
+			if got := h.handle(context.Background(), detach); got.Status != tc.status || h.active == nil {
+				t.Fatalf("release error %v classified as %+v", tc.err, got)
+			}
+		})
+	}
+}
+
+func TestHostHistoricalDetachSurvivesFailedOrUnpersistedContext(t *testing.T) {
+	for _, failure := range []string{"cycle", "save"} {
+		t.Run(failure, func(t *testing.T) {
+			h := &noodleHost{dir: t.TempDir(), binarySHA: "test-binary", instanceID: "instance"}
+			rt := &fakeHostRuntime{}
+			h.newRuntime = func(string, string, config.Config, loop.Dependencies) hostRuntime { return rt }
+			first := hostTestRequest(t, t.TempDir())
+			first.Operation = "once"
+			detached := h.handle(context.Background(), first)
+			if detached.Status != "ok" || detached.ContextState != "detached" {
+				t.Fatalf("first once: %+v", detached)
+			}
+			var persisted []hostReceipt
+			data, err := os.ReadFile(filepath.Join(h.dir, "receipts.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(data, &persisted); err != nil {
+				t.Fatal(err)
+			}
+			if len(persisted) != 1 || persisted[0].ContextState != "detached" {
+				t.Fatalf("historical detach was not durable: %+v", persisted)
+			}
+
+			second := hostTestRequest(t, t.TempDir())
+			rt = &fakeHostRuntime{ready: make(chan struct{}), released: make(chan struct{})}
+			var unresolved hostResponse
+			if failure == "cycle" {
+				second.Operation = "once"
+				rt.cycleErr = errors.New("cycle failed")
+				unresolved = h.handle(context.Background(), second)
+			} else {
+				unresolved = h.handle(context.Background(), second)
+				if unresolved.Status != "ok" {
+					t.Fatalf("second attach: %+v", unresolved)
+				}
+				h.dir = filepath.Join(h.dir, "missing") // Actual persistence failure after actor release.
+				unresolved = h.handle(context.Background(), hostRequest{Operation: "detach", ProjectDir: second.ProjectDir, ContextID: unresolved.ContextID, InstanceID: unresolved.HostInstanceID, BinarySHA256: h.binarySHA})
+			}
+			if h.active == nil || !h.blocked {
+				t.Fatalf("failure lost custody: %+v", unresolved)
+			}
+			defer h.active.restore()
+			defer h.active.lock.Close()
+			lookup := hostRequest{Operation: "status", ProjectDir: second.ProjectDir, ContextID: unresolved.ContextID, InstanceID: unresolved.HostInstanceID, BinarySHA256: h.binarySHA}
+			for _, op := range []string{"status", "detach"} {
+				lookup.Operation = op
+				if got := h.handle(context.Background(), lookup); got.Status != "unknown_effect" {
+					t.Fatalf("unresolved %s became successful: %+v", op, got)
+				}
+			}
+			lookup.ProjectDir, lookup.ContextID = first.ProjectDir, detached.ContextID
+			for _, op := range []string{"status", "detach"} {
+				lookup.Operation = op
+				if got := h.handle(context.Background(), lookup); got.Status != "ok" || got.ContextState != "detached" {
+					t.Errorf("durable historical %s blocked: %+v", op, got)
+				}
+			}
+			if got := h.handle(context.Background(), second); got.Status != "unknown_effect" {
+				t.Fatalf("unresolved request replayed: %+v", got)
+			}
+		})
+	}
+}
+
+func TestHostUpgradeReadsExactHistoricalReceiptWithOriginalBinary(t *testing.T) {
+	req := hostTestRequest(t, t.TempDir())
+	req.Operation = "once"
+	old := &noodleHost{dir: t.TempDir(), instanceID: "old-instance", binarySHA: req.BinarySHA256,
+		newRuntime: func(string, string, config.Config, loop.Dependencies) hostRuntime { return &fakeHostRuntime{} }}
+	detached := old.handle(context.Background(), req)
+	if detached.Status != "ok" {
+		t.Fatalf("original once: %+v", detached)
+	}
+	data, err := os.ReadFile(filepath.Join(old.dir, "receipts.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	upgraded := &noodleHost{dir: old.dir, instanceID: "new-instance", binarySHA: "new-binary"}
+	if err := json.Unmarshal(data, &upgraded.receipts); err != nil {
+		t.Fatal(err)
+	}
+	lookup := hostRequest{Operation: "status", ProjectDir: req.ProjectDir, ContextID: detached.ContextID, InstanceID: detached.HostInstanceID, BinarySHA256: req.BinarySHA256}
+	for _, op := range []string{"status", "detach"} {
+		lookup.Operation = op
+		if got := upgraded.handle(context.Background(), lookup); got.Status != "ok" || got.hostReceipt != detached.hostReceipt {
+			t.Errorf("original binary historical %s: %+v", op, got)
+		}
+		for _, binary := range []string{"foreign-old-binary", upgraded.binarySHA} {
+			foreign := lookup
+			foreign.BinarySHA256 = binary
+			if got := upgraded.handle(context.Background(), foreign); got.Status != "binary_mismatch" {
+				t.Errorf("foreign receipt binary accepted: %+v", got)
+			}
+		}
+	}
+	for _, op := range []string{"attach", "once"} {
+		req.Operation = op
+		if got := upgraded.handle(context.Background(), req); got.Status != "binary_mismatch" {
+			t.Fatalf("old binary %s accepted: %+v", op, got)
+		}
+	}
+	lookup.Operation = "status"
+	lookup.ContextID, lookup.InstanceID = "", ""
+	lookup.ConfigSHA256, lookup.Mode = req.ConfigSHA256, "manual"
+	if got := upgraded.handle(context.Background(), lookup); got.Status != "binary_mismatch" {
+		t.Fatalf("inexact cross-binary lookup accepted: %+v", got)
+	}
+	lookup.RequestID = detached.RequestID
+	if got := upgraded.handle(context.Background(), lookup); got.Status != "ok" {
+		t.Errorf("original request lookup: %+v", got)
+	}
+	upgraded.receipts[0].ContextState = "active"
+	for _, op := range []string{"status", "detach"} {
+		lookup.Operation = op
+		if got := upgraded.handle(context.Background(), lookup); got.Status != "binary_mismatch" {
+			t.Fatalf("old binary active %s accepted: %+v", op, got)
+		}
 	}
 }
