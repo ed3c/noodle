@@ -190,6 +190,17 @@ func (d *ProcessDispatcher) startSessionProcess(
 	if err != nil {
 		return nil, nil, fmt.Errorf("start process: %w", err)
 	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			_ = process.ForceKill()
+			<-process.Done()
+			_ = process.Stdin().Close()
+			_ = process.Stdout().Close()
+			_ = process.Stderr().Close()
+			process.ioWG.Wait()
+		}
+	}()
 
 	controller, err := d.configureStdin(ctx, process, req.Provider, composedPrompt, startup)
 	if err != nil {
@@ -199,7 +210,9 @@ func (d *ProcessDispatcher) startSessionProcess(
 		return nil, nil, err
 	}
 
+	process.ioWG.Add(1)
 	go func() {
+		defer process.ioWG.Done()
 		defer close(stderrDone)
 		drainToFile(startup.reader(process.Stderr(), true), stderrPath)
 	}()
@@ -216,6 +229,7 @@ func (d *ProcessDispatcher) startSessionProcess(
 		_ = process.Stderr().Close()
 		return nil, nil, fmt.Errorf("write spawn metadata: %w", err)
 	}
+	handedOff = true
 	return controller, process, nil
 }
 
@@ -228,7 +242,11 @@ func (d *ProcessDispatcher) configureStdin(
 	startup *codexStartup,
 ) (*claudeController, error) {
 	if stringx.Normalize(provider) == "codex" {
-		go startup.writeInput(process.Stdin(), composedPrompt)
+		process.ioWG.Add(1)
+		go func() {
+			defer process.ioWG.Done()
+			startup.writeInput(process.Stdin(), composedPrompt)
+		}()
 		return nil, nil
 	}
 	controller := newClaudeController(process.Stdin())

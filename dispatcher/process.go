@@ -24,6 +24,7 @@ type ProcessHandle struct {
 
 	done     chan struct{}
 	doneOnce sync.Once
+	ioWG     sync.WaitGroup
 
 	mu       sync.Mutex
 	exitCode int

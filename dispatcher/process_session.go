@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/poteto/noodle/event"
 	"github.com/poteto/noodle/parse"
@@ -15,13 +16,17 @@ import (
 // as a shell pipeline stage.
 type processSession struct {
 	sessionBase
-	process    *ProcessHandle
-	controller *claudeController // nil for non-steerable sessions
-	warnings   []string
-	provider   string
-	stderrPath string
-	stderrDone <-chan struct{}
-	startup    *codexStartup
+	process     *ProcessHandle
+	controller  *claudeController // nil for non-steerable sessions
+	warnings    []string
+	provider    string
+	stderrPath  string
+	stderrDone  <-chan struct{}
+	startup     *codexStartup
+	killMu      sync.Mutex
+	forceKilled bool
+	killed      chan struct{}
+	joined      chan struct{}
 }
 
 type processSessionConfig struct {
@@ -57,6 +62,8 @@ func newProcessSession(cfg processSessionConfig) *processSession {
 		stderrPath: cfg.stderrPath,
 		stderrDone: cfg.stderrDone,
 		startup:    cfg.startup,
+		joined:     make(chan struct{}),
+		killed:     make(chan struct{}),
 	}
 }
 
@@ -109,7 +116,7 @@ func (s *processSession) start(ctx context.Context) {
 		s.waitForExit(ctx)
 	}()
 
-	go s.closeEventsWhenDone()
+	go func() { s.closeEventsWhenDone(); close(s.joined) }()
 
 	for _, warning := range s.warnings {
 		s.publish(SessionEvent{
@@ -136,16 +143,42 @@ func (s *processSession) waitForExit(ctx context.Context) {
 		<-s.process.Done()
 	}
 
-	// A descendant may still hold an output writer after the direct child exits.
-	// Cancellation must unblock the consumer even after Done won the first select.
+	// Keep draining after a normal exit, but cancellation or a forced kill
+	// must unblock pipes retained by descendants as well.
 	select {
 	case <-s.streamDone:
 	case <-ctx.Done():
-		_ = s.process.Stdout().Close()
-		_ = s.process.Stderr().Close()
+		s.closeProcessPipes()
+	case <-s.killed:
+		s.closeProcessPipes()
 	}
+	ioDone := make(chan struct{})
+	go func() { s.process.ioWG.Wait(); close(ioDone) }()
+	select {
+	case <-ioDone:
+	case <-ctx.Done():
+		s.closeProcessPipes()
+		<-ioDone
+	case <-s.killed:
+		s.closeProcessPipes()
+		<-ioDone
+	}
+	s.killMu.Lock()
+	killed := s.forceKilled
+	s.killMu.Unlock()
 	exitCode, _ := s.process.ExitCode()
+	if killed {
+		<-s.streamDone
+		s.markDone("killed")
+		return
+	}
 	s.resolveAndMarkDone(exitCode, ctx.Err() != nil)
+}
+
+func (s *processSession) closeProcessPipes() {
+	_ = s.process.Stdout().Close()
+	_ = s.process.Stderr().Close()
+	_ = s.process.Stdin().Close()
 }
 
 func (s *processSession) Terminate() error {
@@ -153,13 +186,20 @@ func (s *processSession) Terminate() error {
 }
 
 func (s *processSession) ForceKill() error {
+	s.killMu.Lock()
+	defer s.killMu.Unlock()
 	err := s.process.ForceKill()
 	if err != nil {
 		return err
 	}
-	s.markDone("killed")
+	if !s.forceKilled {
+		s.forceKilled = true
+		close(s.killed)
+	}
 	return nil
 }
+
+func (s *processSession) Done() <-chan struct{} { return s.joined }
 
 func (s *processSession) Controller() AgentController {
 	if s.controller != nil {

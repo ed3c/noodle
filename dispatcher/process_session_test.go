@@ -165,6 +165,7 @@ func TestProcessSessionKillMarksKilled(t *testing.T) {
 		canonicalPath: filepath.Join(t.TempDir(), "canonical.ndjson"),
 		stampedPath:   filepath.Join(t.TempDir(), "raw.ndjson"),
 	})
+	session.start(context.Background())
 
 	if err := session.ForceKill(); err != nil {
 		t.Fatalf("Kill: %v", err)
@@ -178,6 +179,18 @@ func TestProcessSessionKillMarksKilled(t *testing.T) {
 
 	if session.Status() != "killed" {
 		t.Fatalf("status = %q, want killed", session.Status())
+	}
+	select {
+	case <-process.Done():
+	default:
+		t.Fatal("session completed before the child exited")
+	}
+	select {
+	case <-session.streamDone:
+	default:
+		t.Fatal("session completed before stream cleanup")
+	}
+	for range session.Events() {
 	}
 }
 

@@ -26,6 +26,36 @@ noodle start [flags]
 
 ---
 
+## `noodle host`
+
+Host 讓不同 project 依序共用一個 Noodle 主進程。每次只接上一個 project context。
+原 Loop 仍負責排程與 worktree。另一個 project 收到 `busy` 後，由原呼叫端稍後續行。
+Host 不另外建立等待佇列。Context 必須設定 `server.enabled=false`。
+
+```sh
+noodle host capabilities
+noodle --project-dir /path/to/project host once --request-file /path/to/run/once.json
+noodle --project-dir /path/to/project host attach --request-file /path/to/run/attach.json
+noodle --project-dir /path/to/project host status --request-file /path/to/run/attach.json
+```
+
+`once` 使用 manual mode 初始化，不啟動 worker。`attach` 使用設定中的 mode，或明確的 `--mode`。
+原生 CLI 在送出請求前產生 request ID，並保存 project、config、binary 與 host directory 綁定。
+同一請求重用同一個 `--request-file`。合法的新一輪使用不同檔案。
+回應遺失時，`status` 依原檔查詢該請求，不以相同設定的歷史結果代替。
+
+`detach` 接受原 `--request-file`，以及 receipt 的 `--context-id` 和 `--instance-id`。
+Loop 確認沒有 worker、合併工作或待處理輸入後，才釋放 context。
+Host 等待 process、stream 與 watcher 結束，再還原環境與工作目錄。主進程繼續存在。
+
+鎖定範圍是同一使用者的 cache directory 下 `noodle/host`。
+新版 `start` 共用此鎖。`NOODLE_HOST_DIR` 可指定隔離的測試端點。
+此鎖不能約束舊 binary 或另一個 OS 帳戶。歷史進程需要原 owner 確認結束後遷移。
+Host 重啟若發現未解決的 active receipt，會回傳 `unknown_effect` 並拒絕新工作。
+這不表示工作已失敗或可以重播；原 owner 必須先取得效果讀回。
+
+---
+
 ## `noodle status`
 
 Show compact runtime status. Prints active agent count, orders queue depth, and noodle loop state (running, paused, draining, or idle).

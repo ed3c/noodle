@@ -1,0 +1,780 @@
+package main
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"slices"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/poteto/noodle/config"
+	"github.com/poteto/noodle/internal/lockfile"
+	"github.com/poteto/noodle/internal/state"
+	"github.com/poteto/noodle/internal/statever"
+	"github.com/poteto/noodle/loop"
+	"github.com/spf13/cobra"
+)
+
+const hostProtocol = "noodle-host-v1"
+
+type hostReceipt struct {
+	Schema         int    `json:"schema"`
+	Protocol       string `json:"protocol"`
+	HostPID        int    `json:"host_pid"`
+	HostInstanceID string `json:"host_instance_id"`
+	ContextID      string `json:"context_id"`
+	ProjectDir     string `json:"project_dir"`
+	ContextState   string `json:"context_state"`
+	Mode           string `json:"mode"`
+	ConfigSHA256   string `json:"config_sha256"`
+	BinaryPath     string `json:"binary_path"`
+	BinarySHA256   string `json:"binary_sha256"`
+	RequestID      string `json:"request_id"`
+	HostDir        string `json:"host_dir"`
+}
+
+type hostResponse struct {
+	hostReceipt
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
+type hostRequest struct {
+	Operation    string   `json:"operation"`
+	ProjectDir   string   `json:"project_dir"`
+	ContextID    string   `json:"context_id"`
+	InstanceID   string   `json:"instance_id"`
+	ConfigSHA256 string   `json:"config_sha256"`
+	Mode         string   `json:"mode"`
+	Environment  []string `json:"environment,omitempty"`
+	BinarySHA256 string   `json:"binary_sha256"`
+	RequestID    string   `json:"request_id"`
+	RequestFile  string   `json:"-"`
+	HostDir      string   `json:"-"`
+}
+
+type hostRuntime interface {
+	Run(context.Context) error
+	Cycle(context.Context) error
+	Release(context.Context) error
+	Ready() <-chan struct{}
+	Shutdown()
+	FinishOnce() error
+}
+
+type hostContext struct {
+	receipt        hostReceipt
+	request        hostRequest
+	runtime        hostRuntime
+	done           chan error
+	cancel         context.CancelFunc
+	lock           *lockfile.Lock
+	restore        func() error
+	environmentSHA string
+}
+
+type noodleHost struct {
+	dir        string
+	instanceID string
+	binaryPath string
+	binarySHA  string
+	receipts   []hostReceipt
+	active     *hostContext
+	blocked    bool
+	newRuntime func(string, string, config.Config, loop.Dependencies) hostRuntime
+}
+
+func newHostCmd(app *App) *cobra.Command {
+	cmd := &cobra.Command{Use: "host", Short: "Manage the single persistent Noodle host"}
+	cmd.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "protocol": hostProtocol})
+	}})
+	cmd.AddCommand(&cobra.Command{Use: "serve", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		return serveHost(ctx)
+	}})
+	for _, operation := range []string{"attach", "once", "status", "detach"} {
+		var mode, contextID, instanceID, configSHA, requestFile string
+		child := &cobra.Command{Use: operation, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+			req := hostRequest{Operation: operation, ProjectDir: app.projectDir, Mode: mode, ContextID: contextID, InstanceID: instanceID, ConfigSHA256: configSHA, RequestFile: requestFile}
+			response := callHost(cmd.Context(), req)
+			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(response); err != nil {
+				return err
+			}
+			if response.Error != "" {
+				return errors.New(response.Error)
+			}
+			return nil
+		}}
+		child.Flags().StringVar(&requestFile, "request-file", "", "Native request binding file")
+		if operation != "detach" {
+			child.Flags().StringVar(&mode, "mode", "", "Run mode")
+		}
+		if operation == "status" || operation == "detach" {
+			child.Flags().StringVar(&contextID, "context-id", "", "Native context identity")
+			child.Flags().StringVar(&instanceID, "instance-id", "", "Native host instance identity")
+		}
+		if operation == "status" {
+			child.Flags().StringVar(&configSHA, "config-sha256", "", "Original config digest for lost response lookup")
+		}
+		cmd.AddCommand(child)
+	}
+	return cmd
+}
+
+func hostDirectory() (string, error) {
+	dir := os.Getenv("NOODLE_HOST_DIR")
+	if dir == "" {
+		cache, err := os.UserCacheDir()
+		if err != nil {
+			return "", err
+		}
+		dir = filepath.Join(cache, "noodle", "host")
+	}
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("host directory is not a real directory")
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func hostDigest(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
+func hostID() (string, error) {
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(id[:]), nil
+}
+func hostError(status string, err error) hostResponse {
+	return hostResponse{hostReceipt: hostReceipt{Schema: 1, Protocol: hostProtocol}, Status: status, Error: err.Error()}
+}
+
+func readHostConfig(dir string) ([]byte, error) {
+	data, err := os.ReadFile(filepath.Join(dir, config.DefaultConfigPath))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	return data, err
+}
+
+func callHost(ctx context.Context, req hostRequest) hostResponse {
+	dir, err := hostDirectory()
+	if err != nil {
+		return hostError("refused", err)
+	}
+	path, err := os.Executable()
+	if err != nil {
+		return hostError("refused", err)
+	}
+	binary, err := os.ReadFile(path)
+	if err != nil {
+		return hostError("refused", err)
+	}
+	req.BinarySHA256 = hostDigest(binary)
+	req.ProjectDir, err = filepath.EvalSymlinks(req.ProjectDir)
+	if err != nil {
+		return hostError("refused", err)
+	}
+	if req.Operation == "attach" || req.Operation == "once" || (req.Operation == "status" && req.ContextID == "" && req.RequestFile == "") {
+		data, err := readHostConfig(req.ProjectDir)
+		if err != nil {
+			return hostError("refused", err)
+		}
+		cfg, err := config.Parse(data)
+		if err != nil {
+			return hostError("refused", err)
+		}
+		if req.Operation == "once" {
+			req.Mode = "manual"
+		}
+		cfg, err = startConfig(cfg, req.Mode)
+		if err != nil {
+			return hostError("refused", err)
+		}
+		req.Mode = cfg.Mode
+		if req.Operation != "status" {
+			req.ConfigSHA256 = hostDigest(data)
+			req.Environment = os.Environ()
+			slices.Sort(req.Environment)
+		}
+	}
+	req.HostDir = dir
+	var requestBinding *hostRequestBinding
+	if req.RequestFile != "" || req.Operation == "attach" || req.Operation == "once" {
+		var unlock func()
+		requestBinding, unlock, err = bindHostRequest(&req)
+		if err != nil {
+			return hostError("refused", err)
+		}
+		defer unlock()
+		dir = req.HostDir
+	}
+	if (req.Operation == "detach" || (req.Operation == "status" && req.ContextID != "")) && (req.ContextID == "" || req.InstanceID == "") {
+		return hostError("refused", errors.New("context-id and instance-id are required together"))
+	}
+	if req.Operation == "status" && req.ContextID == "" && req.ConfigSHA256 == "" {
+		return hostError("refused", errors.New("status needs context identity or config-sha256"))
+	}
+	conn, err := net.DialTimeout("unix", filepath.Join(dir, "host.sock"), time.Second)
+	if err != nil && (req.Operation == "attach" || req.Operation == "once") {
+		if err = startHostProcess(ctx, path, dir); err == nil {
+			conn, err = net.DialTimeout("unix", filepath.Join(dir, "host.sock"), time.Second)
+		}
+	}
+	if err != nil {
+		if req.Operation == "status" {
+			return offlineHostStatus(dir, req, err)
+		}
+		// No request bytes have been sent. This is known nonacceptance,
+		// including another client still launching the shared host.
+		if requestBinding != nil && (req.Operation == "attach" || req.Operation == "once") {
+			requestBinding.Status = "busy"
+			if saveErr := saveHostRequest(req.RequestFile, *requestBinding); saveErr != nil {
+				return hostError("unknown_effect", saveErr)
+			}
+			return hostError("busy", err)
+		}
+		return hostError("host_unavailable", err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
+	if err = json.NewEncoder(conn).Encode(req); err != nil {
+		return hostError("unknown_effect", err)
+	}
+	var response hostResponse
+	if err = json.NewDecoder(conn).Decode(&response); err != nil {
+		return hostError("unknown_effect", err)
+	}
+	if requestBinding != nil && req.Operation != "status" {
+		requestBinding.Status = "pending"
+		if response.Status == "busy" {
+			requestBinding.Status = "busy"
+		}
+		if response.Status == "ok" {
+			requestBinding.Status = "accepted"
+		}
+		if err := saveHostRequest(req.RequestFile, *requestBinding); err != nil {
+			return hostError("unknown_effect", err)
+		}
+	}
+	return response
+}
+
+func startHostProcess(ctx context.Context, path, dir string) error {
+	lock, err := lockfile.TryLock(filepath.Join(dir, "launch.lock"))
+	if err != nil {
+		return fmt.Errorf("host launch is already in progress: %w", err)
+	}
+	defer lock.Close()
+	if conn, err := net.DialTimeout("unix", filepath.Join(dir, "host.sock"), time.Second); err == nil {
+		conn.Close()
+		return nil
+	}
+	probe, err := lockfile.TryLock(filepath.Join(dir, "host.lock"))
+	if err != nil {
+		return fmt.Errorf("host lock is held but socket is unavailable: %w", err)
+	}
+	probe.Close()
+	log, err := os.OpenFile(filepath.Join(dir, "host.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer log.Close()
+	cmd := exec.Command(path, "host", "serve")
+	cmd.Stdout = log
+	cmd.Stderr = log
+	cmd.Env = hostBaselineEnvironment(dir)
+	cmd.Dir = dir
+	detachHostProcess(cmd)
+	if err = cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }()
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return errors.New("host startup timed out; inspect host.log before retry")
+		case <-ticker.C:
+			conn, err := net.DialTimeout("unix", filepath.Join(dir, "host.sock"), 100*time.Millisecond)
+			if err == nil {
+				conn.Close()
+				return nil
+			}
+		}
+	}
+}
+
+func serveHost(ctx context.Context) error {
+	dir, err := hostDirectory()
+	if err != nil {
+		return err
+	}
+	if _, err := swapHostEnvironment(dir, hostBaselineEnvironment(dir)); err != nil {
+		return err
+	}
+	lock, err := lockfile.TryLock(filepath.Join(dir, "host.lock"))
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	path, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	id, err := hostID()
+	if err != nil {
+		return err
+	}
+	h := &noodleHost{dir: dir, instanceID: id, binaryPath: path, binarySHA: hostDigest(data), newRuntime: func(dir, bin string, cfg config.Config, deps loop.Dependencies) hostRuntime {
+		return loop.New(dir, bin, cfg, deps)
+	}}
+	stored, err := os.ReadFile(filepath.Join(dir, "receipts.json"))
+	if err == nil {
+		if err = json.Unmarshal(stored, &h.receipts); err != nil {
+			return fmt.Errorf("read host receipts: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	for _, receipt := range h.receipts {
+		if receipt.ContextState != "detached" {
+			h.blocked = true
+		}
+	}
+	socket := filepath.Join(dir, "host.sock")
+	if err = os.Remove(socket); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	defer os.Remove(socket)
+	if err = os.Chmod(socket, 0600); err != nil {
+		return err
+	}
+	type call struct {
+		request hostRequest
+		reply   chan hostResponse
+	}
+	calls := make(chan call)
+	go func() { <-ctx.Done(); listener.Close() }()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
+				var req hostRequest
+				if err := json.NewDecoder(io.LimitReader(conn, 4<<20)).Decode(&req); err != nil {
+					return
+				}
+				c := call{req, make(chan hostResponse, 1)}
+				select {
+				case calls <- c:
+				case <-ctx.Done():
+					return
+				}
+				select {
+				case response := <-c.reply:
+					_ = json.NewEncoder(conn).Encode(response)
+				case <-ctx.Done():
+				}
+			}()
+		}
+	}()
+	for {
+		var done <-chan error
+		if h.active != nil {
+			done = h.active.done
+		}
+		select {
+		case <-ctx.Done():
+			if h.active != nil {
+				h.active.cancel()
+				if h.active.done != nil {
+					<-h.active.done
+				}
+			}
+			return nil
+		case err := <-done:
+			h.finish(err)
+		case c := <-calls:
+			if h.active != nil {
+				select {
+				case err := <-h.active.done:
+					h.finish(err)
+				default:
+				}
+			}
+			c.reply <- h.handle(ctx, c.request)
+		}
+	}
+}
+
+func (h *noodleHost) save() error {
+	data, err := json.MarshalIndent(h.receipts, "", "  ")
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(h.dir, "receipts.*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err = f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), filepath.Join(h.dir, "receipts.json"))
+}
+
+func (h *noodleHost) finish(runErr error) {
+	c := h.active
+	c.done = nil
+	c.runtime.Shutdown()
+	c.cancel()
+	if runErr == nil {
+		runErr = c.restore()
+	}
+	if runErr != nil {
+		c.receipt.ContextState = "failed"
+		h.blocked = true
+	} else {
+		c.receipt.ContextState = "detached"
+	}
+	h.receipts[len(h.receipts)-1] = c.receipt
+	if err := h.save(); err != nil {
+		h.blocked = true
+		fmt.Fprintln(os.Stderr, "host receipt persistence failed:", err)
+	}
+	if !h.blocked {
+		c.lock.Close()
+		h.active = nil
+	}
+}
+
+func offlineHostStatus(dir string, req hostRequest, dialErr error) hostResponse {
+	data, err := os.ReadFile(filepath.Join(dir, "receipts.json"))
+	if err != nil {
+		return hostError("host_unavailable", dialErr)
+	}
+	var receipts []hostReceipt
+	if err := json.Unmarshal(data, &receipts); err != nil {
+		return hostError("unknown_effect", err)
+	}
+	if ambiguousHostLookup(req, receipts) {
+		return hostError("ambiguous", errors.New("multiple contexts match; use request-file or context identity"))
+	}
+	for i := len(receipts) - 1; i >= 0; i-- {
+		r := receipts[i]
+		if !hostReceiptMatches(req, r) {
+			continue
+		}
+		if r.ContextState == "detached" {
+			return hostResponse{r, "ok", ""}
+		}
+		return hostResponse{r, "unknown_effect", "host is unavailable; the persisted context was not detached"}
+	}
+	return hostError("not_found", errors.New("context identity was not found"))
+}
+
+func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
+	if req.Operation == "once" {
+		req.Mode = "manual"
+	}
+	if req.BinarySHA256 != h.binarySHA {
+		return hostError("binary_mismatch", errors.New("client and host binaries differ"))
+	}
+	if req.Operation == "status" || req.Operation == "detach" {
+		if ambiguousHostLookup(req, h.receipts) {
+			return hostError("ambiguous", errors.New("multiple contexts match; use request-file or context identity"))
+		}
+		for i := len(h.receipts) - 1; i >= 0; i-- {
+			r := h.receipts[i]
+			if !hostReceiptMatches(req, r) {
+				continue
+			}
+			if h.blocked {
+				return hostResponse{r, "unknown_effect", "prior context is unresolved; no replay was attempted"}
+			}
+			if req.Operation == "status" || r.ContextState == "detached" {
+				return hostResponse{r, "ok", ""}
+			}
+			if h.active == nil || h.active.receipt.ContextID != r.ContextID {
+				return hostResponse{r, "stale_context", "context is no longer owned by this host"}
+			}
+			releaseCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			if err := h.active.runtime.Release(releaseCtx); err != nil {
+				return hostResponse{r, "busy", err.Error()}
+			}
+			select {
+			case err := <-h.active.done:
+				h.finish(err)
+			case <-releaseCtx.Done():
+				return hostResponse{r, "unknown_effect", releaseCtx.Err().Error()}
+			}
+			if h.blocked {
+				return hostResponse{h.receipts[i], "unknown_effect", "context cleanup or receipt persistence failed"}
+			}
+			return hostResponse{h.receipts[i], "ok", ""}
+		}
+		return hostError("not_found", errors.New("context identity was not found"))
+	}
+	if req.Operation != "attach" && req.Operation != "once" {
+		return hostError("refused", errors.New("unsupported host operation"))
+	}
+	if req.RequestID == "" {
+		return hostError("refused", errors.New("native request identity is missing"))
+	}
+	for _, r := range h.receipts {
+		if r.RequestID != req.RequestID {
+			continue
+		}
+		if r.ProjectDir != req.ProjectDir || r.ConfigSHA256 != req.ConfigSHA256 || r.Mode != req.Mode {
+			return hostError("refused", errors.New("request identity has conflicting bindings"))
+		}
+		if h.active != nil && h.active.receipt.RequestID == req.RequestID && hostDigest([]byte(strings.Join(req.Environment, "\x00"))) != h.active.environmentSHA {
+			return hostResponse{r, "busy", "request environment differs from active context"}
+		}
+		if h.blocked {
+			return hostResponse{r, "unknown_effect", "original request has an unresolved context"}
+		}
+		return hostResponse{r, "ok", ""}
+	}
+	if h.blocked {
+		return hostError("unknown_effect", errors.New("prior active or failed context requires readback; attach refused"))
+	}
+	if h.active != nil {
+		old := h.active.request
+		if req.RequestID == old.RequestID && req.Operation == "attach" && req.ProjectDir == old.ProjectDir && req.ConfigSHA256 == old.ConfigSHA256 && req.Mode == old.Mode && hostDigest([]byte(strings.Join(req.Environment, "\x00"))) == h.active.environmentSHA {
+			return hostResponse{h.active.receipt, "ok", ""}
+		}
+		return hostResponse{h.active.receipt, "busy", "host already has an attached context"}
+	}
+	return h.attach(ctx, req)
+}
+
+func swapHostEnvironment(dir string, environment []string) (func() error, error) {
+	oldDir, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	oldEnv := os.Environ()
+	restore := func() error {
+		os.Clearenv()
+		for _, entry := range oldEnv {
+			key, value, ok := strings.Cut(entry, "=")
+			if ok {
+				if err := os.Setenv(key, value); err != nil {
+					return err
+				}
+			}
+		}
+		return os.Chdir(oldDir)
+	}
+	for _, entry := range environment {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok || key == "" || strings.ContainsRune(entry, 0) {
+			return nil, errors.New("invalid context environment")
+		}
+	}
+	if err = os.Chdir(dir); err != nil {
+		return nil, err
+	}
+	os.Clearenv()
+	for _, entry := range environment {
+		key, value, _ := strings.Cut(entry, "=")
+		if err = os.Setenv(key, value); err != nil {
+			_ = restore()
+			return nil, err
+		}
+	}
+	return restore, nil
+}
+
+func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
+	data, err := readHostConfig(req.ProjectDir)
+	if err != nil {
+		return hostError("refused", err)
+	}
+	if hostDigest(data) != req.ConfigSHA256 {
+		return hostError("source_drift", errors.New("config changed before host admission"))
+	}
+	if req.Operation == "once" {
+		req.Mode = "manual"
+	}
+	runtimeDir := filepath.Join(req.ProjectDir, ".noodle")
+	if err = os.MkdirAll(runtimeDir, 0755); err != nil {
+		return hostError("refused", err)
+	}
+	lock, err := lockfile.TryLock(filepath.Join(runtimeDir, "noodle.lock"))
+	if err != nil {
+		return hostError("busy", err)
+	}
+	keepLock := false
+	defer func() {
+		if !keepLock {
+			lock.Close()
+		}
+	}()
+	if err = statever.CheckCompatibility(filepath.Join(runtimeDir, "state.json")); err != nil {
+		return hostError("refused", err)
+	}
+	if req.Operation == "once" {
+		entries, err := os.ReadDir(filepath.Join(runtimeDir, "sessions"))
+		if err != nil && !os.IsNotExist(err) {
+			return hostError("refused", err)
+		}
+		if len(entries) != 0 {
+			return hostError("busy", errors.New("host once requires a bootstrap context without existing sessions"))
+		}
+		for _, name := range []string{"control.ndjson", "orders-next.json"} {
+			info, err := os.Stat(filepath.Join(runtimeDir, name))
+			if err != nil && !os.IsNotExist(err) {
+				return hostError("refused", err)
+			}
+			if err == nil && info.Size() != 0 {
+				return hostError("busy", errors.New("host once has pending runtime inputs"))
+			}
+		}
+	}
+	restore, err := swapHostEnvironment(req.ProjectDir, req.Environment)
+	if err != nil {
+		return hostError("refused", err)
+	}
+	keepEnvironment := false
+	defer func() {
+		if !keepEnvironment {
+			if err := restore(); err != nil {
+				h.blocked = true
+			}
+		}
+	}()
+	cfg, err := config.Parse(data)
+	if err != nil {
+		return hostError("refused", err)
+	}
+	validation := config.Validate(cfg)
+	if len(validation.Fatals()) != 0 {
+		return hostError("refused", errors.New("fatal config diagnostics prevent host attach"))
+	}
+	cfg, err = startConfig(cfg, req.Mode)
+	if err != nil {
+		return hostError("refused", err)
+	}
+	if shouldStartServer(cfg.Server) {
+		return hostError("refused", errors.New("host contexts require server.enabled=false"))
+	}
+	id, err := hostID()
+	if err != nil {
+		return hostError("refused", err)
+	}
+	r := hostReceipt{1, hostProtocol, os.Getpid(), h.instanceID, id, req.ProjectDir, "active", cfg.Mode, req.ConfigSHA256, h.binaryPath, h.binarySHA, req.RequestID, h.dir}
+	h.receipts = append(h.receipts, r)
+	if err = h.save(); err != nil {
+		h.receipts = h.receipts[:len(h.receipts)-1]
+		return hostError("refused", err)
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	rt := h.newRuntime(req.ProjectDir, h.binaryPath, cfg, loop.Dependencies{ModeOverride: state.RunMode(req.Mode)})
+	environmentSHA := hostDigest([]byte(strings.Join(req.Environment, "\x00")))
+	req.Environment = nil
+	c := &hostContext{receipt: r, request: req, runtime: rt, done: make(chan error, 1), cancel: cancel, lock: lock, restore: restore, environmentSHA: environmentSHA}
+	h.active = c
+	keepLock = true
+	keepEnvironment = true
+	if req.Operation == "once" {
+		err = rt.Cycle(runCtx)
+		if err == nil {
+			err = rt.FinishOnce()
+		}
+		cancel()
+		h.finish(err)
+		if err != nil {
+			return hostResponse{h.receipts[len(h.receipts)-1], "failed", err.Error()}
+		}
+		if h.blocked {
+			return hostResponse{h.receipts[len(h.receipts)-1], "unknown_effect", "context cleanup or receipt persistence failed"}
+		}
+		return hostResponse{h.receipts[len(h.receipts)-1], "ok", ""}
+	}
+	go func() {
+		err := rt.Run(runCtx)
+		if err == nil && runCtx.Err() != nil {
+			err = runCtx.Err()
+		}
+		c.done <- err
+	}()
+	select {
+	case <-rt.Ready():
+		return hostResponse{r, "ok", ""}
+	case err := <-c.done:
+		if err == nil {
+			err = errors.New("loop exited before becoming ready")
+		}
+		h.finish(err)
+		return hostResponse{h.receipts[len(h.receipts)-1], "failed", err.Error()}
+	case <-time.After(30 * time.Second):
+		return hostResponse{r, "unknown_effect", "loop startup has not completed; use status"}
+	}
+}
+
+func hostBaselineEnvironment(dir string) []string {
+	result := []string{"NOODLE_HOST_DIR=" + dir}
+	for _, key := range []string{"HOME", "PATH", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "USER", "LOGNAME", "SystemRoot", "WINDIR"} {
+		if value, ok := os.LookupEnv(key); ok {
+			result = append(result, key+"="+value)
+		}
+	}
+	return result
+}

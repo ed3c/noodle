@@ -84,15 +84,18 @@ func New(projectDir, noodleBin string, cfg config.Config, deps Dependencies) *Lo
 	eventsWriter := event.NewLoopEventWriter(filepath.Join(runtimeDir, "loop-events.ndjson"))
 
 	loop := &Loop{
-		projectDir:  projectDir,
-		runtimeDir:  runtimeDir,
-		config:      cfg,
-		registry:    registry,
-		registryErr: registryErr,
-		deps:        deps,
-		logger:      deps.Logger,
-		events:      eventsWriter,
-		state:       StateRunning, // Direct assignment; setState() is not used here to avoid logging the initial state.
+		releaseRequests: make(chan releaseRequest),
+		runReady:        make(chan struct{}),
+		runDone:         make(chan struct{}),
+		projectDir:      projectDir,
+		runtimeDir:      runtimeDir,
+		config:          cfg,
+		registry:        registry,
+		registryErr:     registryErr,
+		deps:            deps,
+		logger:          deps.Logger,
+		events:          eventsWriter,
+		state:           StateRunning, // Direct assignment; setState() is not used here to avoid logging the initial state.
 		cooks: cookTracker{
 			activeCooksByOrder: map[string]*cookHandle{},
 			adoptedTargets:     map[string]string{},
@@ -316,6 +319,20 @@ func countPendingDone(sessions []loopruntime.SessionHandle) int {
 }
 
 func (l *Loop) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	var background sync.WaitGroup
+	defer func() {
+		l.shutdownAndDrain()
+		if l.mergeQueue != nil {
+			l.mergeQueue.Close()
+		}
+		l.watcherWG.Wait()
+		cancel()
+		background.Wait()
+		if l.runDone != nil {
+			close(l.runDone)
+		}
+	}()
 	if strings.TrimSpace(l.projectDir) == "" {
 		return fmt.Errorf("project directory not set")
 	}
@@ -345,7 +362,8 @@ func (l *Loop) Run(ctx context.Context) error {
 	if skillWatchErr != nil {
 		fmt.Fprintf(os.Stderr, "skill.watcher: %v\n", skillWatchErr)
 	} else {
-		go skillWatcher.Run(ctx)
+		background.Add(1)
+		go func() { defer background.Done(); skillWatcher.Run(ctx) }()
 		defer skillWatcher.Close()
 	}
 
@@ -359,17 +377,32 @@ func (l *Loop) Run(ctx context.Context) error {
 	}
 	l.startupReady = true
 	l.publishState()
+	if l.runReady != nil {
+		close(l.runReady)
+	}
 
 	ticker := time.NewTicker(l.pollInterval())
 	defer ticker.Stop()
 	cycleTrigger := make(chan struct{}, 1)
 	watchErr := make(chan error, 1)
-	go l.forwardRuntimeWatcher(ctx, watcher.Events, watcher.Errors, cycleTrigger, watchErr)
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		l.forwardRuntimeWatcher(ctx, watcher.Events, watcher.Errors, cycleTrigger, watchErr)
+	}()
 
 	for {
 		select {
+		case request := <-l.releaseRequests:
+			err := request.ctx.Err()
+			if err == nil {
+				err = l.releaseIfQuiescent()
+			}
+			request.reply <- err
+			if err == nil {
+				return nil
+			}
 		case <-ctx.Done():
-			l.shutdownAndDrain()
 			return nil
 		case <-ticker.C:
 			enqueueRuntimeCycle(cycleTrigger)
