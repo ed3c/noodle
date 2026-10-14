@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/poteto/noodle/event"
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/filex"
 	"github.com/poteto/noodle/internal/lockfile"
 	"github.com/poteto/noodle/internal/reducer"
@@ -40,11 +41,11 @@ var reconciliationSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // ReconcilePublication holds the same stopped-owner lock as admission recovery.
 // No loop, adapter, scheduler, writer, merge or cleanup is started here.
-func ReconcilePublication(project, claimPath, digest, mergeHead string) (PublicationReconciliation, error) {
-	return reconcilePublication(project, claimPath, digest, mergeHead, nil)
+func ReconcilePublication(project, claimPath, digest, mergeHead string, execCtx ...*execution.Context) (PublicationReconciliation, error) {
+	return reconcilePublication(project, claimPath, digest, mergeHead, nil, firstExecution(execCtx))
 }
 
-func reconcilePublication(project, claimPath, digest, mergeHead string, barrier func(string)) (PublicationReconciliation, error) {
+func reconcilePublication(project, claimPath, digest, mergeHead string, barrier func(string), execCtx ...*execution.Context) (PublicationReconciliation, error) {
 	r := PublicationReconciliation{Owner: "Noodle", Status: "refused", MergeHead: mergeHead}
 	project, err := canonicalDirectory(project)
 	if err != nil {
@@ -113,7 +114,7 @@ func reconcilePublication(project, claimPath, digest, mergeHead string, barrier 
 			return r, err
 		}
 	}
-	if err := validateMergedPublication(project, intent.Before, claim, mergeHead); err != nil {
+	if err := validateMergedPublication(project, intent.Before, claim, mergeHead, firstExecution(execCtx)); err != nil {
 		return r, err
 	}
 	if !exists {
@@ -132,7 +133,7 @@ func reconcilePublication(project, claimPath, digest, mergeHead string, barrier 
 		barrier("after_intent")
 	}
 	if bytes.Equal(current, intent.Before) {
-		if err := validateMergedPublication(project, intent.Before, claim, mergeHead); err != nil {
+		if err := validateMergedPublication(project, intent.Before, claim, mergeHead, firstExecution(execCtx)); err != nil {
 			return r, err
 		}
 		fresh, err := readAdmissionFile(filepath.Join(dir, "state.snapshot.json"))
@@ -156,7 +157,7 @@ func reconcilePublication(project, claimPath, digest, mergeHead string, barrier 
 	return r, nil
 }
 
-func validateMergedPublication(project string, before []byte, c PublicationClaim, mergeHead string) error {
+func validateMergedPublication(project string, before []byte, c PublicationClaim, mergeHead string, execCtx ...*execution.Context) error {
 	if c.SchemaVersion != publicationClaimSchema || c.Owner != "Noodle" || c.AuthorizesLanding || c.AuthorizesProviderWrite || !reconciliationSHA.MatchString(c.Head) || !reconciliationSHA.MatchString(c.Tree) {
 		return fmt.Errorf("publication claim identity is invalid")
 	}
@@ -164,7 +165,7 @@ func validateMergedPublication(project string, before []byte, c PublicationClaim
 	if match == nil || match[1] != c.Repository {
 		return fmt.Errorf("publication subject differs from repository")
 	}
-	remote, err := publicationGit(project, "remote", "get-url", "--push", "origin")
+	remote, err := publicationGitWithExecution(firstExecution(execCtx), project, "remote", "get-url", "--push", "origin")
 	if err != nil {
 		return err
 	}
@@ -178,7 +179,7 @@ func validateMergedPublication(project string, before []byte, c PublicationClaim
 	if c.Branch != c.WorktreeName && c.Branch != "noodle/"+c.WorktreeName {
 		return fmt.Errorf("publication branch differs from original worktree")
 	}
-	top, err := publicationGit(project, "rev-parse", "--show-toplevel")
+	top, err := publicationGitWithExecution(firstExecution(execCtx), project, "rev-parse", "--show-toplevel")
 	if err != nil || top != project {
 		return fmt.Errorf("reconciliation project is not its Git root")
 	}
@@ -239,19 +240,19 @@ func validateMergedPublication(project string, before []byte, c PublicationClaim
 	if json.Unmarshal(spawnBytes, &spawn) != nil || spawn.SessionID != c.SessionID || spawn.WorktreePath != c.WorktreePath || spawn.RetryCount != len(stage.Attempts)-1 {
 		return fmt.Errorf("publication spawn custody differs")
 	}
-	if _, err := stoppedReviewResidue(project, c); err != nil {
+	if _, err := stoppedReviewResidue(project, c, firstExecution(execCtx)); err != nil {
 		return err
 	}
-	tree, err := exactPublicationObject(project, c.Head+"^{tree}")
+	tree, err := exactPublicationObject(project, c.Head+"^{tree}", firstExecution(execCtx))
 	if err != nil || tree != c.Tree {
 		return fmt.Errorf("publication candidate tree changed")
 	}
 	for _, pair := range [][2]string{{c.Head, mergeHead}, {mergeHead, "HEAD"}} {
-		if err := publicationGitRun(project, "merge-base", "--is-ancestor", pair[0], pair[1]); err != nil {
+		if err := publicationGitRunWithExecution(firstExecution(execCtx), project, "merge-base", "--is-ancestor", pair[0], pair[1]); err != nil {
 			return fmt.Errorf("publication is not included in observed merge/control HEAD: %w", err)
 		}
 	}
-	dirty, err := publicationGit(project, "status", "--porcelain", "--untracked-files=all")
+	dirty, err := publicationGitWithExecution(firstExecution(execCtx), project, "status", "--porcelain", "--untracked-files=all")
 	if err != nil || dirty != "" {
 		return fmt.Errorf("reconciliation control checkout is not clean")
 	}

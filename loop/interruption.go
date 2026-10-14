@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/filex"
 	"github.com/poteto/noodle/internal/lockfile"
 	"github.com/poteto/noodle/internal/reducer"
@@ -59,15 +60,15 @@ type interruptionBinding struct {
 	NextAttemptID  string `json:"next_attempt_id"`
 }
 
-func InspectInterruption(project, binary, order, subject string) InterruptionInspection {
-	return prepareInterruption(project, binary, order, subject, "", nil)
+func InspectInterruption(project, binary, order, subject string, execCtx ...*execution.Context) InterruptionInspection {
+	return prepareInterruption(project, binary, order, subject, "", nil, firstExecution(execCtx))
 }
 
-func PrepareInterruption(project, binary, order, subject, digest string) InterruptionInspection {
+func PrepareInterruption(project, binary, order, subject, digest string, execCtx ...*execution.Context) InterruptionInspection {
 	if len(digest) != 64 {
 		return interruptionRefusal(interruptionResult(project, binary, order, subject), fmt.Errorf("custody_sha256 must be exact"))
 	}
-	return prepareInterruption(project, binary, order, subject, digest, nil)
+	return prepareInterruption(project, binary, order, subject, digest, nil, firstExecution(execCtx))
 }
 
 func interruptionResult(project, binary, order, subject string) InterruptionInspection {
@@ -122,9 +123,9 @@ func readInterruptionIntent(path string) (interruptionIntent, error) {
 	return i, nil
 }
 
-func prepareInterruption(project, binary, order, subject, digest string, barrier func(string)) InterruptionInspection {
+func prepareInterruption(project, binary, order, subject, digest string, barrier func(string), execCtx ...*execution.Context) InterruptionInspection {
 	if digest == "" {
-		return inspectInterruption(project, binary, order, subject)
+		return inspectInterruption(project, binary, order, subject, firstExecution(execCtx))
 	}
 	r := interruptionResult(project, binary, order, subject)
 	refuse := func(err error) InterruptionInspection { return interruptionRefusal(r, err) }
@@ -145,7 +146,7 @@ func prepareInterruption(project, binary, order, subject, digest string, barrier
 		return refuse(err)
 	}
 	if !exists {
-		intent, err = captureInterruption(project, order, subject)
+		intent, err = captureInterruption(project, order, subject, firstExecution(execCtx))
 		if err != nil {
 			return refuse(err)
 		}
@@ -167,18 +168,18 @@ func prepareInterruption(project, binary, order, subject, digest string, barrier
 			return refuse(err)
 		}
 		if dispatched != nil {
-			return dispatchedInterruptionReadback(project, r, intent, dispatched)
+			return dispatchedInterruptionReadback(project, r, intent, dispatched, firstExecution(execCtx))
 		}
 	}
 	before := bytes.Equal(current, intent.Before)
 	after := exists && bytes.Equal(current, intent.After)
 	if !before && !after {
 		if exists {
-			return readPreparedInterruption(project, r, intent, current)
+			return readPreparedInterruption(project, r, intent, current, firstExecution(execCtx))
 		}
 		return refuse(fmt.Errorf("canonical snapshot changed outside interruption transition"))
 	}
-	if err := validateInterruptionFiles(project, intent.Custody); err != nil {
+	if err := validateInterruptionFiles(project, intent.Custody, firstExecution(execCtx)); err != nil {
 		return refuse(err)
 	}
 	var snapshot reducer.DurableSnapshot
@@ -221,7 +222,7 @@ func prepareInterruption(project, binary, order, subject, digest string, barrier
 		barrier("after_intent")
 	}
 	if before {
-		fresh, err := captureInterruption(project, order, subject)
+		fresh, err := captureInterruption(project, order, subject, firstExecution(execCtx))
 		if err != nil {
 			return refuse(err)
 		}
@@ -238,7 +239,7 @@ func prepareInterruption(project, binary, order, subject, digest string, barrier
 	if err := stoppedReviewProjection(dir, intent.After, true); err != nil {
 		return refuse(err)
 	}
-	if err := validateInterruptionFiles(project, intent.Custody); err != nil {
+	if err := validateInterruptionFiles(project, intent.Custody, firstExecution(execCtx)); err != nil {
 		return refuse(err)
 	}
 	r.CandidateUnchanged = true
@@ -304,15 +305,15 @@ func validateInterruptionSession(project string, c InterruptionCustody) error {
 	return nil
 }
 
-func validateInterruptionFiles(project string, c InterruptionCustody) error {
+func validateInterruptionFiles(project string, c InterruptionCustody, execCtx ...*execution.Context) error {
 	if err := validateInterruptionSession(project, c); err != nil {
 		return err
 	}
-	return validateInterruptionCandidate(project, c)
+	return validateInterruptionCandidate(project, c, firstExecution(execCtx))
 }
 
-func validateInterruptionCandidate(project string, c InterruptionCustody) error {
-	manifest, branch, head, err := captureCandidate(project, c.WorktreeName)
+func validateInterruptionCandidate(project string, c InterruptionCustody, execCtx ...*execution.Context) error {
+	manifest, branch, head, err := captureCandidate(project, c.WorktreeName, firstExecution(execCtx))
 	if err != nil {
 		return err
 	}
@@ -322,7 +323,7 @@ func validateInterruptionCandidate(project string, c InterruptionCustody) error 
 	return nil
 }
 
-func readPreparedInterruption(project string, r InterruptionInspection, i interruptionIntent, current []byte) InterruptionInspection {
+func readPreparedInterruption(project string, r InterruptionInspection, i interruptionIntent, current []byte, execCtx ...*execution.Context) InterruptionInspection {
 	refuse := func(err error) InterruptionInspection { return interruptionRefusal(r, err) }
 	r.Custody, r.Digest = i.Custody, i.Digest
 	dir := filepath.Join(project, ".noodle")
@@ -331,7 +332,7 @@ func readPreparedInterruption(project string, r InterruptionInspection, i interr
 		return refuse(err)
 	}
 	if successor != nil {
-		return dispatchedInterruptionReadback(project, r, i, successor)
+		return dispatchedInterruptionReadback(project, r, i, successor, firstExecution(execCtx))
 	}
 	var s reducer.DurableSnapshot
 	if err := decodeStoppedReview(current, &s); err != nil {
@@ -344,7 +345,7 @@ func readPreparedInterruption(project string, r InterruptionInspection, i interr
 	if st.Status != state.StagePending || st.Attempts[len(st.Attempts)-1].AttemptID != i.Custody.AttemptID {
 		return refuse(fmt.Errorf("interruption is not prepared"))
 	}
-	if err := validateInterruptionFiles(project, i.Custody); err != nil {
+	if err := validateInterruptionFiles(project, i.Custody, firstExecution(execCtx)); err != nil {
 		return refuse(err)
 	}
 	if err := interruptionProcessAbsent(dir, i.Custody.SessionID); err != nil {
@@ -362,13 +363,13 @@ func readPreparedInterruption(project string, r InterruptionInspection, i interr
 	return r
 }
 
-func dispatchedInterruptionReadback(project string, r InterruptionInspection, i interruptionIntent, successor *InterruptionSuccessor) InterruptionInspection {
+func dispatchedInterruptionReadback(project string, r InterruptionInspection, i interruptionIntent, successor *InterruptionSuccessor, execCtx ...*execution.Context) InterruptionInspection {
 	if err := validateInterruptionSession(project, i.Custody); err != nil {
 		return interruptionRefusal(r, err)
 	}
 	r.Status = "dispatched"
 	r.Successor = successor
-	if err := validateInterruptionCandidate(project, i.Custody); err != nil {
+	if err := validateInterruptionCandidate(project, i.Custody, firstExecution(execCtx)); err != nil {
 		r.CandidateInvalid = err.Error()
 	} else {
 		r.CandidateUnchanged = true
@@ -376,7 +377,7 @@ func dispatchedInterruptionReadback(project string, r InterruptionInspection, i 
 	return r
 }
 
-func inspectInterruption(project, binary, order, subject string) InterruptionInspection {
+func inspectInterruption(project, binary, order, subject string, execCtx ...*execution.Context) InterruptionInspection {
 	r := interruptionResult(project, binary, order, subject)
 	refuse := func(err error) InterruptionInspection { return interruptionRefusal(r, err) }
 	project, err := canonicalDirectory(project)
@@ -390,7 +391,7 @@ func inspectInterruption(project, binary, order, subject string) InterruptionIns
 		return refuse(err)
 	}
 	if !exists {
-		i, err = captureInterruption(project, order, subject)
+		i, err = captureInterruption(project, order, subject, firstExecution(execCtx))
 		if err != nil {
 			return refuse(err)
 		}
@@ -411,9 +412,9 @@ func inspectInterruption(project, binary, order, subject string) InterruptionIns
 				return r
 			}
 		}
-		return readPreparedInterruption(project, r, i, current)
+		return readPreparedInterruption(project, r, i, current, firstExecution(execCtx))
 	}
-	fresh, err := captureInterruption(project, order, subject)
+	fresh, err := captureInterruption(project, order, subject, firstExecution(execCtx))
 	if err != nil {
 		return refuse(err)
 	}

@@ -60,16 +60,18 @@ func (r *DispatcherRuntime) Dispatch(ctx context.Context, req DispatchRequest) (
 	}
 
 	handle := dispatcherSessionHandle{session: session, runtimeDir: r.runtimeDir}
-	go r.watchDone(handle)
-	return handle, nil
+	tracked := &trackedSession{SessionHandle: handle, done: make(chan struct{})}
+	go r.watchDone(handle, tracked.done)
+	return tracked, nil
 }
 
 // watchDone decrements active count when the session completes.
-func (r *DispatcherRuntime) watchDone(handle SessionHandle) {
+func (r *DispatcherRuntime) watchDone(handle SessionHandle, done chan struct{}) {
 	<-handle.Done()
 	r.mu.Lock()
 	r.active--
 	r.mu.Unlock()
+	close(done)
 }
 
 func (r *DispatcherRuntime) Terminate(handle SessionHandle) error {
@@ -88,4 +90,16 @@ func (r *DispatcherRuntime) ForceKill(handle SessionHandle) error {
 
 func (r *DispatcherRuntime) Recover(context.Context) ([]RecoveredSession, error) {
 	return nil, nil
+}
+
+type trackedSession struct {
+	SessionHandle
+	done chan struct{}
+}
+
+func (s *trackedSession) Done() <-chan struct{} { return s.done }
+func (r *DispatcherRuntime) CapacityAvailable() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.maxConcurrent <= 0 || r.active < r.maxConcurrent
 }

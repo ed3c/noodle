@@ -11,6 +11,8 @@ import (
 	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/dispatcher"
 	"github.com/poteto/noodle/event"
+	"github.com/poteto/noodle/internal/admission"
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/orderx"
 	"github.com/poteto/noodle/internal/reducer"
 	"github.com/poteto/noodle/internal/state"
@@ -150,19 +152,22 @@ type Monitor interface {
 }
 
 type Dependencies struct {
-	Runtimes       map[string]loopruntime.Runtime
-	Worktree       WorktreeManager
-	Adapter        AdapterRunner
-	Mise           MiseBuilder
-	Monitor        Monitor
-	Registry       taskreg.Registry
-	ModeOverride   state.RunMode
-	EventSink      dispatcher.SessionEventSink
-	Logger         *slog.Logger
-	Now            func() time.Time
-	OrdersFile     string
-	OrdersNextFile string
-	StatusFile     string
+	Execution        *execution.Context
+	Admission        *admission.Budget
+	AdmissionContext string
+	Runtimes         map[string]loopruntime.Runtime
+	Worktree         WorktreeManager
+	Adapter          AdapterRunner
+	Mise             MiseBuilder
+	Monitor          Monitor
+	Registry         taskreg.Registry
+	ModeOverride     state.RunMode
+	EventSink        dispatcher.SessionEventSink
+	Logger           *slog.Logger
+	Now              func() time.Time
+	OrdersFile       string
+	OrdersNextFile   string
+	StatusFile       string
 }
 
 func (l *Loop) effectiveMode() state.RunMode {
@@ -183,9 +188,10 @@ type Loop struct {
 	events      *event.LoopEventWriter
 
 	// Components — field-grouping sub-structs.
-	cooks         cookTracker
-	cmds          cmdProcessor
-	completionBuf completionBuffer
+	cooks           cookTracker
+	cmds            cmdProcessor
+	resourceUnknown error
+	completionBuf   completionBuffer
 
 	state             State
 	startupReady      bool

@@ -164,3 +164,28 @@ func (d *failOnNthDispatcher) Dispatch(ctx context.Context, req dispatcher.Dispa
 	}
 	return d.delegate.Dispatch(ctx, req)
 }
+
+func TestDispatcherRuntimeDoneMakesReplacementCapacityAvailable(t *testing.T) {
+	rt := NewDispatcherRuntime("process", &fakeDispatcher{}, t.TempDir())
+	rt.SetMaxConcurrent(1)
+	h, err := rt.Dispatch(context.Background(), DispatchRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt.CapacityAvailable() {
+		t.Fatal("running worker not counted")
+	}
+	if err := h.ForceKill(); err != nil {
+		t.Fatal(err)
+	}
+	<-h.Done()
+	if !rt.CapacityAvailable() {
+		t.Fatal("joined Done preceded capacity release")
+	}
+	replacement, err := rt.Dispatch(context.Background(), DispatchRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = replacement.ForceKill()
+	<-replacement.Done()
+}

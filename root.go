@@ -36,7 +36,7 @@ func NewRootCmd() *cobra.Command {
 		},
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if rootSubcommandName(cmd) == "host" {
-				if cmd.Name() == "capabilities" || cmd.Name() == "serve" {
+				if cmd.Name() == "capabilities" || cmd.Name() == "serve" || cmd.Name() == "resources" {
 					return nil
 				}
 				dir, err := resolveProjectDir(projectDirFlag)

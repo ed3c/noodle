@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/filex"
 	"github.com/poteto/noodle/internal/procx"
 	"github.com/poteto/noodle/internal/reducer"
@@ -151,7 +152,7 @@ func (l *Loop) interruptionForDispatch(cand dispatchCandidate, ordinal int) (*in
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
-	if err := validateInterruptionFiles(l.projectDir, i.Custody); err != nil {
+	if err := validateInterruptionFiles(l.projectDir, i.Custody, l.deps.Execution); err != nil {
 		return nil, err
 	}
 	// Startup may refresh derived metadata. Raw session and process evidence stay fixed.
@@ -161,8 +162,8 @@ func (l *Loop) interruptionForDispatch(cand dispatchCandidate, ordinal int) (*in
 	return &i, nil
 }
 
-func offerInterruptionDispatch(project string, i interruptionIntent, attemptID string) error {
-	if err := validateInterruptionFiles(project, i.Custody); err != nil {
+func offerInterruptionDispatch(project string, i interruptionIntent, attemptID string, execCtx ...*execution.Context) error {
+	if err := validateInterruptionFiles(project, i.Custody, firstExecution(execCtx)); err != nil {
 		return err
 	}
 	path := filepath.Join(interruptionPath(project, i.Custody.OrderID, i.Custody.Subject), "dispatch-offered.json")

@@ -3,7 +3,9 @@ package loop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/poteto/noodle/internal/admission"
 	"os"
 	"strings"
 
@@ -543,6 +545,9 @@ func (l *Loop) spawnPlannedCandidates(ctx context.Context, candidates []dispatch
 			attempt: l.canonicalAttemptOrdinal(cand.OrderID, cand.StageIndex),
 		}
 		if err := l.spawnCook(ctx, cand, order, options); err != nil {
+			if errors.Is(err, admission.ErrDeferred) {
+				break
+			}
 			return err
 		}
 		if scheduleDigest != "" {
