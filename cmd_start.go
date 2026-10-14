@@ -76,6 +76,15 @@ func startConfig(configured config.Config, modeOverride string) (config.Config, 
 }
 
 func runStart(ctx context.Context, app *App, opts startOptions) error {
+	hostDir, err := hostDirectory()
+	if err != nil {
+		return err
+	}
+	globalLock, err := lockfile.TryLock(filepath.Join(hostDir, "host.lock"))
+	if err != nil {
+		return fmt.Errorf("another Noodle host or standalone instance owns this user: %w", err)
+	}
+	defer globalLock.Close()
 	cwd, err := app.ProjectDir()
 	if err != nil {
 		return err

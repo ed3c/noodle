@@ -207,10 +207,13 @@ type Loop struct {
 	scheduleDispatchDigest string // decision state seen by the in-flight scheduler
 	lastPromotionError     string // latest scheduler-output validation issue to inject into next schedule prompt
 
-	activeSummary  mise.ActiveSummary
-	recentHistory  []mise.HistoryItem
-	mergeQueue     *MergeQueue
-	publishedState atomic.Pointer[LoopState]
+	activeSummary   mise.ActiveSummary
+	recentHistory   []mise.HistoryItem
+	mergeQueue      *MergeQueue
+	publishedState  atomic.Pointer[LoopState]
+	releaseRequests chan releaseRequest
+	runReady        chan struct{}
+	runDone         chan struct{}
 
 	lastStatus statusfile.Status
 

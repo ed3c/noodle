@@ -35,6 +35,14 @@ func NewRootCmd() *cobra.Command {
 			return cmd.Help()
 		},
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if rootSubcommandName(cmd) == "host" {
+				if cmd.Name() == "capabilities" || cmd.Name() == "serve" {
+					return nil
+				}
+				dir, err := resolveProjectDir(projectDirFlag)
+				app.projectDir = dir
+				return err
+			}
 			if showVersion || rootSubcommandName(cmd) == "version" {
 				return nil
 			}
@@ -67,6 +75,7 @@ func NewRootCmd() *cobra.Command {
 	root.Flags().BoolVar(&showVersion, "version", false, "Print noodle version")
 
 	root.AddCommand(
+		newHostCmd(&app),
 		newStartCmd(&app),
 		newVersionCmd(&app),
 		newSkillsCmd(&app),
