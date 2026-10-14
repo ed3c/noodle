@@ -14,6 +14,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/event"
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/ingest"
 	"github.com/poteto/noodle/internal/reducer"
 	"github.com/poteto/noodle/internal/state"
@@ -31,12 +32,16 @@ const (
 
 func New(projectDir, noodleBin string, cfg config.Config, deps Dependencies) *Loop {
 	projectDir = strings.TrimSpace(projectDir)
+	if deps.Execution == nil {
+		deps.Execution = execution.Capture(projectDir)
+	}
+	cfg, bindingErr := config.Bind(cfg, deps.Execution)
 	runtimeDir := filepath.Join(projectDir, ".noodle")
 	if deps.Logger == nil {
 		deps.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}
 	if deps.Runtimes == nil || deps.Worktree == nil || deps.Adapter == nil || deps.Mise == nil || deps.Monitor == nil {
-		defaults := defaultDependencies(projectDir, runtimeDir, noodleBin, cfg, deps.Logger, deps.EventSink)
+		defaults := defaultDependencies(projectDir, runtimeDir, noodleBin, cfg, deps.Logger, deps.EventSink, deps.Execution)
 		if deps.Runtimes == nil {
 			deps.Runtimes = defaults.Runtimes
 		}
@@ -81,6 +86,9 @@ func New(projectDir, noodleBin string, cfg config.Config, deps Dependencies) *Lo
 		builder.TaskTypes = registryToTaskTypeSummaries(registry)
 	}
 
+	if bindingErr != nil {
+		registryErr = bindingErr
+	}
 	eventsWriter := event.NewLoopEventWriter(filepath.Join(runtimeDir, "loop-events.ndjson"))
 
 	loop := &Loop{

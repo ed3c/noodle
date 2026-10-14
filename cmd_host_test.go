@@ -67,7 +67,7 @@ func hostTestRequest(t *testing.T, root string) hostRequest {
 	return hostRequest{HostDir: t.TempDir(), RequestID: id, Operation: "attach", ProjectDir: root, Mode: "manual", ConfigSHA256: hostDigest(data), BinarySHA256: "test-binary", Environment: []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), "CONTEXT_SECRET=first"}}
 }
 
-func TestHostSerialContextsKeepPIDAndIsolateEnvironment(t *testing.T) {
+func TestHostConcurrentContextsKeepPIDAndIsolateEnvironment(t *testing.T) {
 	t.Setenv("CONTEXT_SECRET", "baseline")
 	originalDir, err := os.Getwd()
 	if err != nil {
@@ -78,12 +78,9 @@ func TestHostSerialContextsKeepPIDAndIsolateEnvironment(t *testing.T) {
 	var runtimes []*fakeHostRuntime
 	var observedRoots, observedSecrets []string
 	h.newRuntime = func(root, bin string, cfg config.Config, deps loop.Dependencies) hostRuntime {
-		cwd, err := os.Getwd()
-		if err != nil {
-			t.Fatal(err)
-		}
-		observedRoots = append(observedRoots, cwd)
-		observedSecrets = append(observedSecrets, os.Getenv("CONTEXT_SECRET"))
+		observedRoots = append(observedRoots, deps.Execution.Root())
+		secret, _ := deps.Execution.Lookup("CONTEXT_SECRET")
+		observedSecrets = append(observedSecrets, secret)
 		if cfg.Mode != "manual" || string(deps.ModeOverride) != "manual" {
 			t.Fatalf("mode override missing: %+v", cfg)
 		}
@@ -102,8 +99,9 @@ func TestHostSerialContextsKeepPIDAndIsolateEnvironment(t *testing.T) {
 	}
 	other := hostTestRequest(t, second)
 	other.Environment = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
-	if got := h.handle(context.Background(), other); got.Status != "busy" || len(runtimes) != 1 {
-		t.Fatalf("second context: %+v", got)
+	response2 := h.handle(context.Background(), other)
+	if response2.Status != "ok" || len(runtimes) != 2 || len(h.contexts) != 2 {
+		t.Fatalf("concurrent context: %+v", response2)
 	}
 	changed := req
 	changed.Environment = []string{"CONTEXT_SECRET=changed"}
@@ -120,7 +118,7 @@ func TestHostSerialContextsKeepPIDAndIsolateEnvironment(t *testing.T) {
 	}
 	detach.InstanceID = response.HostInstanceID
 	runtimes[0].busy = true
-	if got := h.handle(context.Background(), detach); got.Status != "busy" || h.active == nil {
+	if got := h.handle(context.Background(), detach); got.Status != "busy" || h.testContext() == nil {
 		t.Fatalf("busy detach: %+v", got)
 	}
 	runtimes[0].busy = false
@@ -133,7 +131,7 @@ func TestHostSerialContextsKeepPIDAndIsolateEnvironment(t *testing.T) {
 	if cwd, _ := os.Getwd(); cwd != originalDir {
 		t.Fatalf("cwd after detach: %q", cwd)
 	}
-	response2 := h.handle(context.Background(), other)
+	response2 = h.handle(context.Background(), other)
 	if response2.Status != "ok" || response2.HostPID != response.HostPID || response2.HostInstanceID != response.HostInstanceID || response2.ContextID == response.ContextID {
 		t.Fatalf("second attach: %+v", response2)
 	}
@@ -145,7 +143,7 @@ func TestHostSerialContextsKeepPIDAndIsolateEnvironment(t *testing.T) {
 	if !slices.Equal(observedRoots, []string{wantFirst, wantSecond}) {
 		t.Fatalf("wrong context directories: %q", observedRoots)
 	}
-	if h.active.request.Environment != nil {
+	if h.testContext().request.Environment != nil {
 		t.Fatal("host retained the request environment")
 	}
 	detach.ProjectDir = second
@@ -226,11 +224,10 @@ func TestHostRuntimeFailuresShutdownAndNeverReuseContext(t *testing.T) {
 			}
 			h := &noodleHost{dir: t.TempDir(), binarySHA: req.BinarySHA256, instanceID: "instance", newRuntime: func(string, string, config.Config, loop.Dependencies) hostRuntime { return rt }}
 			response := h.handle(context.Background(), req)
-			if h.active != nil {
-				defer h.active.lock.Close()
-				defer h.active.restore()
+			if h.testContext() != nil {
+				defer h.testContext().lock.Close()
 			}
-			if response.Status != "failed" || !h.blocked || rt.shutdowns != 1 || response.ContextState != "failed" {
+			if response.Status != "failed" || !h.testContext().failed || rt.shutdowns != 1 || response.ContextState != "failed" {
 				t.Fatalf("failure cleanup: %+v shutdowns=%d", response, rt.shutdowns)
 			}
 			if got := h.handle(context.Background(), req); got.Status != "unknown_effect" {
@@ -264,14 +261,13 @@ func TestHostDetachClassifiesOnlyQuiescenceRefusalAsBusy(t *testing.T) {
 				t.Fatalf("attach: %+v", attached)
 			}
 			defer func() {
-				h.active.cancel()
-				runErr := <-h.active.done
-				h.finish(runErr)
-				h.active.restore()
-				h.active.lock.Close()
+				h.testContext().cancel()
+				runErr := <-h.testContext().done
+				h.finish(h.testContext(), runErr)
+				h.testContext().lock.Close()
 			}()
 			detach := hostRequest{Operation: "detach", ProjectDir: req.ProjectDir, ContextID: attached.ContextID, InstanceID: attached.HostInstanceID, BinarySHA256: req.BinarySHA256}
-			if got := h.handle(context.Background(), detach); got.Status != tc.status || h.active == nil {
+			if got := h.handle(context.Background(), detach); got.Status != tc.status || h.testContext() == nil {
 				t.Fatalf("release error %v classified as %+v", tc.err, got)
 			}
 		})
@@ -317,11 +313,10 @@ func TestHostHistoricalDetachSurvivesFailedOrUnpersistedContext(t *testing.T) {
 				h.dir = filepath.Join(h.dir, "missing") // Actual persistence failure after actor release.
 				unresolved = h.handle(context.Background(), hostRequest{Operation: "detach", ProjectDir: second.ProjectDir, ContextID: unresolved.ContextID, InstanceID: unresolved.HostInstanceID, BinarySHA256: h.binarySHA})
 			}
-			if h.active == nil || !h.blocked {
+			if h.testContext() == nil || !h.testContext().failed {
 				t.Fatalf("failure lost custody: %+v", unresolved)
 			}
-			defer h.active.restore()
-			defer h.active.lock.Close()
+			defer h.testContext().lock.Close()
 			lookup := hostRequest{Operation: "status", ProjectDir: second.ProjectDir, ContextID: unresolved.ContextID, InstanceID: unresolved.HostInstanceID, BinarySHA256: h.binarySHA}
 			for _, op := range []string{"status", "detach"} {
 				lookup.Operation = op
@@ -396,5 +391,29 @@ func TestHostUpgradeReadsExactHistoricalReceiptWithOriginalBinary(t *testing.T) 
 		if got := upgraded.handle(context.Background(), lookup); got.Status != "binary_mismatch" {
 			t.Fatalf("old binary active %s accepted: %+v", op, got)
 		}
+	}
+}
+
+func (h *noodleHost) testContext() *hostContext {
+	for _, c := range h.contexts {
+		return c
+	}
+	return nil
+}
+
+func TestHostCapabilitiesPreservesProtocolContract(t *testing.T) {
+	root := NewRootCmd()
+	var output strings.Builder
+	root.SetOut(&output)
+	root.SetArgs([]string{"host", "capabilities"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]any
+	if err := json.Unmarshal([]byte(output.String()), &value); err != nil {
+		t.Fatal(err)
+	}
+	if len(value) != 2 || value["schema"] != float64(1) || value["protocol"] != "noodle-host-v1" {
+		t.Fatalf("host protocol changed: %v", value)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/poteto/noodle/adapter"
 	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/event"
+	"github.com/poteto/noodle/internal/execution"
 )
 
 const backlogSyncInterval = time.Minute
@@ -32,12 +33,16 @@ type Builder struct {
 }
 
 func NewBuilder(projectDir string, cfg config.Config) *Builder {
+	return NewBuilderWithExecution(projectDir, cfg, execution.Capture(projectDir))
+}
+
+func NewBuilderWithExecution(projectDir string, cfg config.Config, e *execution.Context) *Builder {
 	projectDir = strings.TrimSpace(projectDir)
 	return &Builder{
 		projectDir: projectDir,
 		runtimeDir: filepath.Join(projectDir, ".noodle"),
 		config:     cfg,
-		runner:     adapter.NewRunner(projectDir, cfg),
+		runner:     adapter.NewRunnerWithExecution(projectDir, cfg, e),
 		now:        time.Now,
 	}
 }

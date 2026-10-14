@@ -66,10 +66,9 @@ func (l *Loop) steer(target string, prompt string) error {
 
 func (l *Loop) steerCook(cook *cookHandle, prompt string) error {
 	steerPrompt := strings.TrimSpace(prompt)
-	l.recordSteerPrompt(cook.session.ID(), steerPrompt)
-
 	controller := cook.session.Controller()
 	if controller.Steerable() {
+		l.recordSteerPrompt(cook.session.ID(), steerPrompt)
 		// Live steering — interrupt + redirect without killing the session.
 		// Run async so the control loop isn't blocked.
 		sessionID := cook.session.ID()
@@ -153,6 +152,11 @@ func (l *Loop) steerLive(sessionID string, controller interface {
 
 // steerRespawn is the original kill+respawn steer path for non-steerable sessions.
 func (l *Loop) steerRespawn(cook *cookHandle, prompt string) error {
+	return l.withReplacement(cook, func(ctx context.Context) error { return l.steerRespawnAdmitted(ctx, cook, prompt) })
+}
+
+func (l *Loop) steerRespawnAdmitted(ctx context.Context, cook *cookHandle, prompt string) error {
+	l.recordSteerPrompt(cook.session.ID(), prompt)
 	resumeCtx := buildSteerResumeContext(l.runtimeDir, cook.session.ID())
 	steerPrompt := strings.TrimSpace(prompt)
 	if resumeCtx != "" {
@@ -161,6 +165,13 @@ func (l *Loop) steerRespawn(cook *cookHandle, prompt string) error {
 
 	if err := cook.session.ForceKill(); err != nil {
 		return err
+	}
+	if l.deps.Admission != nil {
+		select {
+		case <-cook.session.Done():
+		case <-time.After(shutdownDeadline):
+			return l.retainUnknownDispatch(ctx, fmt.Errorf("replacement old worker has not joined"))
+		}
 	}
 	l.trackCookCompleted(cook, StageResult{
 		SessionID:   cook.session.ID(),
@@ -178,7 +189,7 @@ func (l *Loop) steerRespawn(cook *cookHandle, prompt string) error {
 		Status: cook.orderStatus,
 		Plan:   cook.plan,
 	}
-	return l.spawnCook(context.Background(), cand, order, spawnOptions{
+	return l.spawnCook(ctx, cand, order, spawnOptions{
 		attempt:     cook.attempt,
 		resume:      steerPrompt,
 		displayName: cook.displayName,

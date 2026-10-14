@@ -12,6 +12,9 @@ import (
 )
 
 func (a *App) mergeLockPath() string {
+	if a.CommonDir != "" {
+		return filepath.Join(a.CommonDir, "noodle-merge-lock")
+	}
 	return filepath.Join(a.Root, ".worktrees", ".merge-lock")
 }
 

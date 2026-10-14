@@ -44,6 +44,7 @@ func (f *fakeStartLoop) Shutdown() {}
 func (f *fakeStartLoop) State() loop.LoopState { return loop.LoopState{} }
 
 func TestRunStartOnceUsesLoopCycle(t *testing.T) {
+	t.Setenv("NOODLE_HOST_DIR", t.TempDir())
 	projectDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(projectDir, ".noodle"), 0o755); err != nil {
 		t.Fatalf("mkdir .noodle: %v", err)
@@ -82,6 +83,7 @@ func TestRunStartOnceUsesLoopCycle(t *testing.T) {
 }
 
 func TestRunStartModeOverrideReachesRuntimeWithoutChangingConfiguredMode(t *testing.T) {
+	t.Setenv("NOODLE_HOST_DIR", t.TempDir())
 	projectDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(projectDir, ".noodle"), 0o755); err != nil {
 		t.Fatalf("mkdir .noodle: %v", err)
@@ -123,6 +125,7 @@ func TestRunStartModeOverrideReachesRuntimeWithoutChangingConfiguredMode(t *test
 }
 
 func TestRunStartRejectsUnsupportedModeBeforeCreatingLoop(t *testing.T) {
+	t.Setenv("NOODLE_HOST_DIR", t.TempDir())
 	projectDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(projectDir, ".noodle"), 0o755); err != nil {
 		t.Fatalf("mkdir .noodle: %v", err)
@@ -155,6 +158,7 @@ func TestRunStartRejectsUnsupportedModeBeforeCreatingLoop(t *testing.T) {
 }
 
 func TestRunStartRefusesFutureStateVersion(t *testing.T) {
+	t.Setenv("NOODLE_HOST_DIR", t.TempDir())
 	projectDir := t.TempDir()
 	runtimeDir := filepath.Join(projectDir, ".noodle")
 	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {

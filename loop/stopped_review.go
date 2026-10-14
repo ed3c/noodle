@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/filex"
 	"github.com/poteto/noodle/internal/ingest"
 	"github.com/poteto/noodle/internal/lockfile"
@@ -35,15 +36,15 @@ type stoppedReviewIntent struct {
 	Bundle string            `json:"bundle_sha256"`
 }
 
-func InspectStoppedReview(project, binary, order, subject string) StoppedReviewInspection {
-	return recoverStoppedReview(project, binary, order, subject, "", nil)
+func InspectStoppedReview(project, binary, order, subject string, execCtx ...*execution.Context) StoppedReviewInspection {
+	return recoverStoppedReview(project, binary, order, subject, "", nil, firstExecution(execCtx))
 }
 
-func RejectStoppedReview(project, binary, order, subject, digest string) StoppedReviewInspection {
+func RejectStoppedReview(project, binary, order, subject, digest string, execCtx ...*execution.Context) StoppedReviewInspection {
 	if len(digest) != 64 {
 		return stoppedReviewRefusal(stoppedReviewResult(project, binary, order, subject), fmt.Errorf("custody_sha256 is not exact"))
 	}
-	return recoverStoppedReview(project, binary, order, subject, digest, nil)
+	return recoverStoppedReview(project, binary, order, subject, digest, nil, firstExecution(execCtx))
 }
 
 func stoppedReviewResult(project, binary, order, subject string) StoppedReviewInspection {
@@ -60,7 +61,7 @@ func stoppedReviewRefusal(r StoppedReviewInspection, err error) StoppedReviewIns
 	return r
 }
 
-func recoverStoppedReview(project, binary, order, subject, digest string, barrier func(string)) StoppedReviewInspection {
+func recoverStoppedReview(project, binary, order, subject, digest string, barrier func(string), execCtx ...*execution.Context) StoppedReviewInspection {
 	r := stoppedReviewResult(project, binary, order, subject)
 	refuse := func(err error) StoppedReviewInspection { return stoppedReviewRefusal(r, err) }
 	project, err := canonicalDirectory(project)
@@ -90,7 +91,7 @@ func recoverStoppedReview(project, binary, order, subject, digest string, barrie
 			return refuse(fmt.Errorf("rejection intent identity or digest differs"))
 		}
 	} else {
-		intent, err = captureStoppedReview(project, order, subject)
+		intent, err = captureStoppedReview(project, order, subject, firstExecution(execCtx))
 		if err != nil {
 			return refuse(err)
 		}
@@ -112,7 +113,7 @@ func recoverStoppedReview(project, binary, order, subject, digest string, barrie
 		return refuse(err)
 	}
 	if before {
-		fresh, err := captureStoppedReview(project, order, subject)
+		fresh, err := captureStoppedReview(project, order, subject, firstExecution(execCtx))
 		if err != nil {
 			return refuse(err)
 		}
@@ -121,11 +122,11 @@ func recoverStoppedReview(project, binary, order, subject, digest string, barrie
 		}
 	}
 	if exists {
-		if err := validateStoppedIntent(project, r.EvidencePath, intent); err != nil {
+		if err := validateStoppedIntent(project, r.EvidencePath, intent, firstExecution(execCtx)); err != nil {
 			return refuse(err)
 		}
 	}
-	present, err := stoppedReviewResidue(project, intent.Claim)
+	present, err := stoppedReviewResidue(project, intent.Claim, firstExecution(execCtx))
 	if err != nil {
 		return refuse(err)
 	}
@@ -151,7 +152,7 @@ func recoverStoppedReview(project, binary, order, subject, digest string, barrie
 		if err != nil {
 			return refuse(err)
 		}
-		if err := archiveStoppedCandidate(project, r.EvidencePath, &intent); err != nil {
+		if err := archiveStoppedCandidate(project, r.EvidencePath, &intent, firstExecution(execCtx)); err != nil {
 			return refuse(err)
 		}
 		encoded, err := json.MarshalIndent(intent, "", "  ")
@@ -168,7 +169,7 @@ func recoverStoppedReview(project, binary, order, subject, digest string, barrie
 	// Re-read all custody after archive I/O, before the existing reducer result
 	// becomes canonical. No scheduler, signal, or provider client is constructed.
 	if before {
-		fresh, err := captureStoppedReview(project, order, subject)
+		fresh, err := captureStoppedReview(project, order, subject, firstExecution(execCtx))
 		if err != nil {
 			return refuse(err)
 		}
@@ -188,7 +189,7 @@ func recoverStoppedReview(project, binary, order, subject, digest string, barrie
 	if err := validateStoppedSessions(dir, intent, intent.After); err != nil {
 		return refuse(err)
 	}
-	present, err = stoppedReviewResidue(project, intent.Claim)
+	present, err = stoppedReviewResidue(project, intent.Claim, firstExecution(execCtx))
 	if err != nil {
 		return refuse(err)
 	}
@@ -201,7 +202,7 @@ func recoverStoppedReview(project, binary, order, subject, digest string, barrie
 	if barrier != nil {
 		barrier("after_cleanup")
 	}
-	present, err = stoppedReviewResidue(project, intent.Claim)
+	present, err = stoppedReviewResidue(project, intent.Claim, firstExecution(execCtx))
 	if err != nil {
 		return refuse(err)
 	}

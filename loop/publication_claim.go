@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/poteto/noodle/event"
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/reducer"
 	"github.com/poteto/noodle/internal/state"
 )
@@ -52,7 +52,7 @@ type PublicationClaimEvidence struct {
 
 // InspectPublicationClaim binds canonical Noodle custody to exact Git objects.
 // It performs no state transition and no provider operation.
-func InspectPublicationClaim(projectDir, orderID, subject string) (PublicationClaim, error) {
+func InspectPublicationClaim(projectDir, orderID, subject string, execCtx ...*execution.Context) (PublicationClaim, error) {
 	claim := PublicationClaim{SchemaVersion: publicationClaimSchema, Owner: "Noodle"}
 	projectDir, err := canonicalDirectory(projectDir)
 	if err != nil {
@@ -121,36 +121,36 @@ func InspectPublicationClaim(projectDir, orderID, subject string) (PublicationCl
 	if err != nil || worktreeName == "" || worktreePath != expectedPath || worktreePath == projectDir {
 		return claim, fmt.Errorf("publication worktree is not the claimed Noodle linked worktree")
 	}
-	top, err := publicationGit(worktreePath, "rev-parse", "--show-toplevel")
+	top, err := publicationGitWithExecution(firstExecution(execCtx), worktreePath, "rev-parse", "--show-toplevel")
 	if err != nil || top != worktreePath {
 		return claim, fmt.Errorf("publication worktree root mismatch")
 	}
-	worktreeCommon, err := publicationGit(worktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	worktreeCommon, err := publicationGitWithExecution(firstExecution(execCtx), worktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return claim, err
 	}
-	projectCommon, err := publicationGit(projectDir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	projectCommon, err := publicationGitWithExecution(firstExecution(execCtx), projectDir, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil || worktreeCommon != projectCommon {
 		return claim, fmt.Errorf("publication worktree owner mismatch")
 	}
-	status, err := publicationGit(worktreePath, "status", "--porcelain", "--untracked-files=all")
+	status, err := publicationGitWithExecution(firstExecution(execCtx), worktreePath, "status", "--porcelain", "--untracked-files=all")
 	if err != nil || status != "" {
 		return claim, fmt.Errorf("publication requires a clean worktree")
 	}
-	branch, err := publicationGit(worktreePath, "symbolic-ref", "--short", "HEAD")
+	branch, err := publicationGitWithExecution(firstExecution(execCtx), worktreePath, "symbolic-ref", "--short", "HEAD")
 	if err != nil || branch == "" {
 		return claim, fmt.Errorf("publication requires an attached branch")
 	}
-	head, err := exactPublicationObject(worktreePath, "HEAD")
+	head, err := exactPublicationObject(worktreePath, "HEAD", firstExecution(execCtx))
 	if err != nil {
 		return claim, err
 	}
-	tree, err := exactPublicationObject(worktreePath, "HEAD^{tree}")
+	tree, err := exactPublicationObject(worktreePath, "HEAD^{tree}", firstExecution(execCtx))
 	if err != nil {
 		return claim, err
 	}
 	remote := "origin"
-	remoteURL, err := publicationGit(projectDir, "remote", "get-url", "--push", remote)
+	remoteURL, err := publicationGitWithExecution(firstExecution(execCtx), projectDir, "remote", "get-url", "--push", remote)
 	if err != nil {
 		return claim, fmt.Errorf("publication push remote: %w", err)
 	}
@@ -161,19 +161,19 @@ func InspectPublicationClaim(projectDir, orderID, subject string) (PublicationCl
 	if repository != match[1] {
 		return claim, fmt.Errorf("publication subject repository %q does not match remote %q", match[1], repository)
 	}
-	remoteHead, err := publicationGit(projectDir, "symbolic-ref", "--short", "refs/remotes/"+remote+"/HEAD")
+	remoteHead, err := publicationGitWithExecution(firstExecution(execCtx), projectDir, "symbolic-ref", "--short", "refs/remotes/"+remote+"/HEAD")
 	if err != nil || !strings.HasPrefix(remoteHead, remote+"/") {
 		return claim, fmt.Errorf("publication remote default branch is unavailable")
 	}
 	baseBranch := strings.TrimPrefix(remoteHead, remote+"/")
-	baseHead, err := exactPublicationObject(projectDir, "refs/remotes/"+remote+"/"+baseBranch)
+	baseHead, err := exactPublicationObject(projectDir, "refs/remotes/"+remote+"/"+baseBranch, firstExecution(execCtx))
 	if err != nil {
 		return claim, err
 	}
-	if publicationGitRun(worktreePath, "merge-base", "--is-ancestor", baseHead, head) != nil {
+	if publicationGitRunWithExecution(firstExecution(execCtx), worktreePath, "merge-base", "--is-ancestor", baseHead, head) != nil {
 		return claim, fmt.Errorf("publication candidate is not descended from remote base %s", baseHead)
 	}
-	changed, err := publicationGit(worktreePath, "diff", "--name-only", baseHead+".."+head)
+	changed, err := publicationGitWithExecution(firstExecution(execCtx), worktreePath, "diff", "--name-only", baseHead+".."+head)
 	if err != nil || changed == "" {
 		return claim, fmt.Errorf("publication candidate has no committed changes")
 	}
@@ -224,8 +224,8 @@ func canonicalDirectory(path string) (string, error) {
 	return resolved, nil
 }
 
-func publicationGit(dir string, args ...string) (string, error) {
-	command := exec.Command("git", args...)
+func publicationGitWithExecution(executionContext *execution.Context, dir string, args ...string) (string, error) {
+	command := boundGitCommand(executionContext, dir, args...)
 	command.Dir = dir
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -234,13 +234,13 @@ func publicationGit(dir string, args ...string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-func publicationGitRun(dir string, args ...string) error {
-	_, err := publicationGit(dir, args...)
+func publicationGitRunWithExecution(executionContext *execution.Context, dir string, args ...string) error {
+	_, err := publicationGitWithExecution(executionContext, dir, args...)
 	return err
 }
 
-func exactPublicationObject(dir, revision string) (string, error) {
-	value, err := publicationGit(dir, "rev-parse", revision)
+func exactPublicationObject(dir, revision string, execCtx ...*execution.Context) (string, error) {
+	value, err := publicationGitWithExecution(firstExecution(execCtx), dir, "rev-parse", revision)
 	if err != nil || !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(value) {
 		return "", fmt.Errorf("publication Git object %q is not exact", revision)
 	}
@@ -269,4 +269,10 @@ func githubRepository(remote string) (string, error) {
 func publicationDigest(data []byte) string {
 	digest := sha256.Sum256(data)
 	return hex.EncodeToString(digest[:])
+}
+func publicationGit(dir string, args ...string) (string, error) {
+	return publicationGitWithExecution(nil, dir, args...)
+}
+func publicationGitRun(dir string, args ...string) error {
+	return publicationGitRunWithExecution(nil, dir, args...)
 }

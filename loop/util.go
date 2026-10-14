@@ -2,10 +2,11 @@ package loop
 
 import (
 	"fmt"
-	"os/exec"
+
 	"strings"
 	"time"
 
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/shellx"
 	"github.com/poteto/noodle/internal/stringx"
 	"github.com/poteto/noodle/mise"
@@ -131,8 +132,8 @@ func hasSyncWarnings(warnings []string) bool {
 // worktreeResumeContext checks if a worktree has commits ahead of main.
 // Returns a resume hint for the agent prompt, or empty string if the
 // worktree is fresh.
-func worktreeResumeContext(worktreePath, name string) string {
-	out, err := exec.Command("git", "-C", worktreePath, "log", "main..HEAD", "--oneline").Output()
+func worktreeResumeContext(worktreePath, name string, execCtx ...*execution.Context) string {
+	out, err := boundGitCommand(firstExecution(execCtx), worktreePath, "-C", worktreePath, "log", "main..HEAD", "--oneline").Output()
 	if err != nil {
 		return ""
 	}

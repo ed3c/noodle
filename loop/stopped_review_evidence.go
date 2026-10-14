@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/filex"
 	"github.com/poteto/noodle/internal/orderx"
 	"github.com/poteto/noodle/internal/reducer"
@@ -35,9 +36,9 @@ func stoppedReviewDigest(i stoppedReviewIntent) string {
 	return publicationDigest(data)
 }
 
-func captureStoppedReview(project, order, subject string) (stoppedReviewIntent, error) {
+func captureStoppedReview(project, order, subject string, execCtx ...*execution.Context) (stoppedReviewIntent, error) {
 	var i stoppedReviewIntent
-	claim, err := InspectPublicationClaim(project, order, subject)
+	claim, err := InspectPublicationClaim(project, order, subject, firstExecution(execCtx))
 	if err != nil {
 		return i, err
 	}
@@ -141,13 +142,13 @@ func validateStoppedSessions(dir string, i stoppedReviewIntent, current []byte) 
 	return nil
 }
 
-func archiveStoppedCandidate(project, path string, i *stoppedReviewIntent) error {
+func archiveStoppedCandidate(project, path string, i *stoppedReviewIntent, execCtx ...*execution.Context) error {
 	if err := os.MkdirAll(path, 0700); err != nil {
 		return err
 	}
 	bundle := filepath.Join(path, "candidate.bundle")
 	if _, err := os.Lstat(bundle); os.IsNotExist(err) {
-		if err := publicationGitRun(project, "bundle", "create", bundle, "refs/heads/"+i.Claim.Branch); err != nil {
+		if err := publicationGitRunWithExecution(firstExecution(execCtx), project, "bundle", "create", bundle, "refs/heads/"+i.Claim.Branch); err != nil {
 			return err
 		}
 	} else if err != nil {
@@ -162,10 +163,10 @@ func archiveStoppedCandidate(project, path string, i *stoppedReviewIntent) error
 	if err := filex.WriteFileAtomicDurable(bundle, data); err != nil {
 		return err
 	}
-	return validateStoppedIntent(project, path, *i)
+	return validateStoppedIntent(project, path, *i, firstExecution(execCtx))
 }
 
-func validateStoppedIntent(project, path string, i stoppedReviewIntent) error {
+func validateStoppedIntent(project, path string, i stoppedReviewIntent, execCtx ...*execution.Context) error {
 	var after reducer.DurableSnapshot
 	if err := decodeStoppedReview(i.After, &after); err != nil {
 		return err
@@ -185,19 +186,19 @@ func validateStoppedIntent(project, path string, i stoppedReviewIntent) error {
 	if i.Bundle == "" || publicationDigest(data) != i.Bundle {
 		return fmt.Errorf("candidate archive digest changed")
 	}
-	heads, err := publicationGit(project, "bundle", "list-heads", bundle)
+	heads, err := publicationGitWithExecution(firstExecution(execCtx), project, "bundle", "list-heads", bundle)
 	if err != nil {
 		return err
 	}
 	if heads != i.Claim.Head+" refs/heads/"+i.Claim.Branch {
 		return fmt.Errorf("candidate archive identity differs")
 	}
-	return publicationGitRun(project, "bundle", "verify", bundle)
+	return publicationGitRunWithExecution(firstExecution(execCtx), project, "bundle", "verify", bundle)
 }
 
 // Observe absence separately from errors; a failing Git read is never proof
 // that a branch/worktree disappeared. Partial cleanup resumes only exact refs.
-func stoppedReviewResidue(project string, c PublicationClaim) (bool, error) {
+func stoppedReviewResidue(project string, c PublicationClaim, execCtx ...*execution.Context) (bool, error) {
 	if c.WorktreeName == "" || filepath.Base(c.WorktreeName) != c.WorktreeName || c.WorktreeName == "." || c.WorktreePath != filepath.Join(project, ".worktrees", c.WorktreeName) {
 		return false, fmt.Errorf("cleanup path differs from exact owner")
 	}
@@ -207,7 +208,7 @@ func stoppedReviewResidue(project string, c PublicationClaim) (bool, error) {
 		if branch == c.Branch {
 			continue
 		}
-		alias, err := publicationGit(project, "for-each-ref", "--format=%(refname)", "refs/heads/"+branch)
+		alias, err := publicationGitWithExecution(firstExecution(execCtx), project, "for-each-ref", "--format=%(refname)", "refs/heads/"+branch)
 		if err != nil {
 			return false, err
 		}
@@ -215,14 +216,14 @@ func stoppedReviewResidue(project string, c PublicationClaim) (bool, error) {
 			return false, fmt.Errorf("cleanup branch alias has foreign custody")
 		}
 	}
-	refs, err := publicationGit(project, "for-each-ref", "--format=%(objectname) %(refname)", "refs/heads/"+c.Branch)
+	refs, err := publicationGitWithExecution(firstExecution(execCtx), project, "for-each-ref", "--format=%(objectname) %(refname)", "refs/heads/"+c.Branch)
 	if err != nil {
 		return false, err
 	}
 	if refs != "" && refs != c.Head+" refs/heads/"+c.Branch {
 		return false, fmt.Errorf("candidate branch changed during cleanup")
 	}
-	entries, err := publicationGit(project, "worktree", "list", "--porcelain")
+	entries, err := publicationGitWithExecution(firstExecution(execCtx), project, "worktree", "list", "--porcelain")
 	if err != nil {
 		return false, err
 	}
@@ -248,25 +249,25 @@ func stoppedReviewResidue(project string, c PublicationClaim) (bool, error) {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || !registered || refs == "" {
 		return false, fmt.Errorf("worktree residue has ambiguous custody")
 	}
-	top, err := publicationGit(c.WorktreePath, "rev-parse", "--show-toplevel")
+	top, err := publicationGitWithExecution(firstExecution(execCtx), c.WorktreePath, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return false, err
 	}
 	if top != c.WorktreePath {
 		return false, fmt.Errorf("cleanup worktree root changed")
 	}
-	common, err := publicationGit(c.WorktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	common, err := publicationGitWithExecution(firstExecution(execCtx), c.WorktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return false, err
 	}
-	owner, err := publicationGit(project, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	owner, err := publicationGitWithExecution(firstExecution(execCtx), project, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return false, err
 	}
 	if common != owner {
 		return false, fmt.Errorf("cleanup worktree belongs to another repository")
 	}
-	dirty, err := publicationGit(c.WorktreePath, "status", "--porcelain", "--untracked-files=all")
+	dirty, err := publicationGitWithExecution(firstExecution(execCtx), c.WorktreePath, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return false, err
 	}

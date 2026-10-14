@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -131,6 +132,10 @@ func scheduleBootstrapOopsOrder(cfg config.Config) Order {
 }
 
 func (l *Loop) spawnSchedule(ctx context.Context, order Order, attempt int, resumePrompt string) error {
+	return l.withAdmission(ctx, l.config.Runtime.Default, func(ctx context.Context) error { return l.spawnScheduleAdmitted(ctx, order, attempt, resumePrompt) })
+}
+
+func (l *Loop) spawnScheduleAdmitted(ctx context.Context, order Order, attempt int, resumePrompt string) error {
 	l.schedulePromoted = false // reset: new schedule dispatch invalidates prior promotion
 	name := scheduleOrderID
 	stageIndex, stagePtr := activeStageForOrder(order)
@@ -221,6 +226,10 @@ func (l *Loop) spawnSchedule(ctx context.Context, order Order, attempt int, resu
 // schedule skill. Returns nil in all cases — the loop continues
 // regardless of bootstrap status.
 func (l *Loop) spawnBootstrapIfNeeded(ctx context.Context, order Order) error {
+	return l.withAdmission(ctx, l.config.Runtime.Default, func(ctx context.Context) error { return l.spawnBootstrapIfNeededAdmitted(ctx, order) })
+}
+
+func (l *Loop) spawnBootstrapIfNeededAdmitted(ctx context.Context, order Order) error {
 	if l.bootstrapExhausted {
 		failureMetadata := eventFailureMetadataForLoop(CycleFailureClassDegradeContinue, "", nil)
 		l.logger.Warn("bootstrap exhausted — create .agents/skills/schedule/SKILL.md manually or check bootstrap skill output for errors",
@@ -254,6 +263,9 @@ func (l *Loop) spawnBootstrapIfNeeded(ctx context.Context, order Order) error {
 	}
 	session, _, err := l.dispatchSession(ctx, req)
 	if err != nil {
+		if errors.Is(err, errDispatchUnknown) {
+			return err
+		}
 		l.logger.Warn("bootstrap dispatch failed", "error", err, "attempt", l.bootstrapAttempts+1)
 		l.bootstrapAttempts++
 		if l.bootstrapAttempts >= 3 {
