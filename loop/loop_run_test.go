@@ -3,11 +3,13 @@ package loop
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/poteto/noodle/internal/filex"
 )
 
 func TestShouldTriggerRuntimeCycle(t *testing.T) {
@@ -17,7 +19,7 @@ func TestShouldTriggerRuntimeCycle(t *testing.T) {
 		path string
 		want bool
 	}{
-		{path: "/tmp/orders.json", want: true},
+		{path: "/tmp/orders.json", want: false},
 		{path: "/tmp/orders-next.json", want: true},
 		{path: "/tmp/control.ndjson", want: true},
 		{path: "/tmp/status.json", want: false},
@@ -52,7 +54,7 @@ func TestForwardRuntimeWatcherCoalescesRelevantEvents(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	events <- fsnotify.Event{Name: "/tmp/orders.json"}
+	events <- fsnotify.Event{Name: "/tmp/orders-next.json"}
 	waitForTriggerBuffer(t, cycleTrigger, 1)
 
 	events <- fsnotify.Event{Name: "/tmp/control.ndjson"}
@@ -65,6 +67,79 @@ func TestForwardRuntimeWatcherCoalescesRelevantEvents(t *testing.T) {
 	case err := <-forwardedErrors:
 		t.Fatalf("unexpected forwarded watcher error: %v", err)
 	default:
+	}
+}
+
+func TestRuntimeWatcherIgnoresProjectionWrites(t *testing.T) {
+	for _, input := range []string{"orders-next.json", "control.ndjson"} {
+		t.Run(input, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			l := &Loop{
+				runtimeDir: dir,
+				deps: Dependencies{
+					OrdersFile: filepath.Join(dir, "orders.json"),
+					Now:        time.Now,
+				},
+				ordersLoaded: true,
+				orders: OrdersFile{Orders: []Order{
+					makeOrder("1", OrderStatusActive, []Stage{makeStage(StageStatusPending)}),
+				}},
+				cooks: cookTracker{pendingReview: map[string]*pendingReviewCook{}},
+			}
+			if err := l.flushState(); err != nil {
+				t.Fatalf("seed projection: %v", err)
+			}
+
+			watcher, err := fsnotify.NewWatcher()
+			if err != nil {
+				t.Fatalf("create watcher: %v", err)
+			}
+			defer watcher.Close()
+			if err := watcher.Add(dir); err != nil {
+				t.Fatalf("watch runtime directory: %v", err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			cycleTrigger := make(chan struct{}, 1)
+			watchErr := make(chan error, 1)
+			go l.forwardRuntimeWatcher(ctx, watcher.Events, watcher.Errors, cycleTrigger, watchErr)
+
+			if err := l.flushState(); err != nil {
+				t.Fatalf("flush unchanged projection: %v", err)
+			}
+			if err := l.mutateOrdersState(func(orders *OrdersFile) (bool, error) {
+				orders.Orders[0].Title = "updated"
+				return true, nil
+			}); err != nil {
+				t.Fatalf("update projection: %v", err)
+			}
+			orders, err := readOrders(l.deps.OrdersFile)
+			if err != nil {
+				t.Fatalf("read projection: %v", err)
+			}
+			if len(orders.Orders) != 1 || orders.Orders[0].Title != "updated" {
+				t.Fatalf("updated projection was not persisted: %+v", orders)
+			}
+			select {
+			case <-cycleTrigger:
+				t.Fatal("projection write triggered another runtime cycle")
+			case err := <-watchErr:
+				t.Fatalf("watch projection: %v", err)
+			case <-time.After(100 * time.Millisecond):
+			}
+
+			if err := filex.WriteFileAtomic(filepath.Join(dir, input), []byte("{}\n")); err != nil {
+				t.Fatalf("write runtime input: %v", err)
+			}
+			select {
+			case <-cycleTrigger:
+			case err := <-watchErr:
+				t.Fatalf("watch runtime input: %v", err)
+			case <-time.After(2 * time.Second):
+				t.Fatal("runtime input did not trigger a cycle")
+			}
+		})
 	}
 }
 

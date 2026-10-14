@@ -448,7 +448,7 @@ func enqueueRuntimeCycle(ch chan<- struct{}) {
 
 func shouldTriggerRuntimeCycle(path string) bool {
 	switch filepath.Base(path) {
-	case "orders.json", "orders-next.json", "control.ndjson":
+	case "orders-next.json", "control.ndjson":
 		return true
 	default:
 		return false
