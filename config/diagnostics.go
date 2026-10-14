@@ -57,7 +57,12 @@ func Validate(config Config) ValidationResult {
 		if value == "" {
 			return
 		}
-		resolvedPath := filex.ExpandHome(value)
+		resolvedPath := value
+		if config.execution != nil {
+			resolvedPath, _ = config.execution.ResolvePath(value)
+		} else {
+			resolvedPath = filex.ExpandHome(value)
+		}
 		info, err := statPath(resolvedPath)
 		if err == nil && info.IsDir() {
 			return
@@ -118,7 +123,11 @@ func Validate(config Config) ValidationResult {
 			if !commandLooksPath(token) {
 				continue
 			}
-			if _, err := statPath(token); err == nil {
+			resolvedToken := token
+			if config.execution != nil {
+				resolvedToken, _ = config.execution.ResolvePath(token)
+			}
+			if _, err := statPath(resolvedToken); err == nil {
 				continue
 			}
 			result.Diagnostics = append(result.Diagnostics, ConfigDiagnostic{

@@ -91,8 +91,12 @@ func resolveTemplateVars(tmpl string, vars map[string]string) string {
 }
 
 func buildDispatchEnv(req DispatchRequest) []string {
-	env := make([]string, 0, len(os.Environ())+len(req.EnvVars)+4)
-	for _, entry := range os.Environ() {
+	return buildDispatchEnvFrom(req, os.Environ())
+}
+
+func buildDispatchEnvFrom(req DispatchRequest, base []string) []string {
+	env := make([]string, 0, len(base)+len(req.EnvVars)+4)
+	for _, entry := range base {
 		key, _, _ := strings.Cut(entry, "=")
 		if strings.EqualFold(key, "CLAUDECODE") {
 			continue
