@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,10 +10,14 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/poteto/noodle/internal/execution"
 )
 
 // App holds the resolved git root and provides worktree operations.
 type App struct {
+	Execution         *execution.Context
+	CommonDir         string
 	Root              string
 	CmdPrefix         string        // command prefix for user-facing messages (e.g., "noodle worktree")
 	MergeLockTimeout  time.Duration // 0 uses defaultMergeLockTimeout
@@ -35,7 +40,7 @@ func (a *App) integrationBranch() string {
 	if a.IntegrationBranch != "" {
 		return a.IntegrationBranch
 	}
-	return discoverBaseBranch(a.Root)
+	return discoverBaseBranchWithExecution(a.Root, a.execution())
 }
 
 // ExitError represents a process exit with a specific code.
@@ -49,11 +54,23 @@ func (e *ExitError) Error() string {
 
 // NewApp discovers the git root from the current working directory.
 func NewApp() (*App, error) {
-	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	return NewAppWithExecution(execution.Capture("."))
+}
+
+func NewAppWithExecution(e *execution.Context) (*App, error) {
+	if e == nil {
+		return nil, fmt.Errorf("worktree execution context is missing")
+	}
+	out, err := e.Command(context.Background(), e.Root(), "git", "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		return nil, fmt.Errorf("not inside a git repository")
 	}
-	return &App{Root: strings.TrimSpace(string(out))}, nil
+	root := strings.TrimSpace(string(out))
+	common, err := e.Command(context.Background(), root, "git", "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
+	if err != nil {
+		return nil, fmt.Errorf("resolve shared git directory: %w", err)
+	}
+	return &App{Root: root, CommonDir: strings.TrimSpace(string(common)), Execution: e}, nil
 }
 
 // WorktreePath returns the on-disk path for a named worktree.
@@ -116,14 +133,14 @@ func InstallArgs(pm string) (bin string, args []string) {
 
 // git creates an exec.Cmd that runs git from the App root.
 func (a *App) git(args ...string) *exec.Cmd {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = a.Root
+	cmd := a.execution().Command(context.Background(), a.Root, "git", args...)
 	return cmd
 }
 
 // gitOutput runs a git command and returns trimmed stdout.
 func (a *App) gitOutput(args ...string) (string, error) {
-	return gitOutput(a.Root, args...)
+	out, err := a.git(args...).Output()
+	return strings.TrimSpace(string(out)), err
 }
 
 // gitRun runs a git command with stdout/stderr connected to the terminal.
@@ -253,7 +270,7 @@ func (a *App) allWorktreeEntries() ([]WorktreeEntry, error) {
 	noodleRoot := canonicalPath(filepath.Join(a.Root, ".worktrees"))
 	claudeRoot := canonicalPath(filepath.Join(a.Root, ".claude", "worktrees"))
 
-	home, _ := os.UserHomeDir()
+	home, _ := a.execution().Lookup("HOME")
 	repoName := filepath.Base(a.Root)
 	cursorRoot := ""
 	if home != "" {
@@ -403,8 +420,7 @@ func (a *App) installDeps(dir string) {
 		return
 	}
 	a.info(fmt.Sprintf("Installing deps with %s...", pm))
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = dir
+	cmd := a.execution().Command(context.Background(), dir, bin, args...)
 	cmd.Stdout = a.stdout()
 	cmd.Stderr = a.stderr()
 	_ = cmd.Run()
@@ -443,4 +459,11 @@ func (a *App) printf(format string, args ...any) {
 		return
 	}
 	fmt.Fprintf(a.stdout(), format, args...)
+}
+
+func (a *App) execution() *execution.Context {
+	if a.Execution != nil {
+		return a.Execution
+	}
+	return execution.Capture(a.Root)
 }

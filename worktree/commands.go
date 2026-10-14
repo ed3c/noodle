@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -73,8 +74,7 @@ func (a *App) Exec(name string, args []string) error {
 		return fmt.Errorf("worktree '%s' does not exist at %s", name, wtPath)
 	}
 
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Dir = wtPath
+	cmd := a.execution().Command(context.Background(), wtPath, args[0], args[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = a.stdout()
 	cmd.Stderr = a.stderr()

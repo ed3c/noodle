@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/poteto/noodle/config"
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/shellx"
 )
 
@@ -17,18 +17,27 @@ type RunOptions struct {
 }
 
 type Runner struct {
+	execution  *execution.Context
 	projectDir string
 	config     config.Config
 }
 
 func NewRunner(projectDir string, cfg config.Config) *Runner {
+	return NewRunnerWithExecution(projectDir, cfg, execution.Capture(projectDir))
+}
+
+func NewRunnerWithExecution(projectDir string, cfg config.Config, e *execution.Context) *Runner {
 	return &Runner{
+		execution:  e,
 		projectDir: strings.TrimSpace(projectDir),
 		config:     cfg,
 	}
 }
 
 func (r *Runner) Run(ctx context.Context, adapterName, action string, options RunOptions) (string, error) {
+	if r.execution == nil {
+		return "", fmt.Errorf("adapter execution context is missing")
+	}
 	adapterName = strings.TrimSpace(adapterName)
 	action = strings.TrimSpace(action)
 	if adapterName == "" {
@@ -52,8 +61,7 @@ func (r *Runner) Run(ctx context.Context, adapterName, action string, options Ru
 		dir = "."
 	}
 	fullCommand := commandWithArgs(command, options.Args)
-	cmd := exec.CommandContext(ctx, "sh", "-c", fullCommand)
-	cmd.Dir = dir
+	cmd := r.execution.Command(ctx, dir, "sh", "-c", fullCommand)
 
 	if len(options.Stdin) > 0 {
 		cmd.Stdin = bytes.NewReader(options.Stdin)
