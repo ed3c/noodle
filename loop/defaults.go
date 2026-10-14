@@ -9,6 +9,7 @@ import (
 	"github.com/poteto/noodle/adapter"
 	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/dispatcher"
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/stringx"
 	"github.com/poteto/noodle/mise"
 	"github.com/poteto/noodle/monitor"
@@ -17,18 +18,19 @@ import (
 	"github.com/poteto/noodle/worktree"
 )
 
-type noOpWorktree struct{}
+type unavailableWorktree struct{ err error }
 
-func (noOpWorktree) Create(string, ...worktree.CreateOpts) error   { return nil }
-func (noOpWorktree) Merge(string, ...worktree.MergeOpts) error     { return nil }
-func (noOpWorktree) MergeRemoteBranch(string) error                { return nil }
-func (noOpWorktree) Cleanup(string, ...worktree.CleanupOpts) error { return nil }
-func (noOpWorktree) HasUnmergedCommits(string) (bool, error)       { return false, nil }
+func (w unavailableWorktree) Create(string, ...worktree.CreateOpts) error   { return w.err }
+func (w unavailableWorktree) Merge(string, ...worktree.MergeOpts) error     { return w.err }
+func (w unavailableWorktree) MergeRemoteBranch(string) error                { return w.err }
+func (w unavailableWorktree) Cleanup(string, ...worktree.CleanupOpts) error { return w.err }
+func (w unavailableWorktree) HasUnmergedCommits(string) (bool, error)       { return false, w.err }
 
-func defaultDependencies(projectDir, runtimeDir, noodleBin string, cfg config.Config, logger *slog.Logger, sink dispatcher.SessionEventSink) Dependencies {
+func defaultDependencies(projectDir, runtimeDir, noodleBin string, cfg config.Config, logger *slog.Logger, sink dispatcher.SessionEventSink, executionContext *execution.Context) Dependencies {
 	resolver := skill.Resolver{SearchPaths: cfg.Skills.Paths}
 	local := dispatcher.NewProcessDispatcher(dispatcher.ProcessDispatcherConfig{
 		ProjectDir:    projectDir,
+		Execution:     executionContext,
 		RuntimeDir:    runtimeDir,
 		NoodleBin:     noodleBin,
 		SkillResolver: resolver,
@@ -69,20 +71,20 @@ func defaultDependencies(projectDir, runtimeDir, noodleBin string, cfg config.Co
 		}
 	}
 
-	wtApp, _ := worktree.NewApp()
+	wtApp, wtErr := worktree.NewAppWithExecution(executionContext)
 	var wt WorktreeManager
 	if wtApp != nil {
 		wtApp.CmdPrefix = "noodle worktree"
 		wtApp.Quiet = true
 		wt = wtApp
 	} else {
-		wt = noOpWorktree{}
+		wt = unavailableWorktree{err: wtErr}
 	}
 	return Dependencies{
 		Runtimes:       runtimes,
 		Worktree:       wt,
-		Adapter:        adapter.NewRunner(projectDir, cfg),
-		Mise:           mise.NewBuilder(projectDir, cfg),
+		Adapter:        adapter.NewRunnerWithExecution(projectDir, cfg, executionContext),
+		Mise:           mise.NewBuilderWithExecution(projectDir, cfg, executionContext),
 		Monitor:        monitor.NewMonitor(runtimeDir),
 		Now:            time.Now,
 		OrdersFile:     filepath.Join(runtimeDir, "orders.json"),

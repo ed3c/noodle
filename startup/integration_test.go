@@ -20,6 +20,7 @@ func TestCLIIntegrationStartScaffolds(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	t.Setenv("NOODLE_HOST_DIR", t.TempDir())
 
 	// Build UI assets then the binary
 	projectRoot := findProjectRoot(t)

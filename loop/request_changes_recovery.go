@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 
 	"github.com/poteto/noodle/event"
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/orderx"
 	"github.com/poteto/noodle/internal/procx"
 	"github.com/poteto/noodle/internal/reducer"
@@ -56,8 +56,8 @@ var recoverySessionFiles = []string{"spawn.json", "prompt.txt", "events.ndjson",
 
 func recoveryDigest(data []byte) string { return fmt.Sprintf("%x", sha256.Sum256(data)) }
 
-func recoveryGit(path string, args ...string) (string, error) {
-	out, err := exec.Command("git", append([]string{"-C", path}, args...)...).CombinedOutput()
+func recoveryGitWithExecution(executionContext *execution.Context, path string, args ...string) (string, error) {
+	out, err := boundGitCommand(executionContext, path, append([]string{"-C", path}, args...)...).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("recovery git %v: %w: %s", args, err, out)
 	}
@@ -77,11 +77,11 @@ func (l *Loop) captureRequestChanges(pending *pendingReviewCook) (requestChanges
 	b.Attempt = len(attempts) - 1
 	b.AttemptID = attempts[b.Attempt].AttemptID
 	var err error
-	b.Branch, err = recoveryGit(b.WorktreePath, "symbolic-ref", "--short", "HEAD")
+	b.Branch, err = recoveryGitWithExecution(l.deps.Execution, b.WorktreePath, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
 		return b, err
 	}
-	b.Head, err = recoveryGit(b.WorktreePath, "rev-parse", "HEAD")
+	b.Head, err = recoveryGitWithExecution(l.deps.Execution, b.WorktreePath, "rev-parse", "HEAD")
 	if err != nil {
 		return b, err
 	}
@@ -174,7 +174,7 @@ func (l *Loop) validateRecovery(order state.OrderNode, review state.PendingRevie
 	if !recoverableReviewOutcome(outcome) {
 		return fmt.Errorf("recovery requires exact typed blocked or nonblocking completed outcome")
 	}
-	top, err := recoveryGit(b.WorktreePath, "rev-parse", "--show-toplevel")
+	top, err := recoveryGitWithExecution(l.deps.Execution, b.WorktreePath, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return err
 	}
@@ -185,32 +185,32 @@ func (l *Loop) validateRecovery(order state.OrderNode, review state.PendingRevie
 	if top != actual {
 		return fmt.Errorf("recovery worktree root mismatch")
 	}
-	common, err := recoveryGit(b.WorktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	common, err := recoveryGitWithExecution(l.deps.Execution, b.WorktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return err
 	}
-	owner, err := recoveryGit(l.projectDir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	owner, err := recoveryGitWithExecution(l.deps.Execution, l.projectDir, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return err
 	}
 	if common != owner {
 		return fmt.Errorf("recovery worktree owner mismatch")
 	}
-	branch, err := recoveryGit(b.WorktreePath, "symbolic-ref", "--short", "HEAD")
+	branch, err := recoveryGitWithExecution(l.deps.Execution, b.WorktreePath, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
 		return err
 	}
 	if b.Branch == "" || branch != b.Branch {
 		return fmt.Errorf("recovery branch moved")
 	}
-	head, err := recoveryGit(b.WorktreePath, "rev-parse", "HEAD")
+	head, err := recoveryGitWithExecution(l.deps.Execution, b.WorktreePath, "rev-parse", "HEAD")
 	if err != nil {
 		return err
 	}
 	if b.Head == "" || head != b.Head {
 		return fmt.Errorf("recovery HEAD moved")
 	}
-	dirty, err := recoveryGit(b.WorktreePath, "status", "--porcelain")
+	dirty, err := recoveryGitWithExecution(l.deps.Execution, b.WorktreePath, "status", "--porcelain")
 	if err != nil {
 		return err
 	}
@@ -603,4 +603,7 @@ func (l *Loop) reconcileRequestChangesProjection() error {
 		}
 	}
 	return nil
+}
+func recoveryGit(path string, args ...string) (string, error) {
+	return recoveryGitWithExecution(nil, path, args...)
 }

@@ -12,7 +12,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var inspectPublicationClaim = loop.InspectPublicationClaim
+var inspectPublicationClaim = func(project, order, subject string) (loop.PublicationClaim, error) {
+	return loop.InspectPublicationClaim(project, order, subject)
+}
 
 func newPublicationCmd(app *App) *cobra.Command {
 	command := &cobra.Command{

@@ -2,10 +2,12 @@ package loop
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/poteto/noodle/internal/admission"
 	"github.com/poteto/noodle/internal/filex"
 	"github.com/poteto/noodle/internal/stringx"
 )
@@ -75,6 +78,9 @@ func (l *Loop) hydrateProcessedCommands() error {
 }
 
 func (l *Loop) processControlCommands() error {
+	if l.resourceUnknown != nil {
+		return l.resourceUnknown
+	}
 	controlPath, ackPath, lockPath := l.controlPaths()
 	if err := os.MkdirAll(l.runtimeDir, 0o755); err != nil {
 		return fmt.Errorf("create runtime directory: %w", err)
@@ -103,7 +109,7 @@ func (l *Loop) processControlCommands() error {
 		return nil
 	}
 
-	acks := l.processControlLines(data)
+	acks, pending, outcomeErr := l.processControlLines(data)
 	if l.TestControlAckBarrier != nil {
 		l.TestControlAckBarrier()
 	}
@@ -112,31 +118,62 @@ func (l *Loop) processControlCommands() error {
 			return err
 		}
 	}
-	if err := os.WriteFile(controlPath, []byte{}, 0o644); err != nil {
-		return fmt.Errorf("truncate control file: %w", err)
+	if !bytes.Equal(data, pending) {
+		if err := os.WriteFile(controlPath, pending, 0o644); err != nil {
+			return fmt.Errorf("save pending control file: %w", err)
+		}
 	}
-	return nil
+	return outcomeErr
 }
 
-// processControlLines parses NDJSON command lines, deduplicates, and applies
-// each command. Returns the accumulated acks.
-func (l *Loop) processControlLines(data []byte) []ControlAck {
-	lines := strings.Split(string(data), "\n")
+func (l *Loop) processControlLines(data []byte) ([]ControlAck, []byte, error) {
+	lines := strings.SplitAfter(string(data), "\n")
 	acks := make([]ControlAck, 0, len(lines))
-	for _, raw := range lines {
+	var pending strings.Builder
+	for i, raw := range lines {
 		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
 		}
-		ack := l.processControlLine(line)
+		if pending.Len() != 0 && !controlReducesLoad(line) {
+			pending.WriteString(raw)
+			continue
+		}
+		ack, err := l.processControlLineOutcome(line)
+		if errors.Is(err, admission.ErrDeferred) {
+			pending.WriteString(raw)
+			continue
+		}
 		acks = append(acks, ack)
+		if errors.Is(err, errDispatchUnknown) {
+			pending.WriteString(strings.Join(lines[i+1:], ""))
+			return acks, []byte(pending.String()), err
+		}
 	}
-	return acks
+	return acks, []byte(pending.String()), nil
+}
+
+func controlReducesLoad(line string) bool {
+	var command ControlCommand
+	if json.Unmarshal([]byte(line), &command) != nil {
+		return false
+	}
+	switch stringx.Normalize(command.Action) {
+	case "pause", "drain", "kill", "stop", "stop-all":
+		return true
+	default:
+		return false
+	}
 }
 
 // processControlLine parses a single NDJSON line into a command, deduplicates,
 // and applies it. Returns the ack for this command.
 func (l *Loop) processControlLine(line string) ControlAck {
+	ack, _ := l.processControlLineOutcome(line)
+	return ack
+}
+
+func (l *Loop) processControlLineOutcome(line string) (ControlAck, error) {
 	var cmd ControlCommand
 	if err := json.Unmarshal([]byte(line), &cmd); err != nil {
 		failure := controlAckFailureForInvalidCommandJSON()
@@ -147,7 +184,7 @@ func (l *Loop) processControlLine(line string) ControlAck {
 			Message: "invalid command JSON",
 			Failure: &failure,
 			At:      l.deps.Now(),
-		}
+		}, nil
 	}
 	if cmd.ID == "" {
 		cmd.ID = deterministicControlID(cmd)
@@ -159,17 +196,20 @@ func (l *Loop) processControlLine(line string) ControlAck {
 
 	// Skip commands already applied (ID-based dedup or sequence-based).
 	if _, seen := l.cmds.processedIDs[cmd.ID]; seen {
-		return ControlAck{ID: cmd.ID, Action: cmd.Action, Status: "ok", At: l.deps.Now()}
+		return ControlAck{ID: cmd.ID, Action: cmd.Action, Status: "ok", At: l.deps.Now()}, nil
 	}
 	if seq <= l.cmds.lastAppliedSeq {
 		l.cmds.processedIDs[cmd.ID] = struct{}{}
-		return ControlAck{ID: cmd.ID, Action: cmd.Action, Status: "ok", At: l.deps.Now()}
+		return ControlAck{ID: cmd.ID, Action: cmd.Action, Status: "ok", At: l.deps.Now()}, nil
 	}
 
-	ack := l.applyControlCommand(cmd)
+	ack, err := l.applyControlCommandOutcome(cmd)
+	if errors.Is(err, admission.ErrDeferred) {
+		return ack, err
+	}
 	l.cmds.processedIDs[cmd.ID] = struct{}{}
 	l.cmds.lastAppliedSeq = seq
-	return ack
+	return ack, err
 }
 
 func deterministicControlID(cmd ControlCommand) string {
@@ -222,8 +262,18 @@ func appendAcks(path string, acks []ControlAck) error {
 }
 
 func (l *Loop) applyControlCommand(cmd ControlCommand) ControlAck {
+	ack, _ := l.applyControlCommandOutcome(cmd)
+	return ack
+}
+
+func (l *Loop) applyControlCommandOutcome(cmd ControlCommand) (ControlAck, error) {
 	ack := ControlAck{ID: cmd.ID, Action: cmd.Action, Status: "ok", At: l.deps.Now()}
 	err := l.dispatchControlCommand(cmd)
+	if errors.Is(err, admission.ErrDeferred) {
+		ack.Status = "waiting"
+		ack.Message = err.Error()
+		return ack, err
+	}
 	if err != nil {
 		ack.Status = "error"
 		ack.Message = err.Error()
@@ -235,7 +285,7 @@ func (l *Loop) applyControlCommand(cmd ControlCommand) ControlAck {
 	} else {
 		l.logger.Info("control command", "action", cmd.Action, "status", ack.Status)
 	}
-	return ack
+	return ack, err
 }
 
 func (l *Loop) dispatchControlCommand(cmd ControlCommand) error {
