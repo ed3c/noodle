@@ -38,7 +38,7 @@ function RootComponent() {
     [navigate],
   );
 
-  if (pathname === "/onboarding") {
+  if (pathname === "/onboarding" || pathname === "/loops") {
     return <Outlet />;
   }
 

@@ -23,6 +23,7 @@ import (
 	"github.com/poteto/noodle/internal/admission"
 	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/lockfile"
+	"github.com/poteto/noodle/internal/loopview"
 	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/internal/statever"
 	"github.com/poteto/noodle/loop"
@@ -92,6 +93,7 @@ type noodleHost struct {
 	instanceID string
 	binaryPath string
 	binarySHA  string
+	webURL     string
 	receipts   []hostReceipt
 	contexts   map[string]*hostContext
 	completed  chan string
@@ -103,6 +105,7 @@ type noodleHost struct {
 func newHostCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{Use: "host", Short: "Manage the single persistent Noodle host"}
 	cmd.AddCommand(newHostResourcesCmd())
+	cmd.AddCommand(newHostViewsCmd())
 	cmd.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "protocol": hostProtocol})
 	}})
@@ -402,6 +405,35 @@ func serveHost(ctx context.Context) error {
 		reply   chan any
 	}
 	calls := make(chan call)
+	web, url, webDone, err := startHostWeb(dir, func(requestCtx context.Context) ([]loopview.Resource, error) {
+		requestCtx, stop := context.WithTimeout(requestCtx, 2*time.Second)
+		defer stop()
+		read := call{hostRequest{Operation: "view_resources"}, make(chan any, 1)}
+		select {
+		case calls <- read:
+		case <-requestCtx.Done():
+			return nil, requestCtx.Err()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		select {
+		case value := <-read.reply:
+			resources, ok := value.([]loopview.Resource)
+			if !ok {
+				return nil, errors.New("Host view observation type invalid")
+			}
+			return resources, nil
+		case <-requestCtx.Done():
+			return nil, requestCtx.Err()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("start Host readonly web: %w", err)
+	}
+	h.webURL = url
+	defer web.Close()
 	go func() { <-ctx.Done(); listener.Close() }()
 	go func() {
 		for {
@@ -442,6 +474,12 @@ func serveHost(ctx context.Context) error {
 				}
 			}
 			return nil
+		case err := <-webDone:
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Host readonly web stopped: %v\n", err)
+			}
+			h.webURL = ""
+			webDone = nil
 		case id := <-h.completed:
 			if c := h.contexts[id]; c != nil && c.done != nil {
 				select {
@@ -451,6 +489,10 @@ func serveHost(ctx context.Context) error {
 				}
 			}
 		case call := <-calls:
+			if call.request.Operation == "view_resources" {
+				call.reply <- h.viewResources()
+				continue
+			}
 			for _, c := range h.contexts {
 				if c.done == nil {
 					continue

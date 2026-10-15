@@ -1,0 +1,247 @@
+.lv-page {
+  min-height: 100vh;
+  background: #101918;
+  color: #e1e9e4;
+  padding: 40px clamp(18px, 4vw, 64px);
+  font-family: system-ui, sans-serif;
+  line-height: 1.6;
+}
+.lv-page h1 {
+  font-size: 38px;
+  margin: 0;
+  letter-spacing: -1.5px;
+}
+.lv-page h2 {
+  font-size: 23px;
+  overflow-wrap: anywhere;
+  margin: 4px 0;
+}
+.lv-page h3 {
+  font-size: 18px;
+  margin: 0 0 16px;
+}
+.lv-page h3 span {
+  font-size: 12px;
+  color: #92aaa0;
+  margin-left: 6px;
+}
+.lv-page h4 {
+  font-size: 15px;
+  margin: 0;
+}
+.lv-page p {
+  margin: 7px 0;
+}
+.lv-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.lv-eyebrow {
+  font-size: 11px;
+  letter-spacing: 1.7px;
+  color: #9dbda9;
+}
+.lv-status {
+  font-size: 12px;
+  border: 1px solid #3c594b;
+  border-radius: 20px;
+  padding: 3px 12px;
+  white-space: nowrap;
+  color: #b7ddc5;
+}
+.lv-notice {
+  color: #a2b6ac;
+  font-size: 13px;
+  border-top: 1px solid #2c4036;
+  padding: 16px 0;
+}
+.lv-grid {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 32px;
+  margin-top: 28px;
+}
+.lv-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: start;
+  position: sticky;
+  top: 20px;
+}
+.lv-nav button {
+  background: transparent;
+  color: #d5e4db;
+  text-align: left;
+  border: 1px solid #2b3c33;
+  border-radius: 8px;
+  padding: 14px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.lv-nav button[aria-current="true"] {
+  background: #20372b;
+  border-color: #739e81;
+}
+.lv-nav strong,
+.lv-nav span,
+.lv-nav small {
+  display: block;
+}
+.lv-nav strong {
+  font-size: 14px;
+}
+.lv-nav span {
+  font-size: 12px;
+  color: #b5c4bb;
+}
+.lv-nav small {
+  font-size: 10px;
+  color: #8fa69a;
+  margin-top: 6px;
+}
+.lv-detail {
+  min-width: 0;
+}
+.lv-detail section {
+  margin-top: 32px;
+}
+.lv-muted {
+  font-size: 12px;
+  color: #9db0a6;
+  overflow-wrap: anywhere;
+}
+.lv-timeline {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.lv-timeline li {
+  display: flex;
+  gap: 14px;
+  padding-bottom: 18px;
+}
+.lv-step {
+  background: #314e3e;
+  border-radius: 50%;
+  width: 27px;
+  height: 27px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 12px;
+  line-height: 27px;
+}
+.lv-stage {
+  border: 1px solid #31453a;
+  border-radius: 9px;
+  padding: 16px;
+  width: 100%;
+  min-width: 0;
+  background: #15241c;
+}
+.lv-stage-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.lv-page summary {
+  cursor: pointer;
+  color: #b5d6bf;
+  font-size: 12px;
+  margin-top: 12px;
+}
+.lv-page pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  background: #0d1711;
+  padding: 14px;
+  border-radius: 5px;
+  max-height: 480px;
+  overflow: auto;
+}
+.lv-refs code {
+  display: block;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  color: #a3c1af;
+  padding: 5px 0;
+}
+.lv-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  gap: 14px;
+}
+.lv-card {
+  border: 1px solid #35483e;
+  border-radius: 8px;
+  background: #19281f;
+  padding: 20px;
+}
+.lv-body {
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.lv-breakpoint {
+  border-left: 3px solid #d7af6c;
+  background: #302b20;
+  padding: 14px;
+  font-size: 13px;
+  margin: 12px 0;
+  overflow-wrap: anywhere;
+}
+.lv-resources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0;
+}
+.lv-resources > div {
+  padding: 8px 14px;
+  border: 1px solid #2b4033;
+  border-radius: 6px;
+  max-width: 100%;
+}
+.lv-resources dt {
+  font-size: 10px;
+  color: #9ab5a4;
+}
+.lv-resources dd {
+  margin: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.lv-next {
+  border-top: 1px solid #35483e;
+  padding-top: 24px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.lv-next small {
+  color: #95a99d;
+}
+.lv-empty {
+  padding: 60px;
+  text-align: center;
+  color: #a4b9ab;
+}
+@media (max-width: 720px) {
+  .lv-grid {
+    grid-template-columns: 1fr;
+  }
+  .lv-nav {
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  }
+  .lv-header {
+    align-items: flex-start;
+  }
+  .lv-page h1 {
+    font-size: 30px;
+  }
+}

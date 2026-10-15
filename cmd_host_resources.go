@@ -39,5 +39,5 @@ func (h *noodleHost) resources() any {
 	if h.budget == nil {
 		return hostError("unavailable", fmt.Errorf("host resource admission is not configured"))
 	}
-	return map[string]any{"schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "resources": h.budget.Snapshot()}
+	return map[string]any{"schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot()}
 }

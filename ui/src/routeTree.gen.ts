@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as TopologyRouteImport } from './routes/topology'
 import { Route as ReviewsRouteImport } from './routes/reviews'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as LoopsRouteImport } from './routes/loops'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ActorIdRouteImport } from './routes/actor.$id'
@@ -29,6 +30,11 @@ const ReviewsRoute = ReviewsRouteImport.update({
 const OnboardingRoute = OnboardingRouteImport.update({
   id: '/onboarding',
   path: '/onboarding',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoopsRoute = LoopsRouteImport.update({
+  id: '/loops',
+  path: '/loops',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardRoute = DashboardRouteImport.update({
@@ -50,6 +56,7 @@ const ActorIdRoute = ActorIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/loops': typeof LoopsRoute
   '/onboarding': typeof OnboardingRoute
   '/reviews': typeof ReviewsRoute
   '/topology': typeof TopologyRoute
@@ -58,6 +65,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/loops': typeof LoopsRoute
   '/onboarding': typeof OnboardingRoute
   '/reviews': typeof ReviewsRoute
   '/topology': typeof TopologyRoute
@@ -67,6 +75,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/loops': typeof LoopsRoute
   '/onboarding': typeof OnboardingRoute
   '/reviews': typeof ReviewsRoute
   '/topology': typeof TopologyRoute
@@ -77,6 +86,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/dashboard'
+    | '/loops'
     | '/onboarding'
     | '/reviews'
     | '/topology'
@@ -85,6 +95,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/dashboard'
+    | '/loops'
     | '/onboarding'
     | '/reviews'
     | '/topology'
@@ -93,6 +104,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/dashboard'
+    | '/loops'
     | '/onboarding'
     | '/reviews'
     | '/topology'
@@ -102,6 +114,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
+  LoopsRoute: typeof LoopsRoute
   OnboardingRoute: typeof OnboardingRoute
   ReviewsRoute: typeof ReviewsRoute
   TopologyRoute: typeof TopologyRoute
@@ -131,6 +144,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OnboardingRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/loops': {
+      id: '/loops'
+      path: '/loops'
+      fullPath: '/loops'
+      preLoaderRoute: typeof LoopsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard': {
       id: '/dashboard'
       path: '/dashboard'
@@ -158,6 +178,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
+  LoopsRoute: LoopsRoute,
   OnboardingRoute: OnboardingRoute,
   ReviewsRoute: ReviewsRoute,
   TopologyRoute: TopologyRoute,
