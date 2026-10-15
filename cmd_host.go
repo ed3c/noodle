@@ -55,17 +55,19 @@ type hostResponse struct {
 }
 
 type hostRequest struct {
-	Operation    string   `json:"operation"`
-	ProjectDir   string   `json:"project_dir"`
-	ContextID    string   `json:"context_id"`
-	InstanceID   string   `json:"instance_id"`
-	ConfigSHA256 string   `json:"config_sha256"`
-	Mode         string   `json:"mode"`
-	Environment  []string `json:"environment,omitempty"`
-	BinarySHA256 string   `json:"binary_sha256"`
-	RequestID    string   `json:"request_id"`
-	RequestFile  string   `json:"-"`
-	HostDir      string   `json:"-"`
+	Operation    string                  `json:"operation"`
+	ProjectDir   string                  `json:"project_dir"`
+	ContextID    string                  `json:"context_id"`
+	InstanceID   string                  `json:"instance_id"`
+	ConfigSHA256 string                  `json:"config_sha256"`
+	Mode         string                  `json:"mode"`
+	Environment  []string                `json:"environment,omitempty"`
+	BinarySHA256 string                  `json:"binary_sha256"`
+	RequestID    string                  `json:"request_id"`
+	ResidentSpec *admission.ResidentSpec `json:"resident_spec,omitempty"`
+	ResidentID   string                  `json:"resident_id,omitempty"`
+	RequestFile  string                  `json:"-"`
+	HostDir      string                  `json:"-"`
 }
 
 type hostRuntime interface {
@@ -98,13 +100,14 @@ type noodleHost struct {
 	contexts   map[string]*hostContext
 	completed  chan string
 	budget     *admission.Budget
+	residents  *admission.Residents
 	blocked    bool
 	newRuntime func(string, string, config.Config, loop.Dependencies) hostRuntime
 }
 
 func newHostCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{Use: "host", Short: "Manage the single persistent Noodle host"}
-	cmd.AddCommand(newHostResourcesCmd())
+	cmd.AddCommand(newHostResourcesCmd(app))
 	cmd.AddCommand(newHostViewsCmd())
 	task := &cobra.Command{Use: "task", Short: "Read native task dispatch capabilities"}
 	task.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
@@ -382,6 +385,10 @@ func serveHost(ctx context.Context) error {
 	h := &noodleHost{budget: budget, contexts: make(map[string]*hostContext), completed: make(chan string, 16), dir: dir, instanceID: id, binaryPath: path, binarySHA: hostDigest(data), newRuntime: func(dir, bin string, cfg config.Config, deps loop.Dependencies) hostRuntime {
 		return loop.New(dir, bin, cfg, deps)
 	}}
+	h.residents, err = admission.OpenResidents(dir)
+	if err != nil {
+		return err
+	}
 	stored, err := os.ReadFile(filepath.Join(dir, "receipts.json"))
 	if err == nil {
 		if err = json.Unmarshal(stored, &h.receipts); err != nil {
@@ -474,11 +481,24 @@ func serveHost(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			for _, c := range h.contexts {
+				if h.residents != nil {
+					if err := h.residents.ReleaseContext(c.receipt.ContextID); err != nil {
+						fmt.Fprintln(os.Stderr, "resident shutdown failed:", err)
+					}
+				}
 				c.cancel()
 			}
 			for _, c := range h.contexts {
 				if c.done != nil {
 					<-c.done
+				}
+			}
+			if h.residents != nil {
+				waitCtx, waitCancel := context.WithTimeout(context.Background(), 3*time.Second)
+				err := h.residents.WaitClosed(waitCtx)
+				waitCancel()
+				if err != nil {
+					return err
 				}
 			}
 			return nil
@@ -515,7 +535,9 @@ func serveHost(ctx context.Context) error {
 				default:
 				}
 			}
-			if call.request.Operation == "resources" {
+			if strings.HasPrefix(call.request.Operation, "resident_") {
+				call.reply <- h.residentOperation(ctx, call.request)
+			} else if call.request.Operation == "resources" {
 				call.reply <- h.resources()
 			} else {
 				call.reply <- h.handle(ctx, call.request)
@@ -551,6 +573,12 @@ func (h *noodleHost) save() error {
 func (h *noodleHost) finish(c *hostContext, runErr error) {
 	c.done = nil
 	c.runtime.Shutdown()
+	if h.residents != nil {
+		if err := h.residents.ReleaseContext(c.receipt.ContextID); err != nil {
+			h.blocked = true
+			fmt.Fprintln(os.Stderr, "resident context release failed:", err)
+		}
+	}
 	c.cancel()
 	if runErr != nil {
 		c.receipt.ContextState = "failed"

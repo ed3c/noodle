@@ -12,8 +12,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newHostResourcesCmd() *cobra.Command {
-	return &cobra.Command{Use: "resources", Short: "Read shared Host worker admission and pressure", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+func newHostResourcesCmd(app *App) *cobra.Command {
+	cmd := &cobra.Command{Use: "resources", Short: "Read shared Host worker admission and pressure", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		dir, err := hostDirectory()
 		if err != nil {
 			return err
@@ -33,11 +33,21 @@ func newHostResourcesCmd() *cobra.Command {
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 	}}
+	cmd.AddCommand(newHostResidentsCmd(app))
+	return cmd
 }
 
 func (h *noodleHost) resources() any {
 	if h.budget == nil {
 		return hostError("unavailable", fmt.Errorf("host resource admission is not configured"))
 	}
-	return map[string]any{"schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot()}
+	var residents any
+	if h.residents != nil {
+		rows, err := h.residents.Snapshot()
+		residents = map[string]any{"records": rows, "error": nil}
+		if err != nil {
+			residents = map[string]any{"records": rows, "error": err.Error()}
+		}
+	}
+	return map[string]any{"residents": residents, "schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot()}
 }

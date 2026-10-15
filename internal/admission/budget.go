@@ -39,6 +39,8 @@ type Snapshot struct {
 	SampleError      *string  `json:"sample_error"`
 	Reason           string   `json:"reason"`
 	Active           int      `json:"active_workers"`
+	Residents        int      `json:"active_residents"`
+	Allocations      int      `json:"active_allocations"`
 	Maximum          int      `json:"maximum_workers"`
 	Limit            int      `json:"effective_limit"`
 	Credit           int      `json:"start_credit"`
@@ -51,6 +53,7 @@ type Snapshot struct {
 type Budget struct {
 	mu                                     sync.Mutex
 	maximum, active, limit, credit, stable int
+	residents                              int
 	auto                                   bool
 	previous                               *Sample
 	pressure                               Pressure
@@ -66,8 +69,9 @@ type Budget struct {
 }
 
 type allocation struct {
-	budget *Budget
-	refs   int
+	budget   *Budget
+	refs     int
+	resident bool
 }
 type Permit struct {
 	parent              *Permit
@@ -254,6 +258,9 @@ func (p *Permit) Release() {
 		p.allocation.refs--
 		if p.allocation.refs == 0 {
 			b.active--
+			if p.allocation.resident {
+				b.residents--
+			}
 		}
 	})
 }
@@ -276,7 +283,7 @@ func (p *Permit) ReserveReplacement(id string) (*Permit, error) {
 func (b *Budget) Snapshot() Snapshot {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	s := Snapshot{Pressure: b.pressure, Reason: b.reason, Active: b.active, Maximum: b.maximum, Limit: b.limit, Credit: b.credit, StableSamples: b.stable, Unsupported: b.unsupported}
+	s := Snapshot{Pressure: b.pressure, Reason: b.reason, Active: b.active - b.residents, Residents: b.residents, Allocations: b.active, Maximum: b.maximum, Limit: b.limit, Credit: b.credit, StableSamples: b.stable, Unsupported: b.unsupported}
 	if b.sampleError != nil {
 		message := *b.sampleError
 		s.SampleError = &message
@@ -298,4 +305,16 @@ func (b *Budget) Snapshot() Snapshot {
 		s.SwapoutRate = nil
 	}
 	return s
+}
+
+func (b *Budget) TryAcquireResident(id string) (*Permit, error) {
+	p, err := b.TryAcquire(id)
+	if err != nil {
+		return nil, err
+	}
+	b.mu.Lock()
+	p.allocation.resident = true
+	b.residents++
+	b.mu.Unlock()
+	return p, nil
 }
