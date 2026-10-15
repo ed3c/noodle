@@ -31,3 +31,12 @@ cover recovery, dirty candidates, refusal, fixed-branch integration and retained
 failure history. These local tests do not establish live Host acceptance.
 
 See also [[codebase/merge-recovery-synthetic-cooks-must-preserve-task-key]].
+
+Commit-only completion detection skipped review for dirty local-task outputs.
+Local-task success now parks review before that detection, including empty outputs.
+`prepare-local-completion-recovery` captures retained completed custody into an
+external immutable packet. Its control returns that same terminal attempt to
+review after checking bytes, index, base, process absence and completion events.
+It preserves the original session and events and does not dispatch a worker.
+Request-changes dispatch validates its saved binding before retaining dirty work;
+the generic retry cleanup must not delete that reviewed revision input.

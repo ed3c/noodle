@@ -625,7 +625,8 @@ func (l *Loop) reconcileRequestChangesProjection() error {
 			_, captured := stage.Extra[requestChangesKey]
 			_, requeued := stage.Extra[requestChangesRequeuedKey]
 			_, mergedRecovery := stage.Extra[localTaskMergeRecoveryKey]
-			if captured || requeued || mergedRecovery {
+			_, completionRecovery := stage.Extra[localTaskCompletionRecoveryKey]
+			if captured || requeued || mergedRecovery || completionRecovery {
 				if err := l.projectRecoveredOrder(id); err != nil {
 					return err
 				}

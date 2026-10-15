@@ -72,6 +72,10 @@ func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, or
 
 	name := cookBaseName(cand.OrderID, cand.StageIndex, stage.TaskKey)
 
+	preserveReview, err := l.localTaskRevisionForDispatch(cand, opts.attempt)
+	if err != nil {
+		return err
+	}
 	created, err := l.ensureWorktree(name)
 	if err != nil {
 		return fmt.Errorf("create worktree %s: %w", name, err)
@@ -90,7 +94,7 @@ func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, or
 	}
 	worktreePath := l.worktreePath(name)
 	if !created {
-		if opts.attempt > 0 && interruption == nil {
+		if opts.attempt > 0 && interruption == nil && !preserveReview {
 			resetWorktreeState(worktreePath, l.deps.Execution)
 		}
 		if hint := worktreeResumeContext(worktreePath, name, l.deps.Execution); hint != "" {

@@ -154,6 +154,10 @@ func (l *Loop) handleCompletion(ctx context.Context, cook *cookHandle, resultSta
 			}
 			msg = legacyMessage
 		}
+		order, exists := l.canonical.Orders[cook.orderID]
+		if exists && cook.stageIndex >= 0 && cook.stageIndex < len(order.Stages) && l.isAdmittedLocalTask(order, order.Stages[cook.stageIndex]) {
+			return l.parkPendingReview(cook, "local task completion requires candidate review")
+		}
 		canMerge, err := l.worktreeHasChanges(cook)
 		if err != nil {
 			return l.failStage(ctx, cook, fmt.Sprintf("merge check: %v", err))

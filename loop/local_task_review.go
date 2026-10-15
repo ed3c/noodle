@@ -342,3 +342,29 @@ func (l *Loop) preserveLocalTaskFailure(id string) bool {
 	order, ok := l.canonical.Orders[id]
 	return ok && len(order.Stages) == 1 && order.Status == state.OrderFailed && l.isAdmittedLocalTask(order, order.Stages[0])
 }
+
+func (l *Loop) localTaskRevisionForDispatch(cand dispatchCandidate, attempt int) (bool, error) {
+	order, ok := l.canonical.Orders[cand.OrderID]
+	if !ok || len(order.Stages) != 1 || !l.isAdmittedLocalTask(order, order.Stages[0]) {
+		return false, nil
+	}
+	stage := order.Stages[0]
+	raw, exists := stage.Extra[requestChangesRequeuedKey]
+	if !exists {
+		return false, nil
+	}
+	var receipt requestChangesRequeued
+	if err := decodeStoppedReview(raw, &receipt); err != nil {
+		return false, err
+	}
+	if stage.Status != state.StagePending || attempt != len(stage.Attempts) || attempt != receipt.Binding.Attempt+1 || cand.Stage.Prompt != stage.Prompt || cand.StageIndex != 0 {
+		return false, fmt.Errorf("local task revision dispatch custody differs")
+	}
+	if _, exists := l.canonical.PendingReviews[order.OrderID]; exists {
+		return false, fmt.Errorf("local task revision still has pending review")
+	}
+	if err := l.validateRecovery(order, receipt.Review, receipt.Binding); err != nil {
+		return false, err
+	}
+	return true, nil
+}
