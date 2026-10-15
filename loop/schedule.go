@@ -132,6 +132,9 @@ func scheduleBootstrapOopsOrder(cfg config.Config) Order {
 }
 
 func (l *Loop) spawnSchedule(ctx context.Context, order Order, attempt int, resumePrompt string) error {
+	if err := l.requireProcessOrder(l.config.Runtime.Default, order.ID); err != nil {
+		return err
+	}
 	return l.withAdmission(ctx, l.config.Runtime.Default, func(ctx context.Context) error { return l.spawnScheduleAdmitted(ctx, order, attempt, resumePrompt) })
 }
 
@@ -162,6 +165,7 @@ func (l *Loop) spawnScheduleAdmitted(ctx context.Context, order Order, attempt i
 	failures := l.reconciledFailures
 	req := loopruntime.DispatchRequest{
 		Name:                 name,
+		EnvVars:              map[string]string{"NOODLE_ORDER_ID": order.ID},
 		Prompt:               buildSchedulePrompt(skillName, scheduleType.SkillPath, taskTypesPrompt, order, resumePrompt, l.runtimeDir, promotionError, failures, l.lastMiseWarnings),
 		Provider:             nonEmpty(stage.Provider, l.config.Routing.Defaults.Provider),
 		Model:                nonEmpty(stage.Model, l.config.Routing.Defaults.Model),
@@ -226,6 +230,9 @@ func (l *Loop) spawnScheduleAdmitted(ctx context.Context, order Order, attempt i
 // schedule skill. Returns nil in all cases — the loop continues
 // regardless of bootstrap status.
 func (l *Loop) spawnBootstrapIfNeeded(ctx context.Context, order Order) error {
+	if err := l.requireProcessOrder(l.config.Runtime.Default, order.ID); err != nil {
+		return err
+	}
 	return l.withAdmission(ctx, l.config.Runtime.Default, func(ctx context.Context) error { return l.spawnBootstrapIfNeededAdmitted(ctx, order) })
 }
 
@@ -253,6 +260,7 @@ func (l *Loop) spawnBootstrapIfNeededAdmitted(ctx context.Context, order Order) 
 	name := bootstrapSessionPrefix + scheduleOrderID
 	req := loopruntime.DispatchRequest{
 		Name:                 name,
+		EnvVars:              map[string]string{"NOODLE_ORDER_ID": order.ID},
 		Prompt:               "Create a schedule skill for this project. Follow the system prompt instructions exactly.",
 		Provider:             provider,
 		Model:                model,

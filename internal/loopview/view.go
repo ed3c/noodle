@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 )
 
 const MaxBytes = 16 << 20
+
+var identity = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 type Resource struct {
 	Label string `json:"label"`
@@ -85,7 +88,7 @@ func Decode(data []byte) (View, error) {
 	seen := map[string]bool{}
 	for i := range view.Runs {
 		run := &view.Runs[i]
-		if strings.TrimSpace(run.ID) == "" || strings.TrimSpace(run.Repository) == "" || strings.TrimSpace(run.Mode) == "" || strings.TrimSpace(run.Status) == "" {
+		if !identity.MatchString(run.ID) || strings.TrimSpace(run.Repository) == "" || strings.TrimSpace(run.Mode) == "" || strings.TrimSpace(run.Status) == "" {
 			return View{}, fmt.Errorf("run %d identity, mode or status missing", i)
 		}
 		if seen[run.ID] {
@@ -95,7 +98,7 @@ func Decode(data []byte) (View, error) {
 		stages := map[string]bool{}
 		for j := range run.Stages {
 			stage := &run.Stages[j]
-			if strings.TrimSpace(stage.ID) == "" || strings.TrimSpace(stage.Kind) == "" || strings.TrimSpace(stage.Status) == "" || strings.TrimSpace(stage.ConsumerStatus) == "" {
+			if !identity.MatchString(stage.ID) || strings.TrimSpace(stage.Kind) == "" || strings.TrimSpace(stage.Status) == "" || strings.TrimSpace(stage.ConsumerStatus) == "" {
 				return View{}, fmt.Errorf("run %q stage %d identity or observation missing", run.ID, j)
 			}
 			if stages[stage.ID] {
@@ -112,7 +115,7 @@ func Decode(data []byte) (View, error) {
 		cards, notes := map[string]bool{}, map[string]bool{}
 		for j := range run.Cards {
 			card := &run.Cards[j]
-			if strings.TrimSpace(card.ID) == "" || cards[card.ID] {
+			if !identity.MatchString(card.ID) || cards[card.ID] {
 				return View{}, fmt.Errorf("run %q card id missing or duplicated", run.ID)
 			}
 			cards[card.ID] = true
@@ -122,7 +125,7 @@ func Decode(data []byte) (View, error) {
 		}
 		for j := range run.Notes {
 			note := &run.Notes[j]
-			if strings.TrimSpace(note.ID) == "" || notes[note.ID] {
+			if !identity.MatchString(note.ID) || notes[note.ID] {
 				return View{}, fmt.Errorf("run %q note id missing or duplicated", run.ID)
 			}
 			notes[note.ID] = true

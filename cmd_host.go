@@ -106,6 +106,11 @@ func newHostCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{Use: "host", Short: "Manage the single persistent Noodle host"}
 	cmd.AddCommand(newHostResourcesCmd())
 	cmd.AddCommand(newHostViewsCmd())
+	task := &cobra.Command{Use: "task", Short: "Read native task dispatch capabilities"}
+	task.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "process_admitted_orders": true, "config_key": "runtime.process.admitted_orders", "empty_unrestricted": true, "scope": "process_dispatch"})
+	}})
+	cmd.AddCommand(task)
 	cmd.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "protocol": hostProtocol})
 	}})
@@ -405,28 +410,28 @@ func serveHost(ctx context.Context) error {
 		reply   chan any
 	}
 	calls := make(chan call)
-	web, url, webDone, err := startHostWeb(dir, func(requestCtx context.Context) ([]loopview.Resource, error) {
+	web, url, webDone, err := startHostWeb(dir, func(requestCtx context.Context, view *loopview.View) error {
 		requestCtx, stop := context.WithTimeout(requestCtx, 2*time.Second)
 		defer stop()
 		read := call{hostRequest{Operation: "view_resources"}, make(chan any, 1)}
 		select {
 		case calls <- read:
 		case <-requestCtx.Done():
-			return nil, requestCtx.Err()
+			return requestCtx.Err()
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ctx.Err()
 		}
 		select {
 		case value := <-read.reply:
-			resources, ok := value.([]loopview.Resource)
+			observation, ok := value.(hostViewObservation)
 			if !ok {
-				return nil, errors.New("Host view observation type invalid")
+				return errors.New("Host view observation type invalid")
 			}
-			return resources, nil
+			return enrichHostView(dir, view, observation)
 		case <-requestCtx.Done():
-			return nil, requestCtx.Err()
+			return requestCtx.Err()
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ctx.Err()
 		}
 	})
 	if err != nil {
@@ -490,7 +495,11 @@ func serveHost(ctx context.Context) error {
 			}
 		case call := <-calls:
 			if call.request.Operation == "view_resources" {
-				call.reply <- h.viewResources()
+				receipts := make([]hostReceipt, 0, len(h.contexts))
+				for _, context := range h.contexts {
+					receipts = append(receipts, context.receipt)
+				}
+				call.reply <- hostViewObservation{Resources: h.viewResources(), Receipts: receipts}
 				continue
 			}
 			for _, c := range h.contexts {

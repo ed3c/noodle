@@ -14,7 +14,7 @@ import (
 )
 
 // LoopViewsHandler exposes display data and static assets only. It has no control handler.
-func LoopViewsHandler(dir string, ui fs.FS, resources func(context.Context) ([]loopview.Resource, error)) http.Handler {
+func LoopViewsHandler(dir string, ui fs.FS, observe func(context.Context, *loopview.View) error) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/loops", func(w http.ResponseWriter, r *http.Request) {
 		view, err := loopview.Load(dir)
@@ -22,8 +22,8 @@ func LoopViewsHandler(dir string, ui fs.FS, resources func(context.Context) ([]l
 			http.Error(w, "loop display registry unreadable: "+err.Error(), http.StatusServiceUnavailable)
 			return
 		}
-		if resources != nil {
-			view.Resources, err = resources(r.Context())
+		if observe != nil {
+			err = observe(r.Context(), &view)
 			if err != nil {
 				http.Error(w, "Host observation unavailable: "+err.Error(), http.StatusServiceUnavailable)
 				return

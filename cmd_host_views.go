@@ -31,6 +31,7 @@ func newHostViewsCmd() *cobra.Command {
 	}}
 	imp.Flags().StringVar(&file, "file", "", "JSON display projection (schema_version:1, runs:[]); refs and next are display only")
 	cmd.AddCommand(imp)
+	cmd.AddCommand(newHostViewBindCmd())
 	cmd.AddCommand(&cobra.Command{Use: "inspect", Short: "Read stored loop display projections without contacting Host", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		dir, err := hostDirectory()
 		if err != nil {

@@ -84,7 +84,8 @@ func (c RuntimeConfig) MaxConcurrentFor(name string) int {
 }
 
 type ProcessConfig struct {
-	MaxConcurrent int `toml:"max_concurrent"`
+	MaxConcurrent  int      `toml:"max_concurrent"`
+	AdmittedOrders []string `toml:"admitted_orders"`
 }
 
 type SpritesConfig struct {

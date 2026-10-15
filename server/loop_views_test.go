@@ -15,8 +15,9 @@ import (
 
 func TestLoopViewsReadOnlyUpdatesAndETag(t *testing.T) {
 	dir := t.TempDir()
-	resources := func(context.Context) ([]loopview.Resource, error) {
-		return []loopview.Resource{{Label: "Host workers", Value: "0"}}, nil
+	resources := func(_ context.Context, view *loopview.View) error {
+		view.Resources = []loopview.Resource{{Label: "Host workers", Value: "0"}}
+		return nil
 	}
 	handler := LoopViewsHandler(dir, fstest.MapFS{"index.html": {Data: []byte("loop page")}, "assets/app.js": {Data: []byte("static asset")}}, resources)
 	read := func(method, path, etag string) *httptest.ResponseRecorder {
