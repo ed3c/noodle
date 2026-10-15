@@ -93,7 +93,9 @@ func newHostViewBindCmd() *cobra.Command {
 		request.Status = ""
 		binding := hostViewBinding{RunID: runID, OrderID: orderID, Request: request}
 		if old, ok := bindings[runID]; ok && old != binding {
-			return fmt.Errorf("run %q already has a different native binding", runID)
+			if err := retainHostViewSuccessor(dir, old, binding); err != nil {
+				return err
+			}
 		}
 		bindings[runID] = binding
 		data, err = json.Marshal(bindings)
