@@ -107,6 +107,20 @@ func (l *EffectLedger) MarkFailed(effectID string, result EffectResult) error {
 	return nil
 }
 
+// CancelPending retires an unstarted effect without recording a fabricated run.
+func (l *EffectLedger) CancelPending(effectID, reason string, at time.Time) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	record, exists := l.records[effectID]
+	if !exists || record.Status != EffectLedgerPending || record.Result != nil {
+		return fmt.Errorf("effect cancellation blocked: %s", effectID)
+	}
+	record.Status = EffectLedgerDone
+	record.Result = &EffectResult{EffectID: effectID, Status: EffectResultCancelled, Timestamp: at, Error: reason}
+	l.records[effectID] = record
+	return nil
+}
+
 // Pending returns pending effects.
 func (l *EffectLedger) Pending() []EffectLedgerRecord {
 	l.mu.RLock()

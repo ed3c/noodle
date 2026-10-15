@@ -32,5 +32,12 @@ func newReviewCmd(app *App) *cobra.Command {
 		return nil
 	}
 	command.AddCommand(&cobra.Command{Use: "inspect ORDER_ID SUBJECT", Short: cmdmeta.Short("review", "inspect"), Args: cobra.ExactArgs(2), RunE: run}, &cobra.Command{Use: "reject ORDER_ID SUBJECT CUSTODY_SHA256", Short: cmdmeta.Short("review", "reject"), Args: cobra.ExactArgs(3), RunE: run})
+	command.AddCommand(&cobra.Command{Use: "prepare-local-merge-recovery CANDIDATE_PATH CANDIDATE_SHA BACKUP_DIR OUTPUT_PATH", Short: cmdmeta.Short("review", "prepare-local-merge-recovery"), Args: cobra.ExactArgs(4), RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := loop.PrepareLocalTaskMergeRecovery(args[0], args[1], args[2], args[3])
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+	}})
 	return command
 }

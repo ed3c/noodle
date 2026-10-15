@@ -9,7 +9,9 @@ import (
 // MergeOpts holds optional parameters for Merge.
 type MergeOpts struct {
 	// Into overrides the integration branch for this merge.
-	Into string
+	Into         string
+	ExpectedHead string
+	ExpectedTree string
 }
 
 // Merge rebases the worktree branch onto a target branch, merges, and cleans up.
@@ -45,6 +47,24 @@ func (a *App) Merge(name string, opts ...MergeOpts) error {
 		return err
 	}
 
+	if o.ExpectedHead != "" || o.ExpectedTree != "" {
+		head, err := a.gitOutput("-C", wtPath, "rev-parse", "HEAD")
+		if err != nil || head != o.ExpectedHead {
+			return fmt.Errorf("reviewed candidate HEAD changed")
+		}
+		tree, err := a.gitOutput("-C", wtPath, "rev-parse", "HEAD^{tree}")
+		if err != nil || tree != o.ExpectedTree {
+			return fmt.Errorf("reviewed candidate tree changed")
+		}
+		dirty, err := a.gitOutput("-C", wtPath, "status", "--porcelain", "--untracked-files=all")
+		if err != nil || dirty != "" {
+			return fmt.Errorf("reviewed candidate worktree changed")
+		}
+		if err := a.git("merge-base", "--is-ancestor", base, o.ExpectedHead).Run(); err != nil {
+			return fmt.Errorf("reviewed candidate integration branch advanced")
+		}
+	}
+
 	commits := a.countUnmergedCommits(name)
 	if commits == 0 {
 		a.info(fmt.Sprintf("No commits on '%s' — nothing to merge", name))
@@ -63,24 +83,30 @@ func (a *App) Merge(name string, opts ...MergeOpts) error {
 		}
 	}
 
-	a.info(fmt.Sprintf("Rebasing %s onto %s...", name, base))
-	if err := a.git("-C", wtPath, "rebase", base).Run(); err != nil {
+	if o.ExpectedHead == "" {
+		a.info(fmt.Sprintf("Rebasing %s onto %s...", name, base))
+		if err := a.git("-C", wtPath, "rebase", base).Run(); err != nil {
+			if stashed {
+				_ = a.git("-C", wtPath, "rebase", "--abort").Run()
+				_ = a.git("-C", wtPath, "stash", "pop", "--quiet").Run()
+			}
+			if a.hasMergeConflicts(wtPath) {
+				return &MergeConflictError{Branch: mergeBranch, Err: err}
+			}
+			return fmt.Errorf("rebase failed — resolve conflicts manually in %s", wtPath)
+		}
+
 		if stashed {
-			_ = a.git("-C", wtPath, "rebase", "--abort").Run()
 			_ = a.git("-C", wtPath, "stash", "pop", "--quiet").Run()
 		}
-		if a.hasMergeConflicts(wtPath) {
-			return &MergeConflictError{Branch: mergeBranch, Err: err}
-		}
-		return fmt.Errorf("rebase failed — resolve conflicts manually in %s", wtPath)
-	}
-
-	if stashed {
-		_ = a.git("-C", wtPath, "stash", "pop", "--quiet").Run()
 	}
 
 	a.info(fmt.Sprintf("Merging %s into %s...", mergeBranch, base))
-	if err := a.gitRun("merge", mergeBranch); err != nil {
+	mergeArgs := []string{"merge", mergeBranch}
+	if o.ExpectedHead != "" {
+		mergeArgs = []string{"merge", "--ff-only", mergeBranch}
+	}
+	if err := a.gitRun(mergeArgs...); err != nil {
 		if a.hasMergeConflicts(a.Root) {
 			return &MergeConflictError{Branch: mergeBranch, Err: err}
 		}

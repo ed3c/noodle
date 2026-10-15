@@ -350,7 +350,7 @@ func (l *Loop) reconcileFailedOrders() error {
 		if order.Status != OrderStatusFailed {
 			continue
 		}
-		if isScheduleOrder(order) || l.preserveRequestChanges(order.ID) {
+		if isScheduleOrder(order) || l.preserveRequestChanges(order.ID) || l.preserveLocalTaskFailure(order.ID) {
 			continue
 		}
 		f := reconciledFailure{
@@ -385,7 +385,7 @@ func (l *Loop) reconcileFailedOrders() error {
 	if err := l.mutateOrdersState(func(orders *OrdersFile) (bool, error) {
 		kept := orders.Orders[:0]
 		for _, order := range orders.Orders {
-			if order.Status == OrderStatusFailed && !isScheduleOrder(order) && !l.preserveRequestChanges(order.ID) {
+			if order.Status == OrderStatusFailed && !isScheduleOrder(order) && !l.preserveRequestChanges(order.ID) && !l.preserveLocalTaskFailure(order.ID) {
 				continue
 			}
 			kept = append(kept, order)
@@ -537,6 +537,7 @@ func (l *Loop) handleAlreadyMergedStage(md mergeRecoveryStage) error {
 				TaskKey: md.stage.TaskKey,
 				Skill:   md.stage.Skill,
 				Runtime: md.stage.Runtime,
+				Extra:   cloneLegacyExtra(md.stage.Extra),
 			},
 		},
 		worktreeName: md.stage.Merge.WorktreeName,
@@ -567,6 +568,7 @@ func (l *Loop) requeueStaleMerge(md mergeRecoveryStage) error {
 				TaskKey: md.stage.TaskKey,
 				Skill:   md.stage.Skill,
 				Runtime: md.stage.Runtime,
+				Extra:   cloneLegacyExtra(md.stage.Extra),
 			},
 		},
 		worktreeName: md.stage.Merge.WorktreeName,

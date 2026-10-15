@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/poteto/noodle/internal/ingest"
@@ -26,7 +27,15 @@ func (l *Loop) mergeCookWorktree(ctx context.Context, cook *cookHandle) error {
 			return fmt.Errorf("merge remote branch %s: %w", syncResult.Branch, err)
 		}
 	} else {
-		if err := l.deps.Worktree.Merge(cook.worktreeName); err != nil {
+		var opts worktree.MergeOpts
+		if cook.stage.TaskKey == "local-task" && slices.Contains(l.config.Runtime.Process.AdmittedOrders, cook.orderID) {
+			var binding localTaskMergeBinding
+			if json.Unmarshal(cook.stage.Extra[localTaskMergeKey], &binding) != nil || binding.Head == "" || binding.Tree == "" {
+				return fmt.Errorf("local task merge candidate binding missing")
+			}
+			opts.ExpectedHead, opts.ExpectedTree = binding.Head, binding.Tree
+		}
+		if err := l.deps.Worktree.Merge(cook.worktreeName, opts); err != nil {
 			return fmt.Errorf("merge %s: %w", cook.worktreeName, err)
 		}
 	}
@@ -166,6 +175,7 @@ func (l *Loop) handleMergeError(cook *cookHandle, err error) error {
 	}
 	reason := "merge failed: " + err.Error()
 	l.logger.Warn("merge failed; candidate retained for review", "order", cook.orderID, "reason", reason)
+	l.forwardToScheduler(cook, "merge_failed", reason, nil)
 	if err := l.emitEventChecked(ingest.EventMergeFailed, map[string]any{
 		"order_id": cook.orderID, "stage_index": cook.stageIndex, "error": reason,
 	}); err != nil {

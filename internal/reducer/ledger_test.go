@@ -150,3 +150,25 @@ func TestEffectLedgerReturnsCopies(t *testing.T) {
 		t.Fatalf("copy expectation failed, records unexpectedly equal: %+v", again[0])
 	}
 }
+
+func TestEffectLedgerCancelPendingDoesNotInventExecution(t *testing.T) {
+	ledger := NewEffectLedger()
+	ledger.Record(Effect{EffectID: "old", Type: EffectMerge})
+	if err := ledger.CancelPending("old", "original failure recovered", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	r := ledger.All()[0]
+	if r.Attempts != 0 || r.Status != EffectLedgerDone || r.Result.Status != EffectResultCancelled {
+		t.Fatal(r)
+	}
+	if err := ledger.CancelPending("old", "again", time.Now()); err == nil {
+		t.Fatal("cancelled twice")
+	}
+	ledger.Record(Effect{EffectID: "running", Type: EffectMerge})
+	if err := ledger.MarkRunning("running"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.CancelPending("running", "unsafe", time.Now()); err == nil {
+		t.Fatal("cancelled unknown running effect")
+	}
+}

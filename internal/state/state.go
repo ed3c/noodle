@@ -103,6 +103,7 @@ type OrderNode struct {
 }
 
 const RequestChangesKey = "request_changes_recovery"
+const LocalTaskMergeRecoveryKey = "local_task_merge_recovery"
 
 // StageNode represents a stage within an order.
 type StageNode struct {

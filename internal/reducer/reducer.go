@@ -747,6 +747,9 @@ func recordReviewAttempt(stage *state.StageNode, payload reviewPayload, event in
 		attemptID = fmt.Sprintf("review-%d", event.ID)
 	}
 	if idx, found := attemptIndexByID(stage.Attempts, attemptID); found {
+		if preservedLocalMergeAttempt(*stage, stage.Attempts[idx]) {
+			return
+		}
 		stage.Attempts[idx].SessionID = strings.TrimSpace(payload.SessionID)
 		stage.Attempts[idx].Status = state.AttemptCompleted
 		stage.Attempts[idx].CompletedAt = event.Timestamp
@@ -790,6 +793,9 @@ func finalizeAttempt(stage *state.StageNode, payload orderStagePayload, event in
 	}
 
 	attempt := stage.Attempts[attemptIndex]
+	if preservedLocalMergeAttempt(*stage, attempt) {
+		return
+	}
 	attempt.Status = status
 	attempt.CompletedAt = event.Timestamp
 	if payload.ExitCode != nil {

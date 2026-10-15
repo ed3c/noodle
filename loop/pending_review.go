@@ -111,6 +111,10 @@ func (l *Loop) loadPendingReview() error {
 		if id == "" {
 			continue
 		}
+		order, exists := l.canonical.Orders[id]
+		if !exists || review.StageIndex < 0 || review.StageIndex >= len(order.Stages) {
+			return fmt.Errorf("pending review stage missing for %q", id)
+		}
 		name := strings.TrimSpace(review.WorktreeName)
 		if name == "" {
 			name = defaultPendingReviewWorktreeName(id, review.StageIndex, review.TaskKey)
@@ -125,6 +129,7 @@ func (l *Loop) loadPendingReview() error {
 					Skill:    strings.TrimSpace(review.Skill),
 					Provider: strings.TrimSpace(review.Provider),
 					Model:    strings.TrimSpace(review.Model),
+					Extra:    cloneLegacyExtra(order.Stages[review.StageIndex].Extra),
 					Runtime:  strings.TrimSpace(review.Runtime),
 				},
 				plan: append([]string(nil), review.Plan...),

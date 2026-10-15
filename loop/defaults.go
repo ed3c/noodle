@@ -72,6 +72,12 @@ func defaultDependencies(projectDir, runtimeDir, noodleBin string, cfg config.Co
 	}
 
 	wtApp, wtErr := worktree.NewAppWithExecution(executionContext)
+	if wtErr == nil && len(cfg.Runtime.Process.AdmittedOrders) > 0 {
+		wtErr = bindContextIntegration(wtApp, runtimeDir)
+		if wtErr != nil {
+			wtApp = nil
+		}
+	}
 	var wt WorktreeManager
 	if wtApp != nil {
 		wtApp.CmdPrefix = "noodle worktree"
