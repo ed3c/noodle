@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchLoopView } from "~/client/loop-views";
+import type { LoopViewResponse } from "~/client/loop-views";
 import { fetchLoopGraph } from "~/client/loop-graph";
 import type { GraphResponse, GraphView, LoopGraph } from "~/client/loop-graph";
 import { LoopViews, LoopViewsContent } from "./LoopViews";
@@ -231,6 +233,49 @@ function Knowledge({
     </section>
   );
 }
+function FullProjectionTab({
+  kind,
+  view,
+  repository,
+}: {
+  kind: "timeline" | "cards" | "notes";
+  view: GraphView;
+  repository: string;
+}) {
+  const client = useQueryClient();
+  const query = useQuery({
+    queryKey: ["loop-views"],
+    queryFn: ({ signal }) =>
+      fetchLoopView(client.getQueryData<LoopViewResponse>(["loop-views"]), signal),
+    refetchInterval: 3000,
+    refetchIntervalInBackground: false,
+    retry: false,
+  });
+  return (
+    <>
+      <p className="lg-small">此分頁另讀完整原投影。選取的圖比較仍固定於原版本。</p>
+      {!query.data && !query.isError && <p role="status">讀取完整投影…</p>}
+      {query.isError && (
+        <p role="alert">
+          {query.error.message}
+          {query.data ? "。保留上次成功讀回；目前狀態未知。" : "。完整內容目前未知。"}
+        </p>
+      )}
+      {query.data &&
+        (kind === "timeline" ? (
+          <LoopViewsContent view={query.data.view} />
+        ) : (
+          <Knowledge
+            key={kind}
+            view={{ ...view, ...query.data.view, graph: view.graph }}
+            kind={kind}
+            repository={repository}
+          />
+        ))}
+    </>
+  );
+}
+
 export function LoopGraphContent({ view }: { view: GraphView }) {
   const [pinned, setPinned] = useState<GraphView | null>(null),
     [selection, setSelection] = useState<GraphSelection | null>(null);
@@ -342,9 +387,8 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
           </label>
         </div>
       )}
-      {tab === "timeline" && <LoopViewsContent view={current} />}
-      {(tab === "cards" || tab === "notes") && (
-        <Knowledge key={tab} view={current} kind={tab} repository={repository} />
+      {(tab === "timeline" || tab === "cards" || tab === "notes") && (
+        <FullProjectionTab kind={tab} view={current} repository={repository} />
       )}
       {tab === "requirements" && (
         <section aria-label="需求與驗收讀回">
