@@ -1,4 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { LoopViews } from "~/components/LoopViews";
+import { LoopGraphPanel } from "~/components/LoopGraph";
 
-export const Route = createFileRoute("/loops")({ component: LoopViews });
+export const Route = createFileRoute("/loops")({ component: LoopGraphPanel });

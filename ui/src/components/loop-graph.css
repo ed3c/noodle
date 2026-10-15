@@ -1,0 +1,355 @@
+.lg-page {
+  padding: 28px clamp(14px, 3vw, 44px);
+}
+.lg-page h2 {
+  font-size: 18px;
+}
+.lg-page h2 small {
+  font-size: 11px;
+  font-weight: 400;
+}
+.lg-page button,
+.lg-page select,
+.lg-page input:not([type="checkbox"]) {
+  background: #152720;
+  color: #e1e9e4;
+  border: 1px solid #3c594b;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12px;
+  max-width: 100%;
+}
+.lg-page button {
+  cursor: pointer;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.lg-page button:hover,
+.lg-page button[aria-current="page"] {
+  background: #2b4838;
+  border-color: #8cccaa;
+}
+.lg-page :focus-visible {
+  outline: 2px solid #f3cf81;
+  outline-offset: 3px;
+}
+.lg-tabs,
+.lg-toolbar,
+.lg-filters,
+.lg-related {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0;
+}
+.lg-toolbar h2 {
+  margin-right: auto;
+}
+.lg-tabs {
+  border-bottom: 1px solid #345345;
+  padding-bottom: 12px;
+}
+.lg-filters label {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  gap: 4px;
+  min-width: 130px;
+  max-width: 320px;
+}
+.lg-check {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.lg-workspace {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+.lg-main,
+.lg-source,
+.lg-detail,
+.lg-pair > div {
+  min-width: 0;
+}
+.lg-source {
+  background: #14211b;
+  border: 1px solid #30493a;
+  padding: 14px;
+  border-radius: 10px;
+  position: sticky;
+  top: 12px;
+}
+.lg-source label {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  gap: 5px;
+  margin: 10px 0;
+}
+.lg-small {
+  font-size: 11px;
+  color: #adc0b3;
+  overflow-wrap: anywhere;
+}
+.lg-unknown {
+  color: #d7bd8b;
+  font-size: 12px;
+}
+.lg-file-scroll {
+  height: 510px;
+  overflow: auto;
+  margin-top: 14px;
+}
+.lg-file {
+  border: 0 !important;
+  border-radius: 0 !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px !important;
+  padding: 8px 4px !important;
+}
+.lg-object-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+.lg-object-list article {
+  background: #192b23;
+  border: 1px solid #354d3e;
+  border-radius: 8px;
+  padding: 10px;
+}
+.lg-object-list article > button {
+  width: 100%;
+  border: none;
+}
+.lg-object-list small {
+  display: block;
+  font-size: 10px;
+  color: #acc1b3;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+.lg-ports {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.lg-ports button {
+  flex: 1;
+  font-size: 10px;
+}
+.lg-canvas-scroll {
+  max-height: 660px;
+  overflow: auto;
+  border: 1px solid #345044;
+  border-radius: 10px;
+  background: #0c1712;
+}
+.lg-canvas-scroll svg {
+  display: block;
+  touch-action: none;
+}
+.lg-band rect {
+  fill: #13241b;
+  stroke: #294434;
+}
+.lg-band text {
+  fill: #b5cebc;
+  font: 13px system-ui;
+}
+.lg-node,
+.lg-edge {
+  cursor: pointer;
+}
+.lg-node rect {
+  fill: #203c2c;
+  stroke: #739d7d;
+  stroke-width: 1.5;
+}
+.lg-node text {
+  fill: #e3eee5;
+  font: 13px system-ui;
+}
+.lg-node .lg-node-kind,
+.lg-node .lg-node-state {
+  fill: #aec9b7;
+  font-size: 10px;
+}
+.lg-edge {
+  color: #98c2a5;
+}
+.lg-edge path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+.lg-edge .lg-edge-hit {
+  stroke: transparent;
+  stroke-width: 16;
+}
+.lg-edge text {
+  fill: currentColor;
+  paint-order: stroke;
+  stroke: #101e16;
+  stroke-width: 4;
+  font: 10px system-ui;
+}
+.lg-edge.is-unknown path:not(.lg-edge-hit),
+.lg-node.is-unknown rect {
+  stroke-dasharray: 6 4;
+}
+.lg-edge.is-unknown {
+  color: #b0b4aa;
+}
+.lg-edge.is-failed {
+  color: #ef9291;
+}
+.lg-node.is-failed rect {
+  stroke: #ef9291;
+}
+.lg-page .is-linked {
+  background: #355740 !important;
+  border-color: #e8c477 !important;
+}
+.lg-node.is-linked rect {
+  stroke: #f3cf81;
+  stroke-width: 3;
+}
+.lg-edge.is-linked {
+  color: #f3cf81;
+}
+.lg-edge:focus,
+.lg-node:focus {
+  outline: none;
+}
+.lg-edge:focus path:not(.lg-edge-hit),
+.lg-node:focus rect {
+  stroke: #f3cf81;
+  stroke-width: 4;
+}
+.lg-finding {
+  display: block;
+  border-left: 3px solid #aab4ad !important;
+  margin: 10px 0;
+  padding: 12px;
+  background: #1c2c24;
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+.lg-finding.is-failed {
+  border-left-color: #ef9291 !important;
+}
+.lg-finding.is-unknown {
+  border-left-color: #d7bd8b !important;
+}
+.lg-finding.is-resolved {
+  border-left-color: #90bca0 !important;
+}
+.lg-detail {
+  border: 1px solid #8a9f7b;
+  border-radius: 12px;
+  padding: 22px;
+  margin-top: 24px;
+  background: #192b21;
+  scroll-margin-top: 20px;
+}
+.lg-detail h2 {
+  max-width: 90%;
+}
+.lg-update {
+  background: #36311f;
+  border: 1px solid #aa925b;
+  padding: 14px;
+  border-radius: 8px;
+}
+.lg-update button {
+  margin-left: 12px;
+}
+.lg-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.lg-pair label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lg-pair pre {
+  height: 340px;
+}
+.lg-pair select {
+  width: 100%;
+}
+.lg-metadata {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.lg-metadata dt {
+  color: #a1b7a9;
+  margin-top: 6px;
+}
+.lg-metadata dd {
+  margin: 0;
+}
+.lg-removed {
+  border-left: 3px solid #dc8c88;
+}
+.lg-added {
+  border-left: 3px solid #86b996;
+}
+@media (max-width: 900px) {
+  .lg-workspace {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+  .lg-object-list {
+    grid-template-columns: 1fr;
+  }
+  .lg-pair {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 650px) {
+  .lg-workspace {
+    grid-template-columns: 1fr;
+  }
+  .lg-source {
+    position: static;
+  }
+  .lg-file-scroll {
+    height: 240px;
+  }
+  .lg-filters label {
+    max-width: 100%;
+    width: 100%;
+  }
+  .lg-detail {
+    padding: 14px;
+  }
+  .lg-canvas-scroll {
+    max-height: 500px;
+  }
+}
+.lg-page .lg-svg-button,
+.lg-page .lg-svg-button.is-linked,
+.lg-page .lg-svg-button:hover {
+  width: 100%;
+  height: 100%;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent !important;
+}
+.lg-page .lg-svg-button:focus-visible {
+  outline-offset: -3px;
+}

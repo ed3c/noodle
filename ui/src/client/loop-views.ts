@@ -31,7 +31,7 @@ function resources(value: unknown) {
 
 export function parseLoopView(value: unknown) {
   const root = record(value);
-  if (root.schema_version !== 1) {
+  if (root.schema_version !== 1 && root.schema_version !== 2) {
     throw new Error("Unsupported loop view schema");
   }
   return {

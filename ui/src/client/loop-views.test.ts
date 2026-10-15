@@ -5,7 +5,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("loop display readback", () => {
   it("rejects malformed remote data", () => {
-    expect(() => parseLoopView({ schema_version: 2, runs: [] })).toThrow();
+    expect(() => parseLoopView({ schema_version: 3, runs: [] })).toThrow();
     expect(() => parseLoopView({ schema_version: 1, runs: [{ id: "a" }] })).toThrow();
   });
   it("keeps the same observation on 304 and requests its ETag", async () => {
