@@ -40,3 +40,12 @@ review after checking bytes, index, base, process absence and completion events.
 It preserves the original session and events and does not dispatch a worker.
 Request-changes dispatch validates its saved binding before retaining dirty work;
 the generic retry cleanup must not delete that reviewed revision input.
+
+Terminal `meta.json` remains a monitor projection: `updated_at` and `idle_seconds`
+change after process exit. Completion recovery schema 2 binds the stable session,
+status, alive, provider, model and runtime fields instead of the whole file digest.
+All other session files, candidate bytes, index, base and completion events remain
+bound. A schema 1 packet can have a new immutable successor only after its exact
+known custody-error ACK and matching remaining custody. The successor references
+the failed packet and control; it never rewrites that packet or ACK. Unknown ACKs
+require readback. The corrected control requires Host6, not only a new producer.

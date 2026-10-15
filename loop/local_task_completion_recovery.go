@@ -17,19 +17,35 @@ import (
 
 const localTaskCompletionRecoveryKey = "local_task_completion_recovery"
 
+type localTaskCompletionTerminal struct {
+	SessionID string `json:"session_id"`
+	Status    string `json:"status"`
+	Alive     bool   `json:"alive"`
+	Provider  string `json:"provider"`
+	Model     string `json:"model"`
+	Runtime   string `json:"runtime"`
+}
+
+type localTaskCompletionPredecessor struct {
+	Packet    localTaskFileRef `json:"packet"`
+	ControlID string           `json:"control_id"`
+}
+
 type localTaskCompletionPacket struct {
-	Schema       int                          `json:"schema"`
-	Project      string                       `json:"project"`
-	Order        state.OrderNode              `json:"order"`
-	Binding      requestChangesBinding        `json:"binding"`
-	BaseHead     string                       `json:"base_head"`
-	BaseBranch   string                       `json:"base_branch"`
-	EventsSHA256 string                       `json:"events_sha256"`
-	Effects      []reducer.EffectLedgerRecord `json:"effects"`
+	Schema       int                             `json:"schema"`
+	Project      string                          `json:"project"`
+	Order        state.OrderNode                 `json:"order"`
+	Binding      requestChangesBinding           `json:"binding"`
+	BaseHead     string                          `json:"base_head"`
+	BaseBranch   string                          `json:"base_branch"`
+	EventsSHA256 string                          `json:"events_sha256"`
+	Effects      []reducer.EffectLedgerRecord    `json:"effects"`
+	Terminal     *localTaskCompletionTerminal    `json:"terminal,omitempty"`
+	Predecessor  *localTaskCompletionPredecessor `json:"predecessor,omitempty"`
 }
 
 // Preparation only reads native custody and writes one external immutable packet.
-func PrepareLocalTaskCompletionRecovery(project string, cfg config.Config, id, output string) (map[string]any, error) {
+func PrepareLocalTaskCompletionRecovery(project string, cfg config.Config, id, output string, predecessor ...string) (map[string]any, error) {
 	project, err := filepath.Abs(project)
 	if err != nil {
 		return nil, err
@@ -63,6 +79,15 @@ func PrepareLocalTaskCompletionRecovery(project string, cfg config.Config, id, o
 	}
 	if !recoveryJSONEqual(packet, again) {
 		return nil, fmt.Errorf("completion recovery custody changed during preparation")
+	}
+	if len(predecessor) != 0 {
+		if len(predecessor) != 3 {
+			return nil, fmt.Errorf("completion recovery predecessor arguments differ")
+		}
+		packet.Predecessor = &localTaskCompletionPredecessor{Packet: localTaskFileRef{Path: predecessor[0], SHA256: predecessor[1]}, ControlID: predecessor[2]}
+		if err := l.validateCompletionPredecessor(packet); err != nil {
+			return nil, err
+		}
 	}
 	data, err := json.MarshalIndent(packet, "", "  ")
 	if err != nil {
@@ -98,7 +123,7 @@ func PrepareLocalTaskCompletionRecovery(project string, cfg config.Config, id, o
 }
 
 func (l *Loop) captureLocalTaskCompletion(order state.OrderNode) (localTaskCompletionPacket, error) {
-	p := localTaskCompletionPacket{Schema: 1, Project: l.projectDir, Order: order, Effects: []reducer.EffectLedgerRecord{}}
+	p := localTaskCompletionPacket{Schema: 2, Project: l.projectDir, Order: order, Effects: []reducer.EffectLedgerRecord{}}
 	if order.Status != state.OrderCompleted || len(order.Stages) != 1 || !l.isAdmittedLocalTask(order, order.Stages[0]) {
 		return p, fmt.Errorf("local task completed admission missing")
 	}
@@ -119,7 +144,11 @@ func (l *Loop) captureLocalTaskCompletion(order state.OrderNode) (localTaskCompl
 	if err != nil {
 		return p, err
 	}
-	b.Files["meta.json"] = recoveryDigest(meta)
+	var terminal localTaskCompletionTerminal
+	if err := json.Unmarshal(meta, &terminal); err != nil {
+		return p, err
+	}
+	p.Terminal = &terminal
 	p.Binding = b
 	review := completionPendingReview(order, b)
 	if err := l.validateRecovery(order, review, b); err != nil {
@@ -279,7 +308,7 @@ func (l *Loop) controlRecoverLocalTaskCompletion(cmd ControlCommand) error {
 	if err := decodeStoppedReview(data, &packet); err != nil {
 		return err
 	}
-	if packet.Schema != 1 || packet.Project != l.projectDir || packet.Order.OrderID != cmd.OrderID {
+	if packet.Schema != 2 || packet.Terminal == nil || packet.Project != l.projectDir || packet.Order.OrderID != cmd.OrderID {
 		return fmt.Errorf("local task completion recovery identity differs")
 	}
 	order, ok := l.canonical.Orders[cmd.OrderID]
@@ -306,10 +335,14 @@ func (l *Loop) controlRecoverLocalTaskCompletion(cmd ControlCommand) error {
 	if _, exists := l.canonical.PendingReviews[cmd.OrderID]; exists {
 		return fmt.Errorf("local task completion already has review")
 	}
+	if err := l.validateCompletionPredecessor(packet); err != nil {
+		return err
+	}
 	current, err := l.captureLocalTaskCompletion(order)
 	if err != nil {
 		return err
 	}
+	current.Predecessor = packet.Predecessor
 	if !recoveryJSONEqual(current, packet) {
 		return fmt.Errorf("local task completion recovery custody changed")
 	}
@@ -340,4 +373,63 @@ func (l *Loop) controlRecoverLocalTaskCompletion(cmd ControlCommand) error {
 		return err
 	}
 	return l.syncPendingReviewProjection()
+}
+
+// Schema 1 retained a monitor projection digest. Only its known error ACK can
+// lead to a successor, and every immutable custody field still has to match.
+func (l *Loop) validateCompletionPredecessor(packet localTaskCompletionPacket) error {
+	prior := packet.Predecessor
+	if prior == nil {
+		return nil
+	}
+	if !filepath.IsAbs(prior.Packet.Path) || prior.Packet.SHA256 == "" || prior.ControlID == "" {
+		return fmt.Errorf("completion recovery predecessor identity missing")
+	}
+	data, err := os.ReadFile(prior.Packet.Path)
+	if err != nil {
+		return err
+	}
+	if recoveryDigest(data) != prior.Packet.SHA256 {
+		return fmt.Errorf("completion recovery predecessor source changed")
+	}
+	var original localTaskCompletionPacket
+	if err := decodeStoppedReview(data, &original); err != nil {
+		return err
+	}
+	if original.Schema != 1 || original.Terminal != nil || original.Predecessor != nil || len(original.Binding.Files["meta.json"]) != 64 || len(original.Order.Stages) != 1 {
+		return fmt.Errorf("completion recovery predecessor is not the original projection-bound packet")
+	}
+	data, err = os.ReadFile(filepath.Join(l.runtimeDir, "control-ack.ndjson"))
+	if err != nil {
+		return err
+	}
+	matches := 0
+	for _, line := range bytes.Split(data, []byte{'\n'}) {
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		var ack ControlAck
+		if err := json.Unmarshal(line, &ack); err != nil {
+			return err
+		}
+		if ack.ID != prior.ControlID {
+			continue
+		}
+		if ack.Action != "recover-local-task-completion" || ack.Status != "error" || ack.Message != "local task completion recovery custody changed" {
+			return fmt.Errorf("completion recovery predecessor ACK is not the known projection refusal")
+		}
+		matches++
+	}
+	if matches != 1 {
+		return fmt.Errorf("completion recovery predecessor ACK missing or ambiguous")
+	}
+	original.Schema = 2
+	delete(original.Binding.Files, "meta.json")
+	stage := original.Order.Stages[0]
+	original.Terminal = &localTaskCompletionTerminal{SessionID: original.Binding.SessionID, Status: "exited", Alive: false, Provider: stage.Provider, Model: stage.Model, Runtime: stage.Runtime}
+	original.Predecessor = prior
+	if !recoveryJSONEqual(original, packet) {
+		return fmt.Errorf("completion recovery immutable predecessor custody changed")
+	}
+	return nil
 }

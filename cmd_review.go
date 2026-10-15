@@ -39,8 +39,13 @@ func newReviewCmd(app *App) *cobra.Command {
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 	}})
-	command.AddCommand(&cobra.Command{Use: "prepare-local-completion-recovery ORDER_ID OUTPUT_PATH", Short: cmdmeta.Short("review", "prepare-local-completion-recovery"), Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := loop.PrepareLocalTaskCompletionRecovery(app.projectDir, app.Config, args[0], args[1])
+	command.AddCommand(&cobra.Command{Use: "prepare-local-completion-recovery ORDER_ID OUTPUT_PATH [PRIOR_PATH PRIOR_SHA PRIOR_CONTROL_ID]", Short: cmdmeta.Short("review", "prepare-local-completion-recovery"), Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) != 2 && len(args) != 5 {
+			return fmt.Errorf("completion recovery requires two or five arguments")
+		}
+		return nil
+	}, RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := loop.PrepareLocalTaskCompletionRecovery(app.projectDir, app.Config, args[0], args[1], args[2:]...)
 		if err != nil {
 			return err
 		}

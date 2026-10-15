@@ -47,6 +47,10 @@ func localTaskCompletedFixture(t *testing.T) (*Loop, *cookHandle, string) {
 	t.Helper()
 	l, cook, _ := localTaskReviewFixture(t)
 	localTaskRealWorktree(t, l)
+	// Real attached contexts already retain their original schedule order.
+	if err := l.ensureScheduleOrderPresent(); err != nil {
+		t.Fatal(err)
+	}
 	order := l.canonical.Orders[cook.orderID]
 	order.Status = state.OrderCompleted
 	order.Stages[0].Status = state.StageCompleted
@@ -192,6 +196,136 @@ func TestLocalTaskRevisionDispatchPreservesBoundDirtyBytes(t *testing.T) {
 				}
 			} else if err != nil || !dispatched {
 				t.Fatalf("dispatch %v %v", dispatched, err)
+			}
+		})
+	}
+}
+
+func completionRefreshMeta(t *testing.T, l *Loop, cook *cookHandle, field string, value any) {
+	t.Helper()
+	path := filepath.Join(l.runtimeDir, "sessions", cook.session.ID(), "meta.json")
+	var meta map[string]any
+	if err := json.Unmarshal(recoveryRead(t, path), &meta); err != nil {
+		t.Fatal(err)
+	}
+	meta[field] = value
+	recoveryWriteJSON(t, path, meta)
+}
+
+func TestLocalTaskCompletionRecoveryIgnoresOnlyMonitorProjection(t *testing.T) {
+	for _, field := range []string{"updated_at", "idle_seconds", "session_id", "status", "alive", "provider", "model", "runtime"} {
+		t.Run(field, func(t *testing.T) {
+			l, cook, path := localTaskCompletedFixture(t)
+			result, err := PrepareLocalTaskCompletionRecovery(l.projectDir, l.config, cook.orderID, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ref := result["packet"].(localTaskFileRef)
+			var value any = "changed"
+			if field == "alive" {
+				value = true
+			}
+			if field == "idle_seconds" {
+				value = 999
+			}
+			completionRefreshMeta(t, l, cook, field, value)
+			meta := recoveryRead(t, filepath.Join(l.runtimeDir, "sessions", cook.session.ID(), "meta.json"))
+			before, _ := json.Marshal(l.canonical)
+			err = l.dispatchControlCommand(ControlCommand{Action: "recover-local-task-completion", OrderID: cook.orderID, Value: ref.Path, Target: ref.SHA256})
+			if field == "updated_at" || field == "idle_seconds" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if l.canonical.Orders[cook.orderID].Stages[0].Status != state.StageReview {
+					t.Fatal("missing review")
+				}
+			} else {
+				if err == nil {
+					t.Fatal("accepted changed terminal identity")
+				}
+				after, _ := json.Marshal(l.canonical)
+				if string(before) != string(after) {
+					t.Fatal("refusal mutated state")
+				}
+			}
+			if string(meta) != string(recoveryRead(t, filepath.Join(l.runtimeDir, "sessions", cook.session.ID(), "meta.json"))) {
+				t.Fatal("rewrote native metadata")
+			}
+		})
+	}
+}
+
+func TestLocalTaskCompletionRecoverySuccessorRequiresKnownErrorAndSameCustody(t *testing.T) {
+	for _, change := range []string{"projection", "unknown_ack", "wrong_error", "duplicate_ack", "bytes", "prior_sha", "events"} {
+		t.Run(change, func(t *testing.T) {
+			l, cook, path := localTaskCompletedFixture(t)
+			old, err := l.captureLocalTaskCompletion(l.canonical.Orders[cook.orderID])
+			if err != nil {
+				t.Fatal(err)
+			}
+			old.Schema, old.Terminal = 1, nil
+			old.Binding.Files["meta.json"] = recoveryDigest(recoveryRead(t, filepath.Join(l.runtimeDir, "sessions", cook.session.ID(), "meta.json")))
+			priorPath := filepath.Join(t.TempDir(), "original.json")
+			recoveryWriteJSON(t, priorPath, old)
+			priorBytes := recoveryRead(t, priorPath)
+			priorSHA := recoveryDigest(priorBytes)
+			ack := ControlAck{ID: "original-recovery", Action: "recover-local-task-completion", Status: "error", Message: "local task completion recovery custody changed"}
+			if change == "wrong_error" {
+				ack.Message = "different refusal"
+			}
+			ackBytes, _ := json.Marshal(ack)
+			ackBytes = append(ackBytes, '\n')
+			if change == "unknown_ack" {
+				ackBytes = nil
+			}
+			if change == "duplicate_ack" {
+				ackBytes = append(ackBytes, ackBytes...)
+			}
+			requestChangesWrite(t, filepath.Join(l.runtimeDir, "control-ack.ndjson"), ackBytes)
+			completionRefreshMeta(t, l, cook, "updated_at", "later")
+			completionRefreshMeta(t, l, cook, "idle_seconds", 999)
+			if change == "bytes" {
+				requestChangesWrite(t, filepath.Join(cook.worktreePath, "candidate.txt"), []byte("drift"))
+			}
+			if change == "prior_sha" {
+				priorSHA = "bad"
+			}
+			if change == "events" {
+				requestChangesWrite(t, filepath.Join(l.runtimeDir, "loop-events.ndjson"), append(recoveryRead(t, filepath.Join(l.runtimeDir, "loop-events.ndjson")), []byte("\n")...))
+			}
+			if change == "projection" {
+				if err := l.releaseIfQuiescent(); err != nil {
+					t.Fatal(err)
+				}
+				l = New(l.projectDir, "noodle", l.config, l.deps)
+				if err := l.reconcile(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result, err := PrepareLocalTaskCompletionRecovery(l.projectDir, l.config, cook.orderID, path, priorPath, priorSHA, ack.ID)
+			if change != "projection" {
+				if err == nil {
+					t.Fatal("accepted unsupported successor")
+				}
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatal("refusal wrote packet")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			ref := result["packet"].(localTaskFileRef)
+			completionRefreshMeta(t, l, cook, "updated_at", "later again")
+			cmd := ControlCommand{Action: "recover-local-task-completion", OrderID: cook.orderID, Value: ref.Path, Target: ref.SHA256}
+			if err := l.dispatchControlCommand(cmd); err != nil {
+				t.Fatal(err)
+			}
+			if err := l.dispatchControlCommand(cmd); err != nil {
+				t.Fatal(err)
+			}
+			if string(priorBytes) != string(recoveryRead(t, priorPath)) || string(ackBytes) != string(recoveryRead(t, filepath.Join(l.runtimeDir, "control-ack.ndjson"))) {
+				t.Fatal("rewrote failed history")
 			}
 		})
 	}
