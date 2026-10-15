@@ -108,6 +108,7 @@ type noodleHost struct {
 func newHostCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{Use: "host", Short: "Manage the single persistent Noodle host"}
 	cmd.AddCommand(newHostResourcesCmd(app))
+	cmd.AddCommand(newHostRecoverCmd(app))
 	cmd.AddCommand(newHostViewsCmd())
 	task := &cobra.Command{Use: "task", Short: "Read native task dispatch capabilities"}
 	task.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
