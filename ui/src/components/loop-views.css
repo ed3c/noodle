@@ -245,3 +245,22 @@
     font-size: 30px;
   }
 }
+
+.lv-comparison {
+  border-top: 1px solid #31453a;
+  margin-top: 14px;
+  padding-top: 7px;
+}
+.lv-prompt-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.lv-prompt-pair > div {
+  min-width: 0;
+}
+@media (max-width: 720px) {
+  .lv-prompt-pair {
+    grid-template-columns: 1fr;
+  }
+}

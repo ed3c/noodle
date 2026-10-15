@@ -46,6 +46,50 @@ function Resources({ items }: { items: LoopView["resources"] }) {
   );
 }
 
+function PromptComparison({
+  stage,
+  previous,
+}: {
+  stage: LoopRun["stages"][number];
+  previous: LoopRun["stages"][number] | undefined;
+}) {
+  const { length } = [...stage.prompt];
+  if (!previous) {
+    return <p className="lv-muted">第一階段 · {length} 字元 · 無前一階段可比較。</p>;
+  }
+  const { length: previousLength } = [...previous.prompt];
+  const delta = length - previousLength;
+  const change = delta > 0 ? `+${delta}` : String(delta);
+  return (
+    <div className="lv-comparison" aria-label={`${previous.id} → ${stage.id} 文字比較`}>
+      <p className="lv-muted">
+        <strong>{previous.prompt === stage.prompt ? "完全相同" : "文字不同"}</strong>
+        {` · ${previousLength} → ${length} 字元（${change}）`}
+      </p>
+      <details>
+        <summary>前一階段 → 本階段：並列比較</summary>
+        <div className="lv-prompt-pair">
+          <div>
+            <p className="lv-muted">
+              前一階段 · {previous.kind} · {previous.id}
+            </p>
+            <pre>{previous.prompt || "（空字串）"}</pre>
+          </div>
+          <div>
+            <p className="lv-muted">
+              本階段 · {stage.kind} · {stage.id}
+            </p>
+            <pre>{stage.prompt || "（空字串）"}</pre>
+          </div>
+        </div>
+      </details>
+      <p className="lv-muted">
+        僅比較文字；不代表語義改變或 consumer 已遵循。字元數按 Unicode code point 計算。
+      </p>
+    </div>
+  );
+}
+
 function RunDetail({ run }: { run: LoopRun }) {
   return (
     <article className="lv-detail">
@@ -78,6 +122,7 @@ function RunDetail({ run }: { run: LoopRun }) {
                   <summary>提示詞</summary>
                   <pre>{stage.prompt || "尚無提示詞內容。"}</pre>
                 </details>
+                <PromptComparison stage={stage} previous={run.stages[index - 1]} />
                 <Refs label="輸入來源" refs={stage.input_refs} />
                 <Refs label="輸出來源" refs={stage.output_refs} />
               </div>
