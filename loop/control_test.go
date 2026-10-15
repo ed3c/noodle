@@ -56,14 +56,17 @@ func newControlTestLoop(t *testing.T, wt *fakeWorktree, rt *mockRuntime) *Loop {
 	return l
 }
 
-func TestControlMergeMarksOrderFailedOnMergeFailure(t *testing.T) {
+func TestControlMergeRetainsCandidateReviewOnMergeFailure(t *testing.T) {
 	l := newControlTestLoop(t, &fakeWorktree{mergeErr: errors.New("merge failed")}, newMockRuntime())
 
 	if err := l.controlMerge("42"); err != nil {
 		t.Fatalf("controlMerge: %v", err)
 	}
-	if _, ok := l.cooks.pendingReview["42"]; ok {
-		t.Fatal("pending review item should be removed when merge fails")
+	if _, ok := l.cooks.pendingReview["42"]; !ok {
+		t.Fatal("pending review custody missing after merge failure")
+	}
+	if len(l.deps.Worktree.(*fakeWorktree).cleaned) != 0 {
+		t.Fatal("failed merge deleted candidate")
 	}
 	orders, err := readOrders(l.deps.OrdersFile)
 	if err != nil {
@@ -72,11 +75,11 @@ func TestControlMergeMarksOrderFailedOnMergeFailure(t *testing.T) {
 	if len(orders.Orders) != 1 {
 		t.Fatalf("orders count = %d, want 1", len(orders.Orders))
 	}
-	if orders.Orders[0].Status != OrderStatusFailed {
-		t.Fatalf("order status = %q, want %q", orders.Orders[0].Status, OrderStatusFailed)
+	if orders.Orders[0].Status != OrderStatusActive {
+		t.Fatalf("order status = %q, want active", orders.Orders[0].Status)
 	}
-	if got := orders.Orders[0].Stages[0].Status; got != StageStatusFailed {
-		t.Fatalf("stage status = %q, want %q", got, StageStatusFailed)
+	if got := l.canonical.Orders["42"].Stages[0].Status; got != state.StageReview {
+		t.Fatalf("stage status = %q, want review", got)
 	}
 }
 

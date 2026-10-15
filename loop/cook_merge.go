@@ -165,37 +165,11 @@ func (l *Loop) handleMergeError(cook *cookHandle, err error) error {
 		return err
 	}
 	reason := "merge failed: " + err.Error()
-	schedulerHint := reason + ". Use Skill(schedule) and create a new order to fix this issue before retrying."
-	l.logger.Warn("merge failed, forwarding to scheduler", "order", cook.orderID, "reason", reason)
-	l.forwardToScheduler(cook, "merge_failed", schedulerHint, nil)
-	if err := l.ensureCanonicalOrderFromOrders(cook.orderID); err != nil {
-		return err
-	}
-	if err := l.emitEventChecked(ingest.EventStageFailed, map[string]any{
-		"order_id":      cook.orderID,
-		"stage_index":   cook.stageIndex,
-		"attempt_id":    dispatchAttemptID(cook.orderID, cook.stageIndex, cook.attempt),
-		"session_id":    sessionIDPtr(cook),
-		"worktree_name": cook.worktreeName,
-		"error":         reason,
+	l.logger.Warn("merge failed; candidate retained for review", "order", cook.orderID, "reason", reason)
+	if err := l.emitEventChecked(ingest.EventMergeFailed, map[string]any{
+		"order_id": cook.orderID, "stage_index": cook.stageIndex, "error": reason,
 	}); err != nil {
 		return err
 	}
-	if err := l.mirrorLegacyOrderFromCanonical(cook.orderID); err != nil {
-		return err
-	}
-	if err := l.syncPendingReviewProjection(); err != nil {
-		return err
-	}
-	l.recordStageFailure(cook, reason, OrderFailureClassStageTerminal, nil)
-	l.classifyOrderHard(
-		"cycle.merge_terminal",
-		OrderFailureClassStageTerminal,
-		cook.orderID,
-		cook.stageIndex,
-		reason,
-		err,
-	)
-	l.cleanupCookWorktree(cook)
-	return nil
+	return l.parkPendingReview(cook, reason)
 }
