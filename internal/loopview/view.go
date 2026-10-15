@@ -62,6 +62,7 @@ type View struct {
 	SchemaVersion int        `json:"schema_version"`
 	Runs          []Run      `json:"runs"`
 	Resources     []Resource `json:"resources,omitempty"`
+	Graph         *Graph     `json:"graph,omitempty"`
 }
 
 func Empty() View { return View{SchemaVersion: 1, Runs: []Run{}} }
@@ -79,7 +80,7 @@ func Decode(data []byte) (View, error) {
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return View{}, fmt.Errorf("loop view contains trailing data")
 	}
-	if view.SchemaVersion != 1 {
+	if view.SchemaVersion != 1 && view.SchemaVersion != 2 {
 		return View{}, fmt.Errorf("unsupported loop view schema_version %d", view.SchemaVersion)
 	}
 	if view.Runs == nil {
@@ -150,6 +151,12 @@ func Decode(data []byte) (View, error) {
 		if run.Breakpoints == nil {
 			run.Breakpoints = []Breakpoint{}
 		}
+	}
+	if err := graphShape(data); err != nil {
+		return View{}, err
+	}
+	if err := validateGraph(view); err != nil {
+		return View{}, err
 	}
 	return view, nil
 }

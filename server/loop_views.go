@@ -16,6 +16,7 @@ import (
 // LoopViewsHandler exposes display data and static assets only. It has no control handler.
 func LoopViewsHandler(dir string, ui fs.FS, observe func(context.Context, *loopview.View) error) http.Handler {
 	mux := http.NewServeMux()
+	registerLoopGraph(mux, dir)
 	mux.HandleFunc("GET /api/loops", func(w http.ResponseWriter, r *http.Request) {
 		view, err := loopview.Load(dir)
 		if err != nil {

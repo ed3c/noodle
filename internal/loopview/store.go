@@ -39,6 +39,9 @@ func Load(dir string) (View, error) {
 // Import serializes registry updates without acquiring the Host lifecycle lock.
 // A run can be refreshed, but its repository and mode cannot be reassigned.
 func Import(dir string, incoming View) (bool, int, error) {
+	if err := validateImport(incoming); err != nil {
+		return false, 0, err
+	}
 	if len(incoming.Resources) != 0 {
 		return false, 0, fmt.Errorf("top-level resources are Host observations, not import data")
 	}
@@ -73,6 +76,12 @@ func Import(dir string, incoming View) (bool, int, error) {
 		current.Runs = append(current.Runs, run)
 	}
 	sort.Slice(current.Runs, func(i, j int) bool { return current.Runs[i].ID < current.Runs[j].ID })
+	if err := mergeGraph(&current, incoming); err != nil {
+		return false, 0, err
+	}
+	if err := validateImport(current); err != nil {
+		return false, 0, err
+	}
 	data, err := json.Marshal(current)
 	if err != nil {
 		return false, 0, err
