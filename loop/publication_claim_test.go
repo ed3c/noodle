@@ -89,7 +89,10 @@ func TestInspectPublicationClaimRefusesForeignSubjectAndRootWorktree(t *testing.
 
 func publicationFixture(t *testing.T, outcome event.StageOutcome, blocking bool) (string, string, string, string, string) {
 	t.Helper()
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	remote := filepath.Join(root, "remote.git")
 	project := filepath.Join(root, "project")
 	publicationRun(t, root, "git", "init", "--bare", "-b", "main", remote)
