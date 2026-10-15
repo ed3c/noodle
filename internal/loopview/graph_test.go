@@ -232,3 +232,31 @@ func TestGraphKeepsOtherRunRuntimeIndexOnSameRepository(t *testing.T) {
 		t.Fatalf("other run index lost: %+v", files)
 	}
 }
+
+func TestMergeArtifactAvailabilityDoesNotChangeIdentity(t *testing.T) {
+	source := ArtifactSource{Path: "/original/input", SHA256: ptr("original-sha"), Bytes: ptr(int64(5))}
+	old := View{Graph: &Graph{Artifacts: []Artifact{{ID: "input", Source: &source, Status: "available"}}}}
+	staleSource := source
+	staleSource.Bytes = nil
+	incoming := View{Graph: &Graph{Artifacts: []Artifact{{ID: "input", Source: &staleSource, Status: "stale"}}}}
+	if err := mergeGraph(&old, incoming); err != nil {
+		t.Fatal(err)
+	}
+	if old.Graph.Artifacts[0].Status != "stale" {
+		t.Fatal("availability was not refreshed")
+	}
+	if err := mergeGraph(&old, View{Graph: &Graph{Artifacts: []Artifact{{ID: "input", Source: &source, Status: "available"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	wrong := source
+	wrong.Bytes = ptr(int64(6))
+	if err := mergeGraph(&old, View{Graph: &Graph{Artifacts: []Artifact{{ID: "input", Source: &wrong}}}}); err == nil {
+		t.Fatal("conflicting known size accepted")
+	}
+	old.Graph.Artifacts = []Artifact{{ID: "input", Source: &source, Status: "available"}}
+	wrong = source
+	wrong.SHA256 = ptr("different-sha")
+	if err := mergeGraph(&old, View{Graph: &Graph{Artifacts: []Artifact{{ID: "input", Source: &wrong}}}}); err == nil {
+		t.Fatal("different source identity accepted")
+	}
+}

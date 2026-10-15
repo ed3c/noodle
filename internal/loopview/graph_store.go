@@ -61,7 +61,14 @@ func mergeGraph(current *View, incoming View) error {
 		return err
 	}
 	old.Artifacts, err = mergeItems(old.Artifacts, g.Artifacts, func(v Artifact) string { return v.ID }, func(a, b Artifact) bool {
-		return reflect.DeepEqual(a.Source, b.Source) && reflect.DeepEqual(a.RepositoryID, b.RepositoryID)
+		if !reflect.DeepEqual(a.RepositoryID, b.RepositoryID) {
+			return false
+		}
+		if a.Source == nil || b.Source == nil {
+			return a.Source == nil && b.Source == nil
+		}
+		return a.Source.Path == b.Source.Path && reflect.DeepEqual(a.Source.SHA256, b.Source.SHA256) &&
+			(a.Source.Bytes == nil || b.Source.Bytes == nil || *a.Source.Bytes == *b.Source.Bytes)
 	})
 	if err != nil {
 		return err
