@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -86,6 +87,18 @@ func TestHostViewsBindingAndAutomaticNativeReadback(t *testing.T) {
 	if _, err := loopview.Decode(second.Body.Bytes()); err != nil {
 		t.Fatal(err)
 	}
+	order := snapshot.State.Orders["order"]
+	order.Stages[0].ExtraPrompt = "additional source constraint"
+	order.Stages[0].Attempts[0].Status = state.AttemptFailed
+	order.Stages[0].Attempts[0].Error = "changes requested: retain the counterexample"
+	snapshot.State.Orders["order"] = order
+	if err := reducer.WriteSnapshotAtomic(snapshotPath, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	third := read(second.Header().Get("ETag"))
+	if third.Code != 200 || third.Header().Get("ETag") == second.Header().Get("ETag") || !strings.Contains(third.Body.String(), "additional source constraint") || !strings.Contains(third.Body.String(), "changes requested: retain the counterexample") {
+		t.Fatal("canonical prompt delta/failure did not automatically refresh", third.Body.String())
+	}
 	observation.Receipts = nil
 	unknown := read("")
 	if !strings.Contains(unknown.Body.String(), "native_readback") || !strings.Contains(unknown.Body.String(), "unknown") {
@@ -95,6 +108,116 @@ func TestHostViewsBindingAndAutomaticNativeReadback(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
 			t.Fatal("offline binding changed Host lifecycle")
 		}
+	}
+}
+
+func TestHostViewsNativeFeedbackHistoryAndControlReadback(t *testing.T) {
+	root := t.TempDir()
+	runtimeDir := filepath.Join(root, ".noodle")
+	for _, session := range []string{"first", "revision"} {
+		dir := filepath.Join(runtimeDir, "sessions", session)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"prompt", "input"} {
+			if err := os.WriteFile(filepath.Join(dir, name+".txt"), []byte(session+" "+name), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	feedback := "changes requested: preserve the missing source <quote>"
+	snapshot := reducer.DurableSnapshot{State: state.State{Mode: "supervised", Orders: map[string]state.OrderNode{
+		"order": {OrderID: "order", Status: state.OrderCompleted, Stages: []state.StageNode{{
+			Status: state.StageCompleted, Prompt: "current stage", ExtraPrompt: "current additional requirement",
+			Attempts: []state.AttemptNode{
+				{SessionID: "first", Status: state.AttemptFailed, Error: feedback},
+				{SessionID: "revision", Status: state.AttemptCompleted},
+			},
+		}}},
+	}}}
+	snapshotPath := filepath.Join(runtimeDir, "state.snapshot.json")
+	if err := reducer.WriteSnapshotAtomic(snapshotPath, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	ackPath := filepath.Join(runtimeDir, "control-ack.ndjson")
+	acks := "{\"id\":\"opaque-one\",\"action\":\"request-changes\",\"status\":\"ok\",\"at\":\"2026-10-15T08:00:00Z\"}\n" +
+		"{\"id\":\"opaque-two\",\"action\":\"requeue\",\"status\":\"error\",\"message\":\"worktree custody missing\",\"at\":\"2026-10-15T08:01:00Z\"}\n" +
+		"{\"id\":\"partial\""
+	if err := os.WriteFile(ackPath, []byte(acks), 0600); err != nil {
+		t.Fatal(err)
+	}
+	next := "original owner next"
+	run := loopview.Run{ID: "run", Repository: root, Mode: "inner-only", Status: "source_observed", Next: &next}
+	binding := hostViewBinding{RunID: "run", OrderID: "order", Request: hostRequestBinding{RequestID: "request", ProjectDir: root}}
+	receipts := []hostReceipt{{RequestID: "request", ProjectDir: root, ContextState: "active"}}
+	if err := enrichNativeRun(&run, binding, receipts); err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, stage := range run.Stages {
+		kinds = append(kinds, stage.Kind)
+	}
+	wantKinds := []string{"native_stage", "native_extra_prompt", "native_prompt", "native_input", "native_attempt_feedback", "native_prompt", "native_input"}
+	if !reflect.DeepEqual(kinds, wantKinds) {
+		t.Fatalf("feedback/input order = %v", kinds)
+	}
+	if run.Stages[4].Prompt != feedback || run.Stages[4].Status != "failed" || run.Stages[4].ConsumerStatus != "UNKNOWN" || run.Stages[6].Status != "completed" {
+		t.Fatalf("history or consumer boundary lost: %+v", run.Stages)
+	}
+	if run.Status != "source_observed" || *run.Next != next || run.Stages[1].Status != "current_checkpoint" || run.Stages[1].ConsumerStatus != "UNKNOWN" {
+		t.Fatal("display inferred execution authority or ExtraPrompt consumption")
+	}
+	if len(run.Breakpoints) != 3 || run.Breakpoints[0].Message != feedback || run.Breakpoints[0].StageID != run.Stages[4].ID || run.Breakpoints[1].Status != "error" || run.Breakpoints[2].Status != "unknown" {
+		t.Fatalf("earliest failure/ACK unknown lost: %+v", run.Breakpoints)
+	}
+	if len(run.Notes) != 3 || !strings.Contains(run.Notes[1].Body, "order 綁定 UNKNOWN") || !strings.Contains(run.Notes[1].Body, `"status":"ok"`) || !strings.Contains(run.Notes[2].Body, "worktree custody missing") {
+		t.Fatalf("context ACK provenance lost: %+v", run.Notes)
+	}
+	if err := enrichNativeRun(&run, binding, receipts); err != nil {
+		t.Fatal(err)
+	}
+	if len(run.Stages) != len(wantKinds) || len(run.Notes) != 3 || len(run.Breakpoints) != 3 {
+		t.Fatal("readback duplicated native history")
+	}
+	raw, err := json.Marshal(loopview.View{SchemaVersion: 1, Runs: []loopview.Run{run}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loopview.Decode(raw); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHostViewsFailedAttemptsWithoutInputsAndPendingReview(t *testing.T) {
+	for _, session := range []string{"", "missing-session", "../invalid-session"} {
+		t.Run(session, func(t *testing.T) {
+			root := t.TempDir()
+			runtimeDir := filepath.Join(root, ".noodle")
+			if err := os.MkdirAll(runtimeDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			snapshot := reducer.DurableSnapshot{State: state.State{Orders: map[string]state.OrderNode{
+				"order": {OrderID: "order", Status: state.OrderFailed, Stages: []state.StageNode{{Status: state.StageFailed, Attempts: []state.AttemptNode{{SessionID: session, Status: state.AttemptFailed}}}}},
+			}, PendingReviews: map[string]state.PendingReviewNode{"order": {StageIndex: 0, Reason: "native review stopped: missing outcome"}}}}
+			if err := reducer.WriteSnapshotAtomic(filepath.Join(runtimeDir, "state.snapshot.json"), snapshot); err != nil {
+				t.Fatal(err)
+			}
+			run := loopview.Run{ID: "run", Repository: root, Mode: "single", Status: "source_observed"}
+			binding := hostViewBinding{OrderID: "order", Request: hostRequestBinding{RequestID: "request", ProjectDir: root}}
+			if err := enrichNativeRun(&run, binding, []hostReceipt{{RequestID: "request", ProjectDir: root, ContextState: "active"}}); err != nil {
+				t.Fatal(err)
+			}
+			if len(run.Stages) != 3 || run.Stages[1].Prompt != "" || run.Stages[1].ConsumerStatus != "UNKNOWN" || run.Stages[2].Prompt != "native review stopped: missing outcome" {
+				t.Fatalf("missing capture hid failure/review: %+v", run.Stages)
+			}
+			last := run.Breakpoints[len(run.Breakpoints)-1]
+			if last.Kind != "native_review" || last.Status != "pending" || last.StageID != run.Stages[2].ID {
+				t.Fatalf("pending review lost: %+v", last)
+			}
+			if !strings.Contains(run.Breakpoints[len(run.Breakpoints)-2].Message, "UNKNOWN") {
+				t.Fatal("missing failure cause invented")
+			}
+		})
 	}
 }
 func TestHostTaskCapabilitiesOffline(t *testing.T) {
