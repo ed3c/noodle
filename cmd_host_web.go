@@ -47,10 +47,26 @@ func (h *noodleHost) viewResources() []loopview.Resource {
 	}
 	if h.budget != nil {
 		b := h.budget.Snapshot()
+		rate := "unknown"
+		if b.SwapoutRate != nil {
+			rate = fmt.Sprintf("%g MiB/s", *b.SwapoutRate/(1<<20))
+		}
+		age := fmt.Sprintf("%.1f s", b.SampleAgeSeconds)
+		switch b.Reason {
+		case "awaiting_sample", "sample_failed", "hardware_unknown":
+			age = "unknown"
+		}
+		sampleError := "none reported"
+		if b.SampleError != nil {
+			sampleError = *b.SampleError
+		}
 		resources = append(resources,
 			loopview.Resource{Label: "Host workers", Value: fmt.Sprintf("%d active / %d effective / %d maximum", b.Active, b.Limit, b.Maximum)},
 			loopview.Resource{Label: "Memory pressure", Value: string(b.Pressure)},
 			loopview.Resource{Label: "Admission observation", Value: b.Reason},
+			loopview.Resource{Label: "System swapout rate", Value: rate},
+			loopview.Resource{Label: "Resource sample age", Value: age},
+			loopview.Resource{Label: "Resource sample error", Value: sampleError},
 		)
 	}
 	return resources

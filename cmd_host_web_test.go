@@ -3,6 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strconv"
+
+	"github.com/poteto/noodle/internal/admission"
 	"io"
 	"net"
 	"net/http"
@@ -78,5 +82,62 @@ func TestHostReadonlyWebLifecycle(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatal("Host web accepted lifecycle control")
+	}
+}
+
+func TestHostViewResourceSampleObservations(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		setup                  func(*admission.Budget, time.Time)
+		rate, age, sampleError string
+	}{
+		{name: "awaiting", rate: "unknown", age: "unknown", sampleError: "none reported"},
+		{name: "baseline", setup: func(b *admission.Budget, now time.Time) {
+			b.Observe(admission.Sample{At: now, Pressure: admission.Normal, Swapouts: 1 << 20}, nil)
+		}, rate: "unknown", sampleError: "none reported"},
+		{name: "observed zero", setup: func(b *admission.Budget, now time.Time) {
+			b.Observe(admission.Sample{At: now.Add(-time.Second), Pressure: admission.Normal, Swapouts: 1 << 20}, nil)
+			b.Observe(admission.Sample{At: now, Pressure: admission.Normal, Swapouts: 1 << 20}, nil)
+		}, rate: "0 MiB/s", sampleError: "none reported"},
+		{name: "observed rate", setup: func(b *admission.Budget, now time.Time) {
+			b.Observe(admission.Sample{At: now.Add(-time.Second), Pressure: admission.Normal}, nil)
+			b.Observe(admission.Sample{At: now, Pressure: admission.Normal, Swapouts: 2621440}, nil)
+		}, rate: "2.5 MiB/s", sampleError: "none reported"},
+		{name: "sample failure", setup: func(b *admission.Budget, now time.Time) {
+			b.Observe(admission.Sample{At: now, Pressure: admission.Normal}, nil)
+			b.Observe(admission.Sample{}, errors.New("vm_stat timed out"))
+		}, rate: "unknown", age: "unknown", sampleError: "vm_stat timed out"},
+		{name: "stale", setup: func(b *admission.Budget, now time.Time) {
+			b.Observe(admission.Sample{At: now.Add(-2 * time.Minute), Pressure: admission.Normal}, nil)
+		}, rate: "unknown", sampleError: "none reported"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := admission.NewBudget(4)
+			if tc.setup != nil {
+				tc.setup(b, time.Now())
+			}
+			h := &noodleHost{budget: b}
+			got := map[string]string{}
+			for _, r := range h.viewResources() {
+				got[r.Label] = r.Value
+			}
+			if got["System swapout rate"] != tc.rate || got["Resource sample error"] != tc.sampleError {
+				t.Fatalf("resource observations: %+v", got)
+			}
+			age := got["Resource sample age"]
+			if tc.age != "" {
+				if age != tc.age {
+					t.Fatalf("age = %q, want %q", age, tc.age)
+				}
+			} else {
+				if !strings.HasSuffix(age, " s") {
+					t.Fatalf("age has no seconds unit: %q", age)
+				}
+				value, err := strconv.ParseFloat(strings.TrimSuffix(age, " s"), 64)
+				if err != nil || value < 0 || (tc.name == "stale" && value < 120) {
+					t.Fatalf("age observation: %q (%v)", age, err)
+				}
+			}
+		})
 	}
 }
