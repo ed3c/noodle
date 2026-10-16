@@ -53,6 +53,25 @@ function setup(customize?: (view: ReturnType<typeof graphFixture>) => void) {
   return { view, fetch, wrap, ...render(wrap()) };
 }
 describe("source-backed DAG interactions", () => {
+  it("keeps isometric inspection read-only and opens the original comparison on demand", async () => {
+    const { fetch } = setup();
+    const console = within(screen.getByLabelText("立體工程全景"));
+    expect(console.getAllByRole("button", { name: "物件 · Original Manager" })).toHaveLength(1);
+    await userEvent.selectOptions(console.getByLabelText("立體視圖執行範圍"), "run1");
+    await userEvent.click(console.getByRole("button", { name: "拆解資料載體" }));
+    await userEvent.click(console.getByRole("button", { name: "右轉" }));
+    expect(fetch).not.toHaveBeenCalled();
+    await userEvent.click(console.getByRole("button", { name: "資料流 · Handoff known · 1 段" }));
+    expect(console.getByLabelText("立體選取讀回")).toHaveTextContent("歷史記錄／目前效力未證實");
+    expect(fetch).not.toHaveBeenCalled();
+    await userEvent.click(console.getByRole("button", { name: "比較原始輸入與輸出" }));
+    expect(
+      await within(screen.getByLabelText("選取內容比較")).findByText('{"value":2}'),
+    ).toBeVisible();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await userEvent.click(console.getByRole("button", { name: "還原全景" }));
+    expect(console.getByLabelText("立體視圖執行範圍")).toHaveValue("");
+  });
   it("expands native occurrences and opens typed handoffs in the existing comparison", async () => {
     setup();
     await userEvent.click(screen.getByText("深入 Session、提示詞型態與全部 P-class 節點"));
@@ -188,7 +207,9 @@ describe("source-backed DAG interactions", () => {
   });
   it("shows unique objects, repeated occurrences, typed handoffs and distinct failure/unknown without preloading", async () => {
     const { fetch } = setup();
-    expect(screen.getAllByText("Original Manager")).toHaveLength(1);
+    expect(
+      within(screen.getByLabelText("內外迴圈立體資料流")).getAllByText("Original Manager"),
+    ).toHaveLength(1);
     expect(
       screen.getByRole("button", { name: "紀錄 Invocation first · identity observed" }),
     ).toBeInTheDocument();

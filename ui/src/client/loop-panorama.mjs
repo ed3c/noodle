@@ -1,4 +1,5 @@
 import { layoutGraph } from "./loop-graph-layout.mjs";
+import { mountIsometric } from "./loop-isometric.mjs";
 
 /** Read-only quotient of the original occurrence DAG. Never creates runtime edges. */
 export function projectPanorama(graph, runIds = null) {
@@ -240,11 +241,12 @@ export function mountPanorama(
 ) {
   const model = projectPanorama(graph, runIds ?? runs.map((r) => r.id));
   const scopeKey = JSON.stringify([goal, runIds]);
-  let view = views.get(root);
-  if (!view || view.scope !== scopeKey) {
-    view = { scope: scopeKey, run: null, selection: null, sources: false };
-    views.set(root, view);
-  }
+  const cachedView = views.get(root);
+  const view =
+    cachedView?.scope === scopeKey
+      ? cachedView
+      : { scope: scopeKey, run: null, selection: null, sources: false };
+  views.set(root, view);
   const onSelect = (value) => {
     setSelection(value);
     notifySelection(value);
@@ -292,6 +294,16 @@ export function mountPanorama(
     error,
   );
   root.append(scope);
+  const consoleRoot = el("section", null, { "aria-label": "立體工程全景" });
+  root.append(consoleRoot);
+  const consoleView = mountIsometric(consoleRoot, {
+    graph,
+    scope: model,
+    runs,
+    onSelect,
+    onFocus,
+    view,
+  });
   if (model.context_run_ids.length > 0) {
     root.append(
       el(
@@ -783,6 +795,7 @@ export function mountPanorama(
     updatePosition();
   }
   function setSelection(value) {
+    consoleView.setSelection(value);
     if (!value) {
       view.selection = null;
       updatePosition();

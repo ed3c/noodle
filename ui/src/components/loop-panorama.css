@@ -307,3 +307,350 @@
   overflow-wrap: anywhere;
   color: #aac0ce;
 }
+
+.li-console {
+  --li-paper: #10171d;
+  --li-face: #18252d;
+  --li-top: #283c46;
+  --li-ink: #dceaf0;
+  --li-line: #67808c;
+  --li-accent: #74e0cc;
+  margin: 1.2rem 0;
+  border: 1px solid #47616d;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--li-paper);
+  color: var(--li-ink);
+}
+.li-console header {
+  padding: 1rem 1.2rem 0.4rem;
+}
+.li-console h3 {
+  margin: 0.2rem 0;
+  font-size: 1.3rem;
+}
+.li-kicker {
+  font:
+    11px ui-monospace,
+    monospace;
+  letter-spacing: 0.16em;
+  color: var(--li-accent);
+}
+.li-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #31434d;
+  gap: 0.2rem;
+}
+.li-toolbar select {
+  max-width: 100%;
+  border: 1px solid #47616d;
+  background: #18252d;
+  color: #dceaf0;
+  padding: 0.55rem;
+  border-radius: 6px;
+}
+.li-toolbar label {
+  font-size: 0.75rem;
+}
+.li-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 270px;
+}
+.li-viewport {
+  overflow: auto;
+  min-width: 0;
+  max-height: 780px;
+  background: radial-gradient(ellipse at center, #24313b 0%, #10171d 70%);
+}
+.li-viewport > svg {
+  display: block;
+  min-width: 650px;
+  height: auto;
+}
+.li-inspector {
+  border-left: 1px solid #31434d;
+  padding: 1rem;
+  max-height: 700px;
+  overflow: auto;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+.li-inspector h4 {
+  margin: 0.5rem 0;
+  font-size: 1rem;
+}
+.li-inspector code {
+  font-size: 0.6rem;
+  color: #9cb3be;
+}
+.li-inspector h5 {
+  margin: 0.7rem 0 0.3rem;
+}
+.li-inspector details {
+  margin-top: 1rem;
+  border-top: 1px solid #31434d;
+  padding-top: 0.7rem;
+}
+.li-inspector button {
+  display: block;
+  font-size: 0.72rem;
+  width: 100%;
+  margin: 0.3rem 0;
+}
+.li-type {
+  padding: 0.35rem 0.5rem;
+  background: #1c3039;
+  border-left: 2px solid #73b6aa;
+}
+.li-readout,
+.li-legend {
+  padding: 0.5rem 1rem;
+  margin: 0;
+  font:
+    11px/1.7 ui-monospace,
+    monospace;
+  border-top: 1px solid #31434d;
+}
+.li-legend {
+  color: #a6bac5;
+}
+.li-fill {
+  fill: var(--li-face);
+}
+.li-top {
+  fill: var(--li-top);
+}
+.li-shade-0 {
+  fill: #101c24;
+}
+.li-shade-1 {
+  fill: #172830;
+}
+.li-shade-2 {
+  fill: #1c303b;
+}
+.li-shade-3 {
+  fill: #233943;
+}
+.li-outline,
+.li-bevel,
+.li-engraving {
+  fill: none;
+  stroke: var(--li-line);
+  stroke-width: 0.7;
+}
+.li-bevel {
+  stroke: #90aeb9;
+  stroke-width: 0.5;
+}
+.li-engraving {
+  stroke: #45616d;
+}
+.li-base .li-top {
+  fill: #14232c;
+}
+.li-foot .li-top {
+  fill: #34505d;
+}
+.li-rail .li-top {
+  fill: #4d6c79;
+}
+.li-drawer .li-top {
+  fill: #2d4551;
+}
+.li-cap .li-top {
+  fill: #354b57;
+}
+.li-port .li-top {
+  fill: #71928d;
+}
+.li-label {
+  fill: var(--li-ink);
+  font:
+    12px ui-monospace,
+    monospace;
+  paint-order: stroke;
+  stroke: var(--li-paper);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.li-small {
+  font-size: 9px;
+  fill: #b5ccd6;
+}
+.li-target {
+  cursor: pointer;
+  outline: none;
+}
+.li-target:focus .li-outline,
+.li-target:hover .li-outline,
+.li-target.is-selected .li-outline {
+  stroke: var(--li-accent);
+  stroke-width: 1.8;
+}
+.li-target.is-selected .li-top {
+  fill: #235f5b;
+}
+.li-route-line,
+.li-arrow {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  vector-effect: non-scaling-stroke;
+}
+.li-route-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16;
+}
+.li-route {
+  color: #879ba8;
+}
+.li-route.li-current {
+  color: #73c6b6;
+}
+.li-route.li-unknown .li-route-line {
+  stroke-dasharray: 5 6;
+  opacity: 0.55;
+}
+.li-route.li-failed {
+  color: #ff9393;
+}
+.li-route:hover,
+.li-route:focus,
+.li-route.is-selected {
+  color: #e9c889;
+}
+.li-route:hover .li-route-line,
+.li-route:focus .li-route-line,
+.li-route.is-selected .li-route-line {
+  stroke-width: 3;
+  opacity: 1;
+}
+.li-terminal {
+  fill: currentColor;
+}
+.li-route-count {
+  fill: currentColor;
+  font:
+    11px ui-monospace,
+    monospace;
+  paint-order: stroke;
+  stroke: #10171d;
+  stroke-width: 4px;
+}
+@media (max-width: 1000px) {
+  .li-body {
+    grid-template-columns: 1fr;
+  }
+  .li-inspector {
+    max-height: 320px;
+    border-left: 0;
+    border-top: 1px solid #31434d;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .li-console * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+.lp-panel > header {
+  display: block;
+  position: static;
+  background: transparent;
+  border: 0;
+  color: inherit;
+}
+.lp-panel .li-console > header {
+  display: block;
+  position: static;
+  background: var(--li-paper);
+  color: var(--li-ink);
+  border: 0;
+}
+.lp-panel .li-console button,
+#loop-graph-app .li-console button,
+#loop-graph-app .li-console select {
+  background: #1c303b;
+  color: #e3edf4;
+  border: 1px solid #55717e;
+  box-shadow: none;
+}
+.li-target.is-linked .li-outline {
+  stroke: var(--li-accent);
+  stroke-width: 3;
+}
+.li-breakpoint {
+  fill: #ff9393;
+  font:
+    bold 24px ui-monospace,
+    monospace;
+  paint-order: stroke;
+  stroke: #10171d;
+  stroke-width: 3;
+}
+.li-console.li-expanded {
+  position: fixed;
+  inset: 12px;
+  z-index: 9999;
+  margin: 0;
+  overflow: auto;
+  box-shadow: 0 0 0 30px #10171ddd;
+}
+.li-expanded .li-viewport {
+  height: calc(100vh - 230px);
+}
+.li-expanded .li-viewport > svg {
+  height: 100%;
+  min-width: 800px;
+}
+.li-expanded .li-inspector {
+  max-height: calc(100vh - 230px);
+}
+.li-label {
+  font-size: 16px;
+}
+.li-small {
+  font-size: 11px;
+}
+.li-console button:focus-visible,
+.li-console select:focus-visible {
+  outline: 2px solid var(--li-accent);
+  outline-offset: 2px;
+}
+.li-target.li-dim {
+  opacity: 0.24;
+}
+.li-target.li-endpoint .li-outline {
+  stroke: #e9c889;
+  stroke-width: 2;
+}
+.li-route-casing {
+  fill: none;
+  stroke: #10171d;
+  stroke-width: 5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+.li-route.li-unknown .li-route-casing {
+  stroke-dasharray: 5 6;
+}
+@media (max-width: 700px) {
+  .li-viewport > svg,
+  .li-expanded .li-viewport > svg {
+    min-width: 0;
+    height: auto;
+  }
+  .li-expanded .li-viewport {
+    height: auto;
+    max-height: 450px;
+  }
+  .li-expanded .li-inspector {
+    max-height: 320px;
+  }
+}
