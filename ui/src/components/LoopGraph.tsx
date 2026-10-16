@@ -12,6 +12,9 @@ import type { GraphSelection } from "./LoopGraphCanvas";
 import { LoopGraphDetail } from "./LoopGraphDetail";
 import { findingSymbol, knownFailureFrontier } from "~/client/loop-graph-presentation";
 import "./loop-graph.css";
+import { LoopPanorama } from "./LoopPanorama";
+import { projectPanorama } from "~/client/loop-panorama.mjs";
+import type { WorkspaceScope, PanoramaFocus } from "~/client/loop-panorama.mjs";
 
 function selectionHighlight(graph: LoopGraph, selection: GraphSelection | null): GraphHighlight {
   if (!selection) {
@@ -237,10 +240,12 @@ function FullProjectionTab({
   kind,
   view,
   repository,
+  runIds,
 }: {
   kind: "timeline" | "cards" | "notes";
   view: GraphView;
   repository: string;
+  runIds: string[] | null;
 }) {
   const client = useQueryClient();
   const query = useQuery({
@@ -263,11 +268,21 @@ function FullProjectionTab({
       )}
       {query.data &&
         (kind === "timeline" ? (
-          <LoopViewsContent view={query.data.view} />
+          <LoopViewsContent
+            view={{
+              ...query.data.view,
+              runs: query.data.view.runs.filter((r) => !runIds || runIds.includes(r.id)),
+            }}
+          />
         ) : (
           <Knowledge
             key={kind}
-            view={{ ...view, ...query.data.view, graph: view.graph }}
+            view={{
+              ...view,
+              ...query.data.view,
+              graph: view.graph,
+              runs: query.data.view.runs.filter((r) => !runIds || runIds.includes(r.id)),
+            }}
             kind={kind}
             repository={repository}
           />
@@ -277,6 +292,8 @@ function FullProjectionTab({
 }
 
 export function LoopGraphContent({ view }: { view: GraphView }) {
+  const [workspace, setWorkspace] = useState<WorkspaceScope>({ goal: "", runIds: null });
+  const [focus, setFocus] = useState<PanoramaFocus | null>(null);
   const [pinned, setPinned] = useState<GraphView | null>(null),
     [selection, setSelection] = useState<GraphSelection | null>(null);
   const [tab, setTab] = useState("graph"),
@@ -285,10 +302,14 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
   const [attempt, setAttempt] = useState(""),
     [version, setVersion] = useState(""),
     [showUnknown, setShowUnknown] = useState(false);
-  const [showObjects, setShowObjects] = useState(true),
+  const [showObjects, setShowObjects] = useState(false),
     [hover, setHover] = useState<GraphHighlight>(noHighlight);
   const current = pinned ?? view,
     { graph } = current;
+  const panorama = useMemo(
+    () => projectPanorama(graph, workspace.runIds),
+    [graph, workspace.runIds],
+  );
   const newer = pinned !== null && JSON.stringify(pinned) !== JSON.stringify(view);
   const choose = (value: GraphSelection) => {
     setPinned(current);
@@ -299,8 +320,14 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
     hover.nodes.length > 0 || hover.artifacts.length > 0 ? hover : selectedHighlight;
   const nodes = useMemo(
     () =>
-      graph.nodes.filter(
+      panorama.nodes.filter(
         (n) =>
+          (!focus ||
+            focus.node_ids.includes(n.id) ||
+            panorama.edges.some(
+              (e) =>
+                focus.edge_ids.includes(e.id) && (e.from_node_id === n.id || e.to_node_id === n.id),
+            )) &&
           (!run || n.run_id === run) &&
           (!repository || n.repository_id === repository) &&
           (!attempt || n.identity.attempt_id === attempt) &&
@@ -309,24 +336,76 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
               (id) => graph.artifacts.find((a) => a.id === id)?.source?.sha256 === version,
             )),
       ),
-    [graph, run, repository, attempt, version],
+    [graph, panorama, focus, run, repository, attempt, version],
   );
   const nodeIDs = useMemo(() => new Set(nodes.map((n) => n.id)), [nodes]);
   const edges = useMemo(
     () =>
-      graph.edges.filter(
+      panorama.edges.filter(
         (e) =>
           nodeIDs.has(e.from_node_id) &&
           nodeIDs.has(e.to_node_id) &&
           (showUnknown ||
             (e.kind === "handoff" && (e.status === "observed" || e.status === "failed"))),
       ),
-    [graph, nodeIDs, showUnknown],
+    [panorama, nodeIDs, showUnknown],
   );
   const frontier = useMemo(() => knownFailureFrontier(graph), [graph]);
-  const findings = graph.findings.filter((f) => !run || f.run_id === run);
+  const findings = graph.findings.filter(
+    (f) => (!workspace.runIds || workspace.runIds.includes(f.run_id)) && (!run || f.run_id === run),
+  );
   return (
     <>
+      <LoopPanorama
+        graph={graph}
+        runs={current.runs}
+        highlightedObjects={graph.objects
+          .filter(
+            (o) =>
+              o.source_artifact_ids.some((id) => highlight.artifacts.includes(id)) ||
+              graph.nodes.some((n) => n.object_id === o.id && highlight.nodes.includes(n.id)),
+          )
+          .map((o) => o.id)}
+        {...workspace}
+        onScope={(scope) => {
+          setWorkspace(scope);
+          setFocus(null);
+          setRun("");
+          setRepository("");
+          setAttempt("");
+          setVersion("");
+          setSelection(null);
+          setPinned(null);
+          setHover(noHighlight);
+        }}
+        onSelect={choose}
+        onFocus={(value) => {
+          setFocus(value);
+          setRun("");
+          setRepository("");
+          setAttempt("");
+          setVersion("");
+          setTab("graph");
+          setShowUnknown(true);
+          setHover({ nodes: value.node_ids, artifacts: [] });
+          requestAnimationFrame(() =>
+            document
+              .querySelector('[aria-label="執行 occurrences 因果圖"]')
+              ?.scrollIntoView({ block: "start" }),
+          );
+        }}
+      />
+      {focus && (
+        <button
+          type="button"
+          onClick={() => {
+            setFocus(null);
+            setHover(noHighlight);
+          }}
+        >
+          返回 Workspace 全部執行
+        </button>
+      )}
       <nav className="lg-tabs" aria-label="Loop 顯示方式">
         {[
           ["graph", "關係圖"],
@@ -355,6 +434,7 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
               setSelection(null);
               setPinned(null);
               setHover(noHighlight);
+              setFocus(null);
             }}
           >
             採用新版本
@@ -367,11 +447,13 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
             Run
             <select value={run} onChange={(e) => setRun(e.target.value)}>
               <option value="">全部 Runs</option>
-              {current.runs.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.repository} · {r.status} · {r.id}
-                </option>
-              ))}
+              {current.runs
+                .filter((r) => !workspace.runIds || workspace.runIds.includes(r.id))
+                .map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.repository} · {r.status} · {r.id}
+                  </option>
+                ))}
             </select>
           </label>
           <label>
@@ -388,7 +470,12 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
         </div>
       )}
       {(tab === "timeline" || tab === "cards" || tab === "notes") && (
-        <FullProjectionTab kind={tab} view={current} repository={repository} />
+        <FullProjectionTab
+          kind={tab}
+          view={current}
+          repository={repository}
+          runIds={workspace.runIds}
+        />
       )}
       {tab === "requirements" && (
         <section aria-label="需求與驗收讀回">
@@ -412,7 +499,11 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
         <section aria-label="量測與分母">
           <p>原 Manager 值與直接量測分開；圖節點數不代表決策次數或成功率。</p>
           {graph.metrics
-            .filter((m) => !run || m.run_id === run)
+            .filter(
+              (m) =>
+                (!workspace.runIds || workspace.runIds.includes(m.run_id)) &&
+                (!run || m.run_id === run),
+            )
             .map((m) => (
               <article key={m.id} className="lv-card">
                 <h3>{m.name}</h3>
@@ -466,6 +557,10 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
       {tab === "graph" && (
         <div className="lg-workspace">
           <LoopGraphSourceIndex
+            key={focus?.node_ids[0] ?? focus?.edge_ids[0] ?? "all"}
+            initialRepository={
+              graph.nodes.find((n) => focus?.node_ids.includes(n.id))?.repository_id
+            }
             graph={graph}
             highlight={highlight}
             onHighlight={setHover}

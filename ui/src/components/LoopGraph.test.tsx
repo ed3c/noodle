@@ -52,6 +52,76 @@ function setup() {
   return { view, fetch, wrap, ...render(wrap()) };
 }
 describe("source-backed DAG interactions", () => {
+  it("shows new occurrences after adopting a newer snapshot from an object focus", async () => {
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const { view, wrap, rerender } = setup();
+    await userEvent.click(screen.getByRole("button", { name: "Original Manager" }));
+    const updated = structuredClone(view);
+    updated.graph.nodes.push({
+      ...required(updated.graph.nodes[0]),
+      id: "fresh",
+      label: "Fresh attempt",
+    });
+    rerender(wrap(updated));
+    expect(screen.queryByRole("button", { name: /紀錄 Fresh attempt/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "採用新版本" }));
+    expect(screen.getByRole("button", { name: /紀錄 Fresh attempt/ })).toBeInTheDocument();
+  });
+  it("retains selected runs and their refusal when no invocation DAG exists", () => {
+    const { view, wrap, rerender } = setup();
+    const empty = structuredClone(view);
+    empty.graph.nodes = [];
+    empty.graph.edges = [];
+    rerender(wrap(empty));
+    const missing = within(screen.getByLabelText("尚無 DAG 的選定 Runs"));
+    expect(missing.getByRole("button", { name: /Original command refused/ })).toBeVisible();
+    expect(missing.getAllByText(/行為 Goal 驗收：UNKNOWN/)).toHaveLength(2);
+  });
+  it("opens original comparisons from the panorama and keeps relation controls after focus", async () => {
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    setup();
+    const panorama = within(screen.getByLabelText("Workspace 全景圖"));
+    await userEvent.click(panorama.getByText("Original Manager → Original Manager · 3 次交接"));
+    await userEvent.click(
+      panorama.getByRole("button", { name: "Handoff known · observed/unknown" }),
+    );
+    expect(
+      await within(screen.getByLabelText("選取內容比較")).findByText('{"value":2}'),
+    ).toBeVisible();
+    await userEvent.click(panorama.getByRole("button", { name: "展開這組關係 DAG" }));
+    expect(
+      panorama.getByRole("button", { name: "Handoff known · observed/unknown" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: /紀錄 Invocation other/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "返回 Workspace 全部執行" }));
+    expect(screen.getByRole("button", { name: /紀錄 Invocation other/ })).toBeInTheDocument();
+  });
+  it("scopes cards, notes and metrics to the selected goal without treating completion as closure", async () => {
+    setup();
+    const panorama = within(screen.getByLabelText("Workspace 全景圖"));
+    await userEvent.click(panorama.getByText("工作範圍 · 全部 Runs"));
+    await userEvent.type(panorama.getByLabelText("Workspace 行為目標"), "Goal two");
+    await userEvent.click(panorama.getByRole("checkbox", { name: /org\/one/ }));
+    await userEvent.click(panorama.getByRole("button", { name: "套用工作範圍" }));
+    expect(panorama.getByText(/行為 Goal 驗收：UNKNOWN/)).toBeInTheDocument();
+    expect(
+      panorama.queryByRole("button", { name: /Original command refused/ }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "全部卡片" }));
+    expect(await screen.findByText("Card org/two")).toBeVisible();
+    expect(screen.queryByText("Card org/one")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "全部筆記" }));
+    expect(await screen.findByText("Note org/two")).toBeVisible();
+    expect(screen.queryByText("Note org/one")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "量測" }));
+    expect(screen.queryByText("分子 2 / 分母 unknown")).not.toBeInTheDocument();
+  });
   it("shows unique objects, repeated occurrences, typed handoffs and distinct failure/unknown without preloading", async () => {
     const { fetch } = setup();
     expect(screen.getAllByText("Original Manager")).toHaveLength(1);
@@ -99,6 +169,7 @@ describe("source-backed DAG interactions", () => {
     const file = source.getByRole("button", { name: "檔案 src/prompt.json" });
     await userEvent.hover(file);
     expect(screen.getByRole("button", { name: /紀錄 Invocation first/ })).toHaveClass("is-linked");
+    expect(screen.getByRole("button", { name: "Original Manager" })).toHaveClass("is-linked");
     await userEvent.unhover(file);
     await userEvent.hover(screen.getByRole("button", { name: /紀錄 Invocation first/ }));
     expect(file).toHaveClass("is-linked");
