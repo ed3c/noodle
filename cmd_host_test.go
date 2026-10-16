@@ -413,7 +413,7 @@ func TestHostCapabilitiesPreservesProtocolContract(t *testing.T) {
 	if err := json.Unmarshal([]byte(output.String()), &value); err != nil {
 		t.Fatal(err)
 	}
-	if len(value) != 2 || value["schema"] != float64(1) || value["protocol"] != "noodle-host-v1" {
+	if len(value) != 3 || value["schema"] != float64(1) || value["protocol"] != "noodle-host-v1" || value["resident_request_binding"] != float64(1) {
 		t.Fatalf("host protocol changed: %v", value)
 	}
 }
