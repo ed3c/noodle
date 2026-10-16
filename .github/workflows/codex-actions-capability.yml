@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  worktree-runtime:
+  build-candidate:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -32,6 +32,68 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: runtime-candidate-${{ github.event.pull_request.head.sha }}
+          path: bin/noodle
+          if-no-files-found: error
+          retention-days: 1
+
+  worktree-runtime:
+    needs: build-candidate
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: runtime-candidate-${{ github.event.pull_request.head.sha }}
+          path: candidate
+      - name: Prepare candidate isolation
+        run: |
+          docker build --tag noodle-runtime-sandbox - <<'DOCKERFILE'
+          FROM ubuntu:24.04
+          RUN apt-get update && apt-get install -y --no-install-recommends git python3 ca-certificates && rm -rf /var/lib/apt/lists/*
+          DOCKERFILE
+          chmod 0555 candidate/noodle
+      # This runner never executes the candidate outside its container.
+      # The token is scoped to Soodles
+      # Contents: read and is absent from all candidate/probe processes.
+      - name: Fetch the pinned private oracle
+        env:
+          SOODLES_ORACLE_READ_TOKEN: ${{ secrets.SOODLES_ORACLE_READ_TOKEN }}
+        run: |
+          python3 -I -B - <<'PYTHON'
+          import hashlib
+          import os
+          from pathlib import Path
+          import urllib.request
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *args, **kwargs):
+                  raise RuntimeError("oracle endpoint redirected")
+
+          token = os.environ.pop("SOODLES_ORACLE_READ_TOKEN", "")
+          if not token:
+              raise SystemExit("SOODLES_ORACLE_READ_TOKEN is not configured")
+          url = "https://api.github.com/repos/ed3c/soodles/contents/soodles.py?ref=0256f2923e978b989e25df07c74db4370d343312"
+          request = urllib.request.Request(url, headers={
+              "Authorization": "Bearer " + token,
+              "Accept": "application/vnd.github.raw+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          })
+          try:
+              with urllib.request.build_opener(NoRedirect).open(request, timeout=30) as response:
+                  source = response.read()
+          except Exception as error:
+              raise SystemExit("private oracle download failed: " + type(error).__name__) from None
+          if hashlib.sha256(source).hexdigest() != "d65b8ba15f2cdbfdd43c4fc0bf267c78ccb2b38208171623b1291704b144c6d9":
+              raise SystemExit("fixed external oracle SHA-256 mismatch")
+          path = Path(os.environ["RUNNER_TEMP"]) / "fixed-soodles-oracle.py"
+          with path.open("xb") as output:
+              path.chmod(0o600)
+              output.write(source)
+          PYTHON
       # Fixed external control; no API-key admission rule or model request.
       # This non-authorizing runtime probe is not the landing verifier.
       - name: Exercise Noodle worktree ownership without model credentials
@@ -40,15 +102,14 @@ jobs:
           WORKFLOW_SHA: ${{ github.workflow_sha }}
           TARGET_REPOSITORY: ${{ github.repository }}
         run: |
-          python3 -B - <<'PYTHON'
+          python3 -I -B - <<'PYTHON'
           import hashlib
           import json
           import os
           from pathlib import Path
           import runpy
           import subprocess
-          import urllib.request
-
+          import tempfile
           oracle_commit = "0256f2923e978b989e25df07c74db4370d343312"
           oracle_digest = "d65b8ba15f2cdbfdd43c4fc0bf267c78ccb2b38208171623b1291704b144c6d9"
           receipt = {
@@ -69,29 +130,62 @@ jobs:
                          "path": "soodles.py", "sha256": oracle_digest},
           }
           try:
-              head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-              if head != receipt["candidate_head"]:
-                  raise RuntimeError(f"candidate_head mismatch: {head}")
-              receipt["candidate_tree"] = subprocess.check_output(
-                  ["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
-              url = f"https://raw.githubusercontent.com/ed3c/soodles/{oracle_commit}/soodles.py"
-              with urllib.request.urlopen(url, timeout=30) as response:
-                  source = response.read()
-              if hashlib.sha256(source).hexdigest() != oracle_digest:
-                  raise RuntimeError("fixed external oracle SHA-256 mismatch")
               oracle_path = Path(os.environ["RUNNER_TEMP"]) / "fixed-soodles-oracle.py"
-              oracle_path.write_bytes(source)
+              if hashlib.sha256(oracle_path.read_bytes()).hexdigest() != oracle_digest:
+                  raise RuntimeError("fixed external oracle SHA-256 mismatch")
               oracle = runpy.run_path(str(oracle_path))
-              binary = Path("bin/noodle").resolve()
+              binary = Path("candidate/noodle").resolve()
               receipt["binary_sha256"] = oracle["digest"](binary)
-              receipt["binary_version"] = oracle["checked"]([binary, "--version"], Path.cwd())
+              image = subprocess.check_output(["docker", "image", "inspect", "--format", "{{.Id}}", "noodle-runtime-sandbox"], text=True).strip()
+              receipt["sandbox_image"] = image
+              sandbox = Path(os.environ["RUNNER_TEMP"]) / "candidate-fixtures"
+              sandbox.mkdir(mode=0o700)
+              # Only fixtures and the candidate binary enter the container.
+              # Oracle source and runner credentials remain outside its mounts.
+              original_run = oracle["run"]
+
+              def container_run(command, cwd):
+                  cwd = Path(cwd).resolve()
+                  if not cwd.is_relative_to(sandbox):
+                      raise RuntimeError("candidate cwd is outside fixture scope")
+                  invocation = ["docker", "run", "--rm", "--network=none", "--cap-drop=ALL",
+                                "--security-opt=no-new-privileges", "--read-only", "--pids-limit=128",
+                                "--memory=512m", "--cpus=2", "--user", str(os.getuid()) + ":" + str(os.getgid()),
+                                "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m", "--env", "HOME=/tmp",
+                                "--mount", "type=bind,source=" + str(sandbox) + ",target=" + str(sandbox),
+                                "--mount", "type=bind,source=" + str(binary) + ",target=/opt/noodle,readonly",
+                                "--workdir", str(cwd), image, *command]
+                  return original_run(invocation, sandbox)
+
+              def isolated_run(argv, cwd):
+                  command = [str(value) for value in argv]
+                  if command[0] == str(binary):
+                      command[0] = "/opt/noodle"
+                  elif command[0] != "git":
+                      raise RuntimeError("unregistered fixture command")
+                  return container_run(command, cwd)
+
+              boundary = container_run(["python3", "-c",
+                  "import pathlib,sys; assert not pathlib.Path(sys.argv[1]).exists(); assert pathlib.Path('/opt/noodle').is_file()",
+                  str(oracle_path)], sandbox)
+              if boundary.returncode:
+                  raise RuntimeError("private oracle isolation failed")
+              receipt["private_source_isolation"] = "PASS"
+              # Git also runs inside isolation: candidate-controlled Git config
+              # or hooks must never execute on the oracle's runner.
+              oracle["worktree_probe"].__globals__["run"] = isolated_run
+              tempfile.tempdir = str(sandbox)
+              receipt["execution_boundary"] = "all candidate and fixture commands in restricted container"
+              receipt["binary_version"] = oracle["checked"]([binary, "--version"], sandbox)
               receipt["physical"] = oracle["worktree_probe"](binary)
               if oracle["digest"](binary) != receipt["binary_sha256"]:
                   raise RuntimeError("candidate binary changed during probe")
               receipt["runtime"] = "PASS"
           except Exception as error:
-              receipt["error"] = f"{type(error).__name__}: {error}"
-              raise
+              # Private source, traceback lines and candidate output stay out of
+              # public logs/artifacts. Keep only the typed failure.
+              receipt["error"] = type(error).__name__
+              raise SystemExit("runtime probe failed: " + type(error).__name__) from None
           finally:
               path = Path(os.environ["RUNNER_TEMP"]) / "noodle-actions-runtime.json"
               path.write_text(json.dumps(receipt, indent=2) + "\n")
@@ -106,3 +200,12 @@ jobs:
           path: ${{ runner.temp }}/noodle-actions-runtime.json
           if-no-files-found: error
           retention-days: 30
+
+      - name: Remove the private oracle
+        if: always()
+        run: |
+          python3 -I -B - <<'PYTHON'
+          import os
+          from pathlib import Path
+          (Path(os.environ["RUNNER_TEMP"]) / "fixed-soodles-oracle.py").unlink(missing_ok=True)
+          PYTHON
