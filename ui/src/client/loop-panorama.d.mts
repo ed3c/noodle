@@ -3,7 +3,12 @@ export interface WorkspaceScope {
   goal: string;
   runIds: string[] | null;
 }
+export interface PanoramaSelection {
+  kind: "object" | "edge" | "node" | "finding" | "artifact";
+  id: string;
+}
 export interface PanoramaFocus {
+  reveal?: boolean;
   node_ids: string[];
   edge_ids: string[];
 }
@@ -34,13 +39,11 @@ export function mountPanorama(
     graph: LoopGraph;
     runs: { id: string; repository: string; mode: string }[];
     onScope: (scope: WorkspaceScope) => void;
-    onSelect: (selection: {
-      kind: "object" | "edge" | "node" | "finding" | "artifact";
-      id: string;
-    }) => void;
+    onSelect: (selection: PanoramaSelection) => void;
+    onReset?: () => void;
     onFocus: (focus: PanoramaFocus) => void;
   },
-): void;
+): { setSelection: (selection: PanoramaSelection | null) => void };
 
 export function readStructuredField(
   text: string,

@@ -1,23 +1,30 @@
 import { useEffect, useRef } from "react";
 import { mountPanorama } from "~/client/loop-panorama.mjs";
+import type { PanoramaSelection } from "~/client/loop-panorama.mjs";
 import "./loop-panorama.css";
 
 export function LoopPanorama(
-  props: Parameters<typeof mountPanorama>[1] & { highlightedObjects: string[] },
+  props: Parameters<typeof mountPanorama>[1] & {
+    highlightedObjects: string[];
+    highlightedNodes: string[];
+    selection: PanoramaSelection | null;
+  },
 ) {
   const root = useRef<HTMLDivElement>(null);
   const callbacks = useRef(props);
+  const controller = useRef<ReturnType<typeof mountPanorama> | null>(null);
   useEffect(() => {
     callbacks.current = props;
   }, [props]);
   const { graph, runs, runIds, goal } = props;
   useEffect(() => {
     if (root.current) {
-      mountPanorama(root.current, {
+      controller.current = mountPanorama(root.current, {
         graph,
         runs,
         runIds,
         goal,
+        onReset: () => callbacks.current.onReset?.(),
         onScope: (value) => callbacks.current.onScope(value),
         onSelect: (value) => callbacks.current.onSelect(value),
         onFocus: (value) => callbacks.current.onFocus(value),
@@ -25,12 +32,21 @@ export function LoopPanorama(
     }
   }, [graph, runs, runIds, goal]);
   useEffect(() => {
+    controller.current?.setSelection(props.selection);
+  }, [props.selection, graph, runs, runIds, goal]);
+  useEffect(() => {
     root.current?.querySelectorAll<SVGElement>("[data-panorama-object]").forEach((node) => {
       node.classList.toggle(
         "is-linked",
         props.highlightedObjects.includes(node.dataset.panoramaObject ?? ""),
       );
     });
-  }, [props.highlightedObjects, graph, runs, runIds, goal]);
+    root.current?.querySelectorAll<SVGElement>("[data-detail-node]").forEach((node) => {
+      node.classList.toggle(
+        "is-linked",
+        props.highlightedNodes.includes(node.dataset.detailNode ?? ""),
+      );
+    });
+  }, [props.highlightedObjects, props.highlightedNodes, graph, runs, runIds, goal]);
   return <div ref={root} aria-label="Workspace 全景圖" />;
 }

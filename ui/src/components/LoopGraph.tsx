@@ -358,6 +358,18 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
     <>
       <LoopPanorama
         graph={graph}
+        selection={
+          selection && selection.kind !== "file" && selection.kind !== "port"
+            ? { kind: selection.kind, id: selection.id }
+            : null
+        }
+        highlightedNodes={highlight.nodes}
+        onReset={() => {
+          setFocus(null);
+          setSelection(null);
+          setPinned(null);
+          setHover(noHighlight);
+        }}
         runs={current.runs}
         highlightedObjects={graph.objects
           .filter(
@@ -381,6 +393,7 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
         }}
         onSelect={choose}
         onFocus={(value) => {
+          setSelection(null);
           setFocus(value);
           setRun("");
           setRepository("");
@@ -389,11 +402,13 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
           setTab("graph");
           setShowUnknown(true);
           setHover({ nodes: value.node_ids, artifacts: [] });
-          requestAnimationFrame(() =>
-            document
-              .querySelector('[aria-label="執行 occurrences 因果圖"]')
-              ?.scrollIntoView({ block: "start" }),
-          );
+          if (value.reveal !== false) {
+            requestAnimationFrame(() =>
+              document
+                .querySelector('[aria-label="執行 occurrences 因果圖"]')
+                ?.scrollIntoView({ block: "start" }),
+            );
+          }
         }}
       />
       {focus && (

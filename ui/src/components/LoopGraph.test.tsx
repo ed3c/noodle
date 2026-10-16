@@ -73,6 +73,28 @@ describe("source-backed DAG interactions", () => {
     expect(detail.queryByText("#1 Handoff known · observed/unknown")).not.toBeInTheDocument();
     expect(detail.getByRole("button", { name: "細部 cli · Invocation other" })).toBeVisible();
   });
+  it("keeps route, selected occurrence and return-to-global synchronized", async () => {
+    // jsdom does not implement layout scrolling.
+    // oxlint-disable-next-line no-extend-native
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    setup();
+    const panorama = within(screen.getByLabelText("Workspace 全景圖"));
+    const route = panorama.getByRole("heading", { name: /run2/ }).closest("article");
+    if (!route) {
+      throw new Error("Missing route card");
+    }
+    await userEvent.click(within(route).getByRole("button", { name: "展開本次執行 DAG" }));
+    expect(panorama.getByLabelText("細部 Run")).toHaveValue("run2");
+    expect(panorama.getByRole("button", { name: "細部 cli · Invocation other" })).toBeVisible();
+    await userEvent.click(panorama.getByRole("button", { name: "細部 cli · Invocation other" }));
+    expect(panorama.getByLabelText("全景定位")).toHaveTextContent("Invocation other");
+    await userEvent.click(panorama.getByRole("button", { name: "返回全局" }));
+    expect(panorama.getByLabelText("全景定位")).toHaveTextContent("Goal / 全部適用路徑");
+    expect(screen.getByRole("button", { name: /紀錄 Invocation first/ })).toBeVisible();
+  });
   it("opens only the bound JSON field and keeps missing fields unknown", async () => {
     const { view, wrap, rerender } = setup((value) => {
       required(value.graph.nodes[0]).identity.locator = "/source/c.json#/value";
@@ -128,16 +150,17 @@ describe("source-backed DAG interactions", () => {
     });
     setup();
     const panorama = within(screen.getByLabelText("Workspace 全景圖"));
+    await userEvent.click(panorama.getByText("責任物件與跨 Repo 關係總覽"));
     await userEvent.click(panorama.getByText("Original Manager → Original Manager · 3 次交接"));
     await userEvent.click(
-      panorama.getByRole("button", { name: "Handoff known · observed/unknown" }),
+      required(panorama.getAllByRole("button", { name: "Handoff known · observed/unknown" })[0]),
     );
     expect(
       await within(screen.getByLabelText("選取內容比較")).findByText('{"value":2}'),
     ).toBeVisible();
     await userEvent.click(panorama.getByRole("button", { name: "展開這組關係 DAG" }));
     expect(
-      panorama.getByRole("button", { name: "Handoff known · observed/unknown" }),
+      required(panorama.getAllByRole("button", { name: "Handoff known · observed/unknown" })[0]),
     ).toBeVisible();
     expect(screen.queryByRole("button", { name: /紀錄 Invocation other/ })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "返回 Workspace 全部執行" }));

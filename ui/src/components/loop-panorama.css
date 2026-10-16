@@ -234,3 +234,76 @@
 .lp-instruction-index small {
   padding: 0.3rem;
 }
+
+.lp-journey {
+  margin: 1.5rem 0;
+}
+.lp-paths {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr));
+  gap: 0.75rem;
+}
+.lp-journey h3 {
+  color: #7dd9d2;
+  font-size: 1rem;
+}
+.lp-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.6rem;
+  background: #183040;
+  border-left: 3px solid #7dd9d2;
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+}
+.lp-breadcrumb span {
+  max-width: 48rem;
+}
+.lp-architecture {
+  margin: 1rem 0;
+}
+.lp-architecture > summary {
+  cursor: pointer;
+  padding: 0.75rem;
+}
+.lp-loop.is-linked {
+  border-color: #7dd9d2;
+  background: #173b4a;
+}
+.lp-relation.is-linked path {
+  stroke: #7dd9d2;
+  stroke-width: 5;
+}
+.lp-object.lp-failed rect {
+  stroke: #ffadad;
+}
+.lp-references {
+  background: #142b38;
+  padding: 0.5rem;
+}
+.lp-detail > label {
+  display: block;
+  font-size: 0.8rem;
+  margin-top: 0.6rem;
+}
+
+.lp-corridor {
+  border-left: 2px solid #7dd9d2;
+  padding-left: 0.75rem;
+}
+.lp-corridor article {
+  padding: 0.4rem;
+  border-bottom: 1px solid #37556a;
+}
+.lp-corridor p {
+  font-size: 0.8rem;
+  margin: 0.3rem;
+  color: #a8e5da;
+}
+.lp-corridor small {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #aac0ce;
+}

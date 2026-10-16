@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { projectPanorama, projectRunDetail, readStructuredField } from "./loop-panorama.mjs";
+import {
+  projectPanorama,
+  projectRunDetail,
+  projectDetailLayer,
+  readStructuredField,
+} from "./loop-panorama.mjs";
 const node = (id, object_id, [run_id, repository_id]) => ({
   id,
   object_id,
@@ -188,4 +193,30 @@ test("structured fields read only exact own source pointers, with missing and in
     "unknown",
   );
   assert.equal(readStructuredField("bad", "/source.json#/next", "/source.json").status, "unknown");
+});
+
+test("source-only guidance stays browseable without hiding real handoff endpoints", () => {
+  const g = fixture();
+  g.nodes.push({
+    ...node("guide", "outer", ["b", "repoB"]),
+    kind: "pclass",
+    status: { execution: "available_reference" },
+  });
+  g.nodes[1].status.execution = "selected";
+  const detail = projectRunDetail(g, "b");
+  const main = projectDetailLayer(detail);
+  assert.equal(
+    main.nodes.some((n) => n.id === "guide"),
+    false,
+  );
+  assert.equal(
+    main.nodes.some((n) => n.id === "b"),
+    true,
+  );
+  assert.equal(main.edges.length, 2);
+  assert.equal(
+    detail.pclass_nodes.some((n) => n.id === "guide"),
+    true,
+  );
+  assert.equal(projectDetailLayer(detail, true).nodes.length, detail.nodes.length);
 });
