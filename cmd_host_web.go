@@ -18,7 +18,17 @@ func startHostWeb(dir string, observe func(context.Context, *loopview.View) erro
 	if err != nil {
 		return nil, "", nil, err
 	}
-	srv := &http.Server{Handler: server.LoopViewsHandler(dir, uiClientFS(), observe), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second}
+	authority := listener.Addr().String()
+	views := server.LoopViewsHandler(dir, uiClientFS(), observe)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if r.Host != authority || (origin != "" && origin != "http://"+authority) {
+			http.Error(w, "untrusted Host or Origin", http.StatusForbidden)
+			return
+		}
+		views.ServeHTTP(w, r)
+	})
+	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second}
 	done := make(chan error, 1)
 	go func() {
 		err := srv.Serve(listener)

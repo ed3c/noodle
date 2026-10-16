@@ -390,6 +390,7 @@ func serveHost(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	h.residents.BindBudget(budget)
 	stored, err := os.ReadFile(filepath.Join(dir, "receipts.json"))
 	if err == nil {
 		if err = json.Unmarshal(stored, &h.receipts); err != nil {

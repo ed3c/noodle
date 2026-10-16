@@ -63,6 +63,29 @@ func TestHostReadonlyWebLifecycle(t *testing.T) {
 		t.Fatalf("serving receipt: %+v", receipt)
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
+	for _, tc := range []struct{ host, origin string }{
+		{host: "untrusted.example"},
+		{origin: "https://untrusted.example"},
+	} {
+		req, err := http.NewRequest(http.MethodGet, strings.TrimSuffix(receipt.WebURL, "/loops")+"/api/loops", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tc.host != "" {
+			req.Host = tc.host
+		}
+		if tc.origin != "" {
+			req.Header.Set("Origin", tc.origin)
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusForbidden {
+			t.Errorf("untrusted authority admitted: %+v status %d", tc, res.StatusCode)
+		}
+	}
 	response, err := client.Get(strings.TrimSuffix(receipt.WebURL, "/loops") + "/api/loops")
 	if err != nil {
 		t.Fatal(err)

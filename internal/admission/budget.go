@@ -35,22 +35,24 @@ type Sampler interface {
 }
 
 type Snapshot struct {
-	Pressure         Pressure `json:"pressure"`
-	SampleError      *string  `json:"sample_error"`
-	Reason           string   `json:"reason"`
-	Active           int      `json:"active_workers"`
-	Residents        int      `json:"active_residents"`
-	Allocations      int      `json:"active_allocations"`
-	Maximum          int      `json:"maximum_workers"`
-	Limit            int      `json:"effective_limit"`
-	Credit           int      `json:"start_credit"`
-	StableSamples    int      `json:"stable_samples"`
-	SwapoutRate      *float64 `json:"swapout_bytes_per_second"`
-	SampleAgeSeconds float64  `json:"sample_age_seconds"`
-	Unsupported      bool     `json:"unsupported_monitor"`
+	UnresolvedResidents int      `json:"unresolved_residents"`
+	Pressure            Pressure `json:"pressure"`
+	SampleError         *string  `json:"sample_error"`
+	Reason              string   `json:"reason"`
+	Active              int      `json:"active_workers"`
+	Residents           int      `json:"active_residents"`
+	Allocations         int      `json:"active_allocations"`
+	Maximum             int      `json:"maximum_workers"`
+	Limit               int      `json:"effective_limit"`
+	Credit              int      `json:"start_credit"`
+	StableSamples       int      `json:"stable_samples"`
+	SwapoutRate         *float64 `json:"swapout_bytes_per_second"`
+	SampleAgeSeconds    float64  `json:"sample_age_seconds"`
+	Unsupported         bool     `json:"unsupported_monitor"`
 }
 
 type Budget struct {
+	unresolvedResidents                    int
 	mu                                     sync.Mutex
 	maximum, active, limit, credit, stable int
 	residents                              int
@@ -66,6 +68,12 @@ type Budget struct {
 	waiters                                []string
 	waited                                 map[string]time.Time
 	now                                    func() time.Time
+}
+
+func (b *Budget) SetUnresolvedResidents(count int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.unresolvedResidents = count
 }
 
 type allocation struct {
@@ -216,7 +224,7 @@ func (b *Budget) stale() bool {
 func (b *Budget) TryAcquire(id string) (*Permit, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if !b.contexts[id] {
+	if !b.contexts[id] || b.unresolvedResidents != 0 {
 		return nil, ErrDeferred
 	}
 	if _, ok := b.waited[id]; !ok {
@@ -269,7 +277,7 @@ func (p *Permit) ReserveReplacement(id string) (*Permit, error) {
 	b := p.allocation.budget
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if p.released || p.replacementReserved || !b.contexts[id] || b.stale() || b.limit == 0 || b.active > b.limit || (!b.unsupported && b.credit == 0) {
+	if p.released || p.replacementReserved || !b.contexts[id] || b.unresolvedResidents != 0 || b.stale() || b.limit == 0 || b.active > b.limit || (!b.unsupported && b.credit == 0) {
 		return nil, ErrDeferred
 	}
 	if !b.unsupported {
@@ -303,6 +311,11 @@ func (b *Budget) Snapshot() Snapshot {
 		s.Credit = 0
 		s.Limit = 0
 		s.SwapoutRate = nil
+	}
+	s.UnresolvedResidents = b.unresolvedResidents
+	if b.unresolvedResidents != 0 {
+		s.Limit, s.Credit = 0, 0
+		s.Reason = "resident_owner_readback_required"
 	}
 	return s
 }

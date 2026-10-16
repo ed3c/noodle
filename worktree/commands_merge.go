@@ -3,6 +3,7 @@ package worktree
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -63,9 +64,23 @@ func (a *App) Merge(name string, opts ...MergeOpts) error {
 		if err := a.git("merge-base", "--is-ancestor", base, o.ExpectedHead).Run(); err != nil {
 			return fmt.Errorf("reviewed candidate integration branch advanced")
 		}
+		mergeBranch, err = a.gitOutput("-C", wtPath, "symbolic-ref", "--short", "HEAD")
+		if err != nil || mergeBranch == "" {
+			return fmt.Errorf("reviewed candidate branch unavailable")
+		}
 	}
 
 	commits := a.countUnmergedCommits(name)
+	if o.ExpectedHead != "" {
+		count, err := a.gitOutput("rev-list", "--count", base+".."+o.ExpectedHead)
+		if err != nil {
+			return fmt.Errorf("count reviewed commits: %w", err)
+		}
+		commits, err = strconv.Atoi(count)
+		if err != nil {
+			return fmt.Errorf("parse reviewed commit count: %w", err)
+		}
+	}
 	if commits == 0 {
 		a.info(fmt.Sprintf("No commits on '%s' — nothing to merge", name))
 		a.info(fmt.Sprintf("Use '%s cleanup %s' to remove without merging", a.cmdName(), name))
@@ -104,7 +119,7 @@ func (a *App) Merge(name string, opts ...MergeOpts) error {
 	a.info(fmt.Sprintf("Merging %s into %s...", mergeBranch, base))
 	mergeArgs := []string{"merge", mergeBranch}
 	if o.ExpectedHead != "" {
-		mergeArgs = []string{"merge", "--ff-only", mergeBranch}
+		mergeArgs = []string{"merge", "--ff-only", o.ExpectedHead}
 	}
 	if err := a.gitRun(mergeArgs...); err != nil {
 		if a.hasMergeConflicts(a.Root) {
@@ -113,7 +128,21 @@ func (a *App) Merge(name string, opts ...MergeOpts) error {
 		return fmt.Errorf("merge failed: %w", err)
 	}
 
-	warnings := a.cleanupWorktreeAndBranch(wtPath, mergeBranch, false)
+	var warnings []string
+	if o.ExpectedHead == "" {
+		warnings = a.cleanupWorktreeAndBranch(wtPath, mergeBranch, false)
+	} else {
+		// A concurrent Git writer does not take our merge lock. Preserve its work.
+		head, headErr := a.gitOutput("-C", wtPath, "rev-parse", "HEAD")
+		currentBranch, branchErr := a.gitOutput("-C", wtPath, "symbolic-ref", "--short", "HEAD")
+		if headErr != nil || branchErr != nil || head != o.ExpectedHead || currentBranch != mergeBranch {
+			warnings = append(warnings, "candidate merged; worktree changed and was preserved")
+		} else if err := a.git("worktree", "remove", wtPath).Run(); err != nil {
+			warnings = append(warnings, "candidate merged; worktree cleanup refused and was preserved")
+		} else if err := a.git("branch", "-d", mergeBranch).Run(); err != nil {
+			warnings = append(warnings, "candidate merged; branch cleanup refused and was preserved")
+		}
+	}
 
 	a.installDeps(a.Root)
 	for _, warning := range warnings {

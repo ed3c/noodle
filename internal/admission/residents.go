@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/poteto/noodle/internal/procx"
 )
 
 // ResidentSpec is an explicit service contract. Stdio sessions cannot be shared.
@@ -27,16 +29,17 @@ type ResidentSpec struct {
 	Transport   string   `json:"transport"`
 }
 type Resident struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Fingerprint string   `json:"fingerprint"`
-	Sharing     string   `json:"sharing"`
-	PID         int      `json:"pid"`
-	Started     string   `json:"started"`
-	State       string   `json:"state"`
-	Contexts    []string `json:"contexts"`
-	Released    []string `json:"released_contexts"`
-	Error       string   `json:"error,omitempty"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Fingerprint  string   `json:"fingerprint"`
+	Sharing      string   `json:"sharing"`
+	PID          int      `json:"pid"`
+	ProcessGroup int      `json:"process_group"`
+	Started      string   `json:"started"`
+	State        string   `json:"state"`
+	Contexts     []string `json:"contexts"`
+	Released     []string `json:"released_contexts"`
+	Error        string   `json:"error,omitempty"`
 }
 type residentChild struct {
 	command *exec.Cmd
@@ -50,6 +53,28 @@ type Residents struct {
 	records  map[string]*Resident
 	children map[string]*residentChild
 	failure  error
+	budget   *Budget
+}
+
+func (r *Residents) BindBudget(b *Budget) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.budget = b
+	r.updateRecoveryBudget()
+}
+
+// Called with r.mu held. Unknown records have no transferable child handles.
+func (r *Residents) updateRecoveryBudget() {
+	if r.budget == nil {
+		return
+	}
+	count := 0
+	for id, v := range r.records {
+		if v.State != "exited" && r.children[id] == nil {
+			count++
+		}
+	}
+	r.budget.SetUnresolvedResidents(count)
 }
 
 func OpenResidents(directory string) (*Residents, error) {
@@ -215,6 +240,7 @@ func (r *Residents) Acquire(spec ResidentSpec, contextID string, budget *Budget)
 		return cloneResident(v), err
 	}
 	cmd := exec.Command(spec.Argv[0], spec.Argv[1:]...)
+	configureResident(cmd)
 	cmd.Dir = spec.Directory
 	cmd.Env = append([]string{}, spec.Environment...)
 	// Each resident uses one log, not a per-context pipe or persistent proxy.
@@ -237,6 +263,7 @@ func (r *Residents) Acquire(spec ResidentSpec, contextID string, budget *Budget)
 		return cloneResident(v), errors.Join(err, saveErr)
 	}
 	v.PID = cmd.Process.Pid
+	v.ProcessGroup = cmd.Process.Pid
 	v.Error = "process start identity not observed; restart reconciliation requires owner readback"
 	if rows, readErr := ObserveResidents(context.Background()); readErr == nil {
 		for _, row := range rows {
@@ -254,8 +281,21 @@ func (r *Residents) Acquire(spec ResidentSpec, contextID string, budget *Budget)
 	saveErr := r.persist()
 	go func() {
 		err := cmd.Wait()
+		// Wait reaps only the launcher. Observe the owned group before returning quota.
+		absent, observeErr := procx.ProcessGroupAbsent(v.PID)
+		deadline := time.Now().Add(time.Second)
+		for !absent && observeErr == nil && time.Now().Before(deadline) {
+			time.Sleep(20 * time.Millisecond)
+			absent, observeErr = procx.ProcessGroupAbsent(v.PID)
+		}
 		r.mu.Lock()
 		defer r.mu.Unlock()
+		if !absent || observeErr != nil {
+			v.State = "needs_owner_readback"
+			v.Error = fmt.Sprintf("launcher exited; owned process group absence unconfirmed: %v", observeErr)
+			_ = r.persist()
+			return
+		}
 		v.State = "exited"
 		v.Released = append(v.Released, v.Contexts...)
 		v.Contexts = []string{}
@@ -335,10 +375,24 @@ func (r *Residents) Reconcile(ctx context.Context) ([]Resident, error) {
 			}
 		}
 		if !found {
+			if v.ProcessGroup != v.PID {
+				continue
+			}
+			absent, groupErr := procx.ProcessGroupAbsent(v.ProcessGroup)
+			if groupErr != nil {
+				return nil, groupErr
+			}
+			if !absent {
+				continue
+			}
 			v.State = "exited"
-			v.Error = "original process absent in fresh inventory; no adoption or signal"
+			v.Error = "original process and owned group absent; no adoption or signal"
 			v.Released = append(v.Released, v.Contexts...)
 			v.Contexts = []string{}
+			if child := r.children[v.ID]; child != nil {
+				child.permit.Release()
+				delete(r.children, v.ID)
+			}
 			changed = true
 		}
 	}
@@ -347,6 +401,7 @@ func (r *Residents) Reconcile(ctx context.Context) ([]Resident, error) {
 			return nil, err
 		}
 	}
+	r.updateRecoveryBudget()
 	out := []Resident{}
 	for _, v := range r.records {
 		out = append(out, cloneResident(v))
