@@ -5,17 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/poteto/noodle/event"
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/ingest"
 	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/internal/stringx"
 	"github.com/poteto/noodle/monitor"
 	loopruntime "github.com/poteto/noodle/runtime"
+	"github.com/poteto/noodle/worktree"
 )
 
 func (l *Loop) reconcile(ctx context.Context) error {
@@ -174,6 +175,9 @@ func (l *Loop) recoverAdoptedSessions(ctx context.Context) error {
 	for _, rt := range l.deps.Runtimes {
 		recovered, err := rt.Recover(ctx)
 		if err != nil {
+			if l.deps.Admission != nil {
+				return fmt.Errorf("runtime recovery requires original owner readback before shared admission: %w", err)
+			}
 			l.classifyDegrade(
 				"reconcile.runtime_recover",
 				"runtime recovery degraded",
@@ -181,6 +185,9 @@ func (l *Loop) recoverAdoptedSessions(ctx context.Context) error {
 			)
 			l.logger.Warn("runtime recovery failed", "err", err)
 			continue
+		}
+		if l.deps.Admission != nil && len(recovered) != 0 {
+			return fmt.Errorf("live recovered workers require original owner readback before shared admission")
 		}
 		for _, rs := range recovered {
 			if rs.OrderID != "" {
@@ -344,7 +351,7 @@ func (l *Loop) reconcileFailedOrders() error {
 		if order.Status != OrderStatusFailed {
 			continue
 		}
-		if isScheduleOrder(order) || l.preserveRequestChanges(order.ID) {
+		if isScheduleOrder(order) || l.preserveRequestChanges(order.ID) || l.preserveLocalTaskFailure(order.ID) {
 			continue
 		}
 		f := reconciledFailure{
@@ -379,7 +386,7 @@ func (l *Loop) reconcileFailedOrders() error {
 	if err := l.mutateOrdersState(func(orders *OrdersFile) (bool, error) {
 		kept := orders.Orders[:0]
 		for _, order := range orders.Orders {
-			if order.Status == OrderStatusFailed && !isScheduleOrder(order) && !l.preserveRequestChanges(order.ID) {
+			if order.Status == OrderStatusFailed && !isScheduleOrder(order) && !l.preserveRequestChanges(order.ID) && !l.preserveLocalTaskFailure(order.ID) {
 				continue
 			}
 			kept = append(kept, order)
@@ -482,10 +489,35 @@ func (l *Loop) reconcileOneMergingStage(md mergeRecoveryStage) error {
 	if _, adopted := l.cooks.adoptedTargets[md.orderID]; adopted {
 		return l.handleAlreadyAdoptedStage(md)
 	}
-	if isBranchMerged(l.projectDir, md.checkBranch) {
+	if l.isAdmittedLocalTask(md.order, md.stage) {
+		var binding localTaskMergeBinding
+		if json.Unmarshal(md.stage.Extra[localTaskMergeKey], &binding) != nil || !reconciliationSHA.MatchString(binding.Head) || !reconciliationSHA.MatchString(binding.Tree) {
+			return fmt.Errorf("local task recovery merge binding invalid")
+		}
+		app, ok := l.deps.Worktree.(*worktree.App)
+		if !ok || app.IntegrationBranch == "" {
+			return fmt.Errorf("local task recovery integration owner is unbound")
+		}
+		branch, err := recoveryGitWithExecution(l.deps.Execution, l.projectDir, "symbolic-ref", "--short", "HEAD")
+		if err != nil || branch != app.IntegrationBranch {
+			return fmt.Errorf("local task recovery integration branch changed")
+		}
+		tree, err := recoveryGitWithExecution(l.deps.Execution, l.projectDir, "rev-parse", binding.Head+"^{tree}")
+		if err != nil || tree != binding.Tree {
+			return fmt.Errorf("local task recovery candidate tree differs")
+		}
+		// Cleanup can remove the branch; a same-name branch can name another commit.
+		// Only the original bound commit establishes whether this merge landed.
+		md.checkBranch = binding.Head
+		if isBranchMerged(l.projectDir, binding.Head, l.deps.Execution) {
+			return l.handleAlreadyMergedStage(md)
+		}
+		return l.requeueStaleMerge(md)
+	}
+	if isBranchMerged(l.projectDir, md.checkBranch, l.deps.Execution) {
 		return l.handleAlreadyMergedStage(md)
 	}
-	if branchExists(l.projectDir, md.checkBranch) {
+	if branchExists(l.projectDir, md.checkBranch, l.deps.Execution) {
 		return l.requeueStaleMerge(md)
 	}
 	return l.failMissingBranchStage(md)
@@ -531,6 +563,7 @@ func (l *Loop) handleAlreadyMergedStage(md mergeRecoveryStage) error {
 				TaskKey: md.stage.TaskKey,
 				Skill:   md.stage.Skill,
 				Runtime: md.stage.Runtime,
+				Extra:   cloneLegacyExtra(md.stage.Extra),
 			},
 		},
 		worktreeName: md.stage.Merge.WorktreeName,
@@ -561,6 +594,7 @@ func (l *Loop) requeueStaleMerge(md mergeRecoveryStage) error {
 				TaskKey: md.stage.TaskKey,
 				Skill:   md.stage.Skill,
 				Runtime: md.stage.Runtime,
+				Extra:   cloneLegacyExtra(md.stage.Extra),
 			},
 		},
 		worktreeName: md.stage.Merge.WorktreeName,
@@ -700,22 +734,22 @@ func latestStageMergeWorktree(stage state.StageNode) string {
 }
 
 // isBranchMerged checks if a branch is an ancestor of HEAD (already merged).
-func isBranchMerged(projectDir string, branch string) bool {
+func isBranchMerged(projectDir string, branch string, execCtx ...*execution.Context) bool {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
 		return false
 	}
-	cmd := exec.Command("git", "-C", projectDir, "merge-base", "--is-ancestor", branch, "HEAD")
+	cmd := boundGitCommand(firstExecution(execCtx), projectDir, "-C", projectDir, "merge-base", "--is-ancestor", branch, "HEAD")
 	return cmd.Run() == nil
 }
 
 // branchExists checks if a local or remote branch ref exists.
-func branchExists(projectDir string, branch string) bool {
+func branchExists(projectDir string, branch string, execCtx ...*execution.Context) bool {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
 		return false
 	}
-	cmd := exec.Command("git", "-C", projectDir, "for-each-ref", "--format=%(refname)",
+	cmd := boundGitCommand(firstExecution(execCtx), projectDir, "-C", projectDir, "for-each-ref", "--format=%(refname)",
 		"refs/heads/"+branch,
 		"refs/remotes/origin/"+branch,
 		"refs/remotes/"+branch,

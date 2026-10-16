@@ -7,10 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/poteto/noodle/event"
-	"github.com/poteto/noodle/internal/filex"
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/stringx"
 	"github.com/poteto/noodle/skill"
 	wt "github.com/poteto/noodle/worktree"
@@ -18,6 +19,7 @@ import (
 
 // ProcessDispatcherConfig configures a process dispatcher.
 type ProcessDispatcherConfig struct {
+	Execution       *execution.Context
 	ProjectDir      string
 	RuntimeDir      string
 	NoodleBin       string
@@ -31,6 +33,7 @@ type ProcessDispatcherConfig struct {
 // ProcessDispatcher dispatches provider sessions as direct child processes
 // with bidirectional pipes. Replaces the tmux-based dispatcher.
 type ProcessDispatcher struct {
+	execution       *execution.Context
 	projectDir      string
 	runtimeDir      string
 	noodleBin       string
@@ -42,7 +45,11 @@ type ProcessDispatcher struct {
 }
 
 func NewProcessDispatcher(config ProcessDispatcherConfig) *ProcessDispatcher {
+	if config.Execution == nil {
+		config.Execution = execution.Capture(config.ProjectDir)
+	}
 	return &ProcessDispatcher{
+		execution:       config.Execution,
 		projectDir:      strings.TrimSpace(config.ProjectDir),
 		runtimeDir:      strings.TrimSpace(config.RuntimeDir),
 		noodleBin:       strings.TrimSpace(config.NoodleBin),
@@ -57,6 +64,9 @@ func NewProcessDispatcher(config ProcessDispatcherConfig) *ProcessDispatcher {
 func (d *ProcessDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (Session, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
+	}
+	if req.RequireGroupExit && runtime.GOOS == "windows" {
+		return nil, fmt.Errorf("worker process-group exit observation unavailable on Windows")
 	}
 	reqRuntime := strings.TrimSpace(req.Runtime)
 	if reqRuntime == "" {
@@ -104,19 +114,20 @@ func (d *ProcessDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 	}
 
 	session := newProcessSession(processSessionConfig{
-		id:            sessionID,
-		process:       process,
-		eventWriter:   eventWriter,
-		canonicalPath: canonicalPath,
-		stampedPath:   stampedPath,
-		prompt:        req.Prompt,
-		warnings:      skillBundle.Warnings,
-		controller:    controller,
-		sink:          d.sink,
-		provider:      req.Provider,
-		stderrPath:    stderrPath,
-		stderrDone:    stderrDone,
-		startup:       startup,
+		id:               sessionID,
+		process:          process,
+		eventWriter:      eventWriter,
+		canonicalPath:    canonicalPath,
+		stampedPath:      stampedPath,
+		prompt:           req.Prompt,
+		warnings:         skillBundle.Warnings,
+		controller:       controller,
+		sink:             d.sink,
+		provider:         req.Provider,
+		stderrPath:       stderrPath,
+		stderrDone:       stderrDone,
+		startup:          startup,
+		requireGroupExit: req.RequireGroupExit,
 	})
 	session.start(ctx)
 	return session, nil
@@ -134,9 +145,9 @@ func (d *ProcessDispatcher) resolveWorktreeForDispatch(req DispatchRequest) (str
 		if strings.TrimSpace(path) == "" {
 			return "", fmt.Errorf("project directory not set")
 		}
-		return path, nil
+		return d.execution.ResolvePath(path)
 	}
-	validWorktree, err := wt.ValidateLinkedCheckout(req.WorktreePath)
+	validWorktree, err := wt.ValidateLinkedCheckoutWithExecution(req.WorktreePath, d.execution)
 	if err != nil {
 		return "", fmt.Errorf("worktree enforcement: %w", err)
 	}
@@ -183,8 +194,7 @@ func (d *ProcessDispatcher) startSessionProcess(
 	if err != nil {
 		return nil, nil, fmt.Errorf("build command: %w", err)
 	}
-	cmd.Dir = req.WorktreePath
-	cmd.Env = append(buildDispatchEnv(req), "NOODLE_SESSION_ID="+sessionID)
+	cmd.Env = append(buildDispatchEnvFrom(req, cmd.Env), "NOODLE_SESSION_ID="+sessionID)
 
 	process, err := StartProcess(cmd)
 	if err != nil {
@@ -272,7 +282,7 @@ func (d *ProcessDispatcher) buildCmd(req DispatchRequest, systemPrompt string) (
 	case "codex":
 		args := codexBaseArgs(req)
 		args = append(args, extraArgs...)
-		return exec.Command(binary, args...), nil
+		return d.execution.Command(context.Background(), req.WorktreePath, binary, args...), nil
 
 	default: // claude
 		args := claudeBaseArgs(req, systemPrompt)
@@ -281,7 +291,7 @@ func (d *ProcessDispatcher) buildCmd(req DispatchRequest, systemPrompt string) (
 		// through the claudeController rather than piped to stdin.
 		args = replaceFlag(args, "-p", "--input-format", "stream-json")
 		args = append(args, extraArgs...)
-		return exec.Command(binary, args...), nil
+		return d.execution.Command(context.Background(), req.WorktreePath, binary, args...), nil
 	}
 }
 
@@ -294,14 +304,15 @@ func (d *ProcessDispatcher) buildCustomRuntimeCmd(req DispatchRequest, runtimeCm
 		"brief":  filepath.Join(d.runtimeDir, "mise.json"),
 	}
 	resolved := resolveTemplateVars(runtimeCmd, vars)
-	return exec.Command("sh", "-c", resolved), nil
+	return d.execution.Command(context.Background(), req.WorktreePath, "sh", "-c", resolved), nil
 }
 
 func (d *ProcessDispatcher) resolveAgentBinary(provider string) string {
 	switch stringx.Normalize(provider) {
 	case "codex":
 		if path := strings.TrimSpace(d.providerConfigs.Codex.Path); path != "" {
-			candidate := filepath.Join(filex.ExpandHome(path), "codex")
+			resolved, _ := d.execution.ResolvePath(path)
+			candidate := filepath.Join(resolved, "codex")
 			if _, err := os.Stat(candidate); err == nil {
 				return candidate
 			}
@@ -309,7 +320,8 @@ func (d *ProcessDispatcher) resolveAgentBinary(provider string) string {
 		return "codex"
 	default:
 		if path := strings.TrimSpace(d.providerConfigs.Claude.Path); path != "" {
-			candidate := filepath.Join(filex.ExpandHome(path), "claude")
+			resolved, _ := d.execution.ResolvePath(path)
+			candidate := filepath.Join(resolved, "claude")
 			if _, err := os.Stat(candidate); err == nil {
 				return candidate
 			}

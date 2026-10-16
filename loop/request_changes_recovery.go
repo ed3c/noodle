@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 
 	"github.com/poteto/noodle/event"
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/orderx"
 	"github.com/poteto/noodle/internal/procx"
 	"github.com/poteto/noodle/internal/reducer"
@@ -26,20 +26,22 @@ const requestChangesRequeuedKey = "request_changes_requeued"
 type requestChangesRequeued struct {
 	Binding requestChangesBinding   `json:"binding"`
 	Review  state.PendingReviewNode `json:"review"`
+	Merge   json.RawMessage         `json:"merge,omitempty"`
 }
 
 // Stored in existing stage Extra, so the checkpoint and order projection carry
 // the same custody binding. It authorizes only explicit edit-item and requeue.
 type requestChangesBinding struct {
-	Reason       string            `json:"reason,omitempty"`
-	SessionID    string            `json:"session_id"`
-	AttemptID    string            `json:"attempt_id"`
-	Attempt      int               `json:"attempt"`
-	WorktreeName string            `json:"worktree_name"`
-	WorktreePath string            `json:"worktree_path"`
-	Branch       string            `json:"branch"`
-	Head         string            `json:"candidate_head"`
-	Files        map[string]string `json:"session_sha256"`
+	Reason         string            `json:"reason,omitempty"`
+	WorktreeSHA256 string            `json:"worktree_sha256,omitempty"`
+	SessionID      string            `json:"session_id"`
+	AttemptID      string            `json:"attempt_id"`
+	Attempt        int               `json:"attempt"`
+	WorktreeName   string            `json:"worktree_name"`
+	WorktreePath   string            `json:"worktree_path"`
+	Branch         string            `json:"branch"`
+	Head           string            `json:"candidate_head"`
+	Files          map[string]string `json:"session_sha256"`
 }
 
 // The supervisor supplies the full definition and exact evidence digests; no
@@ -56,8 +58,8 @@ var recoverySessionFiles = []string{"spawn.json", "prompt.txt", "events.ndjson",
 
 func recoveryDigest(data []byte) string { return fmt.Sprintf("%x", sha256.Sum256(data)) }
 
-func recoveryGit(path string, args ...string) (string, error) {
-	out, err := exec.Command("git", append([]string{"-C", path}, args...)...).CombinedOutput()
+func recoveryGitWithExecution(executionContext *execution.Context, path string, args ...string) (string, error) {
+	out, err := boundGitCommand(executionContext, path, append([]string{"-C", path}, args...)...).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("recovery git %v: %w: %s", args, err, out)
 	}
@@ -77,11 +79,11 @@ func (l *Loop) captureRequestChanges(pending *pendingReviewCook) (requestChanges
 	b.Attempt = len(attempts) - 1
 	b.AttemptID = attempts[b.Attempt].AttemptID
 	var err error
-	b.Branch, err = recoveryGit(b.WorktreePath, "symbolic-ref", "--short", "HEAD")
+	b.Branch, err = recoveryGitWithExecution(l.deps.Execution, b.WorktreePath, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
 		return b, err
 	}
-	b.Head, err = recoveryGit(b.WorktreePath, "rev-parse", "HEAD")
+	b.Head, err = recoveryGitWithExecution(l.deps.Execution, b.WorktreePath, "rev-parse", "HEAD")
 	if err != nil {
 		return b, err
 	}
@@ -92,6 +94,12 @@ func (l *Loop) captureRequestChanges(pending *pendingReviewCook) (requestChanges
 			return b, err
 		}
 		b.Files[name] = recoveryDigest(data)
+	}
+	if l.isAdmittedLocalTask(node, node.Stages[pending.stageIndex]) {
+		b.WorktreeSHA256, err = l.localTaskWorktreeDigest(node.Stages[pending.stageIndex], b.WorktreePath)
+		if err != nil {
+			return b, err
+		}
 	}
 	return b, nil
 }
@@ -167,14 +175,42 @@ func (l *Loop) validateRecovery(order state.OrderNode, review state.PendingRevie
 		return fmt.Errorf("recovery prior process/group is live")
 	}
 	cook := &cookHandle{cookIdentity: cookIdentity{orderID: order.OrderID, stageIndex: si}, session: &adoptedSession{id: b.SessionID, status: "completed"}}
-	outcome, err := l.readRequiredStageOutcome(cook)
+	if l.isAdmittedLocalTask(order, stage) {
+		if err := l.validateLocalTaskSession(order, stage, b); err != nil {
+			return err
+		}
+	} else {
+		outcome, err := l.readRequiredStageOutcome(cook)
+		if err != nil {
+			return err
+		}
+		if !recoverableReviewOutcome(outcome) {
+			return fmt.Errorf("recovery requires exact typed blocked or nonblocking completed outcome")
+		}
+	}
+	if err := l.validateRecoveryWorktree(b); err != nil {
+		return err
+	}
+	dirty, err := recoveryGitWithExecution(l.deps.Execution, b.WorktreePath, "status", "--porcelain")
 	if err != nil {
 		return err
 	}
-	if !recoverableReviewOutcome(outcome) {
-		return fmt.Errorf("recovery requires exact typed blocked or nonblocking completed outcome")
+	if l.isAdmittedLocalTask(order, stage) {
+		observed, err := l.localTaskWorktreeDigest(stage, b.WorktreePath)
+		if err != nil {
+			return err
+		}
+		if b.WorktreeSHA256 == "" || observed != b.WorktreeSHA256 {
+			return fmt.Errorf("local task worktree bytes changed")
+		}
+	} else if dirty != "" {
+		return fmt.Errorf("recovery worktree is dirty")
 	}
-	top, err := recoveryGit(b.WorktreePath, "rev-parse", "--show-toplevel")
+	return nil
+}
+
+func (l *Loop) validateRecoveryWorktree(b requestChangesBinding) error {
+	top, err := recoveryGitWithExecution(l.deps.Execution, b.WorktreePath, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return err
 	}
@@ -185,37 +221,30 @@ func (l *Loop) validateRecovery(order state.OrderNode, review state.PendingRevie
 	if top != actual {
 		return fmt.Errorf("recovery worktree root mismatch")
 	}
-	common, err := recoveryGit(b.WorktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	common, err := recoveryGitWithExecution(l.deps.Execution, b.WorktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return err
 	}
-	owner, err := recoveryGit(l.projectDir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	owner, err := recoveryGitWithExecution(l.deps.Execution, l.projectDir, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return err
 	}
 	if common != owner {
 		return fmt.Errorf("recovery worktree owner mismatch")
 	}
-	branch, err := recoveryGit(b.WorktreePath, "symbolic-ref", "--short", "HEAD")
+	branch, err := recoveryGitWithExecution(l.deps.Execution, b.WorktreePath, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
 		return err
 	}
 	if b.Branch == "" || branch != b.Branch {
 		return fmt.Errorf("recovery branch moved")
 	}
-	head, err := recoveryGit(b.WorktreePath, "rev-parse", "HEAD")
+	head, err := recoveryGitWithExecution(l.deps.Execution, b.WorktreePath, "rev-parse", "HEAD")
 	if err != nil {
 		return err
 	}
 	if b.Head == "" || head != b.Head {
 		return fmt.Errorf("recovery HEAD moved")
-	}
-	dirty, err := recoveryGit(b.WorktreePath, "status", "--porcelain")
-	if err != nil {
-		return err
-	}
-	if dirty != "" {
-		return fmt.Errorf("recovery worktree is dirty")
 	}
 	return nil
 }
@@ -543,7 +572,7 @@ func (l *Loop) requeueRequestChanges(orderID string) error {
 		// Legacy custody was validated against the original failure events above.
 		binding.Reason = stage.Attempts[binding.Attempt].Error
 	}
-	receipt, err := json.Marshal(requestChangesRequeued{Binding: binding, Review: review})
+	receipt, err := json.Marshal(requestChangesRequeued{Binding: binding, Review: review, Merge: stage.Extra[localTaskMergeKey]})
 	if err != nil {
 		return err
 	}
@@ -551,6 +580,7 @@ func (l *Loop) requeueRequestChanges(orderID string) error {
 	stage.Status = state.StagePending
 	stage.Merge = nil
 	delete(stage.Extra, requestChangesKey)
+	delete(stage.Extra, localTaskMergeKey)
 	order.Status = state.OrderActive
 	next.Orders[orderID] = order
 	delete(next.PendingReviews, orderID)
@@ -594,7 +624,9 @@ func (l *Loop) reconcileRequestChangesProjection() error {
 		for _, stage := range order.Stages {
 			_, captured := stage.Extra[requestChangesKey]
 			_, requeued := stage.Extra[requestChangesRequeuedKey]
-			if captured || requeued {
+			_, mergedRecovery := stage.Extra[localTaskMergeRecoveryKey]
+			_, completionRecovery := stage.Extra[localTaskCompletionRecoveryKey]
+			if captured || requeued || mergedRecovery || completionRecovery {
 				if err := l.projectRecoveredOrder(id); err != nil {
 					return err
 				}
@@ -603,4 +635,7 @@ func (l *Loop) reconcileRequestChangesProjection() error {
 		}
 	}
 	return nil
+}
+func recoveryGit(path string, args ...string) (string, error) {
+	return recoveryGitWithExecution(nil, path, args...)
 }

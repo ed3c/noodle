@@ -23,6 +23,12 @@ func (l *Loop) controlMerge(orderID string) error {
 		return err
 	}
 
+	order := l.canonical.Orders[orderID]
+	localTask := len(order.Stages) == 1 && l.isAdmittedLocalTask(order, order.Stages[0])
+	if localTask && len(order.Stages[0].Extra[localTaskMergeKey]) == 0 {
+		return fmt.Errorf("local task merge lacks reviewed candidate binding")
+	}
+
 	// Merge the worktree.
 	cook := &cookHandle{
 		cookIdentity: pending.cookIdentity,
@@ -31,9 +37,15 @@ func (l *Loop) controlMerge(orderID string) error {
 		worktreePath: pending.worktreePath,
 		session:      &adoptedSession{id: pending.sessionID, status: "completed"},
 	}
-	canMerge, err := l.worktreeHasChanges(cook)
-	if err != nil {
-		return fmt.Errorf("merge check: %w", err)
+	// Bound candidates must reach the exact HEAD/tree check under the merge lock.
+	// Branch-name or patch-equivalence previews cannot establish their completion.
+	canMerge := true
+	if !localTask {
+		var err error
+		canMerge, err = l.worktreeHasChanges(cook)
+		if err != nil {
+			return fmt.Errorf("merge check: %w", err)
+		}
 	}
 	if !canMerge {
 		if err := l.runDoneBeforeTerminal(context.Background(), cook); err != nil {
@@ -164,7 +176,7 @@ func (l *Loop) controlRequestChanges(orderID, feedback string) error {
 	review := l.canonical.PendingReviews[orderID]
 	outcome, outcomeErr := l.readRequiredStageOutcome(&cookHandle{cookIdentity: pending.cookIdentity, session: &adoptedSession{id: pending.sessionID}})
 	_, hasIntent := l.canonical.Orders[orderID].Stages[pending.stageIndex].Extra[requestChangesKey]
-	if hasIntent || (outcomeErr == nil && recoverableReviewOutcome(outcome)) {
+	if hasIntent || l.isAdmittedLocalTask(l.canonical.Orders[orderID], l.canonical.Orders[orderID].Stages[pending.stageIndex]) || (outcomeErr == nil && recoverableReviewOutcome(outcome)) {
 		if l.canonical.Orders[orderID].Status.IsTerminal() {
 			review, err := l.requestChangesReview(orderID)
 			if err != nil {

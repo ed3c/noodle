@@ -2,12 +2,15 @@ package dispatcher
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/poteto/noodle/event"
+	"github.com/poteto/noodle/internal/procx"
 	"github.com/poteto/noodle/parse"
 )
 
@@ -16,33 +19,35 @@ import (
 // as a shell pipeline stage.
 type processSession struct {
 	sessionBase
-	process     *ProcessHandle
-	controller  *claudeController // nil for non-steerable sessions
-	warnings    []string
-	provider    string
-	stderrPath  string
-	stderrDone  <-chan struct{}
-	startup     *codexStartup
-	killMu      sync.Mutex
-	forceKilled bool
-	killed      chan struct{}
-	joined      chan struct{}
+	process          *ProcessHandle
+	controller       *claudeController // nil for non-steerable sessions
+	warnings         []string
+	provider         string
+	stderrPath       string
+	stderrDone       <-chan struct{}
+	startup          *codexStartup
+	killMu           sync.Mutex
+	forceKilled      bool
+	killed           chan struct{}
+	joined           chan struct{}
+	requireGroupExit bool
 }
 
 type processSessionConfig struct {
-	id            string
-	process       *ProcessHandle
-	eventWriter   *event.EventWriter
-	canonicalPath string
-	stampedPath   string
-	prompt        string
-	warnings      []string
-	controller    *claudeController // nil for non-steerable sessions
-	sink          SessionEventSink
-	provider      string
-	stderrPath    string
-	stderrDone    <-chan struct{}
-	startup       *codexStartup
+	id               string
+	process          *ProcessHandle
+	eventWriter      *event.EventWriter
+	canonicalPath    string
+	stampedPath      string
+	prompt           string
+	warnings         []string
+	controller       *claudeController // nil for non-steerable sessions
+	sink             SessionEventSink
+	provider         string
+	stderrPath       string
+	stderrDone       <-chan struct{}
+	startup          *codexStartup
+	requireGroupExit bool
 }
 
 func newProcessSession(cfg processSessionConfig) *processSession {
@@ -55,15 +60,16 @@ func newProcessSession(cfg processSessionConfig) *processSession {
 			prompt:        cfg.prompt,
 			sink:          cfg.sink,
 		}),
-		process:    cfg.process,
-		controller: cfg.controller,
-		warnings:   append([]string(nil), cfg.warnings...),
-		provider:   cfg.provider,
-		stderrPath: cfg.stderrPath,
-		stderrDone: cfg.stderrDone,
-		startup:    cfg.startup,
-		joined:     make(chan struct{}),
-		killed:     make(chan struct{}),
+		process:          cfg.process,
+		controller:       cfg.controller,
+		warnings:         append([]string(nil), cfg.warnings...),
+		provider:         cfg.provider,
+		stderrPath:       cfg.stderrPath,
+		stderrDone:       cfg.stderrDone,
+		startup:          cfg.startup,
+		joined:           make(chan struct{}),
+		killed:           make(chan struct{}),
+		requireGroupExit: cfg.requireGroupExit,
 	}
 }
 
@@ -163,6 +169,9 @@ func (s *processSession) waitForExit(ctx context.Context) {
 		s.closeProcessPipes()
 		<-ioDone
 	}
+	if s.requireGroupExit {
+		s.waitForProcessGroupExit(ctx)
+	}
 	s.killMu.Lock()
 	killed := s.forceKilled
 	s.killMu.Unlock()
@@ -175,6 +184,38 @@ func (s *processSession) waitForExit(ctx context.Context) {
 	s.resolveAndMarkDone(exitCode, ctx.Err() != nil)
 }
 
+// The original launcher PID is also its Setpgid group identity. A terminal
+// launcher and drained pipes do not prove that redirected descendants exited.
+// Keep Done open on unknown observations, including cancellation, so the shared
+// resource owner cannot return this allocation or admit a replacement early.
+func (s *processSession) waitForProcessGroupExit(ctx context.Context) {
+	warned := false
+	cancellation := ctx.Done()
+	for {
+		absent, err := procx.ProcessGroupAbsent(s.process.PID())
+		if err == nil && absent {
+			return
+		}
+		if !warned {
+			message := "worker process group exit unconfirmed; original owner readback required"
+			if err != nil {
+				message += fmt.Sprintf(": %v", err)
+			}
+			s.publish(SessionEvent{Type: "warning", Message: message, Timestamp: nowUTC()})
+			warned = true
+		}
+		select {
+		case <-cancellation:
+			// Use the original child owner; cancellation is not proof of exit.
+			if err := s.process.ForceKill(); err != nil {
+				s.publish(SessionEvent{Type: "warning", Message: fmt.Sprintf("worker group stop failed; original owner readback required: %v", err), Timestamp: nowUTC()})
+			}
+			cancellation = nil
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
 func (s *processSession) closeProcessPipes() {
 	_ = s.process.Stdout().Close()
 	_ = s.process.Stderr().Close()
@@ -182,10 +223,20 @@ func (s *processSession) closeProcessPipes() {
 }
 
 func (s *processSession) Terminate() error {
+	select {
+	case <-s.joined:
+		return nil
+	default:
+	}
 	return s.process.Terminate()
 }
 
 func (s *processSession) ForceKill() error {
+	select {
+	case <-s.joined:
+		return nil
+	default:
+	}
 	s.killMu.Lock()
 	defer s.killMu.Unlock()
 	err := s.process.ForceKill()

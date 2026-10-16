@@ -3,6 +3,7 @@
 package dispatcher
 
 import (
+	"errors"
 	"os/exec"
 	"syscall"
 )
@@ -23,11 +24,11 @@ func signalProcessGroup(cmd *exec.Cmd, signal syscall.Signal) error {
 	if cmd.Process == nil {
 		return nil
 	}
-	pgid, err := syscall.Getpgid(cmd.Process.Pid)
-	if err != nil {
-		// Process already gone.
+	// StartProcess creates a group whose ID is the original child PID. Keep
+	// that identity after the launcher exits; Getpgid would lose its children.
+	err := syscall.Kill(-cmd.Process.Pid, signal)
+	if errors.Is(err, syscall.ESRCH) {
 		return nil
 	}
-	_ = syscall.Kill(-pgid, signal)
-	return nil
+	return err
 }

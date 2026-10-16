@@ -697,3 +697,13 @@ func TestMaxConcurrentForLookup(t *testing.T) {
 		}
 	}
 }
+
+func TestProcessAdmittedOrdersParse(t *testing.T) {
+	cfg, err := Parse([]byte("[runtime.process]\nadmitted_orders = [\"original-task\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Runtime.Process.AdmittedOrders) != 1 || cfg.Runtime.Process.AdmittedOrders[0] != "original-task" {
+		t.Fatalf("admission lost: %+v", cfg.Runtime.Process)
+	}
+}

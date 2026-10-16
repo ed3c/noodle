@@ -1,9 +1,9 @@
 package config
 
 import (
-	"os"
 	"strings"
 
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/stringx"
 )
 
@@ -13,6 +13,7 @@ const (
 
 // Config is the top-level .noodle.toml contract for runtime wiring.
 type Config struct {
+	execution   *execution.Context
 	Adapters    map[string]AdapterConfig `toml:"adapters"`
 	Routing     RoutingConfig            `toml:"routing"`
 	Skills      SkillsConfig             `toml:"skills"`
@@ -83,10 +84,12 @@ func (c RuntimeConfig) MaxConcurrentFor(name string) int {
 }
 
 type ProcessConfig struct {
-	MaxConcurrent int `toml:"max_concurrent"`
+	MaxConcurrent  int      `toml:"max_concurrent"`
+	AdmittedOrders []string `toml:"admitted_orders"`
 }
 
 type SpritesConfig struct {
+	execution     *execution.Context
 	TokenEnv      string `toml:"token_env"`
 	BaseURL       string `toml:"base_url"`
 	SpriteName    string `toml:"sprite_name"`
@@ -95,6 +98,7 @@ type SpritesConfig struct {
 }
 
 type CursorConfig struct {
+	execution     *execution.Context
 	APIKeyEnv     string `toml:"api_key_env"`
 	BaseURL       string `toml:"base_url"`
 	Repository    string `toml:"repository"`
@@ -232,7 +236,7 @@ func (c SpritesConfig) Token() string {
 	if key == "" {
 		key = "SPRITES_TOKEN"
 	}
-	return strings.TrimSpace(os.Getenv(key))
+	return strings.TrimSpace(contextValue(c.execution, key))
 }
 
 func (c SpritesConfig) GitToken() string {
@@ -240,7 +244,7 @@ func (c SpritesConfig) GitToken() string {
 	if key == "" {
 		key = "GITHUB_TOKEN"
 	}
-	return strings.TrimSpace(os.Getenv(key))
+	return strings.TrimSpace(contextValue(c.execution, key))
 }
 
 func (c CursorConfig) APIKey() string {
@@ -248,5 +252,5 @@ func (c CursorConfig) APIKey() string {
 	if key == "" {
 		key = "CURSOR_API_KEY"
 	}
-	return strings.TrimSpace(os.Getenv(key))
+	return strings.TrimSpace(contextValue(c.execution, key))
 }

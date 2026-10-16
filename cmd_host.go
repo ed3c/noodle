@@ -20,7 +20,10 @@ import (
 	"time"
 
 	"github.com/poteto/noodle/config"
+	"github.com/poteto/noodle/internal/admission"
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/lockfile"
+	"github.com/poteto/noodle/internal/loopview"
 	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/internal/statever"
 	"github.com/poteto/noodle/loop"
@@ -52,17 +55,19 @@ type hostResponse struct {
 }
 
 type hostRequest struct {
-	Operation    string   `json:"operation"`
-	ProjectDir   string   `json:"project_dir"`
-	ContextID    string   `json:"context_id"`
-	InstanceID   string   `json:"instance_id"`
-	ConfigSHA256 string   `json:"config_sha256"`
-	Mode         string   `json:"mode"`
-	Environment  []string `json:"environment,omitempty"`
-	BinarySHA256 string   `json:"binary_sha256"`
-	RequestID    string   `json:"request_id"`
-	RequestFile  string   `json:"-"`
-	HostDir      string   `json:"-"`
+	Operation    string                  `json:"operation"`
+	ProjectDir   string                  `json:"project_dir"`
+	ContextID    string                  `json:"context_id"`
+	InstanceID   string                  `json:"instance_id"`
+	ConfigSHA256 string                  `json:"config_sha256"`
+	Mode         string                  `json:"mode"`
+	Environment  []string                `json:"environment,omitempty"`
+	BinarySHA256 string                  `json:"binary_sha256"`
+	RequestID    string                  `json:"request_id"`
+	ResidentSpec *admission.ResidentSpec `json:"resident_spec,omitempty"`
+	ResidentID   string                  `json:"resident_id,omitempty"`
+	RequestFile  string                  `json:"-"`
+	HostDir      string                  `json:"-"`
 }
 
 type hostRuntime interface {
@@ -81,7 +86,7 @@ type hostContext struct {
 	done           chan error
 	cancel         context.CancelFunc
 	lock           *lockfile.Lock
-	restore        func() error
+	failed         bool
 	environmentSHA string
 }
 
@@ -90,16 +95,31 @@ type noodleHost struct {
 	instanceID string
 	binaryPath string
 	binarySHA  string
+	webURL     string
 	receipts   []hostReceipt
-	active     *hostContext
+	contexts   map[string]*hostContext
+	completed  chan string
+	budget     *admission.Budget
+	residents  *admission.Residents
 	blocked    bool
 	newRuntime func(string, string, config.Config, loop.Dependencies) hostRuntime
 }
 
 func newHostCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{Use: "host", Short: "Manage the single persistent Noodle host"}
+	cmd.AddCommand(newHostResourcesCmd(app))
+	cmd.AddCommand(newHostRecoverCmd(app))
+	cmd.AddCommand(newHostViewsCmd())
+	task := &cobra.Command{Use: "task", Short: "Read native task dispatch capabilities"}
+	task.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "process_admitted_orders": true, "config_key": "runtime.process.admitted_orders", "empty_unrestricted": true, "scope": "process_dispatch"})
+	}})
+	task.AddCommand(&cobra.Command{Use: "review-capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "local_task_review_recovery": true, "candidate_bound_merge": true, "local_task_merge_recovery": true, "local_task_completion_recovery": true, "local_task_completion_recovery_version": 2})
+	}})
+	cmd.AddCommand(task)
 	cmd.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "protocol": hostProtocol})
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1})
 	}})
 	cmd.AddCommand(&cobra.Command{Use: "serve", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
@@ -338,11 +358,10 @@ func startHostProcess(ctx context.Context, path, dir string) error {
 }
 
 func serveHost(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	dir, err := hostDirectory()
 	if err != nil {
-		return err
-	}
-	if _, err := swapHostEnvironment(dir, hostBaselineEnvironment(dir)); err != nil {
 		return err
 	}
 	lock, err := lockfile.TryLock(filepath.Join(dir, "host.lock"))
@@ -362,9 +381,16 @@ func serveHost(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	h := &noodleHost{dir: dir, instanceID: id, binaryPath: path, binarySHA: hostDigest(data), newRuntime: func(dir, bin string, cfg config.Config, deps loop.Dependencies) hostRuntime {
+	budget := admission.NewBudget(0)
+	go budget.Run(ctx, admission.NewSampler())
+	h := &noodleHost{budget: budget, contexts: make(map[string]*hostContext), completed: make(chan string, 16), dir: dir, instanceID: id, binaryPath: path, binarySHA: hostDigest(data), newRuntime: func(dir, bin string, cfg config.Config, deps loop.Dependencies) hostRuntime {
 		return loop.New(dir, bin, cfg, deps)
 	}}
+	h.residents, err = admission.OpenResidents(dir)
+	if err != nil {
+		return err
+	}
+	h.residents.BindBudget(budget)
 	stored, err := os.ReadFile(filepath.Join(dir, "receipts.json"))
 	if err == nil {
 		if err = json.Unmarshal(stored, &h.receipts); err != nil {
@@ -393,9 +419,38 @@ func serveHost(ctx context.Context) error {
 	}
 	type call struct {
 		request hostRequest
-		reply   chan hostResponse
+		reply   chan any
 	}
 	calls := make(chan call)
+	web, url, webDone, err := startHostWeb(dir, func(requestCtx context.Context, view *loopview.View) error {
+		requestCtx, stop := context.WithTimeout(requestCtx, 2*time.Second)
+		defer stop()
+		read := call{hostRequest{Operation: "view_resources"}, make(chan any, 1)}
+		select {
+		case calls <- read:
+		case <-requestCtx.Done():
+			return requestCtx.Err()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		select {
+		case value := <-read.reply:
+			observation, ok := value.(hostViewObservation)
+			if !ok {
+				return errors.New("Host view observation type invalid")
+			}
+			return enrichHostView(dir, view, observation)
+		case <-requestCtx.Done():
+			return requestCtx.Err()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("start Host readonly web: %w", err)
+	}
+	h.webURL = url
+	defer web.Close()
 	go func() { <-ctx.Done(); listener.Close() }()
 	go func() {
 		for {
@@ -410,7 +465,7 @@ func serveHost(ctx context.Context) error {
 				if err := json.NewDecoder(io.LimitReader(conn, 4<<20)).Decode(&req); err != nil {
 					return
 				}
-				c := call{req, make(chan hostResponse, 1)}
+				c := call{req, make(chan any, 1)}
 				select {
 				case calls <- c:
 				case <-ctx.Done():
@@ -425,30 +480,70 @@ func serveHost(ctx context.Context) error {
 		}
 	}()
 	for {
-		var done <-chan error
-		if h.active != nil {
-			done = h.active.done
-		}
 		select {
 		case <-ctx.Done():
-			if h.active != nil {
-				h.active.cancel()
-				if h.active.done != nil {
-					<-h.active.done
+			for _, c := range h.contexts {
+				if h.residents != nil {
+					if err := h.residents.ReleaseContext(c.receipt.ContextID); err != nil {
+						fmt.Fprintln(os.Stderr, "resident shutdown failed:", err)
+					}
+				}
+				c.cancel()
+			}
+			for _, c := range h.contexts {
+				if c.done != nil {
+					<-c.done
+				}
+			}
+			if h.residents != nil {
+				waitCtx, waitCancel := context.WithTimeout(context.Background(), 3*time.Second)
+				err := h.residents.WaitClosed(waitCtx)
+				waitCancel()
+				if err != nil {
+					return err
 				}
 			}
 			return nil
-		case err := <-done:
-			h.finish(err)
-		case c := <-calls:
-			if h.active != nil {
+		case err := <-webDone:
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Host readonly web stopped: %v\n", err)
+			}
+			h.webURL = ""
+			webDone = nil
+		case id := <-h.completed:
+			if c := h.contexts[id]; c != nil && c.done != nil {
 				select {
-				case err := <-h.active.done:
-					h.finish(err)
+				case err := <-c.done:
+					h.finish(c, err)
 				default:
 				}
 			}
-			c.reply <- h.handle(ctx, c.request)
+		case call := <-calls:
+			if call.request.Operation == "view_resources" {
+				receipts := make([]hostReceipt, 0, len(h.contexts))
+				for _, context := range h.contexts {
+					receipts = append(receipts, context.receipt)
+				}
+				call.reply <- hostViewObservation{Resources: h.viewResources(), Receipts: receipts}
+				continue
+			}
+			for _, c := range h.contexts {
+				if c.done == nil {
+					continue
+				}
+				select {
+				case err := <-c.done:
+					h.finish(c, err)
+				default:
+				}
+			}
+			if strings.HasPrefix(call.request.Operation, "resident_") {
+				call.reply <- h.residentOperation(ctx, call.request)
+			} else if call.request.Operation == "resources" {
+				call.reply <- h.resources()
+			} else {
+				call.reply <- h.handle(ctx, call.request)
+			}
 		}
 	}
 }
@@ -477,28 +572,39 @@ func (h *noodleHost) save() error {
 	return os.Rename(f.Name(), filepath.Join(h.dir, "receipts.json"))
 }
 
-func (h *noodleHost) finish(runErr error) {
-	c := h.active
+func (h *noodleHost) finish(c *hostContext, runErr error) {
 	c.done = nil
 	c.runtime.Shutdown()
-	c.cancel()
-	if runErr == nil {
-		runErr = c.restore()
+	if h.residents != nil {
+		if err := h.residents.ReleaseContext(c.receipt.ContextID); err != nil {
+			h.blocked = true
+			fmt.Fprintln(os.Stderr, "resident context release failed:", err)
+		}
 	}
+	c.cancel()
 	if runErr != nil {
 		c.receipt.ContextState = "failed"
-		h.blocked = true
+		c.failed = true
 	} else {
 		c.receipt.ContextState = "detached"
 	}
-	h.receipts[len(h.receipts)-1] = c.receipt
+	for i := range h.receipts {
+		if h.receipts[i].ContextID == c.receipt.ContextID {
+			h.receipts[i] = c.receipt
+			break
+		}
+	}
 	if err := h.save(); err != nil {
+		c.failed = true
 		h.blocked = true
 		fmt.Fprintln(os.Stderr, "host receipt persistence failed:", err)
 	}
-	if !h.blocked {
+	if !c.failed {
 		c.lock.Close()
-		h.active = nil
+		delete(h.contexts, c.receipt.ContextID)
+		if h.budget != nil {
+			h.budget.Unregister(c.receipt.ContextID)
+		}
 	}
 }
 
@@ -545,7 +651,8 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 			}
 			// finish retains the current context when saving its detached receipt
 			// fails. Only earlier detached contexts are already durable.
-			if r.ContextState == "detached" && (h.active == nil || h.active.receipt.ContextID != r.ContextID) {
+			c := h.contexts[r.ContextID]
+			if r.ContextState == "detached" && c == nil {
 				if req.BinarySHA256 != r.BinarySHA256 || (req.BinarySHA256 != h.binarySHA && req.RequestID == "" && req.ContextID == "") {
 					return hostError("binary_mismatch", errors.New("historical readback requires the original binary and exact context or request identity"))
 				}
@@ -554,18 +661,18 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 			if req.BinarySHA256 != h.binarySHA {
 				return hostError("binary_mismatch", errors.New("client and host binaries differ"))
 			}
-			if h.blocked {
+			if h.blocked || (c != nil && c.failed) || (c == nil && r.ContextState != "detached") {
 				return hostResponse{r, "unknown_effect", "prior context is unresolved; no replay was attempted"}
 			}
 			if req.Operation == "status" || r.ContextState == "detached" {
 				return hostResponse{r, "ok", ""}
 			}
-			if h.active == nil || h.active.receipt.ContextID != r.ContextID {
+			if c == nil {
 				return hostResponse{r, "stale_context", "context is no longer owned by this host"}
 			}
 			releaseCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
-			if err := h.active.runtime.Release(releaseCtx); err != nil {
+			if err := c.runtime.Release(releaseCtx); err != nil {
 				status := "unknown_effect"
 				if errors.Is(err, loop.ErrReleaseBusy) {
 					status = "busy"
@@ -573,12 +680,12 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 				return hostResponse{r, status, err.Error()}
 			}
 			select {
-			case err := <-h.active.done:
-				h.finish(err)
+			case err := <-c.done:
+				h.finish(c, err)
 			case <-releaseCtx.Done():
 				return hostResponse{r, "unknown_effect", releaseCtx.Err().Error()}
 			}
-			if h.blocked {
+			if h.blocked || c.failed {
 				return hostResponse{h.receipts[i], "unknown_effect", "context cleanup or receipt persistence failed"}
 			}
 			return hostResponse{h.receipts[i], "ok", ""}
@@ -598,10 +705,11 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 		if r.ProjectDir != req.ProjectDir || r.ConfigSHA256 != req.ConfigSHA256 || r.Mode != req.Mode {
 			return hostError("refused", errors.New("request identity has conflicting bindings"))
 		}
-		if h.active != nil && h.active.receipt.RequestID == req.RequestID && hostDigest([]byte(strings.Join(req.Environment, "\x00"))) != h.active.environmentSHA {
+		c := h.contexts[r.ContextID]
+		if c != nil && hostDigest([]byte(strings.Join(req.Environment, "\x00"))) != c.environmentSHA {
 			return hostResponse{r, "busy", "request environment differs from active context"}
 		}
-		if h.blocked {
+		if h.blocked || (c != nil && c.failed) || (c == nil && r.ContextState != "detached") {
 			return hostResponse{r, "unknown_effect", "original request has an unresolved context"}
 		}
 		return hostResponse{r, "ok", ""}
@@ -609,52 +717,16 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 	if h.blocked {
 		return hostError("unknown_effect", errors.New("prior active or failed context requires readback; attach refused"))
 	}
-	if h.active != nil {
-		old := h.active.request
-		if req.RequestID == old.RequestID && req.Operation == "attach" && req.ProjectDir == old.ProjectDir && req.ConfigSHA256 == old.ConfigSHA256 && req.Mode == old.Mode && hostDigest([]byte(strings.Join(req.Environment, "\x00"))) == h.active.environmentSHA {
-			return hostResponse{h.active.receipt, "ok", ""}
-		}
-		return hostResponse{h.active.receipt, "busy", "host already has an attached context"}
+	if len(h.contexts) >= 16 {
+		return hostError("busy", errors.New("host context limit reached (16)"))
 	}
-	return h.attach(ctx, req)
-}
+	for _, c := range h.contexts {
+		if c.receipt.ProjectDir == req.ProjectDir {
+			return hostResponse{c.receipt, "busy", "project already has an attached context"}
+		}
+	}
 
-func swapHostEnvironment(dir string, environment []string) (func() error, error) {
-	oldDir, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-	oldEnv := os.Environ()
-	restore := func() error {
-		os.Clearenv()
-		for _, entry := range oldEnv {
-			key, value, ok := strings.Cut(entry, "=")
-			if ok {
-				if err := os.Setenv(key, value); err != nil {
-					return err
-				}
-			}
-		}
-		return os.Chdir(oldDir)
-	}
-	for _, entry := range environment {
-		key, _, ok := strings.Cut(entry, "=")
-		if !ok || key == "" || strings.ContainsRune(entry, 0) {
-			return nil, errors.New("invalid context environment")
-		}
-	}
-	if err = os.Chdir(dir); err != nil {
-		return nil, err
-	}
-	os.Clearenv()
-	for _, entry := range environment {
-		key, value, _ := strings.Cut(entry, "=")
-		if err = os.Setenv(key, value); err != nil {
-			_ = restore()
-			return nil, err
-		}
-	}
-	return restore, nil
+	return h.attach(ctx, req)
 }
 
 func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
@@ -703,19 +775,21 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 			}
 		}
 	}
-	restore, err := swapHostEnvironment(req.ProjectDir, req.Environment)
+	e, err := execution.New(req.ProjectDir, req.Environment)
 	if err != nil {
 		return hostError("refused", err)
 	}
-	keepEnvironment := false
-	defer func() {
-		if !keepEnvironment {
-			if err := restore(); err != nil {
-				h.blocked = true
-			}
-		}
-	}()
+	if err = validateHostEnvironment(e); err != nil {
+		return hostError("refused", err)
+	}
+	if err = hostRecoveryPreflight(runtimeDir); err != nil {
+		return hostError("unknown_effect", err)
+	}
 	cfg, err := config.Parse(data)
+	if err != nil {
+		return hostError("refused", err)
+	}
+	cfg, err = config.Bind(cfg, e)
 	if err != nil {
 		return hostError("refused", err)
 	}
@@ -730,6 +804,10 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 	if shouldStartServer(cfg.Server) {
 		return hostError("refused", errors.New("host contexts require server.enabled=false"))
 	}
+	remote := slices.Contains(cfg.AvailableRuntimes(), "sprites") || slices.Contains(cfg.AvailableRuntimes(), "cursor") || cfg.Runtime.Default == "sprites" || cfg.Runtime.Default == "cursor"
+	if remote {
+		return hostError("refused", errors.New("shared host does not support remote runtimes without confirmed remote completion"))
+	}
 	id, err := hostID()
 	if err != nil {
 		return hostError("refused", err)
@@ -741,27 +819,32 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 		return hostError("refused", err)
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	rt := h.newRuntime(req.ProjectDir, h.binaryPath, cfg, loop.Dependencies{ModeOverride: state.RunMode(req.Mode)})
+	rt := h.newRuntime(req.ProjectDir, h.binaryPath, cfg, loop.Dependencies{ModeOverride: state.RunMode(req.Mode), Execution: e, Admission: h.budget, AdmissionContext: id})
 	environmentSHA := hostDigest([]byte(strings.Join(req.Environment, "\x00")))
 	req.Environment = nil
-	c := &hostContext{receipt: r, request: req, runtime: rt, done: make(chan error, 1), cancel: cancel, lock: lock, restore: restore, environmentSHA: environmentSHA}
-	h.active = c
+	c := &hostContext{receipt: r, request: req, runtime: rt, done: make(chan error, 1), cancel: cancel, lock: lock, environmentSHA: environmentSHA}
+	if h.contexts == nil {
+		h.contexts = make(map[string]*hostContext)
+	}
+	h.contexts[id] = c
+	if h.budget != nil {
+		h.budget.Register(id)
+	}
 	keepLock = true
-	keepEnvironment = true
 	if req.Operation == "once" {
 		err = rt.Cycle(runCtx)
 		if err == nil {
 			err = rt.FinishOnce()
 		}
 		cancel()
-		h.finish(err)
+		h.finish(c, err)
 		if err != nil {
-			return hostResponse{h.receipts[len(h.receipts)-1], "failed", err.Error()}
+			return hostResponse{c.receipt, "failed", err.Error()}
 		}
-		if h.blocked {
-			return hostResponse{h.receipts[len(h.receipts)-1], "unknown_effect", "context cleanup or receipt persistence failed"}
+		if h.blocked || c.failed {
+			return hostResponse{c.receipt, "unknown_effect", "context cleanup or receipt persistence failed"}
 		}
-		return hostResponse{h.receipts[len(h.receipts)-1], "ok", ""}
+		return hostResponse{c.receipt, "ok", ""}
 	}
 	go func() {
 		err := rt.Run(runCtx)
@@ -769,6 +852,12 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 			err = runCtx.Err()
 		}
 		c.done <- err
+		if h.completed != nil {
+			select {
+			case h.completed <- id:
+			case <-ctx.Done():
+			}
+		}
 	}()
 	select {
 	case <-rt.Ready():
@@ -777,8 +866,8 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 		if err == nil {
 			err = errors.New("loop exited before becoming ready")
 		}
-		h.finish(err)
-		return hostResponse{h.receipts[len(h.receipts)-1], "failed", err.Error()}
+		h.finish(c, err)
+		return hostResponse{c.receipt, "failed", err.Error()}
 	case <-time.After(30 * time.Second):
 		return hostResponse{r, "unknown_effect", "loop startup has not completed; use status"}
 	}

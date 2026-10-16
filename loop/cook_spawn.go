@@ -2,13 +2,14 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/ingest"
 	"github.com/poteto/noodle/internal/stringx"
 	loopruntime "github.com/poteto/noodle/runtime"
@@ -42,6 +43,17 @@ func (l *Loop) atMaxConcurrency() bool {
 }
 
 func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Order, opts spawnOptions) error {
+	runtimeName := nonEmpty(cand.Stage.Runtime, "process")
+	if isScheduleStage(cand.Stage) {
+		runtimeName = l.config.Runtime.Default
+	}
+	if err := l.requireProcessOrder(runtimeName, cand.OrderID); err != nil {
+		return err
+	}
+	return l.withAdmission(ctx, runtimeName, func(ctx context.Context) error { return l.spawnCookAdmitted(ctx, cand, order, opts) })
+}
+
+func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, order Order, opts spawnOptions) error {
 	if isScheduleStage(cand.Stage) {
 		return l.spawnSchedule(ctx, order, opts.attempt, opts.resume)
 	}
@@ -60,6 +72,10 @@ func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Orde
 
 	name := cookBaseName(cand.OrderID, cand.StageIndex, stage.TaskKey)
 
+	preserveReview, err := l.localTaskRevisionForDispatch(cand, opts.attempt)
+	if err != nil {
+		return err
+	}
 	created, err := l.ensureWorktree(name)
 	if err != nil {
 		return fmt.Errorf("create worktree %s: %w", name, err)
@@ -78,10 +94,10 @@ func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Orde
 	}
 	worktreePath := l.worktreePath(name)
 	if !created {
-		if opts.attempt > 0 && interruption == nil {
-			resetWorktreeState(worktreePath)
+		if opts.attempt > 0 && interruption == nil && !preserveReview {
+			resetWorktreeState(worktreePath, l.deps.Execution)
 		}
-		if hint := worktreeResumeContext(worktreePath, name); hint != "" {
+		if hint := worktreeResumeContext(worktreePath, name, l.deps.Execution); hint != "" {
 			resumePrompt = stringx.JoinNonEmpty("\n\n", hint, resumePrompt)
 		}
 	}
@@ -108,7 +124,7 @@ func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Orde
 	}
 	attemptID := dispatchAttemptID(cand.OrderID, cand.StageIndex, opts.attempt)
 	if interruption != nil {
-		if err := offerInterruptionDispatch(l.projectDir, *interruption, attemptID); err != nil {
+		if err := offerInterruptionDispatch(l.projectDir, *interruption, attemptID, l.deps.Execution); err != nil {
 			return err
 		}
 	}
@@ -121,7 +137,7 @@ func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Orde
 	session, fallbackOutcome, err := l.dispatchSession(ctx, req)
 	if err != nil {
 		if interruption != nil {
-			return fmt.Errorf("interruption dispatch outcome requires readback: %w", err)
+			return fmt.Errorf("interruption dispatch outcome unresolved; readback pending: %w", err)
 		}
 		return l.handleCookDispatchFailure(cand, stage, name, created, attemptID, err)
 	}
@@ -189,6 +205,10 @@ func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Orde
 }
 
 func (l *Loop) dispatchSession(ctx context.Context, req loopruntime.DispatchRequest) (loopruntime.SessionHandle, RuntimeFallbackOutcome, error) {
+	if l.deps.Admission != nil && ctx.Value(admissionKey{}) == nil {
+		return nil, RuntimeFallbackOutcome{}, fmt.Errorf("worker dispatch lacks original resource admission")
+	}
+	req.RequireGroupExit = l.deps.Admission != nil
 	runtimeName := stringx.Normalize(req.Runtime)
 	if runtimeName == "" {
 		runtimeName = stringx.Normalize(l.config.Runtime.Default)
@@ -197,6 +217,9 @@ func (l *Loop) dispatchSession(ctx context.Context, req loopruntime.DispatchRequ
 		runtimeName = "process"
 	}
 
+	if err := l.requireProcessOrder(runtimeName, req.EnvVars["NOODLE_ORDER_ID"]); err != nil {
+		return nil, RuntimeFallbackOutcome{}, err
+	}
 	runtime := l.deps.Runtimes[runtimeName]
 	if runtime == nil {
 		notConfigured := newRuntimeNotConfiguredError(runtimeName)
@@ -206,10 +229,17 @@ func (l *Loop) dispatchSession(ctx context.Context, req loopruntime.DispatchRequ
 	req.Runtime = runtimeName
 	session, err := runtime.Dispatch(ctx, req)
 	if err == nil {
+		session = l.retainDispatched(ctx, session)
 		return session, RuntimeFallbackOutcome{}, nil
 	}
 	if runtimeName != "process" {
+		if l.deps.Admission != nil {
+			return nil, RuntimeFallbackOutcome{}, l.retainUnknownDispatch(ctx, err)
+		}
 		if fallback := l.deps.Runtimes["process"]; fallback != nil {
+			if err := l.requireProcessOrder("process", req.EnvVars["NOODLE_ORDER_ID"]); err != nil {
+				return nil, RuntimeFallbackOutcome{}, err
+			}
 			l.logger.Warn("runtime dispatch failed, falling back to process", "runtime", runtimeName, "error", err)
 			req.Runtime = "process"
 			req.DispatchWarning = fmt.Sprintf("%s dispatch failed: %v", runtimeName, err)
@@ -223,6 +253,7 @@ func (l *Loop) dispatchSession(ctx context.Context, req loopruntime.DispatchRequ
 			if fallbackErr != nil {
 				return nil, outcome, classifyAgentStartFailure("process", fallbackErr)
 			}
+			fallbackSession = l.retainDispatched(ctx, fallbackSession)
 			return fallbackSession, outcome, nil
 		}
 	}
@@ -230,6 +261,9 @@ func (l *Loop) dispatchSession(ctx context.Context, req loopruntime.DispatchRequ
 }
 
 func (l *Loop) handleCookDispatchFailure(cand dispatchCandidate, stage Stage, worktreeName string, created bool, attemptID string, err error) error {
+	if errors.Is(err, errDispatchUnknown) {
+		return err
+	}
 	if created {
 		_ = l.deps.Worktree.Cleanup(worktreeName, worktree.CleanupOpts{Force: true})
 	}
@@ -286,14 +320,14 @@ func (l *Loop) worktreePath(name string) string {
 // agent starts from a clean working tree. Committed progress on the worktree
 // branch is preserved. Errors are logged but not fatal — a dirty worktree is
 // better than failing to dispatch.
-func resetWorktreeState(worktreePath string) {
+func resetWorktreeState(worktreePath string, execCtx ...*execution.Context) {
 	// Reset tracked files to HEAD.
-	checkout := exec.Command("git", "-C", worktreePath, "checkout", ".")
+	checkout := boundGitCommand(firstExecution(execCtx), worktreePath, "-C", worktreePath, "checkout", ".")
 	checkout.Stdout, checkout.Stderr = nil, nil
 	_ = checkout.Run()
 
 	// Remove untracked files and directories.
-	clean := exec.Command("git", "-C", worktreePath, "clean", "-fd")
+	clean := boundGitCommand(firstExecution(execCtx), worktreePath, "-C", worktreePath, "clean", "-fd")
 	clean.Stdout, clean.Stderr = nil, nil
 	_ = clean.Run()
 }

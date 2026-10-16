@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/orderx"
 	"github.com/poteto/noodle/internal/reducer"
 	"github.com/poteto/noodle/internal/state"
@@ -27,9 +27,9 @@ type candidateManifest struct {
 	Files       map[string]candidateFile `json:"files"`
 }
 
-func candidateGit(path string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", append([]string{"-C", path}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+func candidateGitWithExecution(executionContext *execution.Context, path string, args ...string) ([]byte, error) {
+	cmd := boundGitCommand(executionContext, path, append([]string{"-C", path}, args...)...)
+	cmd.Env = append(cmd.Env, "GIT_OPTIONAL_LOCKS=0")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("candidate git %v: %w", args, err)
@@ -37,7 +37,7 @@ func candidateGit(path string, args ...string) ([]byte, error) {
 	return out, nil
 }
 
-func captureCandidate(project, name string) (candidateManifest, string, string, error) {
+func captureCandidate(project, name string, execCtx ...*execution.Context) (candidateManifest, string, string, error) {
 	m := candidateManifest{Files: map[string]candidateFile{}}
 	if name == "" || name == "." || filepath.Base(name) != name {
 		return m, "", "", fmt.Errorf("invalid worktree name")
@@ -47,27 +47,27 @@ func captureCandidate(project, name string) (candidateManifest, string, string, 
 	if err != nil || root != path {
 		return m, "", "", fmt.Errorf("candidate worktree path differs")
 	}
-	top, err := publicationGit(path, "rev-parse", "--show-toplevel")
+	top, err := publicationGitWithExecution(firstExecution(execCtx), path, "rev-parse", "--show-toplevel")
 	if err != nil || top != path {
 		return m, "", "", fmt.Errorf("candidate is not a linked checkout")
 	}
-	owner, err := publicationGit(project, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	owner, err := publicationGitWithExecution(firstExecution(execCtx), project, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return m, "", "", err
 	}
-	common, err := publicationGit(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	common, err := publicationGitWithExecution(firstExecution(execCtx), path, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil || common != owner {
 		return m, "", "", fmt.Errorf("candidate repository differs")
 	}
-	branch, err := publicationGit(path, "symbolic-ref", "--short", "HEAD")
+	branch, err := publicationGitWithExecution(firstExecution(execCtx), path, "symbolic-ref", "--short", "HEAD")
 	if err != nil || (branch != name && branch != "noodle/"+name) {
 		return m, "", "", fmt.Errorf("candidate branch differs")
 	}
-	head, err := exactPublicationObject(path, "HEAD")
+	head, err := exactPublicationObject(path, "HEAD", firstExecution(execCtx))
 	if err != nil {
 		return m, "", "", err
 	}
-	registration, err := publicationGit(project, "worktree", "list", "--porcelain")
+	registration, err := publicationGitWithExecution(firstExecution(execCtx), project, "worktree", "list", "--porcelain")
 	if err != nil {
 		return m, "", "", err
 	}
@@ -83,12 +83,12 @@ func captureCandidate(project, name string) (candidateManifest, string, string, 
 	if !found {
 		return m, "", "", fmt.Errorf("candidate registration missing")
 	}
-	index, err := candidateGit(path, "ls-files", "--stage", "-z")
+	index, err := candidateGitWithExecution(firstExecution(execCtx), path, "ls-files", "--stage", "-z")
 	if err != nil {
 		return m, "", "", err
 	}
 	m.IndexSHA256 = publicationDigest(index)
-	names, err := candidateGit(path, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+	names, err := candidateGitWithExecution(firstExecution(execCtx), path, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return m, "", "", err
 	}
@@ -146,7 +146,7 @@ func interruptionSubject(prompt, subject string) (string, error) {
 	return p.Envelope, nil
 }
 
-func captureInterruption(project, orderID, subject string) (interruptionIntent, error) {
+func captureInterruption(project, orderID, subject string, execCtx ...*execution.Context) (interruptionIntent, error) {
 	var i interruptionIntent
 	dir := filepath.Join(project, ".noodle")
 	raw, err := readAdmissionFile(filepath.Join(dir, "state.snapshot.json"))
@@ -180,7 +180,7 @@ func captureInterruption(project, orderID, subject string) (interruptionIntent, 
 	if err != nil {
 		return i, err
 	}
-	remote, err := publicationGit(project, "remote", "get-url", "origin")
+	remote, err := publicationGitWithExecution(firstExecution(execCtx), project, "remote", "get-url", "origin")
 	if err != nil {
 		return i, err
 	}
@@ -276,7 +276,7 @@ func captureInterruption(project, orderID, subject string) (interruptionIntent, 
 	if loopruntime.ReadSessionTarget(promptPath) != orderID || !strings.Contains(string(originalPrompt), stage.Prompt) {
 		return i, fmt.Errorf("original session prompt does not contain admitted order and stage")
 	}
-	c.CandidateManifest, c.Branch, c.Head, err = captureCandidate(project, c.WorktreeName)
+	c.CandidateManifest, c.Branch, c.Head, err = captureCandidate(project, c.WorktreeName, firstExecution(execCtx))
 	if err != nil {
 		return i, err
 	}
@@ -399,4 +399,7 @@ func validateHistoricalScheduleSession(project, sessionDir string) error {
 		return fmt.Errorf("schedule prompt differs from spawn skill")
 	}
 	return nil
+}
+func candidateGit(path string, args ...string) ([]byte, error) {
+	return candidateGitWithExecution(nil, path, args...)
 }

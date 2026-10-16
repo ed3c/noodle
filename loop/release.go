@@ -40,6 +40,9 @@ func (l *Loop) Release(ctx context.Context) error {
 }
 
 func (l *Loop) releaseIfQuiescent() error {
+	if l.resourceUnknown != nil {
+		return l.resourceUnknown
+	}
 	if len(l.cooks.activeCooksByOrder) != 0 || len(l.cooks.adoptedSessions) != 0 ||
 		len(l.cooks.adoptedTargets) != 0 || l.bootstrapInFlight != nil || l.watcherCount.Load() != 0 {
 		return fmt.Errorf("%w: workers are active", ErrReleaseBusy)

@@ -1,11 +1,14 @@
 package worktree
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/poteto/noodle/internal/execution"
 )
 
 // DiffResult holds the unified diff and diffstat for a worktree branch.
@@ -44,7 +47,12 @@ func DiffWorktree(worktreePath string) (DiffResult, error) {
 // discoverBaseBranch returns the default branch name from origin/HEAD,
 // falling back to "main" on any error.
 func discoverBaseBranch(repoPath string) string {
-	ref, err := gitOutput(repoPath, "symbolic-ref", "refs/remotes/origin/HEAD")
+	return discoverBaseBranchWithExecution(repoPath, execution.Capture(repoPath))
+}
+
+func discoverBaseBranchWithExecution(repoPath string, e *execution.Context) string {
+	out, err := e.Command(context.Background(), repoPath, "git", "symbolic-ref", "refs/remotes/origin/HEAD").Output()
+	ref := strings.TrimSpace(string(out))
 	if err != nil {
 		return "main"
 	}

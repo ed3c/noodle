@@ -586,7 +586,7 @@ func TestCycleMergeFailureForwardsToSchedulerWithoutCrashing(t *testing.T) {
 	}
 	rt.sessions[0].complete("completed")
 
-	// Merge failure should be handled as a stage failure and forwarded to the
+	// Merge failure should preserve review custody and be forwarded to the
 	// scheduler, not returned as a fatal loop cycle error.
 	if err := l.Cycle(context.Background()); err != nil {
 		t.Fatalf("completion cycle should not crash on merge failure: %v", err)
@@ -600,19 +600,19 @@ func TestCycleMergeFailureForwardsToSchedulerWithoutCrashing(t *testing.T) {
 	for _, order := range updatedOrders.Orders {
 		if order.ID == "42" {
 			found = true
-			if order.Status != OrderStatusFailed {
-				t.Fatalf("order status = %q, want %q", order.Status, OrderStatusFailed)
+			if order.Status != OrderStatusActive {
+				t.Fatalf("order status = %q, want %q", order.Status, OrderStatusActive)
 			}
-			if got := order.Stages[0].Status; got != StageStatusFailed {
-				t.Fatalf("stage status = %q, want %q", got, StageStatusFailed)
+			if got := order.Stages[0].Status; got != StageStatusActive {
+				t.Fatalf("stage status = %q, want %q", got, StageStatusActive)
 			}
 		}
 	}
 	if !found {
 		t.Fatal("order 42 should remain in orders.json after merge failure")
 	}
-	if _, ok := l.cooks.pendingReview["42"]; ok {
-		t.Fatal("non-conflict merge failure should not park pending review")
+	if _, ok := l.cooks.pendingReview["42"]; !ok {
+		t.Fatal("merge failure lost pending review")
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -637,8 +637,8 @@ func TestCycleMergeFailureForwardsToSchedulerWithoutCrashing(t *testing.T) {
 	if !strings.Contains(ctrl.lastSentMessage, "root checkout has uncommitted changes") {
 		t.Fatalf("scheduler message = %q, want root-cleanliness error", ctrl.lastSentMessage)
 	}
-	if !strings.Contains(ctrl.lastSentMessage, "Use Skill(schedule) and create a new order to fix this issue before retrying.") {
-		t.Fatalf("scheduler message = %q, want Skill(schedule) remediation hint", ctrl.lastSentMessage)
+	if len(wt.cleaned) != 0 {
+		t.Fatal("merge failure deleted candidate")
 	}
 }
 

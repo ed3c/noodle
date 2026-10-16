@@ -270,6 +270,10 @@ func restoreEffectLedger(records []reducer.EffectLedgerRecord) *reducer.EffectLe
 		case reducer.EffectLedgerRunning:
 			_ = ledger.MarkRunning(rec.EffectID)
 		case reducer.EffectLedgerDone:
+			if rec.Result != nil && rec.Result.Status == reducer.EffectResultCancelled && rec.Attempts == 0 {
+				_ = ledger.CancelPending(rec.EffectID, rec.Result.Error, rec.Result.Timestamp)
+				continue
+			}
 			_ = ledger.MarkRunning(rec.EffectID)
 			result := rec.Result
 			if result == nil {
@@ -394,6 +398,9 @@ func (l *Loop) syncCanonicalOrderFromLegacyAt(order Order, sequence int) {
 			ExtraPrompt: strings.TrimSpace(stage.ExtraPrompt),
 		}
 		if i < len(node.Stages) {
+			if review, ok := l.canonical.PendingReviews[order.ID]; ok && review.StageIndex == i && node.Stages[i].Status == state.StageReview && stage.Status == StageStatusActive {
+				stageNode.Status = state.StageReview
+			}
 			stageNode.Attempts = slices.Clone(node.Stages[i].Attempts)
 			if node.Stages[i].Merge != nil {
 				mergeCopy := *node.Stages[i].Merge
