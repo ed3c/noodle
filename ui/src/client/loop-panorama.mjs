@@ -748,7 +748,7 @@ export function mountPanorama(
         detailPanel.open = false;
         updatePosition();
         onReset?.();
-        journey.scrollIntoView({ block: "start" });
+        root.querySelector(".lp-journey")?.scrollIntoView({ block: "start" });
       }),
       el("span", run ? `${run.repository} / ${run.id.slice(0, 12)}` : "Goal / 全部適用路徑"),
     );
@@ -896,7 +896,7 @@ export function mountPanorama(
         view.selection = null;
         openRun(row.run_id);
         onFocus({ node_ids: row.node_ids, edge_ids: row.edge_ids, reveal: false });
-        detailPanel.scrollIntoView({ block: "start" });
+        root.querySelector(".lp-detail")?.scrollIntoView({ block: "start" });
       }),
     );
     const failures = row.findings.filter((f) => f.status === "failed");
@@ -943,7 +943,7 @@ export function mountPanorama(
         button(`${row.run_id.slice(0, 12)} · 開啟路徑`, () => {
           view.selection = null;
           openRun(row.run_id);
-          detailPanel.scrollIntoView({ block: "start" });
+          root.querySelector(".lp-detail")?.scrollIntoView({ block: "start" });
         }),
       );
     }
