@@ -115,5 +115,10 @@
     // CodeHighlight needs dangerouslySetInnerHTML for rendered syntax HTML
     "react/no-danger": "off"
   },
+  "overrides": [{
+    "files": ["**/loop-panorama.test.mjs"],
+    "env": {"node": true},
+    "rules": {"import/no-nodejs-modules": "off"}
+  }],
   "ignorePatterns": ["**/routeTree.gen.ts"]
 }

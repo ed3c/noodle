@@ -8,8 +8,9 @@ import { knownFailureFrontier } from "~/client/loop-graph-presentation";
 import { compareJSON, compareText } from "./LoopGraphComparison";
 
 afterEach(() => vi.unstubAllGlobals());
-function setup() {
+function setup(customize?: (view: ReturnType<typeof graphFixture>) => void) {
   const view = graphFixture();
+  customize?.(view);
   const fullView = structuredClone(view);
   for (const run of view.runs) {
     for (const stage of run.stages) {
@@ -52,7 +53,45 @@ function setup() {
   return { view, fetch, wrap, ...render(wrap()) };
 }
 describe("source-backed DAG interactions", () => {
+  it("expands native occurrences and opens typed handoffs in the existing comparison", async () => {
+    setup();
+    await userEvent.click(screen.getByText("深入 Session、提示詞型態與全部 P-class 節點"));
+    const detail = within(screen.getByLabelText("Session 與 P-class 細部全景"));
+    expect(await detail.findByLabelText("Session 與提示詞細部 DAG")).toBeVisible();
+    expect(detail.getByText(/未提供的 Session 工程判斷仍為 UNKNOWN/)).toBeVisible();
+    await userEvent.click(detail.getByText("#1 Handoff known · observed/unknown"));
+    expect(
+      required(
+        detail.getAllByText("prompt (application/json) → native_input (application/json)")[0],
+      ),
+    ).toBeVisible();
+    await userEvent.click(required(detail.getAllByRole("button", { name: "同窗比較這次傳遞" })[0]));
+    expect(
+      await within(screen.getByLabelText("選取內容比較")).findByText('{"value":2}'),
+    ).toBeVisible();
+    await userEvent.selectOptions(detail.getByLabelText("細部 Run"), "run2");
+    expect(detail.queryByText("#1 Handoff known · observed/unknown")).not.toBeInTheDocument();
+    expect(detail.getByRole("button", { name: "細部 cli · Invocation other" })).toBeVisible();
+  });
+  it("opens only the bound JSON field and keeps missing fields unknown", async () => {
+    const { view, wrap, rerender } = setup((value) => {
+      required(value.graph.nodes[0]).identity.locator = "/source/c.json#/value";
+    });
+    await userEvent.click(screen.getByRole("button", { name: /紀錄 Invocation first/ }));
+    const field = within(screen.getByLabelText("結構化欄位內容"));
+    expect(await field.findByText("2")).toBeVisible();
+    const next = structuredClone(view);
+    required(next.graph.nodes[0]).identity.locator = "/source/c.json#/missing";
+    rerender(wrap(next));
+    await userEvent.click(screen.getByRole("button", { name: "採用新版本" }));
+    await userEvent.click(screen.getByRole("button", { name: /紀錄 Invocation first/ }));
+    expect(
+      await within(screen.getByLabelText("結構化欄位內容")).findByText("欄位狀態：unknown"),
+    ).toBeVisible();
+  });
   it("shows new occurrences after adopting a newer snapshot from an object focus", async () => {
+    // jsdom has no layout scrolling; this mock is confined to the UI test environment.
+    // oxlint-disable-next-line no-extend-native
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -81,6 +120,8 @@ describe("source-backed DAG interactions", () => {
     expect(missing.getAllByText(/行為 Goal 驗收：UNKNOWN/)).toHaveLength(2);
   });
   it("opens original comparisons from the panorama and keeps relation controls after focus", async () => {
+    // jsdom has no layout scrolling; this mock is confined to the UI test environment.
+    // oxlint-disable-next-line no-extend-native
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),

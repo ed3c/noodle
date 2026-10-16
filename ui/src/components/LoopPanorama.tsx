@@ -12,7 +12,7 @@ export function LoopPanorama(
   }, [props]);
   const { graph, runs, runIds, goal } = props;
   useEffect(() => {
-    if (root.current)
+    if (root.current) {
       mountPanorama(root.current, {
         graph,
         runs,
@@ -22,6 +22,7 @@ export function LoopPanorama(
         onSelect: (value) => callbacks.current.onSelect(value),
         onFocus: (value) => callbacks.current.onFocus(value),
       });
+    }
   }, [graph, runs, runIds, goal]);
   useEffect(() => {
     root.current?.querySelectorAll<SVGElement>("[data-panorama-object]").forEach((node) => {

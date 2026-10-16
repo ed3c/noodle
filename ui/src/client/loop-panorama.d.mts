@@ -34,7 +34,16 @@ export function mountPanorama(
     graph: LoopGraph;
     runs: { id: string; repository: string; mode: string }[];
     onScope: (scope: WorkspaceScope) => void;
-    onSelect: (selection: { kind: "object" | "edge" | "node" | "finding"; id: string }) => void;
+    onSelect: (selection: {
+      kind: "object" | "edge" | "node" | "finding" | "artifact";
+      id: string;
+    }) => void;
     onFocus: (focus: PanoramaFocus) => void;
   },
 ): void;
+
+export function readStructuredField(
+  text: string,
+  locator: string | null,
+  sourcePath: string | null,
+): { pointer: string; status: string; text: string } | null;

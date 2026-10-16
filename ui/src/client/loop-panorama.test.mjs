@@ -1,16 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { projectPanorama } from "./loop-panorama.mjs";
+import { projectPanorama, projectRunDetail, readStructuredField } from "./loop-panorama.mjs";
+const node = (id, object_id, [run_id, repository_id]) => ({
+  id,
+  object_id,
+  run_id,
+  repository_id,
+  kind: "cli",
+  identity: { status: "observed" },
+  input_artifact_ids: [],
+  output_artifact_ids: [],
+  status: { execution: "completed", transfer: "input_recorded", acceptance: "unknown" },
+  evidence_artifact_ids: ["proof"],
+});
 function fixture() {
-  const node = (id, object_id, run_id, repository_id) => ({
-    id,
-    object_id,
-    run_id,
-    repository_id,
-    identity: { status: "observed" },
-    status: { execution: "completed", transfer: "input_recorded", acceptance: "unknown" },
-    evidence_artifact_ids: ["proof"],
-  });
   return {
     objects: [
       { id: "outer", namespace: "soodles.outer" },
@@ -18,10 +21,10 @@ function fixture() {
       { id: "loop", namespace: "soodles.loop" },
     ],
     nodes: [
-      node("a", "outer", "a", "repoA"),
-      node("b", "inner", "b", "repoB"),
-      node("c", "outer", "b", "repoB"),
-      node("unrelated", "inner", "c", "repoC"),
+      node("a", "outer", ["a", "repoA"]),
+      node("b", "inner", ["b", "repoB"]),
+      node("c", "outer", ["b", "repoB"]),
+      node("unrelated", "inner", ["c", "repoC"]),
     ],
     edges: [
       {
@@ -77,7 +80,7 @@ test("current scoped consumer review proves only its original boundary", () => {
     transfer: "output_reviewed",
     acceptance: "original_scoped_review_approved",
   };
-  const row = projectPanorama(g, ["b"]).rows[0];
+  const [row] = projectPanorama(g, ["b"]).rows;
   assert.equal(row.consumption.status, "observed");
   assert.deepEqual(row.consumption.edge_ids, ["bc"]);
   assert.equal(row.goal.status, "unknown");
@@ -126,4 +129,63 @@ test("stale payload cannot retain a current consumption claim", () => {
   g.nodes[2].status.acceptance = "original_scoped_review_approved";
   g.artifacts[0].status = "stale";
   assert.equal(projectPanorama(g, ["b"]).rows[0].consumption.status, "unknown");
+});
+
+test("detail exposes every P-class occurrence and bound instruction without fabricating execution", () => {
+  const g = fixture();
+  g.nodes[1].kind = "pclass";
+  g.nodes[1].identity.session_id = "native-session";
+  g.nodes[2].identity.session_id = "native-session";
+  g.nodes[2].input_artifact_ids = ["guide", "support"];
+  g.artifacts.push(
+    { id: "guide", role: "instruction", status: "not_public" },
+    { id: "support", role: "instruction", status: "available" },
+    { id: "unbound", role: "instruction", status: "available" },
+  );
+  const before = JSON.stringify(g);
+  const p = projectRunDetail(g, "b");
+  assert.deepEqual(
+    p.pclass_nodes.map((n) => n.id),
+    ["b"],
+  );
+  assert.deepEqual(
+    p.instructions.map((i) => i.artifact.id),
+    ["guide", "support"],
+  );
+  assert.deepEqual(p.instructions[0].node_ids, ["c"]);
+  assert.equal(p.sessions.find((s) => s.session_id === "native-session").nodes.length, 2);
+  assert.deepEqual(
+    p.edges.map((e) => e.id),
+    ["ab", "bc"],
+  );
+  assert.equal(JSON.stringify(g), before);
+});
+test("session names never merge across Run or repository and unknown identity stays unbound", () => {
+  const g = fixture();
+  g.nodes.forEach((n) => (n.identity.session_id = "same-name"));
+  g.nodes[2].identity.status = "unknown";
+  const p = projectRunDetail(g, "b");
+  assert.equal(p.sessions.length, 3);
+  assert.equal(p.sessions.filter((s) => s.session_id).length, 2);
+  assert.deepEqual(
+    p.sessions.find((s) => !s.session_id).nodes.map((n) => n.id),
+    ["c"],
+  );
+  assert.equal(
+    p.nodes.some((n) => n.id === "unrelated"),
+    false,
+  );
+});
+
+test("structured fields read only exact own source pointers, with missing and invalid data explicit", () => {
+  assert.deepEqual(
+    readStructuredField('{"a/b":{"~key":false}}', "/source.json#/a~1b/~0key", "/source.json"),
+    { pointer: "/a~1b/~0key", status: "available", text: "false" },
+  );
+  assert.equal(readStructuredField("{}", "/other.json#/next", "/source.json"), null);
+  assert.equal(
+    readStructuredField("{}", "/source.json#/__proto__", "/source.json").status,
+    "unknown",
+  );
+  assert.equal(readStructuredField("bad", "/source.json#/next", "/source.json").status, "unknown");
 });

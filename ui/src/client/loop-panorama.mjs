@@ -1,3 +1,5 @@
+import { layoutGraph } from "./loop-graph-layout.mjs";
+
 /** Read-only quotient of the original occurrence DAG. Never creates runtime edges. */
 export function projectPanorama(graph, runIds = null) {
   const selected = runIds === null ? new Set(graph.nodes.map((n) => n.run_id)) : new Set(runIds);
@@ -20,12 +22,16 @@ export function projectPanorama(graph, runIds = null) {
   const observed = (e) => recorded(e) && e.current_validity === "current";
   const relations = new Map();
   for (const edge of edges) {
-    if (edge.kind !== "handoff") continue;
+    if (edge.kind !== "handoff") {
+      continue;
+    }
     const from = nodeMap.get(edge.from_node_id),
       to = nodeMap.get(edge.to_node_id);
-    if (!from || !to) throw new Error("Panorama endpoint missing");
+    if (!from || !to) {
+      throw new Error("Panorama endpoint missing");
+    }
     const key = JSON.stringify([from.object_id, to.object_id]);
-    if (!relations.has(key))
+    if (!relations.has(key)) {
       relations.set(key, {
         id: key,
         from: from.object_id,
@@ -33,14 +39,17 @@ export function projectPanorama(graph, runIds = null) {
         edge_ids: [],
         current: 0,
       });
+    }
     const relation = relations.get(key);
     relation.edge_ids.push(edge.id);
-    if (observed(edge)) relation.current++;
+    if (observed(edge)) {
+      relation.current++;
+    }
   }
-  const rows = [...selected].sort().map((run_id) => {
+  const rows = [...selected].toSorted().map((run_id) => {
     const ownNodes = nodes.filter((n) => n.run_id === run_id);
     const ownEdges = edges.filter((e) => e.run_id === run_id);
-    const current = ownEdges.filter(observed);
+    const current = ownEdges.filter((edge) => observed(edge));
     const consumed = current.filter((e) => {
       const target = nodeMap.get(e.to_node_id);
       return (
@@ -50,15 +59,18 @@ export function projectPanorama(graph, runIds = null) {
     });
     // The original producer only attaches this set after candidate/feedback/ACK/attempt checks.
     const feedback = ownEdges.filter((e) => {
-      if (!recorded(e)) return false;
+      if (!recorded(e)) {
+        return false;
+      }
       const from = nodeMap.get(e.from_node_id),
         to = nodeMap.get(e.to_node_id);
       if (
         graph.objects.find((o) => o.id === from.object_id)?.namespace !== "soodles.loop" ||
         graph.objects.find((o) => o.id === to.object_id)?.namespace !== "noodle.inner" ||
         to.kind !== "cli"
-      )
+      ) {
         return false;
+      }
       const roles = new Set(e.evidence_artifact_ids.map((id) => artifacts.get(id)?.role));
       return ["review_candidate", "review_feedback", "control_ack", "native_spawn"].every((role) =>
         roles.has(role),
@@ -84,13 +96,13 @@ export function projectPanorama(graph, runIds = null) {
       ],
       cross_repository: ownEdges.some((e) => e.scope === "cross_repository"),
       consumption: {
-        status: consumed.length ? "observed" : "unknown",
+        status: consumed.length > 0 ? "observed" : "unknown",
         edge_ids: consumed.map((e) => e.id),
       },
       feedback: {
-        status: feedback.length ? "observed" : "unknown",
+        status: feedback.length > 0 ? "observed" : "unknown",
         edge_ids: feedback.map((e) => e.id),
-        current: feedback.length > 0 && feedback.every(observed),
+        current: feedback.length > 0 && feedback.every((edge) => observed(edge)),
       },
       goal: { status: "unknown", node_ids: scopedReviews.map((n) => n.id) },
       findings: graph.findings.filter((f) => f.run_id === run_id),
@@ -99,7 +111,7 @@ export function projectPanorama(graph, runIds = null) {
   return {
     nodes,
     edges,
-    relations: [...relations.values()].sort((a, b) => a.id.localeCompare(b.id)),
+    relations: [...relations.values()].toSorted((a, b) => a.id.localeCompare(b.id)),
     rows,
     context_run_ids: [
       ...new Set(nodes.filter((n) => !selected.has(n.run_id)).map((n) => n.run_id)),
@@ -107,11 +119,85 @@ export function projectPanorama(graph, runIds = null) {
   };
 }
 
+/** Presentation groups preserve native identity and never mint Session/P-class occurrences. */
+export function projectRunDetail(graph, runId) {
+  const scope = projectPanorama(graph, [runId]);
+  const sessions = new Map();
+  for (const node of scope.nodes) {
+    const { identity } = node;
+    const session = identity.status === "observed" ? identity.session_id : null;
+    const key = JSON.stringify([node.run_id, node.repository_id, session || null]);
+    if (!sessions.has(key)) {
+      sessions.set(key, {
+        run_id: node.run_id,
+        repository_id: node.repository_id,
+        session_id: session || null,
+        nodes: [],
+      });
+    }
+    sessions.get(key).nodes.push(node);
+  }
+  const references = new Map();
+  for (const node of scope.nodes) {
+    for (const id of [
+      ...node.input_artifact_ids,
+      ...node.output_artifact_ids,
+      ...node.evidence_artifact_ids,
+    ]) {
+      if (!references.has(id)) {
+        references.set(id, []);
+      }
+      references.get(id).push(node.id);
+    }
+  }
+  return {
+    ...scope,
+    sessions: [...sessions.values()],
+    pclass_nodes: scope.nodes.filter((n) => n.kind === "pclass"),
+    instructions: graph.artifacts
+      .filter((a) => a.role === "instruction" && references.has(a.id))
+      .map((artifact) => ({ artifact, node_ids: [...new Set(references.get(artifact.id))] })),
+  };
+}
+
+/** Resolve only a source-bound JSON pointer from already verified artifact content. */
+export function readStructuredField(text, locator, sourcePath) {
+  if (!locator || !sourcePath || !locator.startsWith(`${sourcePath}#/`)) {
+    return null;
+  }
+  const pointer = locator.slice(sourcePath.length + 1);
+  try {
+    let value = JSON.parse(text);
+    for (const token of pointer.slice(1).split("/")) {
+      if (/~(?![01])/u.test(token)) {
+        return { pointer, status: "unknown", text: "無效 JSON pointer" };
+      }
+      const key = token.replaceAll("~1", "/").replaceAll("~0", "~");
+      if (value === null || typeof value !== "object" || !Object.hasOwn(value, key)) {
+        return { pointer, status: "unknown", text: "原來源未提供此欄位" };
+      }
+      value = value[key];
+    }
+    return { pointer, status: "available", text: JSON.stringify(value, null, 2) };
+  } catch {
+    return { pointer, status: "unknown", text: "原來源不是可解析 JSON" };
+  }
+}
+
 const ns = "http://www.w3.org/2000/svg";
-function el(tag, text, attrs = {}, svg = false) {
-  const node = svg ? document.createElementNS(ns, tag) : document.createElement(tag);
-  if (text != null) node.textContent = text;
-  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+function el(tag, text, attrs = {}) {
+  return decorate(document.createElement(tag), text, attrs);
+}
+function svgEl(tag, text, attrs = {}) {
+  return decorate(document.createElementNS(ns, tag), text, attrs);
+}
+function decorate(node, text, attrs) {
+  if (text !== null && text !== undefined) {
+    node.textContent = text;
+  }
+  for (const [key, value] of Object.entries(attrs)) {
+    node.setAttribute(key, String(value));
+  }
   return node;
 }
 function button(text, action, attrs = {}) {
@@ -136,17 +222,17 @@ export function mountPanorama(
   root.replaceChildren();
   root.classList.add("lp-panel");
   const header = el("header"),
-    title = el("h2", goal || "全機總覽 · 尚未選定行為目標");
+    pageTitle = el("h2", goal || "全機總覽 · 尚未選定行為目標");
   header.append(
     el("p", "WORKSPACE / LOOP PANORAMA", { class: "lp-eyebrow" }),
-    title,
+    pageTitle,
     el("p", "上層看責任物件與回饋關係，下層展開原始執行 DAG。彙總圖中的環不代表同一次執行已閉環。"),
   );
   root.append(header);
   const scope = el("details", null, { class: "lp-scope" });
   scope.append(el("summary", `工作範圍 · ${runIds === null ? "全部" : runIds.length} Runs`));
-  const label = el("label", "行為目標 "),
-    input = el("input", null, { "aria-label": "Workspace 行為目標", maxlength: 240 });
+  const label = el("label", "行為目標 ");
+  const input = el("input", null, { "aria-label": "Workspace 行為目標", maxlength: 240 });
   input.value = goal;
   label.append(input);
   scope.append(label);
@@ -163,7 +249,7 @@ export function mountPanorama(
   scope.append(
     button("套用工作範圍", () => {
       const ids = checkboxes.filter((b) => b.checked).map((b) => b.value);
-      if (!input.value.trim() || !ids.length) {
+      if (!input.value.trim() || ids.length === 0) {
         error.textContent = "請命名行為目標並選取至少一個 Run。";
         return;
       }
@@ -173,7 +259,7 @@ export function mountPanorama(
     error,
   );
   root.append(scope);
-  if (model.context_run_ids.length)
+  if (model.context_run_ids.length > 0) {
     root.append(
       el(
         "p",
@@ -181,32 +267,27 @@ export function mountPanorama(
         { class: "lp-note" },
       ),
     );
-  const objects = [...graph.objects].sort((a, b) => a.namespace.localeCompare(b.namespace));
-  const width = Math.max(900, objects.length * 175 + 40),
-    height = 320;
+  }
+  const objects = [...graph.objects].toSorted((a, b) => a.namespace.localeCompare(b.namespace));
+  const width = Math.max(900, objects.length * 175 + 40);
+  const height = 320;
   const scroll = el("div", null, { class: "lp-map" });
-  const drawing = el(
-    "svg",
-    null,
-    { viewBox: `0 0 ${width} ${height}`, role: "group", "aria-label": "唯一物件全景關係圖" },
-    true,
-  );
-  const defs = el("defs", null, {}, true),
-    marker = el(
-      "marker",
-      null,
-      {
-        id: "lp-arrow",
-        viewBox: "0 0 10 10",
-        refX: 9,
-        refY: 5,
-        markerWidth: 6,
-        markerHeight: 6,
-        orient: "auto",
-      },
-      true,
-    );
-  marker.append(el("path", null, { d: "M0 0 L10 5 L0 10z", fill: "currentColor" }, true));
+  const drawing = svgEl("svg", null, {
+    viewBox: `0 0 ${width} ${height}`,
+    role: "group",
+    "aria-label": "唯一物件全景關係圖",
+  });
+  const defs = svgEl("defs", null, {}),
+    marker = svgEl("marker", null, {
+      id: "lp-arrow",
+      viewBox: "0 0 10 10",
+      refX: 9,
+      refY: 5,
+      markerWidth: 6,
+      markerHeight: 6,
+      orient: "auto",
+    });
+  marker.append(svgEl("path", null, { d: "M0 0 L10 5 L0 10z", fill: "currentColor" }));
   defs.append(marker);
   drawing.append(defs);
   const xs = new Map(objects.map((o, i) => [o.id, 30 + i * 175]));
@@ -218,26 +299,20 @@ export function mountPanorama(
       r.from === r.to
         ? `M${x1 - 24} 170 C${x1 - 120} ${arcY},${x1 + 120} ${arcY},${x1 + 24} 170`
         : `M${x1} 170 C${x1} ${arcY},${x2} ${arcY},${x2} 170`;
-    const g = el(
-      "g",
-      null,
-      {
-        class: `lp-relation ${r.current === r.edge_ids.length ? "lp-observed" : "lp-unknown"}`,
-        role: "button",
-        tabindex: 0,
-        "aria-label": `${objects.find((o) => o.id === r.from)?.label} → ${objects.find((o) => o.id === r.to)?.label} · ${r.edge_ids.length} 次交接`,
-        "data-panorama-relation": r.id,
-      },
-      true,
-    );
-    g.append(el("path", null, { d, "marker-end": "url(#lp-arrow)" }, true));
+    const g = svgEl("g", null, {
+      class: `lp-relation ${r.current === r.edge_ids.length ? "lp-observed" : "lp-unknown"}`,
+      role: "button",
+      tabindex: 0,
+      "aria-label": `${objects.find((o) => o.id === r.from)?.label} → ${objects.find((o) => o.id === r.to)?.label} · ${r.edge_ids.length} 次交接`,
+      "data-panorama-relation": r.id,
+    });
+    g.append(svgEl("path", null, { d, "marker-end": "url(#lp-arrow)" }));
     g.append(
-      el(
-        "text",
-        `${r.current}/${r.edge_ids.length} 目前可證實`,
-        { x: (x1 + x2) / 2, y: arcY + 50, "text-anchor": "middle" },
-        true,
-      ),
+      svgEl("text", `${r.current}/${r.edge_ids.length} 目前可證實`, {
+        x: (x1 + x2) / 2,
+        y: arcY + 50,
+        "text-anchor": "middle",
+      }),
     );
     activate(g, () => {
       const panel = relationPanels.get(r.id);
@@ -249,23 +324,18 @@ export function mountPanorama(
   objects.forEach((o) => {
     const nodes = model.nodes.filter((n) => n.object_id === o.id),
       x = xs.get(o.id);
-    const g = el(
-      "g",
-      null,
-      {
-        transform: `translate(${x},170)`,
-        class: "lp-object",
-        role: "button",
-        tabindex: 0,
-        "aria-label": o.label,
-        "data-panorama-object": o.id,
-      },
-      true,
-    );
+    const g = svgEl("g", null, {
+      transform: `translate(${x},170)`,
+      class: "lp-object",
+      role: "button",
+      tabindex: 0,
+      "aria-label": o.label,
+      "data-panorama-object": o.id,
+    });
     g.append(
-      el("rect", null, { width: 150, height: 85, rx: 12 }, true),
-      el("text", o.label, { x: 12, y: 28 }, true),
-      el("text", `${nodes.length} 次已記錄發生`, { x: 12, y: 51 }, true),
+      svgEl("rect", null, { width: 150, height: 85, rx: 12 }),
+      svgEl("text", o.label, { x: 12, y: 28 }),
+      svgEl("text", `${nodes.length} 筆來源／執行節點`, { x: 12, y: 51 }),
     );
     activate(g, () => {
       onFocus({ node_ids: nodes.map((n) => n.id), edge_ids: [] });
@@ -288,7 +358,7 @@ export function mountPanorama(
       button("展開這組關係 DAG", () => onFocus({ node_ids: [], edge_ids: r.edge_ids })),
     );
     r.edge_ids.forEach((id) => {
-      const e = graph.edges.find((e) => e.id === id);
+      const e = graph.edges.find((edge) => edge.id === id);
       detail.append(
         button(`${e.label} · ${e.status}/${e.current_validity}`, () =>
           onSelect({ kind: "edge", id }),
@@ -297,10 +367,283 @@ export function mountPanorama(
     });
     drill.append(detail);
   });
-  if (!model.relations.length) drill.append(el("p", "此範圍尚無已登記交接；不補造連線。"));
+  if (model.relations.length === 0) {
+    drill.append(el("p", "此範圍尚無已登記交接；不補造連線。"));
+  }
+  const detailPanel = el("details", null, {
+    class: "lp-detail",
+    "aria-label": "Session 與 P-class 細部全景",
+  });
+  detailPanel.append(el("summary", "深入 Session、提示詞型態與全部 P-class 節點"));
+  const chooser = el("select", null, { "aria-label": "細部 Run" });
+  model.rows.forEach((row) => {
+    const run = runs.find((r) => r.id === row.run_id);
+    chooser.append(
+      el("option", `${run?.repository || "未知 Repo"} · ${row.run_id.slice(0, 12)}`, {
+        value: row.run_id,
+      }),
+    );
+  });
+  const detailBody = el("div");
+  detailPanel.append(chooser, detailBody);
+  let renderedRun = null;
+  const artifacts = new Map(graph.artifacts.map((a) => [a.id, a]));
+  const types = (ids) =>
+    [
+      ...new Set(
+        ids.map((id) => {
+          const a = artifacts.get(id);
+          return a ? `${a.role} (${a.format})` : "未知來源";
+        }),
+      ),
+    ].join(" + ") || "未記錄";
+  function sourceList(title, ids) {
+    const section = el("details", null, { class: "lp-sources" });
+    section.append(el("summary", `${title} · ${ids.length}`));
+    ids.forEach((id) => {
+      const a = artifacts.get(id);
+      section.append(
+        button(
+          `${a?.role || "未知"} · ${a?.format || "未知型態"} · ${a?.status || "unknown"} · ${a?.source?.path || id}`,
+          () => onSelect({ kind: "artifact", id }),
+        ),
+      );
+    });
+    return section;
+  }
+  function drawDetail() {
+    if (!chooser.value || renderedRun === chooser.value) {
+      return;
+    }
+    renderedRun = chooser.value;
+    const detail = projectRunDetail(graph, chooser.value);
+    detailBody.replaceChildren();
+    detailBody.append(
+      el(
+        "p",
+        `${detail.sessions.filter((s) => s.session_id).length} 個原生 Session 分組 · ${detail.pclass_nodes.length} 個 P-class 發生節點 · ${detail.instructions.length} 個綁定指引／附屬來源`,
+        { class: "lp-note" },
+      ),
+      el(
+        "p",
+        "Session 分組依原身分建立，不是新增執行節點。指引綁定不等於載入或遵循；未提供的 Session 工程判斷仍為 UNKNOWN。跨界來源保留原 Run 標籤。",
+        { class: "lp-note" },
+      ),
+    );
+    const geometry = layoutGraph({
+      nodes: detail.nodes,
+      edges: detail.edges
+        .filter((e) => e.kind === "handoff")
+        .map((e) => ({ from: e.from_node_id, to: e.to_node_id })),
+    });
+    const map = el("div", null, { class: "lp-map lp-detail-map" });
+    const svg = svgEl("svg", null, {
+      viewBox: `0 0 ${geometry.width} ${geometry.height}`,
+      role: "group",
+      "aria-label": "Session 與提示詞細部 DAG",
+      style: `min-width:${geometry.width}px`,
+    });
+    const positions = new Map(geometry.nodes.map((n) => [n.id, n]));
+    const nodeMap = new Map(detail.nodes.map((n) => [n.id, n]));
+    const nodePanels = new Map();
+    const edgePanels = new Map();
+    geometry.bands.forEach((band) => {
+      svg.append(
+        svgEl("rect", null, { ...band, rx: 10, class: "lp-band" }),
+        svgEl(
+          "text",
+          graph.repositories.find((r) => r.id === band.repository_id)?.label || "未知 Repo",
+          { x: band.x + 12, y: band.y + 25, class: "lp-band-label" },
+        ),
+      );
+    });
+    detail.edges.forEach((edge, index) => {
+      const from = positions.get(edge.from_node_id),
+        to = positions.get(edge.to_node_id);
+      const x1 = from.x + from.width;
+      const y1 = from.y + from.height / 2;
+      const x2 = to.x;
+      const y2 = to.y + to.height / 2;
+      const g = svgEl("g", null, {
+        class: `lp-relation ${edge.current_validity === "current" && edge.status === "observed" ? "lp-observed" : "lp-unknown"}`,
+        role: "button",
+        tabindex: 0,
+        "aria-label": `資料流 ${index + 1} · ${edge.label}`,
+      });
+      g.append(
+        svgEl("path", null, {
+          d: `M${x1} ${y1} C${x1 + 50} ${y1},${x2 - 50} ${y2},${x2} ${y2}`,
+          "marker-end": "url(#lp-arrow)",
+        }),
+        svgEl("text", `#${index + 1}`, { x: (x1 + x2) / 2, y: (y1 + y2) / 2 - 8 }),
+      );
+      activate(g, () => {
+        const panel = edgePanels.get(edge.id);
+        panel.open = true;
+        panel.scrollIntoView({ block: "nearest" });
+      });
+      svg.append(g);
+    });
+    geometry.nodes.forEach((position) => {
+      const node = nodeMap.get(position.id);
+      const g = svgEl("g", null, {
+        transform: `translate(${position.x},${position.y})`,
+        class: "lp-object",
+        role: "button",
+        tabindex: 0,
+        "data-detail-node": node.id,
+        "aria-label": `細部 ${node.kind} · ${node.label}`,
+      });
+      const title = `${node.status.execution === "failed" ? "✕ " : ""}${node.kind} · ${node.label}`;
+      g.append(
+        svgEl("title", `${title} · ${node.identity.session_id || "Session 未綁定"}`, {}),
+        svgEl("rect", null, { width: position.width, height: position.height, rx: 8 }),
+        svgEl(
+          "text",
+          `${node.status.execution === "failed" ? "✕ " : ""}${node.kind.toUpperCase()}`,
+          { x: 10, y: 19 },
+        ),
+        svgEl("text", node.label.length > 31 ? `${node.label.slice(0, 30)}…` : node.label, {
+          x: 10,
+          y: 42,
+        }),
+        svgEl("text", `${node.identity.status} · ${node.status.transfer}`, { x: 10, y: 64 }),
+        svgEl("text", `Run ${node.run_id.slice(0, 12)}`, { x: 10, y: 81 }),
+      );
+      activate(g, () => {
+        const panel = nodePanels.get(node.id);
+        panel.open = true;
+        panel.scrollIntoView({ block: "nearest" });
+      });
+      svg.append(g);
+    });
+    map.append(svg);
+    detailBody.append(map);
+    const inventory = el("details");
+    inventory.append(el("summary", `全部 P-class 發生節點 · ${detail.pclass_nodes.length}`));
+    detail.pclass_nodes.forEach((node) =>
+      inventory.append(
+        button(`${node.label} · ${node.identity.session_id || "Session UNKNOWN"}`, () => {
+          const panel = nodePanels.get(node.id);
+          panel.open = true;
+          panel.scrollIntoView({ block: "nearest" });
+        }),
+      ),
+    );
+    detailBody.append(inventory);
+    detail.sessions.forEach((session) => {
+      const group = el("section", null, { class: "lp-session" });
+      group.append(
+        el(
+          "h4",
+          session.session_id ? `Session · ${session.session_id}` : "未綁定 Session 的原始節點",
+        ),
+        el(
+          "small",
+          `Run ${session.run_id} · ${graph.repositories.find((r) => r.id === session.repository_id)?.label || "未知 Repo"}`,
+        ),
+      );
+      session.nodes.forEach((node) => {
+        const panel = el("details", null, { "data-detail-occurrence": node.id });
+        nodePanels.set(node.id, panel);
+        panel.append(
+          el("summary", `${node.kind} · ${node.label} · ${node.identity.status}`),
+          el(
+            "p",
+            `執行 ${node.status.execution} · 傳遞 ${node.status.transfer} · 驗收 ${node.status.acceptance}`,
+          ),
+          el(
+            "p",
+            `Attempt：${node.identity.attempt_id || "UNKNOWN"} · Invocation：${node.identity.invocation_id || "UNKNOWN"}`,
+          ),
+          sourceList("輸入表示", node.input_artifact_ids),
+          sourceList("輸出表示", node.output_artifact_ids),
+          sourceList("原生證據", node.evidence_artifact_ids),
+          button("定位原節點與內容", () => {
+            onFocus({ node_ids: [node.id], edge_ids: [] });
+            onSelect({ kind: "node", id: node.id });
+          }),
+        );
+        group.append(panel);
+      });
+      detailBody.append(group);
+    });
+    const flows = el("section", null, { class: "lp-flows" });
+    flows.append(el("h4", "連線上的資料型態變化"));
+    detail.edges.forEach((edge, index) => {
+      const panel = el("details", null, { "data-detail-flow": edge.id });
+      edgePanels.set(edge.id, panel);
+      panel.append(
+        el("summary", `#${index + 1} ${edge.label} · ${edge.status}/${edge.current_validity}`),
+        el("p", `${nodeMap.get(edge.from_node_id).kind} → ${nodeMap.get(edge.to_node_id).kind}`),
+        el("p", `${types(edge.input_artifact_ids)} → ${types(edge.output_artifact_ids)}`, {
+          class: "lp-types",
+        }),
+        sourceList("轉換前", edge.input_artifact_ids),
+        sourceList("轉換後", edge.output_artifact_ids),
+        sourceList("交接證據", edge.evidence_artifact_ids),
+        button("同窗比較這次傳遞", () => onSelect({ kind: "edge", id: edge.id })),
+      );
+      flows.append(panel);
+    });
+    detailBody.append(flows);
+    const sources = el("details", null, { class: "lp-instruction-index" });
+    sources.append(
+      el("summary", `P-class 指引及附屬來源完整索引 · ${detail.instructions.length}`),
+      el(
+        "p",
+        "逐一列出原節點引用的 instruction 資料。包含 playbook 與輔助程式；此索引不宣告它們都是 P-class 執行節點。",
+      ),
+    );
+    const search = el("input", null, {
+      type: "search",
+      placeholder: "依路徑篩選",
+      "aria-label": "篩選指引來源",
+    });
+    const list = el("div");
+    const drawSources = () => {
+      const matching = detail.instructions.filter(({ artifact }) =>
+        (artifact.source?.path || artifact.id).toLowerCase().includes(search.value.toLowerCase()),
+      );
+      list.replaceChildren(el("p", `${matching.length} / ${detail.instructions.length} 個來源`));
+      matching.forEach(({ artifact, node_ids }) => {
+        const item = el("article");
+        item.append(
+          button(`${artifact.source?.path || artifact.id} · ${artifact.status}`, () =>
+            onSelect({ kind: "artifact", id: artifact.id }),
+          ),
+          el("small", `綁定來源 · ${artifact.format} · 載入／遵循 UNKNOWN`),
+          button(`定位 ${node_ids.length} 個引用節點`, () => onFocus({ node_ids, edge_ids: [] })),
+        );
+        list.append(item);
+      });
+    };
+    search.addEventListener("input", drawSources);
+    sources.append(search, list);
+    drawSources();
+    detailBody.append(sources);
+    graph.findings
+      .filter((f) => f.run_id === chooser.value)
+      .forEach((f) =>
+        detailBody.append(
+          button(
+            `${f.status === "failed" ? "✕" : "?"} ${f.message}`,
+            () => onSelect({ kind: "finding", id: f.id }),
+            { class: f.status === "failed" ? "lp-failed" : "lp-unknown" },
+          ),
+        ),
+      );
+  }
+  chooser.addEventListener("change", drawDetail);
+  detailPanel.addEventListener("toggle", () => {
+    if (detailPanel.open) {
+      drawDetail();
+    }
+  });
+  root.append(detailPanel);
   function renderRow(row) {
-    const run = runs.find((r) => r.id === row.run_id),
-      card = el("article", null, { class: "lp-loop", "data-panorama-run": row.run_id });
+    const run = runs.find((r) => r.id === row.run_id);
+    const card = el("article", null, { class: "lp-loop", "data-panorama-run": row.run_id });
     card.append(
       el("h4", `${run?.mode || "未知模式"} · ${row.run_id.slice(0, 12)}`),
       el("p", `${row.kinds.join(" / ")}${row.cross_repository ? " · 跨 Repo 交接" : ""}`),
@@ -327,14 +670,15 @@ export function mountPanorama(
         card.append(button("開啟交接證據", () => onSelect({ kind: "edge", id }))),
       );
     }
-    if (row.feedback.status === "unknown")
+    if (row.feedback.status === "unknown") {
       card.append(
         el("small", "原回饋角色／ACK／後續 attempt 綁定不足或已失效；不從邊的名稱推論續行。"),
       );
+    }
     card.append(
       el(
         "p",
-        `? 行為 Goal 驗收：UNKNOWN${row.goal.node_ids.length ? "（已有局部審查，不等於 Goal 完成）" : ""}`,
+        `? 行為 Goal 驗收：UNKNOWN${row.goal.node_ids.length > 0 ? "（已有局部審查，不等於 Goal 完成）" : ""}`,
         { class: "lp-unknown" },
       ),
     );
@@ -353,7 +697,7 @@ export function mountPanorama(
       ),
     );
     const gaps = row.findings.filter((f) => f.status === "unknown");
-    if (gaps.length) {
+    if (gaps.length > 0) {
       const detail = el("details");
       detail.append(el("summary", `? ${gaps.length} 個證據缺口`));
       gaps.forEach((f) =>
@@ -366,7 +710,9 @@ export function mountPanorama(
   const regions = el("div", null, { class: "lp-regions" });
   for (const repo of graph.repositories) {
     const members = model.nodes.filter((n) => n.repository_id === repo.id);
-    if (!members.length) continue;
+    if (members.length === 0) {
+      continue;
+    }
     const region = el("section", null, { class: "lp-region", "data-panorama-repository": repo.id });
     const index = el("aside");
     index.append(
@@ -381,12 +727,14 @@ export function mountPanorama(
     for (const row of model.rows.filter((r) => r.repository_ids.includes(repo.id))) {
       body.append(renderRow(row));
     }
-    if (!body.children.length) body.append(el("p", "跨界來源上下文；不納入選定 Goal 的驗收。"));
+    if (body.children.length === 0) {
+      body.append(el("p", "跨界來源上下文；不納入選定 Goal 的驗收。"));
+    }
     region.append(index, body);
     regions.append(region);
   }
-  const unlocated = model.rows.filter((row) => !row.repository_ids.length);
-  if (unlocated.length) {
+  const unlocated = model.rows.filter((row) => row.repository_ids.length === 0);
+  if (unlocated.length > 0) {
     const section = el("section", null, {
       class: "lp-region-runs",
       "aria-label": "尚無 DAG 的選定 Runs",

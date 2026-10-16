@@ -366,7 +366,8 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
               graph.nodes.some((n) => n.object_id === o.id && highlight.nodes.includes(n.id)),
           )
           .map((o) => o.id)}
-        {...workspace}
+        goal={workspace.goal}
+        runIds={workspace.runIds}
         onScope={(scope) => {
           setWorkspace(scope);
           setFocus(null);
