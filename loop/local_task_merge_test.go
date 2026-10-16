@@ -47,6 +47,117 @@ func TestLocalTaskMergeCommitsOnlyReviewedBytesIntoControlBranch(t *testing.T) {
 	}
 }
 
+func TestLocalTaskMergeDoesNotSkipReviewedCandidateForShadowBranch(t *testing.T) {
+	l, cook, cmd := localTaskReviewFixture(t)
+	localTaskRealWorktree(t, l)
+	// Native cooks use noodle/<name>; a bare branch may independently name the base.
+	runGitInRepo(t, cook.worktreePath, "branch", "-m", "noodle/"+cook.worktreeName)
+	base, err := recoveryGit(l.projectDir, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runGitInRepo(t, l.projectDir, "branch", cook.worktreeName, base)
+	cmd.Action = "merge-local-task"
+	if err := l.dispatchControlCommand(cmd); err != nil {
+		t.Fatal(err)
+	}
+	actual, err := os.ReadFile(filepath.Join(l.projectDir, "candidate.txt"))
+	if err != nil || string(actual) != "reviewed candidate\n" {
+		t.Fatalf("reviewed candidate was not integrated: bytes=%q error=%v order=%s", actual, err, l.canonical.Orders[cook.orderID].Status)
+	}
+	var binding localTaskMergeBinding
+	if err := json.Unmarshal(l.canonical.Orders[cook.orderID].Stages[0].Extra[localTaskMergeKey], &binding); err != nil {
+		t.Fatal(err)
+	}
+	if head, err := recoveryGit(l.projectDir, "rev-parse", "HEAD"); err != nil || head != binding.Head {
+		t.Fatalf("control HEAD does not match reviewed commit: %s error=%v", head, err)
+	}
+	if shadow, err := recoveryGit(l.projectDir, "rev-parse", cook.worktreeName); err != nil || shadow != base {
+		t.Fatalf("unrelated branch changed: %s error=%v", shadow, err)
+	}
+	if l.canonical.Orders[cook.orderID].Status != state.OrderCompleted {
+		t.Fatal("reviewed merge did not complete")
+	}
+}
+
+func TestLocalTaskMergeRecoveryUsesReviewedCommitInsteadOfBranch(t *testing.T) {
+	for _, scenario := range []string{"unmerged-shadow", "merged-cleanup", "advanced-integration"} {
+		t.Run(scenario, func(t *testing.T) {
+			l, cook, cmd := localTaskReviewFixture(t)
+			localTaskRealWorktree(t, l)
+			base, err := recoveryGit(l.projectDir, "rev-parse", "HEAD")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario != "merged-cleanup" {
+				runGitInRepo(t, cook.worktreePath, "branch", "-m", "noodle/"+cook.worktreeName)
+				runGitInRepo(t, l.projectDir, "branch", cook.worktreeName, base)
+			}
+			// Stop the original merge after its durable StageMerging transition.
+			// A dirty control checkout makes the real merge owner refuse before landing.
+			l.mergeQueue.Close()
+			l.mergeQueue = nil
+			ignorePath := filepath.Join(l.projectDir, ".gitignore")
+			ignore := recoveryRead(t, ignorePath)
+			requestChangesWrite(t, ignorePath, append(append([]byte{}, ignore...), []byte("# merge barrier\n")...))
+			cmd.Action = "merge-local-task"
+			if err := l.dispatchControlCommand(cmd); err == nil {
+				t.Fatal("dirty integration root did not prevent original merge")
+			}
+			stage := l.canonical.Orders[cook.orderID].Stages[0]
+			if stage.Status != state.StageMerging {
+				t.Fatal("original control did not persist a pending merge")
+			}
+			requestChangesWrite(t, ignorePath, ignore)
+			var binding localTaskMergeBinding
+			if err := json.Unmarshal(stage.Extra[localTaskMergeKey], &binding); err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "merged-cleanup" {
+				if err := l.deps.Worktree.Merge(cook.worktreeName, worktree.MergeOpts{ExpectedHead: binding.Head, ExpectedTree: binding.Tree}); err != nil {
+					t.Fatal(err)
+				}
+			} else if scenario == "advanced-integration" {
+				requestChangesWrite(t, filepath.Join(l.projectDir, "other.txt"), []byte("independent change\n"))
+				runGitInRepo(t, l.projectDir, "add", "other.txt")
+				runGitInRepo(t, l.projectDir, "commit", "-m", "advance integration")
+			}
+			l = New(l.projectDir, "noodle", l.config, l.deps)
+			if loaded, err := l.loadCanonicalSnapshot(); err != nil || !loaded {
+				t.Fatalf("reload original merge: loaded=%v error=%v", loaded, err)
+			}
+			if err := l.reconcileMergingStages(); err != nil {
+				t.Fatal(err)
+			}
+			if err := l.drainMergeResults(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "advanced-integration" {
+				if l.canonical.Orders[cook.orderID].Stages[0].Status != state.StageReview {
+					t.Fatal("integration drift did not retain candidate for review")
+				}
+				if _, err := os.Stat(filepath.Join(l.projectDir, "candidate.txt")); !os.IsNotExist(err) {
+					t.Fatal("integration drift landed candidate")
+				}
+				if _, err := os.Stat(cook.worktreePath); err != nil {
+					t.Fatal("integration drift lost candidate worktree")
+				}
+				return
+			}
+			actual, err := os.ReadFile(filepath.Join(l.projectDir, "candidate.txt"))
+			if err != nil || string(actual) != "reviewed candidate\n" {
+				t.Fatalf("recovery did not integrate candidate: bytes=%q error=%v order=%s", actual, err, l.canonical.Orders[cook.orderID].Status)
+			}
+			if head, err := recoveryGit(l.projectDir, "rev-parse", "HEAD"); err != nil || head != binding.Head {
+				t.Fatalf("recovery HEAD differs from reviewed commit: %s error=%v", head, err)
+			}
+			if l.canonical.Orders[cook.orderID].Status != state.OrderCompleted {
+				t.Fatal("landed candidate did not complete after restart")
+			}
+		})
+	}
+}
+
 func TestLocalTaskMergeRejectsDriftBeforeCommit(t *testing.T) {
 	for _, change := range []string{"bytes", "index", "foreign", "branch", "mode", "unbound"} {
 		t.Run(change, func(t *testing.T) {

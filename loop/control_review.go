@@ -24,7 +24,8 @@ func (l *Loop) controlMerge(orderID string) error {
 	}
 
 	order := l.canonical.Orders[orderID]
-	if len(order.Stages) == 1 && l.isAdmittedLocalTask(order, order.Stages[0]) && len(order.Stages[0].Extra[localTaskMergeKey]) == 0 {
+	localTask := len(order.Stages) == 1 && l.isAdmittedLocalTask(order, order.Stages[0])
+	if localTask && len(order.Stages[0].Extra[localTaskMergeKey]) == 0 {
 		return fmt.Errorf("local task merge lacks reviewed candidate binding")
 	}
 
@@ -36,9 +37,15 @@ func (l *Loop) controlMerge(orderID string) error {
 		worktreePath: pending.worktreePath,
 		session:      &adoptedSession{id: pending.sessionID, status: "completed"},
 	}
-	canMerge, err := l.worktreeHasChanges(cook)
-	if err != nil {
-		return fmt.Errorf("merge check: %w", err)
+	// Bound candidates must reach the exact HEAD/tree check under the merge lock.
+	// Branch-name or patch-equivalence previews cannot establish their completion.
+	canMerge := true
+	if !localTask {
+		var err error
+		canMerge, err = l.worktreeHasChanges(cook)
+		if err != nil {
+			return fmt.Errorf("merge check: %w", err)
+		}
 	}
 	if !canMerge {
 		if err := l.runDoneBeforeTerminal(context.Background(), cook); err != nil {

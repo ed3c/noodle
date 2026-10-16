@@ -17,3 +17,9 @@ The existing context lease remains the unit of idempotence, including duplicate
 acquire and release. External stdio ownership is unchanged and cannot be adopted.
 
 If the launcher exits while its group remains, the record stays `needs_owner_readback` and retains its allocation. Reconcile observes absence without signalling or adopting a PID. After Host restart, unresolved resident records block new worker and resident admission until absence is confirmed. Missing start identity or a legacy record without process-group identity remains unknown.
+
+Host-managed process workers also retain their allocation until the original
+launcher and process group are absent. Session completion waits for this evidence.
+Terminate, ForceKill and cancellation use the original spawned group, including
+after its launcher exits. Recovery refuses a live or unconfirmed group. This
+contract does not adopt foreign processes or cover descendants that leave the group.

@@ -58,8 +58,12 @@ func hostRecoveryPreflight(runtimeDir string) error {
 		if err != nil {
 			return fmt.Errorf("session %s has unknown process identity; owner readback required", entry.Name())
 		}
-		if procx.IsPIDAlive(pid) {
-			return fmt.Errorf("session %s still has a live process; owner readback required", entry.Name())
+		absent, err := procx.ProcessGroupAbsent(pid)
+		if err != nil {
+			return fmt.Errorf("session %s process group absence unknown; owner readback required: %w", entry.Name(), err)
+		}
+		if !absent {
+			return fmt.Errorf("session %s still has a live process or group; owner readback required", entry.Name())
 		}
 	}
 	return nil

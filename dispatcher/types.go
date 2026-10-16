@@ -34,6 +34,7 @@ type DispatchRequest struct {
 	EnvVars              map[string]string
 	BudgetCap            float64
 	AllowPrimaryCheckout bool
+	RequireGroupExit     bool   // resource owner retains admission until its original group is absent
 	TaskKey              string // resolved task type key (e.g., "execute", "schedule")
 	Runtime              string // runtime kind from queue item (e.g., "process", "sprites")
 	SystemPrompt         string // if set, used directly as system prompt — skips skill resolution

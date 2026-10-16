@@ -17,6 +17,13 @@ The worktree merge owner checks the resulting HEAD and tree under its merge lock
 It uses a fast-forward into the context's recorded control branch. Branch drift,
 new unreviewed files and a changed integration base cause refusal.
 
+The local-task caller always reaches the bound merge owner. A same-named branch
+or patch-equivalence preview cannot prove that the reviewed commit was integrated.
+The reviewed path does not stash or rebase candidate files. If another writer
+changes them after validation, non-force cleanup preserves that worktree.
+After restart, recovery checks the bound commit and tree on the original control
+branch. A removed candidate branch does not erase evidence that its commit landed.
+
 The previous generic merge-error path deleted dirty candidates. Merge errors now
 retain their worktree and pending review. For a candidate already lost through
 that path, `review prepare-local-merge-recovery` binds exact retained backup bytes.

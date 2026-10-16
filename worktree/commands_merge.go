@@ -88,17 +88,17 @@ func (a *App) Merge(name string, opts ...MergeOpts) error {
 	}
 	a.info(fmt.Sprintf("%d commit(s) to merge", commits))
 
-	stashed := false
-	unstaged := a.git("-C", wtPath, "diff", "--quiet").Run() != nil
-	staged := a.git("-C", wtPath, "diff", "--cached", "--quiet").Run() != nil
-	if unstaged || staged {
-		a.info("Stashing worktree changes before rebase...")
-		if a.git("-C", wtPath, "stash", "--include-untracked", "--quiet").Run() == nil {
-			stashed = true
-		}
-	}
-
 	if o.ExpectedHead == "" {
+		stashed := false
+		unstaged := a.git("-C", wtPath, "diff", "--quiet").Run() != nil
+		staged := a.git("-C", wtPath, "diff", "--cached", "--quiet").Run() != nil
+		if unstaged || staged {
+			a.info("Stashing worktree changes before rebase...")
+			if a.git("-C", wtPath, "stash", "--include-untracked", "--quiet").Run() == nil {
+				stashed = true
+			}
+		}
+
 		a.info(fmt.Sprintf("Rebasing %s onto %s...", name, base))
 		if err := a.git("-C", wtPath, "rebase", base).Run(); err != nil {
 			if stashed {

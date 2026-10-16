@@ -16,6 +16,7 @@ import (
 	"github.com/poteto/noodle/internal/stringx"
 	"github.com/poteto/noodle/monitor"
 	loopruntime "github.com/poteto/noodle/runtime"
+	"github.com/poteto/noodle/worktree"
 )
 
 func (l *Loop) reconcile(ctx context.Context) error {
@@ -487,6 +488,31 @@ func (l *Loop) reconcileOneMergingStage(md mergeRecoveryStage) error {
 	}
 	if _, adopted := l.cooks.adoptedTargets[md.orderID]; adopted {
 		return l.handleAlreadyAdoptedStage(md)
+	}
+	if l.isAdmittedLocalTask(md.order, md.stage) {
+		var binding localTaskMergeBinding
+		if json.Unmarshal(md.stage.Extra[localTaskMergeKey], &binding) != nil || !reconciliationSHA.MatchString(binding.Head) || !reconciliationSHA.MatchString(binding.Tree) {
+			return fmt.Errorf("local task recovery merge binding invalid")
+		}
+		app, ok := l.deps.Worktree.(*worktree.App)
+		if !ok || app.IntegrationBranch == "" {
+			return fmt.Errorf("local task recovery integration owner is unbound")
+		}
+		branch, err := recoveryGitWithExecution(l.deps.Execution, l.projectDir, "symbolic-ref", "--short", "HEAD")
+		if err != nil || branch != app.IntegrationBranch {
+			return fmt.Errorf("local task recovery integration branch changed")
+		}
+		tree, err := recoveryGitWithExecution(l.deps.Execution, l.projectDir, "rev-parse", binding.Head+"^{tree}")
+		if err != nil || tree != binding.Tree {
+			return fmt.Errorf("local task recovery candidate tree differs")
+		}
+		// Cleanup can remove the branch; a same-name branch can name another commit.
+		// Only the original bound commit establishes whether this merge landed.
+		md.checkBranch = binding.Head
+		if isBranchMerged(l.projectDir, binding.Head, l.deps.Execution) {
+			return l.handleAlreadyMergedStage(md)
+		}
+		return l.requeueStaleMerge(md)
 	}
 	if isBranchMerged(l.projectDir, md.checkBranch, l.deps.Execution) {
 		return l.handleAlreadyMergedStage(md)

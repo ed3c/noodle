@@ -208,6 +208,7 @@ func (l *Loop) dispatchSession(ctx context.Context, req loopruntime.DispatchRequ
 	if l.deps.Admission != nil && ctx.Value(admissionKey{}) == nil {
 		return nil, RuntimeFallbackOutcome{}, fmt.Errorf("worker dispatch lacks original resource admission")
 	}
+	req.RequireGroupExit = l.deps.Admission != nil
 	runtimeName := stringx.Normalize(req.Runtime)
 	if runtimeName == "" {
 		runtimeName = stringx.Normalize(l.config.Runtime.Default)

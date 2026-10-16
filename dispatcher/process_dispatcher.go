@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/poteto/noodle/event"
@@ -64,6 +65,9 @@ func (d *ProcessDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
+	if req.RequireGroupExit && runtime.GOOS == "windows" {
+		return nil, fmt.Errorf("worker process-group exit observation unavailable on Windows")
+	}
 	reqRuntime := strings.TrimSpace(req.Runtime)
 	if reqRuntime == "" {
 		reqRuntime = d.runtimeKind
@@ -110,19 +114,20 @@ func (d *ProcessDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 	}
 
 	session := newProcessSession(processSessionConfig{
-		id:            sessionID,
-		process:       process,
-		eventWriter:   eventWriter,
-		canonicalPath: canonicalPath,
-		stampedPath:   stampedPath,
-		prompt:        req.Prompt,
-		warnings:      skillBundle.Warnings,
-		controller:    controller,
-		sink:          d.sink,
-		provider:      req.Provider,
-		stderrPath:    stderrPath,
-		stderrDone:    stderrDone,
-		startup:       startup,
+		id:               sessionID,
+		process:          process,
+		eventWriter:      eventWriter,
+		canonicalPath:    canonicalPath,
+		stampedPath:      stampedPath,
+		prompt:           req.Prompt,
+		warnings:         skillBundle.Warnings,
+		controller:       controller,
+		sink:             d.sink,
+		provider:         req.Provider,
+		stderrPath:       stderrPath,
+		stderrDone:       stderrDone,
+		startup:          startup,
+		requireGroupExit: req.RequireGroupExit,
 	})
 	session.start(ctx)
 	return session, nil
