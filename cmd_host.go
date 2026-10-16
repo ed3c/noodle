@@ -119,7 +119,7 @@ func newHostCmd(app *App) *cobra.Command {
 	}})
 	cmd.AddCommand(task)
 	cmd.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "protocol": hostProtocol})
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1})
 	}})
 	cmd.AddCommand(&cobra.Command{Use: "serve", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
