@@ -13,6 +13,34 @@ describe("readonly v2 graph boundary", () => {
     expect(parsed.graph.repositories[0]?.tracked_files[0]?.git_blob).toBe("blobA");
     expect(parsed.graph.artifacts[0]).not.toHaveProperty("content");
   });
+  it("retains optional Git readback and refuses promotion to execution evidence", () => {
+    const view = root();
+    const repo = required(view.graph.repositories[0]);
+    const obs = {
+      status: "observed",
+      scope: "display_readback",
+      observed_at: "2026-10-17T06:00:00Z",
+      repository_id: "git",
+      worktree_id: "wt",
+      snapshot_id: "snapshot",
+      branch: "main",
+      detached: false,
+      dirty: true,
+      revision: repo.revision,
+      gap: null,
+    };
+    const input = {
+      ...view,
+      graph: {
+        ...view.graph,
+        repositories: [{ ...repo, observation: obs }, ...view.graph.repositories.slice(1)],
+      },
+    };
+    expect(parseLoopGraph(input).graph.repositories[0]?.observation?.branch).toBe("main");
+    obs.scope = "native_execution";
+    expect(() => parseLoopGraph(input)).toThrow();
+    expect(parseLoopGraph(view).graph.repositories[0]?.observation).toBeUndefined();
+  });
   it("rejects malformed shape, dangling refs, duplicate IDs and causal cycles", () => {
     expect(() => parseLoopGraph({ schema_version: 3 })).toThrow();
     const duplicate = root();

@@ -25,6 +25,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify UI source and loop interactions
+        run: |
+          pnpm --filter noodle-ui verify
+          node --test ui/src/client/*.test.mjs
+          pnpm --filter noodle-ui exec vitest run src/client/loop-graph.test.ts src/client/loop-graph-layout.test.ts src/client/loop-views.test.ts src/components/LoopGraph.test.tsx src/components/LoopViews.test.tsx src/components/Sidebar.test.tsx
+
       - name: Build UI
         run: pnpm --filter noodle-ui build
 

@@ -8,8 +8,9 @@ import { knownFailureFrontier } from "~/client/loop-graph-presentation";
 import { compareJSON, compareText } from "./LoopGraphComparison";
 
 afterEach(() => vi.unstubAllGlobals());
-function setup() {
+function setup(customize?: (view: ReturnType<typeof graphFixture>) => void) {
   const view = graphFixture();
+  customize?.(view);
   const fullView = structuredClone(view);
   for (const run of view.runs) {
     for (const stage of run.stages) {
@@ -52,9 +53,189 @@ function setup() {
   return { view, fetch, wrap, ...render(wrap()) };
 }
 describe("source-backed DAG interactions", () => {
+  it("loads one selected anatomy, keeps unknown Git facts and makes view changes effect-free", async () => {
+    const { fetch } = setup();
+    const scene = within(screen.getByLabelText("立體工程全景"));
+    expect(scene.queryByLabelText("節點 anatomy 詳圖")).not.toBeInTheDocument();
+    await userEvent.click(scene.getByRole("button", { name: "物件 · Original Manager" }));
+    const panel = within(await scene.findByLabelText("節點 anatomy 詳圖"));
+    expect(await panel.findByRole("img", { name: "UNKNOWN · 機制尚未分類" })).toBeVisible();
+    await userEvent.click(panel.getByRole("button", { name: "拆解／組裝機構" }));
+    await userEvent.click(panel.getByRole("button", { name: "詳圖 1×／4×" }));
+    await userEvent.selectOptions(scene.getByLabelText("來源Branch篩選"), "UNKNOWN");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(scene.getAllByRole("button", { name: "物件 · Original Manager" })).toHaveLength(1);
+    await userEvent.click(scene.getByRole("button", { name: "還原全景" }));
+    expect(scene.getByLabelText("來源Branch篩選")).toHaveValue("");
+  });
+  it("keeps isometric inspection read-only and opens the original comparison on demand", async () => {
+    const { fetch } = setup();
+    const console = within(screen.getByLabelText("立體工程全景"));
+    expect(console.getAllByRole("button", { name: "物件 · Original Manager" })).toHaveLength(1);
+    await userEvent.selectOptions(console.getByLabelText("立體視圖執行範圍"), "run1");
+    await userEvent.click(console.getByRole("button", { name: "拆解資料載體" }));
+    await userEvent.click(console.getByRole("button", { name: "右轉" }));
+    expect(fetch).not.toHaveBeenCalled();
+    await userEvent.click(console.getByRole("button", { name: "資料流 · Handoff known" }));
+    expect(console.getByLabelText("立體選取讀回")).toHaveTextContent("歷史記錄／目前效力未證實");
+    expect(fetch).not.toHaveBeenCalled();
+    await userEvent.click(console.getByRole("button", { name: "比較原始輸入與輸出" }));
+    expect(
+      await within(screen.getByLabelText("選取內容比較")).findByText('{"value":2}'),
+    ).toBeVisible();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await userEvent.click(console.getByRole("button", { name: "還原全景" }));
+    expect(console.getByLabelText("立體視圖執行範圍")).toHaveValue("");
+  });
+  it("expands native occurrences and opens typed handoffs in the existing comparison", async () => {
+    setup();
+    await userEvent.click(screen.getByText("深入 Session、提示詞型態與全部 P-class 節點"));
+    const detail = within(screen.getByLabelText("Session 與 P-class 細部全景"));
+    expect(await detail.findByLabelText("Session 與提示詞細部 DAG")).toBeVisible();
+    expect(detail.getByText(/未提供的 Session 工程判斷仍為 UNKNOWN/)).toBeVisible();
+    await userEvent.click(detail.getByText("#1 Handoff known · observed/unknown"));
+    expect(
+      required(
+        detail.getAllByText("prompt (application/json) → native_input (application/json)")[0],
+      ),
+    ).toBeVisible();
+    await userEvent.click(required(detail.getAllByRole("button", { name: "同窗比較這次傳遞" })[0]));
+    expect(
+      await within(screen.getByLabelText("選取內容比較")).findByText('{"value":2}'),
+    ).toBeVisible();
+    await userEvent.selectOptions(detail.getByLabelText("細部 Run"), "run2");
+    expect(detail.queryByText("#1 Handoff known · observed/unknown")).not.toBeInTheDocument();
+    expect(detail.getByRole("button", { name: "細部 cli · Invocation other" })).toBeVisible();
+  });
+  it("keeps route, selected occurrence and return-to-global synchronized", async () => {
+    // jsdom does not implement layout scrolling.
+    // oxlint-disable-next-line no-extend-native
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    setup();
+    const panorama = within(screen.getByLabelText("Workspace 全景圖"));
+    const route = panorama.getByRole("heading", { name: /run2/ }).closest("article");
+    if (!route) {
+      throw new Error("Missing route card");
+    }
+    await userEvent.click(within(route).getByRole("button", { name: "展開本次執行 DAG" }));
+    expect(panorama.getByLabelText("細部 Run")).toHaveValue("run2");
+    expect(panorama.getByRole("button", { name: "細部 cli · Invocation other" })).toBeVisible();
+    await userEvent.click(panorama.getByRole("button", { name: "細部 cli · Invocation other" }));
+    expect(panorama.getByLabelText("全景定位")).toHaveTextContent("Invocation other");
+    await userEvent.click(panorama.getByRole("button", { name: "返回全局" }));
+    expect(panorama.getByLabelText("全景定位")).toHaveTextContent("Goal / 全部適用路徑");
+    expect(screen.getByRole("button", { name: /紀錄 Invocation first/ })).toBeVisible();
+  });
+  it("opens only the bound JSON field and keeps missing fields unknown", async () => {
+    const { view, wrap, rerender } = setup((value) => {
+      required(value.graph.nodes[0]).identity.locator = "/source/c.json#/value";
+    });
+    await userEvent.click(screen.getByRole("button", { name: /紀錄 Invocation first/ }));
+    const field = within(screen.getByLabelText("結構化欄位內容"));
+    expect(await field.findByText("2")).toBeVisible();
+    const next = structuredClone(view);
+    required(next.graph.nodes[0]).identity.locator = "/source/c.json#/missing";
+    rerender(wrap(next));
+    await userEvent.click(screen.getByRole("button", { name: "採用新版本" }));
+    await userEvent.click(screen.getByRole("button", { name: /紀錄 Invocation first/ }));
+    expect(
+      await within(screen.getByLabelText("結構化欄位內容")).findByText("欄位狀態：unknown"),
+    ).toBeVisible();
+  });
+  it("shows new occurrences after adopting a newer snapshot from an object focus", async () => {
+    // jsdom has no layout scrolling; this mock is confined to the UI test environment.
+    // oxlint-disable-next-line no-extend-native
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const { view, wrap, rerender } = setup();
+    await userEvent.click(screen.getByRole("button", { name: "Original Manager" }));
+    const updated = structuredClone(view);
+    updated.graph.nodes.push({
+      ...required(updated.graph.nodes[0]),
+      id: "fresh",
+      label: "Fresh attempt",
+    });
+    rerender(wrap(updated));
+    expect(screen.queryByRole("button", { name: /紀錄 Fresh attempt/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "採用新版本" }));
+    expect(screen.getByRole("button", { name: /紀錄 Fresh attempt/ })).toBeInTheDocument();
+  });
+  it("retains original selection during synchronization but clears it for an explicit Run change", async () => {
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: /紀錄 Invocation first/ }));
+    expect(screen.getByLabelText("選取內容比較")).toHaveTextContent("Invocation first");
+    const scene = within(screen.getByLabelText("立體工程全景"));
+    expect(scene.getByLabelText("立體視圖執行範圍")).toHaveValue("run1");
+    await userEvent.selectOptions(scene.getByLabelText("立體視圖執行範圍"), "run2");
+    expect(screen.queryByLabelText("選取內容比較")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /紀錄 Invocation first/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /紀錄 Invocation other/ })).toBeInTheDocument();
+  });
+  it("retains selected runs and their refusal when no invocation DAG exists", () => {
+    const { view, wrap, rerender } = setup();
+    const empty = structuredClone(view);
+    empty.graph.nodes = [];
+    empty.graph.edges = [];
+    rerender(wrap(empty));
+    const missing = within(screen.getByLabelText("尚無 DAG 的選定 Runs"));
+    expect(missing.getByRole("button", { name: /Original command refused/ })).toBeVisible();
+    expect(missing.getAllByText(/行為 Goal 驗收：UNKNOWN/)).toHaveLength(2);
+  });
+  it("opens original comparisons from the panorama and keeps relation controls after focus", async () => {
+    // jsdom has no layout scrolling; this mock is confined to the UI test environment.
+    // oxlint-disable-next-line no-extend-native
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    setup();
+    const panorama = within(screen.getByLabelText("Workspace 全景圖"));
+    await userEvent.click(panorama.getByText("責任物件與跨 Repo 關係總覽"));
+    await userEvent.click(panorama.getByText("Original Manager → Original Manager · 3 次交接"));
+    await userEvent.click(
+      required(panorama.getAllByRole("button", { name: "Handoff known · observed/unknown" })[0]),
+    );
+    expect(
+      await within(screen.getByLabelText("選取內容比較")).findByText('{"value":2}'),
+    ).toBeVisible();
+    await userEvent.click(panorama.getByRole("button", { name: "展開這組關係 DAG" }));
+    expect(
+      required(panorama.getAllByRole("button", { name: "Handoff known · observed/unknown" })[0]),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: /紀錄 Invocation other/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "返回 Workspace 全部執行" }));
+    expect(screen.getByRole("button", { name: /紀錄 Invocation other/ })).toBeInTheDocument();
+  });
+  it("scopes cards, notes and metrics to the selected goal without treating completion as closure", async () => {
+    setup();
+    const panorama = within(screen.getByLabelText("Workspace 全景圖"));
+    await userEvent.click(panorama.getByText("工作範圍 · 全部 Runs"));
+    await userEvent.type(panorama.getByLabelText("Workspace 行為目標"), "Goal two");
+    await userEvent.click(panorama.getByRole("checkbox", { name: /org\/one/ }));
+    await userEvent.click(panorama.getByRole("button", { name: "套用工作範圍" }));
+    expect(panorama.getByText(/行為 Goal 驗收：UNKNOWN/)).toBeInTheDocument();
+    expect(
+      panorama.queryByRole("button", { name: /Original command refused/ }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "全部卡片" }));
+    expect(await screen.findByText("Card org/two")).toBeVisible();
+    expect(screen.queryByText("Card org/one")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "全部筆記" }));
+    expect(await screen.findByText("Note org/two")).toBeVisible();
+    expect(screen.queryByText("Note org/one")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "量測" }));
+    expect(screen.queryByText("分子 2 / 分母 unknown")).not.toBeInTheDocument();
+  });
   it("shows unique objects, repeated occurrences, typed handoffs and distinct failure/unknown without preloading", async () => {
     const { fetch } = setup();
-    expect(screen.getAllByText("Original Manager")).toHaveLength(1);
+    expect(
+      within(screen.getByLabelText("內外迴圈立體資料流")).getAllByText("Original Manager"),
+    ).toHaveLength(1);
     expect(
       screen.getByRole("button", { name: "紀錄 Invocation first · identity observed" }),
     ).toBeInTheDocument();
@@ -99,6 +280,7 @@ describe("source-backed DAG interactions", () => {
     const file = source.getByRole("button", { name: "檔案 src/prompt.json" });
     await userEvent.hover(file);
     expect(screen.getByRole("button", { name: /紀錄 Invocation first/ })).toHaveClass("is-linked");
+    expect(screen.getByRole("button", { name: "Original Manager" })).toHaveClass("is-linked");
     await userEvent.unhover(file);
     await userEvent.hover(screen.getByRole("button", { name: /紀錄 Invocation first/ }));
     expect(file).toHaveClass("is-linked");

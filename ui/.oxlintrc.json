@@ -115,5 +115,11 @@
     // CodeHighlight needs dangerouslySetInnerHTML for rendered syntax HTML
     "react/no-danger": "off"
   },
-  "ignorePatterns": ["**/routeTree.gen.ts"]
+  "overrides": [{
+    "files": ["**/*.test.mjs"],
+    "env": {"node": true},
+    "rules": {"import/no-nodejs-modules": "off"}
+  }],
+  // Exact upstream bytes are checked by anatomy-source.test.mjs. First-party code remains linted.
+  "ignorePatterns": ["**/routeTree.gen.ts", "src/client/anatomy/iso-kit.mjs"]
 }

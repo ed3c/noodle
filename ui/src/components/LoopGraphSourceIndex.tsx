@@ -10,16 +10,20 @@ export const noHighlight: GraphHighlight = { nodes: [], artifacts: [] };
 type FileEntry = LoopGraph["repositories"][number]["tracked_files"][number];
 export function LoopGraphSourceIndex({
   graph,
+  initialRepository,
   highlight,
   onHighlight,
   onSelect,
 }: {
   graph: LoopGraph;
+  initialRepository?: string;
   highlight: GraphHighlight;
   onHighlight: (value: GraphHighlight) => void;
   onSelect: (entry: FileEntry, repository: string) => void;
 }) {
-  const [repository, setRepository] = useState(graph.repositories[0]?.id ?? "");
+  const [repository, setRepository] = useState(
+    initialRepository ?? graph.repositories[0]?.id ?? "",
+  );
   const [search, setSearch] = useState("");
   const [section, setSection] = useState("tracked");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());

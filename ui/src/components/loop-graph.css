@@ -218,8 +218,8 @@
   stroke: #ef9291;
 }
 .lg-page .is-linked {
-  background: #355740 !important;
-  border-color: #e8c477 !important;
+  background: var(--linked-background, #355740) !important;
+  border-color: var(--linked-border, #e8c477) !important;
 }
 .lg-node.is-linked rect {
   stroke: #f3cf81;

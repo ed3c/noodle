@@ -20,13 +20,29 @@ type Graph struct {
 	Findings     []Finding    `json:"findings"`
 	Metrics      []Metric     `json:"metrics"`
 }
+type Mechanism struct {
+	Version      int          `json:"version"`
+	Template     string       `json:"template"`
+	Capabilities []Capability `json:"capabilities"`
+}
+type Capability struct {
+	ID       string `json:"id"`
+	Function string `json:"function"`
+	Entry    string `json:"entry"`
+	Input    string `json:"input"`
+	Output   string `json:"output"`
+	Readback string `json:"readback"`
+	Refusal  string `json:"refusal"`
+	Source   string `json:"source"`
+}
 type Object struct {
-	ID                string   `json:"id"`
-	Namespace         string   `json:"namespace"`
-	Label             string   `json:"label"`
-	Kind              string   `json:"kind"`
-	Scope             string   `json:"scope"`
-	SourceArtifactIDs []string `json:"source_artifact_ids"`
+	Mechanism         *Mechanism `json:"mechanism,omitempty"`
+	ID                string     `json:"id"`
+	Namespace         string     `json:"namespace"`
+	Label             string     `json:"label"`
+	Kind              string     `json:"kind"`
+	Scope             string     `json:"scope"`
+	SourceArtifactIDs []string   `json:"source_artifact_ids"`
 }
 type Port struct {
 	ID                string   `json:"id"`
@@ -37,15 +53,29 @@ type Port struct {
 	EffectScope       string   `json:"effect_scope"`
 	SourceArtifactIDs []string `json:"source_artifact_ids"`
 }
+type RepositoryObservation struct {
+	Status       string  `json:"status"`
+	Scope        string  `json:"scope"`
+	ObservedAt   string  `json:"observed_at"`
+	RepositoryID *string `json:"repository_id"`
+	WorktreeID   *string `json:"worktree_id"`
+	SnapshotID   *string `json:"snapshot_id"`
+	Branch       *string `json:"branch"`
+	Detached     *bool   `json:"detached"`
+	Dirty        *bool   `json:"dirty"`
+	Revision     *string `json:"revision"`
+	Gap          *string `json:"gap"`
+}
 type Repository struct {
-	ID            string      `json:"id"`
-	Label         string      `json:"label"`
-	Root          string      `json:"root"`
-	Revision      *string     `json:"revision"`
-	IndexStatus   string      `json:"index_status"`
-	TrackedFiles  []IndexFile `json:"tracked_files"`
-	SelectedFiles []IndexFile `json:"selected_files"`
-	Gaps          []string    `json:"gaps"`
+	Observation   *RepositoryObservation `json:"observation,omitempty"`
+	ID            string                 `json:"id"`
+	Label         string                 `json:"label"`
+	Root          string                 `json:"root"`
+	Revision      *string                `json:"revision"`
+	IndexStatus   string                 `json:"index_status"`
+	TrackedFiles  []IndexFile            `json:"tracked_files"`
+	SelectedFiles []IndexFile            `json:"selected_files"`
+	Gaps          []string               `json:"gaps"`
 }
 type IndexFile struct {
 	ID          string   `json:"id"`
@@ -90,6 +120,7 @@ type NodeStatus struct {
 	Acceptance string `json:"acceptance"`
 }
 type Node struct {
+	Mechanism           string       `json:"mechanism,omitempty"`
 	ID                  string       `json:"id"`
 	RunID               string       `json:"run_id"`
 	RepositoryID        string       `json:"repository_id"`
@@ -245,6 +276,18 @@ func validateGraph(view View) error {
 			return fmt.Errorf("object %s namespace duplicated or scope invalid", o.ID)
 		}
 		namespaces[o.Namespace] = true
+		if m := o.Mechanism; m != nil {
+			if m.Version != 1 || m.Template == "" || len(m.Capabilities) == 0 {
+				return fmt.Errorf("invalid mechanism")
+			}
+			seen := map[string]bool{}
+			for _, c := range m.Capabilities {
+				if seen[c.ID] || c.ID == "" || c.Function == "" || c.Entry == "" || c.Input == "" || c.Output == "" || c.Readback == "" || c.Refusal == "" || c.Source == "" {
+					return fmt.Errorf("invalid capability")
+				}
+				seen[c.ID] = true
+			}
+		}
 		if err := refsExist(o.SourceArtifactIDs, artifacts); err != nil {
 			return err
 		}
@@ -330,6 +373,19 @@ func validateGraph(view View) error {
 		}
 	}
 	for _, r := range g.Repositories {
+		if o := r.Observation; o != nil {
+			sameRevision := o.Revision == nil && r.Revision == nil || o.Revision != nil && r.Revision != nil && *o.Revision == *r.Revision
+			if o.Scope != "display_readback" || o.ObservedAt == "" || !sameRevision || !oneOf(o.Status, "observed", "unknown") {
+				return fmt.Errorf("repository %s observation scope invalid", r.ID)
+			}
+			if o.Status == "observed" {
+				if o.RepositoryID == nil || *o.RepositoryID == "" || o.WorktreeID == nil || *o.WorktreeID == "" || o.SnapshotID == nil || *o.SnapshotID == "" || o.Dirty == nil || o.Detached == nil || (o.Branch == nil) != *o.Detached || o.Gap != nil {
+					return fmt.Errorf("repository %s observed identity incomplete", r.ID)
+				}
+			} else if o.RepositoryID != nil || o.WorktreeID != nil || o.SnapshotID != nil || o.Branch != nil || o.Dirty != nil || o.Detached != nil || o.Gap == nil || *o.Gap == "" {
+				return fmt.Errorf("repository %s unknown observation claims state", r.ID)
+			}
+		}
 		if r.IndexStatus == "complete" && (r.Revision == nil || *r.Revision == "") {
 			return fmt.Errorf("repository %s complete revision missing", r.ID)
 		}

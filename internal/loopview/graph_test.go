@@ -260,3 +260,31 @@ func TestMergeArtifactAvailabilityDoesNotChangeIdentity(t *testing.T) {
 		t.Fatal("different source identity accepted")
 	}
 }
+
+func TestRepositoryObservationKeepsDisplayScopeAndRoundTrips(t *testing.T) {
+	v := graphFixture()
+	v.Graph.Repositories[0].Revision = ptr("revision")
+	v.Graph.Repositories[0].Observation = &RepositoryObservation{Status: "observed", Scope: "display_readback", ObservedAt: "2026-10-17T06:00:00+00:00", RepositoryID: ptr("git_repo"), WorktreeID: ptr("worktree"), SnapshotID: ptr("snapshot"), Branch: ptr("main"), Detached: ptr(false), Dirty: ptr(true), Revision: ptr("revision")}
+	if err := validateImport(v); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded View
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Graph.Repositories[0].Observation == nil || !*decoded.Graph.Repositories[0].Observation.Dirty {
+		t.Fatal("observation lost")
+	}
+	decoded.Graph.Repositories[0].Observation.Scope = "native_execution"
+	if err := validateImport(decoded); err == nil {
+		t.Fatal("historical execution claim accepted")
+	}
+	v.Graph.Repositories[0].Observation.Status = "unknown"
+	if err := validateImport(v); err == nil {
+		t.Fatal("unknown branch claim accepted")
+	}
+}
