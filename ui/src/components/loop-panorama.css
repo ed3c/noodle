@@ -741,6 +741,8 @@
   min-width: 1000px;
 }
 .li-readback {
+  --li-ink: #253a42;
+  --li-accent: #166652;
   background: #f1eee5;
   color: #253a42;
   border-left: 1px solid #778880;
@@ -958,4 +960,18 @@
 .li-readback .li-run-summary > summary {
   font-weight: 650;
   color: #294b50;
+}
+.li-readback summary,
+.li-readback a,
+.li-readback .lp-eyebrow,
+.li-readback .lp-note,
+.li-readback .li-legend {
+  color: #36565b;
+}
+.li-readback .lp-failed {
+  color: #992e36;
+}
+.li-readback pre {
+  background: #e1e8db;
+  color: #253a42;
 }
