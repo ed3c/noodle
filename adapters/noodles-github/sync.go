@@ -94,8 +94,7 @@ func Sync(ctx context.Context, client *GitHubClient, policy Policy, capabilities
 		bodyDigest := hex.EncodeToString(bodySum[:])
 		for _, receipt := range valid {
 			declaration := receipt.Declaration
-			if receipt.Sender == policy.RepositoryDispatchSender &&
-				declaration.SourceRepository == sourceRepository &&
+			if sourceAdmitted(policy, declaration.SourceRepository, receipt.Sender) &&
 				declaration.SubjectBodySHA256 == bodyDigest && declaration.BaseSHA == baseHead &&
 				declaration.Runtime == contract.Runtime && declaration.Evidence == contract.Evidence &&
 				reflect.DeepEqual(declaration.WriteBoundary, contract.WriteBoundary) {
