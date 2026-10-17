@@ -266,7 +266,9 @@ export function mountAnatomy(root, model, { onSelect, onOriginal }) {
   };
   root.replaceChildren();
   root.className = "li-anatomy";
-  root.append(el("h4", model.title));
+  const heading = el("h4", model.title);
+  const description = el("p", model.description);
+  root.append(heading);
   const art = el("div", "");
   art.className = "li-anatomy-art";
   art.innerHTML = mechanismFigure(model.template);
@@ -288,7 +290,7 @@ export function mountAnatomy(root, model, { onSelect, onOriginal }) {
   root.append(
     art,
     controls,
-    el("p", model.description),
+    description,
     el("p", "機構是解說模型，位置與零件數不代表進度或執行次數。以下讀數來自同一筆原來源。"),
   );
   const fields = el("div", "");
@@ -328,7 +330,10 @@ export function mountAnatomy(root, model, { onSelect, onOriginal }) {
     );
     const capabilityButton = (c) =>
       button("查看此功能機構", () => {
-        activeTemplate = c.function;
+        activeTemplate = Object.hasOwn(machines, c.function) ? c.function : "unknown";
+        const [title, detail] = machines[activeTemplate];
+        heading.textContent = `${model.value.label} / ${c.id} · ${title}`;
+        description.textContent = detail;
         art.innerHTML = mechanismFigure(activeTemplate, { apart });
       });
     for (const c of model.capabilities) {

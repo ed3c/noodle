@@ -15,6 +15,98 @@ import {
   planOutline,
 } from "./anatomy/iso-kit.mjs";
 
+// Low-detail silhouettes share the producer's functional classification with anatomy.
+// These are mechanical symbols; none of their parts or contacts assert an execution.
+const silhouettes = {
+  outer: [
+    [0, 0, 65, 8, 0, 5],
+    [0, 36, 65, 8, 0, 5],
+    [0, 8, 8, 28, 0, 12],
+    [57, 8, 8, 28, 0, 12],
+    [23, 10, 20, 25, 0, 9],
+  ],
+  inner: [
+    [0, 0, 8, 44, 0, 28],
+    [57, 0, 8, 44, 0, 28],
+    [0, 0, 65, 8, 28, 6],
+    [28, 4, 10, 8, 10, 18],
+    [15, 16, 35, 25, 0, 7],
+  ],
+  router: [
+    [0, 0, 65, 44, 0, 5],
+    [5, 5, 12, 12, 5, 5],
+    [26, 5, 12, 12, 5, 5],
+    [47, 5, 12, 12, 5, 5],
+    [5, 26, 12, 12, 5, 5],
+    [26, 26, 12, 12, 5, 5],
+    [47, 26, 12, 12, 5, 5],
+  ],
+  gauge: [
+    [0, 0, 8, 40, 0, 25],
+    [57, 0, 8, 40, 0, 25],
+    [0, 0, 65, 8, 25, 6],
+    [21, 5, 5, 8, 8, 17],
+    [40, 5, 5, 8, 8, 17],
+    [16, 18, 35, 20, 0, 5],
+  ],
+  testbench: [
+    [0, 0, 65, 44, 0, 6],
+    [5, 2, 55, 6, 6, 20],
+    [8, 8, 6, 8, 10, 14],
+    [30, 8, 6, 8, 10, 14],
+    [52, 8, 6, 8, 10, 14],
+    [10, 25, 45, 13, 6, 5],
+  ],
+  trigger: [
+    [0, 0, 65, 44, 0, 7],
+    [17, 10, 31, 24, 7, 9],
+    [29, 18, 7, 7, 16, 17],
+    [21, 13, 23, 17, 33, 4],
+  ],
+  clock: [
+    [0, 0, 65, 44, 0, 7],
+    [5, 4, 9, 34, 7, 8],
+    [16, 4, 9, 34, 7, 16],
+    [27, 4, 9, 34, 7, 24],
+    [38, 4, 9, 34, 7, 16],
+    [49, 4, 9, 34, 7, 8],
+  ],
+  reservoir: [
+    [0, 0, 27, 44, 0, 30],
+    [33, 3, 32, 8, 0, 8],
+    [33, 18, 32, 8, 0, 8],
+    [33, 33, 32, 8, 0, 8],
+    [49, 1, 12, 12, 8, 7],
+    [49, 16, 12, 12, 8, 7],
+    [49, 31, 12, 12, 8, 7],
+  ],
+  index: [
+    [0, 0, 65, 44, 0, 6],
+    [0, 0, 65, 44, 8, 6],
+    [0, 0, 65, 44, 16, 6],
+    [0, 0, 65, 44, 24, 6],
+  ],
+  meter: [
+    [0, 0, 65, 44, 0, 5],
+    [4, 4, 16, 26, 5, 14],
+    [25, 4, 16, 26, 5, 14],
+    [46, 4, 16, 26, 5, 14],
+  ],
+  dock: [
+    [0, 0, 23, 44, 0, 20],
+    [42, 0, 23, 44, 0, 20],
+    [23, 8, 19, 28, 0, 5],
+    [6, 8, 11, 28, 20, 4],
+    [48, 8, 11, 28, 20, 4],
+  ],
+  reader: [
+    [0, 0, 7, 44, 0, 25],
+    [58, 0, 7, 44, 0, 25],
+    [0, 0, 65, 8, 25, 5],
+    [8, 8, 49, 30, 4, 3],
+  ],
+};
+
 const NS = "http://www.w3.org/2000/svg";
 function html(tag, text, attrs = {}) {
   return decorate(document.createElement(tag), text, attrs);
@@ -409,8 +501,7 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
       const x = (i % 4) * 190,
         y = Math.floor(i / 4) * 155,
         z = 0;
-      const tower = ["soodles.outer", "noodle.inner"].includes(object.namespace);
-      const roof = tower ? 106 : 63;
+      const roof = 32;
       const portAnchor = [x + 65, y + 42, roof + 5];
       objectPoints.set(object.id, portAnchor);
       add([x + 65, y + 42, z], () => {
@@ -418,12 +509,16 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
         solid(g, { plan: { x, y, w: 140, d: 86 }, z: 0, h: 8, cls: "li-foot" });
         solid(g, { plan: { x: x + 5, y: y + 5, w: 130, d: 76 }, z: 8, h: roof - 13, cls: "" });
         solid(g, { plan: { x: x + 3, y: y + 3, w: 134, d: 80 }, z: roof - 5, h: 5, cls: "li-cap" });
-        // Three drawers represent source, transition and evidence views, not executions.
-        for (let j = 0; j < 3; j++) {
+        const parts = silhouettes[object.mechanism?.template] || [];
+        for (const [dx, dy, w, d, lift, h] of parts.toSorted(
+          (a, b) =>
+            depthOf([a[0] + a[2] / 2, a[1] + a[3] / 2, a[4] + a[5] / 2], projection) -
+            depthOf([b[0] + b[2] / 2, b[1] + b[3] / 2, b[4] + b[5] / 2], projection),
+        )) {
           solid(g, {
-            plan: { x: x + 12, y: y + 69 + (state.apart ? 10 * j : 0), w: 112, d: 8 },
-            z: 14 + j * 13,
-            h: 8,
+            plan: { x: x + 36 + dx, y: y + 17 + dy, w, d },
+            z: roof + lift,
+            h,
             cls: "li-drawer",
           });
         }
@@ -437,9 +532,9 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
             class: "li-engraving",
           }),
         );
-        drawLabel(g, object.label, { point: [x + 70, y + 45, roof + 6], cls: "", offset: 0 });
+        drawLabel(g, object.label, { point: [x + 70, y + 45, roof + 56], cls: "", offset: 0 });
         drawLabel(g, `${scope.nodes.filter((n) => n.object_id === object.id).length} 節點`, {
-          point: [x + 70, y + 45, roof + 6],
+          point: [x + 70, y + 45, roof + 56],
           cls: "li-small",
           offset: 15,
         });
