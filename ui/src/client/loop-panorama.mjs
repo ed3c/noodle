@@ -815,6 +815,10 @@ export function mountPanorama(
     }
     chooser.value = id;
     view.run = id;
+    if (focus) {
+      view.selection = null;
+      consoleView.setSelection(null);
+    }
     consoleView.syncRun(id);
     detailPanel.open = true;
     drawDetail();

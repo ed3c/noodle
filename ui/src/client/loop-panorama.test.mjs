@@ -317,3 +317,28 @@ test("detail Run selector also updates the original external focus", (t) => {
   assert.deepEqual(calls.at(-1).node_ids, ["unrelated"]);
   assert.equal(root.querySelector('[aria-label="立體視圖執行範圍"]').value, "c");
 });
+
+test("Run switch after content inspection survives consumer remount", (t) => {
+  const { root, dom, graph } = navigationFixture(t);
+  const options = {
+    graph,
+    runs: ["a", "b", "c"].map((id) => ({ id, repository: `repo-${id}`, mode: "inner-only" })),
+    onScope() {
+      assert.fail("Run navigation must preserve Workspace scope");
+    },
+    onSelect() {
+      assert.fail("Run navigation must not request old content");
+    },
+    onFocus() {
+      mountPanorama(root, options);
+    },
+  };
+  const controller = mountPanorama(root, options);
+  controller.setSelection({ kind: "node", id: "a" });
+  const selection = root.querySelector('[aria-label="立體視圖執行範圍"]');
+  selection.value = "c";
+  selection.dispatchEvent(new dom.window.Event("change"));
+  assert.equal(root.querySelector('[aria-label="立體視圖執行範圍"]').value, "c");
+  assert.equal(root.querySelector('[aria-label="細部 Run"]').value, "c");
+  assert.match(root.querySelector('[aria-label="全景定位"]').textContent, /repo-c \/ c/);
+});
