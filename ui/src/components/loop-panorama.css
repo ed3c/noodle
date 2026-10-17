@@ -743,6 +743,8 @@
 .li-readback {
   --li-ink: #253a42;
   --li-accent: #166652;
+  --linked-background: #e4e8dc;
+  --linked-border: #96763a;
   background: #f1eee5;
   color: #253a42;
   border-left: 1px solid #778880;
