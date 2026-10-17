@@ -1,4 +1,12 @@
 import {
+  repositoryGroups,
+  dirtyName,
+  groupView,
+  filterRepositories,
+  branchName,
+  worktreeKey,
+} from "./loop-repository.mjs";
+import {
   slabOf,
   iso,
   fitProjection,
@@ -65,14 +73,26 @@ export function evidenceState(edge, graph) {
 }
 
 /** Geometry is a view of original IDs. It never adds an execution or a relationship. */
-export function projectConsole(graph, scope, { runId = null, sources = false } = {}) {
-  const nodes = scope.nodes.filter(
+export function projectConsole(
+  graph,
+  scope,
+  { runId = null, sources = false, repositoryIds = null } = {},
+) {
+  let nodes = scope.nodes.filter(
     (n) =>
       runId === null ||
       n.run_id === runId ||
       scope.edges.some((e) => e.run_id === runId && [e.from_node_id, e.to_node_id].includes(n.id)),
   );
-  const eligible = scope.edges.filter((e) => runId === null || e.run_id === runId);
+  let eligible = scope.edges.filter((e) => runId === null || e.run_id === runId);
+  if (repositoryIds) {
+    const own = new Set(
+      nodes.filter((n) => repositoryIds.includes(n.repository_id)).map((n) => n.id),
+    );
+    eligible = eligible.filter((e) => own.has(e.from_node_id) || own.has(e.to_node_id));
+    const related = new Set(eligible.flatMap((e) => [e.from_node_id, e.to_node_id]));
+    nodes = nodes.filter((n) => own.has(n.id) || related.has(n.id));
+  }
   const endpoints = new Set(
     eligible.filter((e) => e.kind === "handoff").flatMap((e) => [e.from_node_id, e.to_node_id]),
   );
@@ -94,7 +114,11 @@ export function projectConsole(graph, scope, { runId = null, sources = false } =
     hidden: nodes.length - visible.length,
     findings: graph.findings.filter(
       (f) =>
-        scope.rows.some((r) => r.run_id === f.run_id) && (runId === null || f.run_id === runId),
+        scope.rows.some((r) => r.run_id === f.run_id) &&
+        (runId === null || f.run_id === runId) &&
+        (!repositoryIds ||
+          f.node_ids.some((id) => nodes.some((n) => n.id === id)) ||
+          nodes.some((n) => n.run_id === f.run_id)),
     ),
   };
 }
@@ -119,6 +143,7 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
     state.run = null;
   }
   let projection, sceneModel;
+  state.filter ??= { repo: "", branch: "", worktree: "", snapshot: "" };
   root.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       root.classList.remove("li-expanded");
@@ -151,6 +176,69 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
     state.selection = null;
     render();
   });
+  const navigation = html("div", null, { class: "li-toolbar li-repository-nav" });
+  const filters = {};
+  for (const [key, label] of [
+    ["repo", "Repo"],
+    ["branch", "Branch"],
+    ["worktree", "Worktree"],
+    ["snapshot", "快照"],
+  ]) {
+    const select = html("select", null, { "aria-label": `來源${label}篩選` });
+    select.addEventListener("change", () => {
+      state.filter[key] = select.value;
+      const order = ["repo", "branch", "worktree", "snapshot"];
+      for (const child of order.slice(order.indexOf(key) + 1)) {
+        state.filter[child] = "";
+      }
+      state.run = null;
+      run.value = "";
+      state.selection = null;
+      render();
+    });
+    filters[key] = select;
+    const field = html("label", `${label} `);
+    field.append(select);
+    navigation.append(field);
+  }
+  function updateFilters() {
+    const available = graph.repositories.filter((r) =>
+      scope.nodes.some((n) => n.repository_id === r.id),
+    );
+    const groups = repositoryGroups(available);
+    const repos = state.filter.repo
+      ? groups.find((g) => g.id === state.filter.repo)?.members || []
+      : available;
+    const branched = repos.filter(
+      (r) => !state.filter.branch || branchName(r) === state.filter.branch,
+    );
+    const trees = branched.filter(
+      (r) => !state.filter.worktree || worktreeKey(r) === state.filter.worktree,
+    );
+    const options = {
+      repo: groups.map((g) => [g.id, `${g.label} · ${g.members.length} 來源快照`]),
+      branch: [...new Set(repos.map((r) => branchName(r)))].map((b) => [b, b]),
+      worktree: [
+        ...new Map(
+          branched.map((r) => [
+            worktreeKey(r),
+            [worktreeKey(r), `${r.root} · ${worktreeKey(r).slice(-8)}`],
+          ]),
+        ).values(),
+      ],
+      snapshot: trees.map((r) => [
+        r.id,
+        `${r.revision?.slice(0, 10) || "UNKNOWN"} · ${r.observation?.observed_at || "時間 UNKNOWN"} · ${dirtyName(r.observation?.dirty)}`,
+      ]),
+    };
+    for (const [key, select] of Object.entries(filters)) {
+      select.replaceChildren(html("option", "全部", { value: "" }));
+      for (const [value, label] of options[key]) {
+        select.append(html("option", label, { value }));
+      }
+      select.value = state.filter[key];
+    }
+  }
   const explode = button("拆解資料載體", () => {
     state.apart = !state.apart;
     render();
@@ -186,7 +274,14 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
       size();
     }),
     button("還原全景", () => {
-      Object.assign(state, { run: null, selection: null, zoom: 1, angle: 42, apart: false });
+      Object.assign(state, {
+        filter: { repo: "", branch: "", worktree: "", snapshot: "" },
+        run: null,
+        selection: null,
+        zoom: 1,
+        angle: 42,
+        apart: false,
+      });
       run.value = "";
       render();
     }),
@@ -212,12 +307,12 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
     "實線：目前交接證據完整　虛線：歷史／UNKNOWN　✕：已記錄失敗。連線與選取只讀回證據，不啟動任務。",
     { class: "li-legend" },
   );
-  root.append(heading, toolbar, body, readout, legend);
+  root.append(heading, navigation, toolbar, body, readout, legend);
 
   function size() {
     drawing.style.width = `${state.zoom * 100}%`;
   }
-  function select(kind, id) {
+  function selectItem(kind, id) {
     state.selection = { kind, id };
     render();
   }
@@ -238,7 +333,7 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
     );
     group.append(g);
   }
-  function label(group, text, { point, cls = "", offset = 0 }) {
+  function drawLabel(group, text, { point, cls = "", offset = 0 }) {
     const [x, y] = iso(point, projection);
     group.append(
       svg("text", text, { x, y: y + offset, class: `li-label ${cls}`, "text-anchor": "middle" }),
@@ -270,12 +365,22 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
       group.classList.toggle("li-endpoint", related && kind !== "edge");
     }
     group.append(svg("title", title));
-    action(group, () => select(kind, id));
+    action(group, () => selectItem(kind, id));
     return group;
   }
   function render() {
     source.disabled = !state.run;
-    sceneModel = projectConsole(graph, scope, { runId: state.run, sources: state.sources });
+    updateFilters();
+    const filtered = Object.values(state.filter).some(Boolean);
+    sceneModel = projectConsole(graph, scope, {
+      runId: state.run,
+      sources: state.sources,
+      repositoryIds: filtered
+        ? filterRepositories(graph.repositories, state.filter).map((r) => r.id)
+        : null,
+    });
+    const repoGroups = repositoryGroups(sceneModel.repositories);
+    const groupFor = new Map(repoGroups.flatMap((g) => g.members.map((r) => [r.id, g.id])));
     drawing.replaceChildren();
     explode.textContent = state.apart ? "收合資料載體" : "拆解資料載體";
     explode.setAttribute("aria-pressed", String(state.apart));
@@ -283,9 +388,7 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
     const placements = new Map();
     const objects = [...graph.objects].toSorted((a, b) => a.namespace.localeCompare(b.namespace));
     const cols = state.run ? 3 : 4;
-    const rackRows = Math.ceil(
-      (state.run ? sceneModel.nodes.length : sceneModel.repositories.length) / cols,
-    );
+    const rackRows = Math.ceil((state.run ? sceneModel.nodes.length : repoGroups.length) / cols);
     const worldDepth = 410 + Math.max(1, rackRows) * 160;
     projection = fitProjection(
       boxCorners({ x: -25, y: -20, w: 800, d: worldDepth, r: 4 }, -25, 140),
@@ -333,8 +436,8 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
             class: "li-engraving",
           }),
         );
-        label(g, object.label, { point: [x + 70, y + 45, roof + 6], cls: "", offset: 0 });
-        label(g, `${scope.nodes.filter((n) => n.object_id === object.id).length} 節點`, {
+        drawLabel(g, object.label, { point: [x + 70, y + 45, roof + 6], cls: "", offset: 0 });
+        drawLabel(g, `${scope.nodes.filter((n) => n.object_id === object.id).length} 節點`, {
           point: [x + 70, y + 45, roof + 6],
           cls: "li-small",
           offset: 15,
@@ -342,7 +445,7 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
         return g;
       });
     });
-    const members = state.run ? sceneModel.nodes : sceneModel.repositories;
+    const members = state.run ? sceneModel.nodes : repoGroups.map((g) => groupView(g));
     members.forEach((item, i) => {
       const x = (i % cols) * (760 / cols),
         y = 355 + Math.floor(i / cols) * 160;
@@ -369,26 +472,42 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
             cls: "li-drawer",
           });
         }
-        label(g, state.run ? item.kind : item.label, {
+        if (state.run) {
+          const count = { session: 1, pclass: 5, cli: 3, observation: 2 }[item.kind];
+          for (let j = 0; j < count; j++) {
+            solid(g, {
+              plan: {
+                x: x + 20 + j * 20,
+                y: y + 20,
+                w: item.kind === "session" ? w - 40 : 12,
+                d: item.kind === "session" ? 5 : 16,
+              },
+              z: top + 4,
+              h: item.kind === "session" ? 20 : 8,
+              cls: "li-port",
+            });
+          }
+        }
+        drawLabel(g, state.run ? item.kind : item.label, {
           point: [x + w / 2, y + 43, top + 8],
           cls: "",
           offset: 0,
         });
-        label(
+        drawLabel(
           g,
           state.run
             ? item.label.slice(0, 30)
-            : `${sceneModel.nodes.filter((n) => n.repository_id === item.id).length} 節點 · ${item.revision?.slice(0, 8) || "版本未知"}`,
+            : `${sceneModel.nodes.filter((n) => groupFor.get(n.repository_id) === item.id).length} 節點 · ${item.revision?.slice(0, 8) || "版本未知"}`,
           { point: [x + w / 2, y + 43, top + 8], cls: "li-small", offset: 15 },
         );
         if (state.run) {
-          label(
+          drawLabel(
             g,
             `${graph.repositories.find((r) => r.id === item.repository_id)?.label || "Repo"} · ${item.status.execution}`,
             { point: [x + w / 2, y + 43, top + 8], cls: "li-small", offset: 29 },
           );
         } else {
-          label(g, `${item.tracked_files.length} 個目錄索引`, {
+          drawLabel(g, `${item.tracked_files.length} 個目錄索引`, {
             point: [x + w / 2, y + 43, top + 8],
             cls: "li-small",
             offset: 29,
@@ -414,7 +533,7 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
       if (state.run) {
         pair = [from.id, to.id];
       } else if (edge.scope === "cross_repository") {
-        pair = [from.repository_id, to.repository_id];
+        pair = [groupFor.get(from.repository_id), groupFor.get(to.repository_id)];
       }
       const key = JSON.stringify(pair);
       if (!groups.has(key)) {
@@ -478,7 +597,7 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
       g.append(svg("text", "✕", { x: x + 40, y: y - 25, class: "li-breakpoint" }));
       drawing.append(g);
     }
-    readout.textContent = `${graph.objects.length} 唯一物件 · ${sceneModel.repositories.length} Repo 區域 · ${sceneModel.nodes.length} 路徑節點 · ${sceneModel.hidden} 來源節點按需展開 · ${sceneModel.edges.filter((e) => evidenceState(e, graph) === "current").length} 段目前交接證據完整`;
+    readout.textContent = `${graph.objects.length} 唯一物件 · ${repoGroups.length} Repo 區域 · ${sceneModel.nodes.length} 路徑節點 · ${sceneModel.hidden} 來源節點按需展開 · ${sceneModel.edges.filter((e) => evidenceState(e, graph) === "current").length} 段目前交接證據完整`;
     size();
     inspect();
   }
@@ -489,7 +608,7 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
       object: graph.objects,
       node: graph.nodes,
       edge: graph.edges,
-      repository: graph.repositories,
+      repository: repositoryGroups(graph.repositories).map((g) => groupView(g)),
       finding: graph.findings,
     };
     const value = pick && collection[pick.kind]?.find((v) => v.id === pick.id);
@@ -516,13 +635,28 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
         }
         inspector.append(button("比較原始輸入與輸出", () => openOriginal(pick)));
       } else if (pick.kind === "repository") {
-        const nodes = scope.nodes.filter((n) => n.repository_id === value.id);
+        const nodes = scope.nodes.filter((n) =>
+          value.members.some((r) => r.id === n.repository_id),
+        );
         inspector.append(
-          html("p", `${value.tracked_files.length} 個 Git 索引項目 · ${value.index_status}`),
+          html("p", `${value.members.length} 來源快照；Git 觀察不代表歷史執行版本。`),
+          button("選取此 Repo", () => {
+            state.filter = { repo: value.id, branch: "", worktree: "", snapshot: "" };
+            render();
+          }),
           button("定位目錄與區域 DAG", () =>
             onFocus({ node_ids: nodes.map((n) => n.id), edge_ids: [] }),
           ),
         );
+        for (const repo of value.members) {
+          const o = repo.observation;
+          inspector.append(
+            html(
+              "p",
+              `${branchName(repo)} · ${repo.revision || "UNKNOWN"} · ${dirtyName(o?.dirty)} · ${o?.observed_at || "觀察時間 UNKNOWN"}`,
+            ),
+          );
+        }
         for (const id of new Set(nodes.map((n) => n.run_id))) {
           inspector.append(
             button(`拆解 Run ${id.slice(0, 12)}`, () => {
@@ -540,17 +674,34 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
             html("p", `Session ${value.identity.session_id || "UNKNOWN"}`),
           );
         }
-        if (pick.kind === "object") {
-          const nodes = scope.nodes.filter((n) => n.object_id === value.id);
+        if (["node", "object"].includes(pick.kind)) {
+          const panel = html("section", "載入立體詳圖…", { "aria-label": "節點 anatomy 詳圖" });
           inspector.append(
-            html(
-              "p",
-              `${nodes.length} 筆來源／執行節點。${nodes.length > 0 ? "依原節點狀態判讀。" : "此範圍未觀察到執行。"}`,
-            ),
+            button("詳圖放大／全景定位", () => {
+              root.classList.toggle("li-detail-open");
+              inspector.scrollTop = panel.offsetTop - inspector.offsetTop;
+            }),
+            panel,
           );
-          for (const p of graph.ports.filter((port) => port.object_id === value.id)) {
-            inspector.append(html("p", `${p.direction} · ${p.name}`, { class: "li-type" }));
-          }
+          import("./loop-anatomy.mjs")
+            .then(({ anatomyModel, mountAnatomy }) => {
+              if (!panel.isConnected) {
+                return null;
+              }
+              const model = anatomyModel(graph, pick, sceneModel.nodes);
+              if (model) {
+                mountAnatomy(panel, model, {
+                  onSelect: ({ kind, id }) => selectItem(kind, id),
+                  onOriginal: (chosen) => openOriginal(chosen?.kind ? chosen : pick),
+                });
+              }
+              return null;
+            })
+            .catch((error) => {
+              if (panel.isConnected) {
+                panel.textContent = `詳圖載入失敗：${error.message}`;
+              }
+            });
         }
         inspector.append(button("開啟原節點與證據", () => openOriginal(pick)));
       }
@@ -569,7 +720,7 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
     for (const edge of sceneModel.edges) {
       list.append(
         button(`${stateNames[evidenceState(edge, graph)]} · ${edge.label}`, () =>
-          select("edge", edge.id),
+          selectItem("edge", edge.id),
         ),
       );
     }

@@ -53,6 +53,21 @@ function setup(customize?: (view: ReturnType<typeof graphFixture>) => void) {
   return { view, fetch, wrap, ...render(wrap()) };
 }
 describe("source-backed DAG interactions", () => {
+  it("loads one selected anatomy, keeps unknown Git facts and makes view changes effect-free", async () => {
+    const { fetch } = setup();
+    const scene = within(screen.getByLabelText("立體工程全景"));
+    expect(scene.queryByLabelText("節點 anatomy 詳圖")).not.toBeInTheDocument();
+    await userEvent.click(scene.getByRole("button", { name: "物件 · Original Manager" }));
+    const panel = within(await scene.findByLabelText("節點 anatomy 詳圖"));
+    expect(await panel.findByRole("img", { name: "功能組件 · 接口配線台" })).toBeVisible();
+    await userEvent.click(panel.getByRole("button", { name: "拆解／組裝機構" }));
+    await userEvent.click(panel.getByRole("button", { name: "詳圖 1×／4×" }));
+    await userEvent.selectOptions(scene.getByLabelText("來源Branch篩選"), "UNKNOWN");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(scene.getAllByRole("button", { name: "物件 · Original Manager" })).toHaveLength(1);
+    await userEvent.click(scene.getByRole("button", { name: "還原全景" }));
+    expect(scene.getByLabelText("來源Branch篩選")).toHaveValue("");
+  });
   it("keeps isometric inspection read-only and opens the original comparison on demand", async () => {
     const { fetch } = setup();
     const console = within(screen.getByLabelText("立體工程全景"));

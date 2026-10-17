@@ -654,3 +654,58 @@
     max-height: 320px;
   }
 }
+
+.li-repository-nav label {
+  min-width: 0;
+  max-width: 100%;
+  display: grid;
+  gap: 0.3rem;
+}
+.li-repository-nav select {
+  max-width: 320px;
+  width: 100%;
+}
+.li-anatomy {
+  border-top: 1px solid #46535c;
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+}
+.li-anatomy-art {
+  overflow: auto;
+  background: #10191e;
+  border: 1px solid #384750;
+  border-radius: 8px;
+}
+.li-anatomy-art svg {
+  display: block;
+  width: calc(100% * var(--anatomy-zoom, 1));
+  min-width: 280px;
+}
+.li-anatomy button {
+  display: block;
+  margin: 0.35rem 0;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.li-anatomy-fields {
+  display: grid;
+  gap: 0.6rem;
+}
+.li-anatomy h5 {
+  margin: 0.6rem 0;
+}
+.li-anatomy p {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+@media (min-width: 1000px) {
+  .li-detail-open .li-body {
+    grid-template-columns: minmax(0, 1fr) minmax(480px, 1fr);
+  }
+}
+
+.li-anatomy .li-toolbar button {
+  width: auto;
+  flex: 1;
+}
