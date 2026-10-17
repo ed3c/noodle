@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 const [, , kit] = process.argv;
 if (!kit) {
@@ -109,14 +109,14 @@ function extrude(...args) { return {...rawExtrude(...args),world:A.extruded(...a
       JSON.stringify(orders) +
       ";\n",
   );
-  const linted = spawnSync("pnpm", ["exec", "oxlint", "--fix", target.pathname], {
+  const linted = spawnSync("pnpm", ["exec", "oxlint", "--fix", fileURLToPath(target)], {
     cwd: new URL("../ui/", import.meta.url),
     stdio: "inherit",
   });
   if (linted.error || linted.status !== 0) {
     throw new Error("Generated geometry lint failed.", { cause: linted.error });
   }
-  const formatted = spawnSync("pnpm", ["exec", "oxfmt", "--write", target.pathname], {
+  const formatted = spawnSync("pnpm", ["exec", "oxfmt", "--write", fileURLToPath(target)], {
     cwd: new URL("../ui/", import.meta.url),
     stdio: "inherit",
   });
