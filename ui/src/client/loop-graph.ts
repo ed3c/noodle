@@ -358,7 +358,12 @@ export function parseLoopGraph(value: unknown) {
       .filter((e) => e.kind === "handoff")
       .map((e) => ({ from: e.from_node_id, to: e.to_node_id })),
   });
-  return { ...parseLoopView({ ...root, schema_version: 1 }), schema_version: 2, graph };
+  return {
+    ...parseLoopView({ ...root, schema_version: 1 }),
+    schema_version: 2,
+    graph,
+    review_version: root.review_version === undefined ? null : text(root.review_version),
+  };
 }
 export type GraphView = ReturnType<typeof parseLoopGraph>;
 export type LoopGraph = GraphView["graph"];
@@ -442,4 +447,28 @@ export async function fetchGraphFile(
     error,
     content: response.ok && status === "available" ? nullable(raw.content, text) : null,
   };
+}
+
+export async function submitReviewSelection({
+  graphVersion,
+  runId,
+  kind,
+  targetId,
+}: {
+  graphVersion: string;
+  runId: string;
+  kind: string;
+  targetId: string;
+}) {
+  const response = await fetch("/api/loops/review-selections", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ graph_version: graphVersion, run_id: runId, kind, target_id: targetId }),
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  const raw = object(await response.json());
+  const selection = object(raw.selection);
+  return { id: id(selection.id), status: text(raw.status) };
 }

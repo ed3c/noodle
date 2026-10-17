@@ -383,6 +383,40 @@ export function mountComparison(
   }
   hypotheses.append(el("p", "原 Schema 宣告不是契約要求；人的採納不等於假說已驗證。"));
   panel.append(hypotheses);
+  const harness = el("section", null, "lc-harness");
+  harness.setAttribute("aria-label", "Harness 工具化缺口");
+  harness.append(el("h4", "Harness：從敘述到工具"));
+  const categories = {
+    session_judgment: "需要 Session 語義判斷",
+    tool_unwired: "已有工具但未接線",
+    capability_missing: "缺少確定性能力",
+    evidence_missing: "只有證據不足",
+  };
+  harness.append(
+    el("p", "四類判斷分開保留。缺觀察不能推成缺工具；工具已註冊不代表已載入或已執行。"),
+  );
+  for (const row of comparison.rows.filter((r) => r.status === "unknown")) {
+    harness.append(button(`證據不足 · ${row.route_id}`, () => chooseRoute(row.route_id)));
+  }
+  for (const record of comparison.harness_reviews || []) {
+    const { assessment } = record;
+    if (!assessment || !categories[assessment.category]) {
+      continue;
+    }
+    const detail = el("details", null);
+    detail.append(
+      el("summary", `${categories[assessment.category]} · Session 提交／未認證`),
+      el("p", assessment.claim),
+      el("p", `前提：${assessment.premise}`),
+      el("p", `推翻條件：${assessment.falsifier}`),
+      el("p", `原工具：${assessment.tool || "未指定；不猜測命令"}`),
+      button("檢視原判斷與來源版本", () =>
+        onOriginal({ kind: "artifact", id: record.artifact_id }),
+      ),
+    );
+    harness.append(detail);
+  }
+  review.append(harness);
   const table = el("table", null);
   const head = el("tr", null);
   for (const label of ["契約／型態轉換", "實際觀察", "機械對照"]) {

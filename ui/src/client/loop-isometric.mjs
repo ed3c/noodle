@@ -215,7 +215,19 @@ const stateNames = {
 
 export function mountIsometric(
   root,
-  { graph, scope, runs, onSelect, onFocus, onRun, onInspect, renderRunCard, view, readArtifact },
+  {
+    graph,
+    scope,
+    runs,
+    onSelect,
+    onFocus,
+    onRun,
+    onInspect,
+    renderRunCard,
+    view,
+    readArtifact,
+    onReviewSelection,
+  },
 ) {
   const state = (view.console ??= {
     run: null,
@@ -1004,6 +1016,27 @@ export function mountIsometric(
     }
     inspector.append(runHeader);
     machineInspector();
+    if (value && state.run && ["object", "node", "edge", "finding"].includes(pick.kind)) {
+      const reviewStatus = html("p", "雲端／未支援交接：只讀取原資料。");
+      if (onReviewSelection) {
+        reviewStatus.textContent = "保存選取引用，供目前 Session 按需讀取；不啟動任務。";
+        const reviewPick = { runId: state.run, kind: pick.kind, id: pick.id };
+        const submit = button("交給 Session 檢視", async () => {
+          submit.disabled = true;
+          try {
+            const receipt = await onReviewSelection(reviewPick);
+            reviewStatus.textContent = `已保存 ${receipt.id} · ${receipt.status}；Session 可讀取原引用與續行。`;
+          } catch (error) {
+            reviewStatus.textContent = `選取未確認：${error.message}。先讀回；不重播任務。`;
+          } finally {
+            submit.disabled = false;
+          }
+        });
+        inspector.append(submit);
+      }
+      reviewStatus.setAttribute("role", "status");
+      inspector.append(reviewStatus);
+    }
     if (value) {
       inspector.append(html("h4", value.label || value.message), html("code", value.id));
       if (pick.kind === "finding") {

@@ -13,10 +13,11 @@ import (
 	"github.com/poteto/noodle/internal/loopview"
 )
 
-// LoopViewsHandler exposes display data and static assets only. It has no control handler.
+// LoopViewsHandler exposes evidence and explicit review selections, never execution controls.
 func LoopViewsHandler(dir string, ui fs.FS, observe func(context.Context, *loopview.View) error) http.Handler {
 	mux := http.NewServeMux()
 	registerLoopGraph(mux, dir)
+	registerReviewSelection(mux, dir)
 	mux.HandleFunc("GET /api/loops", func(w http.ResponseWriter, r *http.Request) {
 		view, err := loopview.Load(dir)
 		if err != nil {
@@ -68,7 +69,7 @@ func LoopViewsHandler(dir string, ui fs.FS, observe func(context.Context, *loopv
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && !(r.Method == http.MethodPost && r.URL.Path == "/api/loops/review-selections") {
 			w.Header().Set("Allow", "GET, HEAD")
 			http.Error(w, "loop display is read only", http.StatusMethodNotAllowed)
 			return

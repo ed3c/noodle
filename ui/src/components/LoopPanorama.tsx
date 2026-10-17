@@ -17,6 +17,7 @@ export function LoopPanorama(
     callbacks.current = props;
   }, [props]);
   const { graph, runs, runIds, goal } = props;
+  const canReview = Boolean(props.onReviewSelection);
   useEffect(() => {
     if (root.current) {
       controller.current = mountPanorama(root.current, {
@@ -24,6 +25,15 @@ export function LoopPanorama(
         runs,
         runIds,
         goal,
+        onReviewSelection: canReview
+          ? (value) => {
+              const submit = callbacks.current.onReviewSelection;
+              if (!submit) {
+                return Promise.reject(new Error("Local review selection unavailable"));
+              }
+              return submit(value);
+            }
+          : undefined,
         readArtifact: (id) => callbacks.current.readArtifact?.(id) ?? Promise.resolve(null),
         onReset: () => callbacks.current.onReset?.(),
         onScope: (value) => callbacks.current.onScope(value),
@@ -31,7 +41,7 @@ export function LoopPanorama(
         onFocus: (value) => callbacks.current.onFocus(value),
       });
     }
-  }, [graph, runs, runIds, goal]);
+  }, [graph, runs, runIds, goal, canReview]);
   useEffect(() => {
     controller.current?.setSelection(props.selection);
   }, [props.selection, graph, runs, runIds, goal]);

@@ -1007,6 +1007,7 @@
 .li-console .lc-panel h4,
 .li-console .lc-review h3,
 .li-console .lc-review h4,
+.li-console .lc-review summary,
 .li-console .lc-panel summary {
   color: #253a42;
 }

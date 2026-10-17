@@ -225,7 +225,7 @@ test("source-only guidance stays browseable without hiding real handoff endpoint
   assert.equal(projectDetailLayer(detail, true).nodes.length, detail.nodes.length);
 });
 
-function navigationFixture(t) {
+function navigationFixture(t, extra = {}) {
   const dom = new JSDOM("<main></main>");
   const previous = globalThis.document;
   globalThis.document = dom.window.document;
@@ -275,6 +275,7 @@ function navigationFixture(t) {
     onReset() {
       resets.push(true);
     },
+    ...extra,
   });
   return { root, calls, resets, dom, graph };
 }
@@ -341,4 +342,34 @@ test("Run switch after content inspection survives consumer remount", (t) => {
   assert.equal(root.querySelector('[aria-label="立體視圖執行範圍"]').value, "c");
   assert.equal(root.querySelector('[aria-label="細部 Run"]').value, "c");
   assert.match(root.querySelector('[aria-label="全景定位"]').textContent, /repo-c \/ c/);
+});
+
+test("explicit local review selection keeps the chosen Run; cloud has no submission control", async (t) => {
+  const submitted = [];
+  const { root, dom } = navigationFixture(t, {
+    onReviewSelection: (pick) => {
+      submitted.push(pick);
+      return Promise.resolve({ id: "receipt", status: "current" });
+    },
+  });
+  const run = root.querySelector('[aria-label="立體視圖執行範圍"]');
+  run.value = "a";
+  run.dispatchEvent(new dom.window.Event("change"));
+  root.querySelector('[data-detail-node="a"]').dispatchEvent(new dom.window.Event("click"));
+  const submit = [...root.querySelectorAll("button")].find(
+    (b) => b.textContent === "交給 Session 檢視",
+  );
+  assert.ok(submit);
+  assert.equal(submitted.length, 0);
+  submit.click();
+  await new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+  assert.deepEqual(submitted, [{ runId: "a", kind: "node", id: "a" }]);
+  assert.match(root.textContent, /已保存 receipt/);
+  const cloud = navigationFixture(t);
+  assert.equal(
+    [...cloud.root.querySelectorAll("button")].some((b) => b.textContent === "交給 Session 檢視"),
+    false,
+  );
 });
