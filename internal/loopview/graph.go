@@ -20,13 +20,29 @@ type Graph struct {
 	Findings     []Finding    `json:"findings"`
 	Metrics      []Metric     `json:"metrics"`
 }
+type Mechanism struct {
+	Version      int          `json:"version"`
+	Template     string       `json:"template"`
+	Capabilities []Capability `json:"capabilities"`
+}
+type Capability struct {
+	ID       string `json:"id"`
+	Function string `json:"function"`
+	Entry    string `json:"entry"`
+	Input    string `json:"input"`
+	Output   string `json:"output"`
+	Readback string `json:"readback"`
+	Refusal  string `json:"refusal"`
+	Source   string `json:"source"`
+}
 type Object struct {
-	ID                string   `json:"id"`
-	Namespace         string   `json:"namespace"`
-	Label             string   `json:"label"`
-	Kind              string   `json:"kind"`
-	Scope             string   `json:"scope"`
-	SourceArtifactIDs []string `json:"source_artifact_ids"`
+	Mechanism         *Mechanism `json:"mechanism,omitempty"`
+	ID                string     `json:"id"`
+	Namespace         string     `json:"namespace"`
+	Label             string     `json:"label"`
+	Kind              string     `json:"kind"`
+	Scope             string     `json:"scope"`
+	SourceArtifactIDs []string   `json:"source_artifact_ids"`
 }
 type Port struct {
 	ID                string   `json:"id"`
@@ -104,6 +120,7 @@ type NodeStatus struct {
 	Acceptance string `json:"acceptance"`
 }
 type Node struct {
+	Mechanism           string       `json:"mechanism,omitempty"`
 	ID                  string       `json:"id"`
 	RunID               string       `json:"run_id"`
 	RepositoryID        string       `json:"repository_id"`
@@ -259,6 +276,18 @@ func validateGraph(view View) error {
 			return fmt.Errorf("object %s namespace duplicated or scope invalid", o.ID)
 		}
 		namespaces[o.Namespace] = true
+		if m := o.Mechanism; m != nil {
+			if m.Version != 1 || m.Template == "" || len(m.Capabilities) == 0 {
+				return fmt.Errorf("invalid mechanism")
+			}
+			seen := map[string]bool{}
+			for _, c := range m.Capabilities {
+				if seen[c.ID] || c.ID == "" || c.Function == "" || c.Entry == "" || c.Input == "" || c.Output == "" || c.Readback == "" || c.Refusal == "" || c.Source == "" {
+					return fmt.Errorf("invalid capability")
+				}
+				seen[c.ID] = true
+			}
+		}
 		if err := refsExist(o.SourceArtifactIDs, artifacts); err != nil {
 			return err
 		}

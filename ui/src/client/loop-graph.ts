@@ -129,6 +129,36 @@ export function parseArtifact(value: unknown) {
     },
   };
 }
+function mechanism(raw: unknown) {
+  if (raw === undefined) {
+    return;
+  }
+  const m = object(raw);
+  if (m.version !== 1) {
+    throw new Error("Unknown mechanism version");
+  }
+  const capabilities = list(m.capabilities, (item) => {
+    const c = object(item);
+    return {
+      id: text(c.id),
+      function: text(c.function),
+      entry: text(c.entry),
+      input: text(c.input),
+      output: text(c.output),
+      readback: text(c.readback),
+      refusal: text(c.refusal),
+      source: text(c.source),
+    };
+  });
+  if (
+    capabilities.length === 0 ||
+    new Set(capabilities.map((c) => c.id)).size !== capabilities.length ||
+    capabilities.some((c) => Object.values(c).some((v) => !v))
+  ) {
+    throw new Error("Invalid mechanism capability");
+  }
+  return { version: 1, template: id(m.template), capabilities };
+}
 export function parseLoopGraph(value: unknown) {
   const root = object(value);
   if (root.schema_version !== 2) {
@@ -141,6 +171,7 @@ export function parseLoopGraph(value: unknown) {
       return {
         id: id(o.id),
         namespace: text(o.namespace),
+        mechanism: mechanism(o.mechanism),
         label: text(o.label),
         kind: text(o.kind),
         scope: choice(o.scope, ["shared", "repository"]),
@@ -183,6 +214,7 @@ export function parseLoopGraph(value: unknown) {
         run_id: id(n.run_id),
         repository_id: id(n.repository_id),
         object_id: id(n.object_id),
+        mechanism: n.mechanism === undefined ? undefined : id(n.mechanism),
         kind: choice(n.kind, ["session", "pclass", "cli", "observation"]),
         label: text(n.label),
         identity: {

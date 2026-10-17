@@ -134,7 +134,27 @@ test("repository filtering retains original handoff endpoint but excludes unrela
   assert.equal(view.edges[0].id, "handoff");
 });
 test("each mechanism has independently renderable static detail without executing a timeline", () => {
-  for (const kind of ["loop", "manager", "session", "prompt", "pclass", "cli", "observation"]) {
+  for (const kind of [
+    "outer",
+    "inner",
+    "router",
+    "gauge",
+    "testbench",
+    "trigger",
+    "clock",
+    "reservoir",
+    "index",
+    "meter",
+    "dock",
+    "reader",
+    "session",
+    "carrier",
+    "selector",
+    "interlock",
+    "workcell",
+    "recorder",
+    "unknown",
+  ]) {
     const drawing = mechanismFigure(kind);
     assert.match(drawing, new RegExp(`data-anatomy-template="${kind}"`));
     assert.ok(Number(drawing.match(/data-parts="(\d+)"/)[1]) >= 40);
@@ -156,8 +176,36 @@ test("shared manager anatomy preserves original objects and unobserved condition
     });
   const before = JSON.stringify(graph);
   const model = anatomyModel(graph, { kind: "object", id: "manager" });
-  assert.equal(model.template, "manager");
+  assert.equal(model.template, "unknown");
   assert.equal(model.peers.length, 0);
   assert.equal(model.inputs.length, 0);
   assert.equal(JSON.stringify(graph), before);
+});
+
+test("functional mapping is producer supplied and does not change on failure", () => {
+  const { graph } = fixture();
+  graph.objects = [
+    {
+      id: "m",
+      namespace: "soodles.test",
+      mechanism: { version: 1, template: "testbench", capabilities: [] },
+    },
+  ];
+  graph.ports = [];
+  for (const node of graph.nodes)
+    Object.assign(node, {
+      object_id: "m",
+      kind: "cli",
+      mechanism: "interlock",
+      input_artifact_ids: [],
+      output_artifact_ids: [],
+      evidence_artifact_ids: [],
+    });
+  assert.equal(anatomyModel(graph, { kind: "object", id: "m" }).template, "testbench");
+  graph.nodes[0].status.execution = "failed";
+  assert.equal(anatomyModel(graph, { kind: "node", id: "a" }).template, "interlock");
+  graph.nodes[0].mechanism = "future-unknown";
+  assert.equal(anatomyModel(graph, { kind: "node", id: "a" }).template, "unknown");
+  assert.notEqual(mechanismFigure("outer"), mechanismFigure("inner"));
+  assert.notEqual(mechanismFigure("gauge"), mechanismFigure("testbench"));
 });

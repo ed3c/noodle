@@ -389,7 +389,8 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
     const objects = [...graph.objects].toSorted((a, b) => a.namespace.localeCompare(b.namespace));
     const cols = state.run ? 3 : 4;
     const rackRows = Math.ceil((state.run ? sceneModel.nodes.length : repoGroups.length) / cols);
-    const worldDepth = 410 + Math.max(1, rackRows) * 160;
+    const machineDepth = Math.ceil(objects.length / 4) * 155 + 75;
+    const worldDepth = machineDepth + Math.max(1, rackRows) * 160;
     projection = fitProjection(
       boxCorners({ x: -25, y: -20, w: 800, d: worldDepth, r: 4 }, -25, 140),
       1100,
@@ -448,7 +449,7 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
     const members = state.run ? sceneModel.nodes : repoGroups.map((g) => groupView(g));
     members.forEach((item, i) => {
       const x = (i % cols) * (760 / cols),
-        y = 355 + Math.floor(i / cols) * 160;
+        y = machineDepth + Math.floor(i / cols) * 160;
       const w = 760 / cols - 28;
       const kind = state.run ? "node" : "repository";
       const top = state.apart ? 78 : 32;

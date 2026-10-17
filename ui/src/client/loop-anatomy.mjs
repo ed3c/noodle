@@ -1,13 +1,28 @@
-import { slabOf, cylinder, boxCorners, fitProjection, depthOf } from "./anatomy/iso-kit.mjs";
+import { slabOf, boxCorners, fitProjection, depthOf } from "./anatomy/iso-kit.mjs";
 
 const machines = {
-  loop: ["整體機械 · 閉環輸送台", "既有交接是輸送路徑；回饋與驗收依原證據分開判讀。"],
-  manager: ["功能組件 · 接口配線台", "每個插座對應原接口；同一物件不因被多個迴圈引用而複製。"],
-  session: ["Session · 判斷操作台", "輸入、已提交的判斷與原輸出分開；未記錄的內部推論不補畫。"],
-  prompt: ["Prompt · 載體轉換台", "兩端保存原資料型態；中間只展示已有交接，不宣稱語義等價。"],
-  pclass: ["P-class · 條件選擇機構", "條件、斷言與原續行由原來源展開；載入不等於已遵循。"],
-  cli: ["CLI · 轉移導軌", "原輸入經已記錄的條件走向輸出或拒絕；圖面不觸發轉移。"],
-  observation: ["觀察 · 證據讀數台", "讀數只對應這筆來源的狀態；沒有量測就保留 UNKNOWN。"],
+  outer: ["Outer · 審查回送分流機", "分開審查、回饋與驗收；回送路徑仍須原續行證據。"],
+  inner: ["Inner · 隔離加工單元", "Stage 輸入進入隔離 worktree；原生輸出不等於 Goal 驗收。"],
+  router: [
+    "LoopManager · 接口交換台",
+    "原 request 經所選接口交原 owner；配線不建立第二份任務狀態。",
+  ],
+  gauge: ["Schema · 校驗量規", "量規檢查已知資料與綁定，不能測出語義判斷是否正確。"],
+  testbench: ["Test · 可換探頭測試台", "選定控制量測原行為，由獨立 Oracle 判定。"],
+  trigger: ["Hook · 事件觸發開關", "原生事件與專用 binding 才能觸發；查看機構不發送事件。"],
+  clock: ["Cron · 授權定時接點", "原 heartbeat 喚醒目前 Session；此物件不是額外 daemon。"],
+  reservoir: ["Swap · 資源分配歧管", "全機額度與各 context 租約分開；最後租約交原 Host 釋放。"],
+  index: ["Code Intel · 來源索引抽屜", "依 worktree 與來源版本查結構；結構有效不代表測試通過。"],
+  meter: ["Cost · 觀察儀表台", "同源讀數保留時間與缺口；不同成本區間不能直接相加。"],
+  dock: ["Provider · 交付對接座", "效果由原 Provider 執行並讀回；局部 PASS 不授權交付。"],
+  reader: ["Knowledge · 來源讀取槽", "讀取原 Bundle 與 Cards；知識資料不提供執行權限。"],
+  session: ["Session · 判斷操作台", "呈現已提交的判斷、輸入與輸出；不補寫未記錄的思考。"],
+  carrier: ["Prompt · 載體轉換台", "保留兩端型態與原內容；連線不自行證明語義等價。"],
+  selector: ["P-class／選測 · 條件選擇器", "條件選擇是原功能的一部分；不把指引當成執行授權。"],
+  interlock: ["CLI · 互鎖轉移導軌", "依原狀態檢查合法轉移；保留拒絕與未知效果。"],
+  workcell: ["Worker · 隔離加工單元", "依原 admission 處理已綁定 Stage。"],
+  recorder: ["觀察 · 證據記錄台", "只顯示來源已有的讀回；缺少 invocation 不補畫因果邊。"],
+  unknown: ["UNKNOWN · 機制尚未分類", "缺少版本化功能映射；保留原資料，不從名稱或狀態猜造型。"],
 };
 
 export function anatomyModel(graph, pick, scopeNodes = graph.nodes) {
@@ -25,15 +40,8 @@ export function anatomyModel(graph, pick, scopeNodes = graph.nodes) {
       .filter(Boolean);
   const inputs = artifacts("input_artifact_ids"),
     outputs = artifacts("output_artifact_ids");
-  let template = value.kind;
-  if (object) {
-    template = ["soodles.outer", "noodle.inner"].includes(value.namespace) ? "loop" : "manager";
-  } else if (
-    value.kind === "observation" &&
-    [...inputs, ...outputs].some((a) => /prompt|input/.test(a.role))
-  ) {
-    template = "prompt";
-  }
+  const selected = object ? value.mechanism?.template : value.mechanism;
+  const template = Object.hasOwn(machines, selected) ? selected : "unknown";
   const peers = new Set(
     [...new Set(edges.flatMap((e) => [e.from_node_id, e.to_node_id]))]
       .map((id) => graph.nodes.find((n) => n.id === id)?.object_id)
@@ -41,6 +49,7 @@ export function anatomyModel(graph, pick, scopeNodes = graph.nodes) {
   );
   return {
     value,
+    capabilities: object ? value.mechanism?.capabilities || [] : [],
     template,
     title: machines[template][0],
     description: machines[template][1],
@@ -60,17 +69,16 @@ export function anatomyModel(graph, pick, scopeNodes = graph.nodes) {
 }
 
 /** Mechanical analogy only. Parts count is geometry, never an execution metric. */
-export function mechanismFigure(template, { apart = false } = {}) {
+export function mechanismFigure(selectedTemplate, { apart = false } = {}) {
+  const template = Object.hasOwn(machines, selectedTemplate) ? selectedTemplate : "unknown";
   const p = fitProjection(boxCorners({ x: -112, y: -75, w: 224, d: 150 }, -14, 110), 650, 410, {
     pad: 26,
     azimuth: 42,
     elevation: 35,
   });
   const parts = [];
-  const add = ([x, y, w, d, z, h, cls = "", round = false]) => {
-    const shape = round
-      ? cylinder(x + w / 2, y + d / 2, w / 2, z, h, p, 28)
-      : slabOf({ x, y, w, d, r: 1.5 }, z, h, p, 4, 0.6);
+  const add = ([x, y, w, d, z, h, cls = ""]) => {
+    const shape = slabOf({ x, y, w, d, r: 1.5 }, z, h, p, 4, 0.6);
     parts.push({ depth: depthOf([x + w / 2, y + d / 2, z + h / 2], p), shape, cls });
   };
   // Bench: four paired feet, base, guide rails, mounting screws and end stops.
@@ -109,7 +117,7 @@ export function mechanismFigure(template, { apart = false } = {}) {
         add([-55 + c * 11, 8 + r * 10, 8, 7, 5, 3, "li-drawer"]);
       }
     }
-  } else if (template === "prompt" || template === "loop") {
+  } else if (template === "carrier" || template === "outer") {
     add([-78, -40, 156, 80, 0, 8, "li-cap"]);
     for (let i = 0; i < 8; i++) {
       add([-70 + i * 19, -36, 12, 72, 8, 5, "li-rail"]);
@@ -120,14 +128,14 @@ export function mechanismFigure(template, { apart = false } = {}) {
         add([-57 + i * 48, -18 + j * 12, 28, 2, 18 + lift, 0.7, "li-rail"]);
       }
     }
-    if (template === "loop") {
+    if (template === "outer") {
       for (const x of [-80, 72]) {
         add([x, -43, 8, 86, 8, 42, "li-rail"]);
       }
       add([-80, -43, 160, 8, 50, 7, "li-cap"]);
       add([-22, -43, 44, 8, 57, 12, "li-drawer"]);
     }
-  } else if (template === "pclass" || template === "cli") {
+  } else if (template === "selector" || template === "interlock") {
     for (const x of [-72, 60]) {
       add([x, -40, 12, 80, 0, 12, "li-cap"]);
     }
@@ -135,25 +143,104 @@ export function mechanismFigure(template, { apart = false } = {}) {
       add([-60, y, 120, 4, 8, 4, "li-rail"]);
     }
     add([-28, -35, 56, 70, 12 + lift, 7, "li-drawer"]);
-    const count = template === "pclass" ? 6 : 3;
+    const count = template === "selector" ? 6 : 3;
     for (let i = 0; i < count; i++) {
       const x = -22 + i * (44 / count);
       add([x, -25, 5, 50, 19 + lift, 6, "li-cap"]);
       add([x, -12, 5, 14, 25 + lift, 14, "li-port"]);
     }
     add([60, -15, 12, 30, 12, 32, "li-rail"]);
-  } else {
+  } else if (template === "inner" || template === "workcell") {
+    // Gantry, vertical tool slide, isolated work holder and three feed jaws.
+    for (const x of [-74, 62]) {
+      add([x, -38, 12, 76, 0, 65, "li-rail"]);
+    }
+    add([-74, -38, 148, 18, 65 + lift, 12, "li-cap"]);
+    add([-20, -34, 40, 14, 25 + lift, 40, "li-drawer"]);
+    add([-6, -27, 12, 7, 15 + lift, 10, "li-port"]);
+    add([-57, -13, 114, 55, 0, 9, "li-cap"]);
+    for (const x of [-49, -9, 31]) {
+      add([x, 2, 24, 24, 9, 6, "li-drawer"]);
+    }
+  } else if (template === "router") {
+    // Crosspoint board: rows are ports, not fabricated runtime connections.
+    add([-77, -43, 154, 86, 0, 10, "li-cap"]);
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 5; c++) {
+        add([-67 + c * 29, -33 + r * 21, 17, 12, 10 + lift, 6, "li-drawer"]);
+        add([-63 + c * 29, -30 + r * 21, 9, 6, 16 + lift, 3, "li-port"]);
+      }
+    }
+  } else if (template === "gauge" || template === "testbench") {
+    add([-70, -40, 140, 80, 0, 8, "li-cap"]);
+    for (const x of [-65, 53]) {
+      add([x, -34, 12, 12, 8, 52, "li-rail"]);
+    }
+    add([-65, -34, 130, 12, 60 + lift, 8, "li-cap"]);
+    for (const x of template === "gauge" ? [-34, 28] : [-46, -4, 38]) {
+      add([x, -30, 8, 8, 28 + lift, 32, "li-drawer"]);
+      add([x + 2, -28, 4, 4, 18 + lift, 10, "li-port"]);
+      add([x - 6, -18, 20, 33, 8, 7, "li-cap"]);
+    }
+    add([-56, 26, 112, 8, 8, 9, "li-drawer"]);
+  } else if (template === "trigger" || template === "clock") {
+    add([-60, -40, 120, 80, 0, 12, "li-cap"]);
+    if (template === "trigger") {
+      add([-36, -18, 72, 36, 12, 14, "li-drawer"]);
+      add([-6, -6, 12, 12, 26 + lift, 35, "li-rail"]);
+      add([-24, -15, 48, 30, 61 + lift, 7, "li-port"]);
+    } else {
+      // Stepped program drum and discrete contact followers.
+      for (let i = 0; i < 7; i++) {
+        add([-49 + i * 14, -25, 10, 50, 12 + lift, 12 + (i % 3) * 9, "li-drawer"]);
+        add([-47 + i * 14, 29, 6, 9, 12, 9, "li-port"]);
+      }
+    }
+  } else if (template === "index" || template === "reader") {
+    const shelves = template === "index" ? 5 : 1;
+    for (const x of [-69, 61]) {
+      add([x, -40, 8, 80, 0, 72, "li-cap"]);
+    }
+    for (let i = 0; i < shelves; i++) {
+      add([-61, -38 + (apart ? i * 5 : 0), 122, 72, i * 13 + 5, 8, "li-drawer"]);
+      add([-12, 32 + (apart ? i * 5 : 0), 24, 5, i * 13 + 7, 4, "li-port"]);
+    }
+    if (template === "reader") {
+      add([-61, -38, 122, 10, 45, 10, "li-cap"]);
+      add([-54, -26, 108, 48, 17 + lift, 3, "li-port"]);
+    }
+  } else if (template === "reservoir") {
+    add([-69, -43, 138, 86, 0, 8, "li-cap"]);
+    add([-62, -35, 55, 70, 8 + lift, 48, "li-drawer"]);
+    for (let i = 0; i < 4; i++) {
+      add([7, -33 + i * 18, 52, 10, 8, 12, "li-rail"]);
+      add([39, -35 + i * 18, 16, 14, 20 + lift, 9, "li-port"]);
+    }
+  } else if (template === "dock") {
+    for (const x of [-70, 30]) {
+      add([x, -36, 40, 72, 0, 22, "li-cap"]);
+      for (let i = 0; i < 5; i++) {
+        add([x + 9, -28 + i * 13, 22, 7, 22 + lift, 7, "li-port"]);
+      }
+    }
+    add([-30, -30, 60, 60, 0, 7, "li-rail"]);
+  } else if (template === "meter" || template === "recorder") {
     add([-75, -44, 150, 88, 0, 9, "li-cap"]);
     for (let i = 0; i < 3; i++) {
       const x = -64 + i * 47;
-      add([x, -32, 36, 36, 9 + lift, 9, "li-drawer", true]);
-      add([x + 14, -22, 6, 18, 18 + lift, 1, "li-port"]);
-      add([x + 8, 18, 20, 15, 9, 5, "li-drawer"]);
-      for (let j = 0; j < 4; j++) {
-        add([x + j * 8, 35, 4, 4, 9, 2, "li-port", true]);
+      add([x, -32, 36, 36, 9 + lift, 12, "li-drawer"]);
+      for (let j = 0; j < 5; j++) {
+        add([x + 4 + j * 6, -25, 2, 22, 21 + lift, 1, "li-rail"]);
       }
+      add([x + 14, -19, 6, 15, 22 + lift, 2, "li-port"]);
     }
+    if (template === "recorder") {
+      add([-60, 10, 120, 30, 9 + lift, 4, "li-port"]);
+    }
+  } else {
+    add([-48, -28, 96, 56, 0, 5, "li-drawer"]);
   }
+
   parts.sort((a, b) => a.depth - b.depth);
   const paths = parts
     .map(
@@ -183,6 +270,7 @@ export function mountAnatomy(root, model, { onSelect, onOriginal }) {
   const art = el("div", "");
   art.className = "li-anatomy-art";
   art.innerHTML = mechanismFigure(model.template);
+  let activeTemplate = model.template;
   let apart = false,
     zoom = 1;
   const controls = el("div", "");
@@ -190,7 +278,7 @@ export function mountAnatomy(root, model, { onSelect, onOriginal }) {
   controls.append(
     button("拆解／組裝機構", () => {
       apart = !apart;
-      art.innerHTML = mechanismFigure(model.template, { apart });
+      art.innerHTML = mechanismFigure(activeTemplate, { apart });
     }),
     button("詳圖 1×／4×", () => {
       zoom = zoom === 1 ? 4 : 1;
@@ -231,6 +319,36 @@ export function mountAnatomy(root, model, { onSelect, onOriginal }) {
     fields.append(section);
   }
   root.append(fields);
+  if (model.capabilities.length > 0) {
+    const capabilities = el("details", "");
+    capabilities.open = true;
+    capabilities.append(el("summary", `原物件內的功能機構 · ${model.capabilities.length}`));
+    capabilities.append(
+      el("p", "以下為版本化接口契約。存在接口不等於本次已執行；按鈕只切換解說機構。"),
+    );
+    const capabilityButton = (c) =>
+      button("查看此功能機構", () => {
+        activeTemplate = c.function;
+        art.innerHTML = mechanismFigure(activeTemplate, { apart });
+      });
+    for (const c of model.capabilities) {
+      const section = el("details", "");
+      section.append(el("summary", c.id));
+      section.append(capabilityButton(c));
+      for (const [name, key] of [
+        ["原入口", "entry"],
+        ["輸入", "input"],
+        ["輸出", "output"],
+        ["讀回", "readback"],
+        ["拒絕／未知", "refusal"],
+        ["來源", "source"],
+      ]) {
+        section.append(el("p", `${name} · ${c[key]}`));
+      }
+      capabilities.append(section);
+    }
+    root.append(capabilities);
+  }
   const details = el("details", "");
   details.open = true;
   details.append(el("summary", "條件／斷言／原續行與拒絕"));
