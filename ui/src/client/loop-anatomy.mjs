@@ -84,6 +84,8 @@ export function geometryFingerprint(parts) {
   let value = 2_166_136_261;
   for (const part of parts) {
     for (const character of part.shape.fill) {
+      // FNV-1a requires 32-bit XOR; this fingerprint binds the audited geometry.
+      // oxlint-disable-next-line no-bitwise
       value = Math.imul(value ^ character.codePointAt(0), 16_777_619);
     }
   }

@@ -36,18 +36,18 @@ export function LoopPanorama(
     controller.current?.setSelection(props.selection);
   }, [props.selection, graph, runs, runIds, goal]);
   useEffect(() => {
-    root.current?.querySelectorAll<SVGElement>("[data-panorama-object]").forEach((node) => {
+    for (const node of root.current?.querySelectorAll<SVGElement>("[data-panorama-object]") ?? []) {
       node.classList.toggle(
         "is-linked",
         props.highlightedObjects.includes(node.dataset.panoramaObject ?? ""),
       );
-    });
-    root.current?.querySelectorAll<SVGElement>("[data-detail-node]").forEach((node) => {
+    }
+    for (const node of root.current?.querySelectorAll<SVGElement>("[data-detail-node]") ?? []) {
       node.classList.toggle(
         "is-linked",
         props.highlightedNodes.includes(node.dataset.detailNode ?? ""),
       );
-    });
+    }
   }, [props.highlightedObjects, props.highlightedNodes, graph, runs, runIds, goal]);
   return <div ref={root} aria-label="Workspace 全景圖" />;
 }

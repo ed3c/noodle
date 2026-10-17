@@ -1,6 +1,8 @@
+import { JSDOM } from "jsdom";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  mountPanorama,
   projectPanorama,
   projectRunDetail,
   projectDetailLayer,
@@ -167,7 +169,9 @@ test("detail exposes every P-class occurrence and bound instruction without fabr
 });
 test("session names never merge across Run or repository and unknown identity stays unbound", () => {
   const g = fixture();
-  g.nodes.forEach((n) => (n.identity.session_id = "same-name"));
+  for (const n of g.nodes) {
+    n.identity.session_id = "same-name";
+  }
   g.nodes[2].identity.status = "unknown";
   const p = projectRunDetail(g, "b");
   assert.equal(p.sessions.length, 3);
@@ -219,4 +223,97 @@ test("source-only guidance stays browseable without hiding real handoff endpoint
     true,
   );
   assert.equal(projectDetailLayer(detail, true).nodes.length, detail.nodes.length);
+});
+
+function navigationFixture(t) {
+  const dom = new JSDOM("<main></main>");
+  const previous = globalThis.document;
+  globalThis.document = dom.window.document;
+  dom.window.HTMLElement.prototype.scrollIntoView = () => {
+    /* jsdom has no layout scrolling. */
+  };
+  t.after(() => {
+    dom.window.close();
+    globalThis.document = previous;
+  });
+  const graph = fixture();
+  graph.ports = [];
+  graph.repositories = ["repoA", "repoB", "repoC"].map((id) => ({
+    id,
+    label: id,
+    root: `/${id}`,
+    tracked_files: [],
+    selected_files: [],
+    index_status: "unknown",
+    revision: null,
+  }));
+  for (const object of graph.objects) {
+    object.label = object.namespace;
+    object.source_artifact_ids = [];
+  }
+  for (const occurrence of graph.nodes) {
+    occurrence.label = occurrence.id;
+  }
+  for (const edge of graph.edges) {
+    edge.label = edge.id;
+  }
+  const root = dom.window.document.querySelector("main");
+  const calls = [];
+  const resets = [];
+  mountPanorama(root, {
+    graph,
+    runs: ["a", "b", "c"].map((id) => ({ id, repository: `repo-${id}`, mode: "inner-only" })),
+    onScope() {
+      assert.fail("Navigation must not change Workspace scope");
+    },
+    onSelect() {
+      assert.fail("Navigation must not request original content");
+    },
+    onFocus(value) {
+      calls.push(value);
+    },
+    onReset() {
+      resets.push(true);
+    },
+  });
+  return { root, calls, resets, dom, graph };
+}
+test("repository inspection opens the same Run in console, Goal and detail", (t) => {
+  const { root, calls, dom } = navigationFixture(t);
+  root.querySelector("[data-iso-repository]").dispatchEvent(new dom.window.Event("click"));
+  [...root.querySelectorAll("button")].find((b) => b.textContent === "拆解 Run a").click();
+  assert.equal(root.querySelector('[aria-label="立體視圖執行範圍"]').value, "a");
+  assert.equal(root.querySelector('[aria-label="細部 Run"]').value, "a");
+  assert.match(root.querySelector('[aria-label="全景定位"]').textContent, /repo-a \/ a/);
+  assert.deepEqual(
+    [...root.querySelector(".lp-paths").children]
+      .filter((n) => !n.hidden)
+      .map((n) => n.dataset.panoramaRun),
+    ["a"],
+  );
+  assert.deepEqual(calls.at(-1).node_ids, ["a"]);
+});
+test("Run changes update the external DAG focus and global reset clears it", (t) => {
+  const { root, calls, resets, dom } = navigationFixture(t);
+  const first = root.querySelector('[data-panorama-run="a"]');
+  [...first.querySelectorAll("button")].find((b) => b.textContent === "展開本次執行 DAG").click();
+  const selection = root.querySelector('[aria-label="立體視圖執行範圍"]');
+  selection.value = "b";
+  selection.dispatchEvent(new dom.window.Event("change"));
+  assert.deepEqual(calls.at(-1).node_ids, ["b", "c"]);
+  assert.deepEqual(calls.at(-1).edge_ids, ["ab", "bc"]);
+  assert.equal(calls.at(-1).reveal, false);
+  assert.equal(root.querySelector('[aria-label="細部 Run"]').value, "b");
+  selection.value = "";
+  selection.dispatchEvent(new dom.window.Event("change"));
+  assert.equal(resets.length, 1);
+  assert.match(root.querySelector('[aria-label="全景定位"]').textContent, /全部適用路徑/);
+});
+test("detail Run selector also updates the original external focus", (t) => {
+  const { root, calls, dom } = navigationFixture(t);
+  const selection = root.querySelector('[aria-label="細部 Run"]');
+  selection.value = "c";
+  selection.dispatchEvent(new dom.window.Event("change"));
+  assert.deepEqual(calls.at(-1).node_ids, ["unrelated"]);
+  assert.equal(root.querySelector('[aria-label="立體視圖執行範圍"]').value, "c");
 });

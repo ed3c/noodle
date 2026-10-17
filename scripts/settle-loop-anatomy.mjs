@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
 const [, , kit] = process.argv;
 if (!kit) {
   throw new Error("Pass the installed Anatomy kit directory.");
@@ -108,6 +109,20 @@ function extrude(...args) { return {...rawExtrude(...args),world:A.extruded(...a
       JSON.stringify(orders) +
       ";\n",
   );
+  const linted = spawnSync("pnpm", ["exec", "oxlint", "--fix", target.pathname], {
+    cwd: new URL("../ui/", import.meta.url),
+    stdio: "inherit",
+  });
+  if (linted.error || linted.status !== 0) {
+    throw new Error("Generated geometry lint failed.", { cause: linted.error });
+  }
+  const formatted = spawnSync("pnpm", ["exec", "oxfmt", "--write", target.pathname], {
+    cwd: new URL("../ui/", import.meta.url),
+    stdio: "inherit",
+  });
+  if (formatted.error || formatted.status !== 0) {
+    throw new Error("Generated geometry formatting failed.", { cause: formatted.error });
+  }
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }

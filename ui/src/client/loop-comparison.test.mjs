@@ -74,22 +74,18 @@ test("lazy readback fetches only the selected Run comparison and its bound expec
   graph.nodes = [{ run_id: "run", evidence_artifact_ids: ["comparison"] }];
   graph.artifacts.push(artifact("other", "loop_comparison", { run_id: "other" }));
   const calls = [];
-  const contents = await loadComparison(graph, "run", async (id) => {
+  const contents = await loadComparison(graph, "run", (id) => {
     calls.push(id);
-    return graph.artifacts.find((a) => a.id === id).content;
+    return Promise.resolve(graph.artifacts.find((a) => a.id === id).content);
   });
   assert.deepEqual(calls, ["comparison", "expected"]);
   assert.equal(Object.keys(contents).length, 2);
   assert.deepEqual(
-    await loadComparison(graph, "missing", async () => {
-      throw Error("must not read");
-    }),
+    await loadComparison(graph, "missing", () => Promise.reject(new Error("must not read"))),
     {},
   );
   await assert.rejects(
-    loadComparison(graph, "run", async () => {
-      throw Error("source unavailable");
-    }),
+    loadComparison(graph, "run", () => Promise.reject(new Error("source unavailable"))),
     /source unavailable/,
   );
 });

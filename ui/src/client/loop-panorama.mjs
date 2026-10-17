@@ -315,12 +315,13 @@ export function mountPanorama(
     onFocus,
     onRun: (id) => {
       if (id) {
-        openRun(id);
+        openRun(id, { focus: true });
       } else {
         view.run = null;
         view.selection = null;
         detailPanel.open = false;
         updatePosition();
+        onReset?.();
       }
     },
     onInspect: (value) => setSelection(value),
@@ -373,7 +374,7 @@ export function mountPanorama(
   defs.append(marker);
   drawing.append(defs);
   const xs = new Map(objects.map((o, i) => [o.id, 30 + i * 175]));
-  model.relations.forEach((r, i) => {
+  for (const [i, r] of model.relations.entries()) {
     const x1 = xs.get(r.from) + 75,
       x2 = xs.get(r.to) + 75;
     const arcY = 40 + (i % 5) * 24;
@@ -402,8 +403,8 @@ export function mountPanorama(
       panel.scrollIntoView({ block: "nearest" });
     });
     drawing.append(g);
-  });
-  objects.forEach((o) => {
+  }
+  for (const o of objects) {
     const nodes = model.nodes.filter((n) => n.object_id === o.id),
       x = xs.get(o.id);
     const g = svgEl("g", null, {
@@ -424,14 +425,14 @@ export function mountPanorama(
       onSelect({ kind: "object", id: o.id });
     });
     drawing.append(g);
-  });
+  }
   scroll.append(drawing);
   architecture.append(scroll);
   const drill = el("section", null, { "aria-label": "全景關係展開", class: "lp-drill" }),
     relationPanels = new Map();
   architecture.append(drill);
   drill.append(el("h3", "關係與原始交接"));
-  model.relations.forEach((r) => {
+  for (const r of model.relations) {
     const detail = el("details");
     relationPanels.set(r.id, detail);
     const name = `${objects.find((o) => o.id === r.from)?.label} → ${objects.find((o) => o.id === r.to)?.label}`;
@@ -439,16 +440,16 @@ export function mountPanorama(
       el("summary", `${name} · ${r.edge_ids.length} 次交接`),
       button("展開這組關係 DAG", () => onFocus({ node_ids: [], edge_ids: r.edge_ids })),
     );
-    r.edge_ids.forEach((id) => {
+    for (const id of r.edge_ids) {
       const e = graph.edges.find((edge) => edge.id === id);
       detail.append(
         button(`${e.label} · ${e.status}/${e.current_validity}`, () =>
           onSelect({ kind: "edge", id }),
         ),
       );
-    });
+    }
     drill.append(detail);
-  });
+  }
   if (model.relations.length === 0) {
     drill.append(el("p", "此範圍尚無已登記交接；不補造連線。"));
   }
@@ -458,14 +459,14 @@ export function mountPanorama(
   });
   detailPanel.append(el("summary", "深入 Session、提示詞型態與全部 P-class 節點"));
   const chooser = el("select", null, { "aria-label": "細部 Run" });
-  model.rows.forEach((row) => {
+  for (const row of model.rows) {
     const run = runs.find((r) => r.id === row.run_id);
     chooser.append(
       el("option", `${run?.repository || "未知 Repo"} · ${row.run_id.slice(0, 12)}`, {
         value: row.run_id,
       }),
     );
-  });
+  }
   const detailBody = el("div");
   const sourceLabel = el("label", "同時顯示可用／已選指引（來源層） ");
   const sourceToggle = el("input", null, { type: "checkbox", "aria-label": "顯示來源層" });
@@ -486,7 +487,7 @@ export function mountPanorama(
   function sourceList(title, ids) {
     const section = el("details", null, { class: "lp-sources" });
     section.append(el("summary", `${title} · ${ids.length}`));
-    ids.forEach((id) => {
+    for (const id of ids) {
       const a = artifacts.get(id);
       section.append(
         button(
@@ -494,7 +495,7 @@ export function mountPanorama(
           () => onSelect({ kind: "artifact", id }),
         ),
       );
-    });
+    }
     return section;
   }
   function drawDetail() {
@@ -535,7 +536,7 @@ export function mountPanorama(
     if (handoffs.length === 0) {
       corridor.append(el("p", "尚無原生交接證據；下方僅展示來源投影。"));
     }
-    handoffs.forEach((edge) => {
+    for (const edge of handoffs) {
       const from = detail.nodes.find((n) => n.id === edge.from_node_id);
       const to = detail.nodes.find((n) => n.id === edge.to_node_id);
       const item = el("article");
@@ -552,7 +553,7 @@ export function mountPanorama(
         button(`接收節點 · ${to.kind}`, () => onSelect({ kind: "node", id: to.id })),
       );
       corridor.append(item);
-    });
+    }
     detailBody.append(corridor);
     const geometry = layoutGraph({
       nodes: layer.nodes,
@@ -571,7 +572,7 @@ export function mountPanorama(
     const nodeMap = new Map(detail.nodes.map((n) => [n.id, n]));
     const nodePanels = new Map();
     const edgePanels = new Map();
-    geometry.bands.forEach((band) => {
+    for (const band of geometry.bands) {
       svg.append(
         svgEl("rect", null, { ...band, rx: 10, class: "lp-band" }),
         svgEl(
@@ -580,8 +581,8 @@ export function mountPanorama(
           { x: band.x + 12, y: band.y + 25, class: "lp-band-label" },
         ),
       );
-    });
-    layer.edges.forEach((edge, index) => {
+    }
+    for (const [index, edge] of layer.edges.entries()) {
       const from = positions.get(edge.from_node_id),
         to = positions.get(edge.to_node_id);
       const x1 = from.x + from.width;
@@ -606,8 +607,8 @@ export function mountPanorama(
         onSelect({ kind: "edge", id: edge.id });
       });
       svg.append(g);
-    });
-    geometry.nodes.forEach((position) => {
+    }
+    for (const position of geometry.nodes) {
       const node = nodeMap.get(position.id);
       const g = svgEl("g", null, {
         transform: `translate(${position.x},${position.y})`,
@@ -637,24 +638,24 @@ export function mountPanorama(
         onSelect({ kind: "node", id: node.id });
       });
       svg.append(g);
-    });
+    }
     map.append(svg);
     detailBody.append(map);
     const inventory = el("details");
     inventory.append(el("summary", `全部 P-class 來源／執行節點 · ${detail.pclass_nodes.length}`));
-    detail.pclass_nodes.forEach((node) =>
+    for (const node of detail.pclass_nodes) {
       inventory.append(
         button(
           `${node.label} · ${node.status.execution} · ${node.identity.session_id || "Session UNKNOWN"}`,
           () => onSelect({ kind: "node", id: node.id }),
         ),
-      ),
-    );
+      );
+    }
     detailBody.append(inventory);
     const referencePanels = el("details", null, { class: "lp-references" });
     referencePanels.append(el("summary", "可用／已選指引的來源紀錄"));
     detailBody.append(referencePanels);
-    detail.sessions.forEach((session) => {
+    for (const session of detail.sessions) {
       const group = el("section", null, { class: "lp-session" });
       group.append(
         el(
@@ -666,7 +667,7 @@ export function mountPanorama(
           `Run ${session.run_id} · ${graph.repositories.find((r) => r.id === session.repository_id)?.label || "未知 Repo"}`,
         ),
       );
-      session.nodes.forEach((node) => {
+      for (const node of session.nodes) {
         const panel = el("details", null, { "data-detail-occurrence": node.id });
         nodePanels.set(node.id, panel);
         panel.append(
@@ -694,12 +695,12 @@ export function mountPanorama(
         } else {
           group.append(panel);
         }
-      });
+      }
       detailBody.append(group);
-    });
+    }
     const flows = el("section", null, { class: "lp-flows" });
     flows.append(el("h4", "連線上的資料型態變化"));
-    detail.edges.forEach((edge, index) => {
+    for (const [index, edge] of detail.edges.entries()) {
       const panel = el("details", null, { "data-detail-flow": edge.id });
       edgePanels.set(edge.id, panel);
       panel.append(
@@ -714,7 +715,7 @@ export function mountPanorama(
         button("同窗比較這次傳遞", () => onSelect({ kind: "edge", id: edge.id })),
       );
       flows.append(panel);
-    });
+    }
     detailBody.append(flows);
     const sources = el("details", null, { class: "lp-instruction-index" });
     sources.append(
@@ -735,7 +736,7 @@ export function mountPanorama(
         (artifact.source?.path || artifact.id).toLowerCase().includes(search.value.toLowerCase()),
       );
       list.replaceChildren(el("p", `${matching.length} / ${detail.instructions.length} 個來源`));
-      matching.forEach(({ artifact, node_ids }) => {
+      for (const { artifact, node_ids } of matching) {
         const item = el("article");
         item.append(
           button(`${artifact.source?.path || artifact.id} · ${artifact.status}`, () =>
@@ -745,23 +746,21 @@ export function mountPanorama(
           button(`定位 ${node_ids.length} 個引用節點`, () => onFocus({ node_ids, edge_ids: [] })),
         );
         list.append(item);
-      });
+      }
     };
     search.addEventListener("input", drawSources);
     sources.append(search, list);
     drawSources();
     detailBody.append(sources);
-    graph.findings
-      .filter((f) => f.run_id === chooser.value)
-      .forEach((f) =>
-        detailBody.append(
-          button(
-            `${f.status === "failed" ? "✕" : "?"} ${f.message}`,
-            () => onSelect({ kind: "finding", id: f.id }),
-            { class: f.status === "failed" ? "lp-failed" : "lp-unknown" },
-          ),
+    for (const f of graph.findings.filter((finding) => finding.run_id === chooser.value)) {
+      detailBody.append(
+        button(
+          `${f.status === "failed" ? "✕" : "?"} ${f.message}`,
+          () => onSelect({ kind: "finding", id: f.id }),
+          { class: f.status === "failed" ? "lp-failed" : "lp-unknown" },
         ),
       );
+    }
   }
   function updatePosition() {
     for (const card of paths.querySelectorAll("[data-panorama-run]")) {
@@ -800,19 +799,17 @@ export function mountPanorama(
         ),
       );
     }
-    root
-      .querySelectorAll("[data-panorama-run]")
-      .forEach((node) => node.classList.toggle("is-linked", node.dataset.panoramaRun === view.run));
-    root
-      .querySelectorAll("[data-detail-node], [data-detail-edge]")
-      .forEach((node) =>
-        node.classList.toggle(
-          "is-linked",
-          Boolean(selected) && (node.dataset.detailNode || node.dataset.detailEdge) === selected.id,
-        ),
+    for (const node of root.querySelectorAll("[data-panorama-run]")) {
+      node.classList.toggle("is-linked", node.dataset.panoramaRun === view.run);
+    }
+    for (const node of root.querySelectorAll("[data-detail-node], [data-detail-edge]")) {
+      node.classList.toggle(
+        "is-linked",
+        Boolean(selected) && (node.dataset.detailNode || node.dataset.detailEdge) === selected.id,
       );
+    }
   }
-  function openRun(id) {
+  function openRun(id, { focus = false } = {}) {
     if (![...chooser.options].some((o) => o.value === id)) {
       return;
     }
@@ -822,6 +819,10 @@ export function mountPanorama(
     detailPanel.open = true;
     drawDetail();
     updatePosition();
+    if (focus) {
+      const row = model.rows.find((candidate) => candidate.run_id === id);
+      onFocus({ node_ids: row.node_ids, edge_ids: row.edge_ids, reveal: false });
+    }
   }
   function setSelection(value) {
     consoleView.setSelection(value);
@@ -848,7 +849,7 @@ export function mountPanorama(
       record.run_id &&
       (!view.run || !projectRunDetail(graph, view.run).nodes.some((n) => n.id === record.id))
     ) {
-      openRun(record.run_id);
+      openRun(record.run_id, { focus: false });
     }
     if (
       value.kind === "node" &&
@@ -879,10 +880,7 @@ export function mountPanorama(
   });
   chooser.addEventListener("change", () => {
     view.selection = null;
-    consoleView.syncRun(chooser.value);
-    drawDetail();
-    updatePosition();
-    onReset?.();
+    openRun(chooser.value, { focus: true });
   });
   detailPanel.addEventListener("toggle", () => {
     if (detailPanel.open) {
@@ -918,9 +916,9 @@ export function mountPanorama(
           { class: facet.status === "observed" ? "lp-observed" : "lp-unknown" },
         ),
       );
-      facet.edge_ids.forEach((id) =>
-        card.append(button("開啟交接證據", () => onSelect({ kind: "edge", id }))),
-      );
+      for (const id of facet.edge_ids) {
+        card.append(button("開啟交接證據", () => onSelect({ kind: "edge", id })));
+      }
     }
     if (row.feedback.status === "unknown") {
       card.append(
@@ -934,9 +932,9 @@ export function mountPanorama(
         { class: "lp-unknown" },
       ),
     );
-    row.goal.node_ids.forEach((id) =>
-      card.append(button("原局部審查", () => onSelect({ kind: "node", id }))),
-    );
+    for (const id of row.goal.node_ids) {
+      card.append(button("原局部審查", () => onSelect({ kind: "node", id })));
+    }
     card.append(
       button("展開本次執行 DAG", () => {
         view.selection = null;
@@ -945,32 +943,31 @@ export function mountPanorama(
         } else {
           consoleView.setRun(row.run_id);
         }
-        onFocus({ node_ids: row.node_ids, edge_ids: row.edge_ids, reveal: false });
         consoleRoot.scrollIntoView({ block: "nearest" });
       }),
     );
     const failures = row.findings.filter((f) => f.status === "failed");
-    failures.forEach((f) =>
+    for (const f of failures) {
       card.append(
         button(`✕ ${f.message}`, () => onSelect({ kind: "finding", id: f.id }), {
           class: "lp-failed",
         }),
-      ),
-    );
+      );
+    }
     const gaps = row.findings.filter((f) => f.status === "unknown");
     if (gaps.length > 0) {
       const detail = el("details");
       detail.append(el("summary", `? ${gaps.length} 個證據缺口`));
-      gaps.forEach((f) =>
-        detail.append(button(f.message, () => onSelect({ kind: "finding", id: f.id }))),
-      );
+      for (const f of gaps) {
+        detail.append(button(f.message, () => onSelect({ kind: "finding", id: f.id })));
+      }
       card.append(detail);
     }
     return card;
   }
-  model.rows
-    .filter((row) => row.repository_ids.length > 0)
-    .forEach((row) => paths.append(renderRow(row)));
+  for (const row of model.rows.filter((candidate) => candidate.repository_ids.length > 0)) {
+    paths.append(renderRow(row));
+  }
   const regions = el("div", null, { class: "lp-regions" });
   for (const repo of graph.repositories) {
     const members = model.nodes.filter((n) => n.repository_id === repo.id);
@@ -992,7 +989,7 @@ export function mountPanorama(
       body.append(
         button(`${row.run_id.slice(0, 12)} · 開啟路徑`, () => {
           view.selection = null;
-          openRun(row.run_id);
+          openRun(row.run_id, { focus: true });
           root.querySelector(".lp-detail")?.scrollIntoView({ block: "start" });
         }),
       );
@@ -1010,7 +1007,9 @@ export function mountPanorama(
       "aria-label": "尚無 DAG 的選定 Runs",
     });
     section.append(el("h3", "尚無 DAG 的選定 Runs"));
-    unlocated.forEach((row) => section.append(renderRow(row)));
+    for (const row of unlocated) {
+      section.append(renderRow(row));
+    }
     journey.append(section);
   }
   architecture.append(

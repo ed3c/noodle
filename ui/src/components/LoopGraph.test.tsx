@@ -59,7 +59,7 @@ describe("source-backed DAG interactions", () => {
     expect(scene.queryByLabelText("節點 anatomy 詳圖")).not.toBeInTheDocument();
     await userEvent.click(scene.getByRole("button", { name: "物件 · Original Manager" }));
     const panel = within(await scene.findByLabelText("節點 anatomy 詳圖"));
-    expect(await panel.findByRole("img", { name: "功能組件 · 接口配線台" })).toBeVisible();
+    expect(await panel.findByRole("img", { name: "UNKNOWN · 機制尚未分類" })).toBeVisible();
     await userEvent.click(panel.getByRole("button", { name: "拆解／組裝機構" }));
     await userEvent.click(panel.getByRole("button", { name: "詳圖 1×／4×" }));
     await userEvent.selectOptions(scene.getByLabelText("來源Branch篩選"), "UNKNOWN");
@@ -76,7 +76,7 @@ describe("source-backed DAG interactions", () => {
     await userEvent.click(console.getByRole("button", { name: "拆解資料載體" }));
     await userEvent.click(console.getByRole("button", { name: "右轉" }));
     expect(fetch).not.toHaveBeenCalled();
-    await userEvent.click(console.getByRole("button", { name: "資料流 · Handoff known · 1 段" }));
+    await userEvent.click(console.getByRole("button", { name: "資料流 · Handoff known" }));
     expect(console.getByLabelText("立體選取讀回")).toHaveTextContent("歷史記錄／目前效力未證實");
     expect(fetch).not.toHaveBeenCalled();
     await userEvent.click(console.getByRole("button", { name: "比較原始輸入與輸出" }));
@@ -164,6 +164,17 @@ describe("source-backed DAG interactions", () => {
     expect(screen.queryByRole("button", { name: /紀錄 Fresh attempt/ })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "採用新版本" }));
     expect(screen.getByRole("button", { name: /紀錄 Fresh attempt/ })).toBeInTheDocument();
+  });
+  it("retains original selection during synchronization but clears it for an explicit Run change", async () => {
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: /紀錄 Invocation first/ }));
+    expect(screen.getByLabelText("選取內容比較")).toHaveTextContent("Invocation first");
+    const scene = within(screen.getByLabelText("立體工程全景"));
+    expect(scene.getByLabelText("立體視圖執行範圍")).toHaveValue("run1");
+    await userEvent.selectOptions(scene.getByLabelText("立體視圖執行範圍"), "run2");
+    expect(screen.queryByLabelText("選取內容比較")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /紀錄 Invocation first/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /紀錄 Invocation other/ })).toBeInTheDocument();
   });
   it("retains selected runs and their refusal when no invocation DAG exists", () => {
     const { view, wrap, rerender } = setup();

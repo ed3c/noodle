@@ -1,3 +1,5 @@
+import { repositoryGroups, filterRepositories, branchName } from "./loop-repository.mjs";
+import { mechanismFigure, anatomyModel } from "./loop-anatomy.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -7,7 +9,7 @@ import {
   observedParticipation,
   traceFinding,
 } from "./loop-isometric.mjs";
-const n = (id, run, repo, execution = "completed") => ({
+const makeNode = (id, { run, repo, execution = "completed" }) => ({
   id,
   run_id: run,
   repository_id: repo,
@@ -16,10 +18,10 @@ const n = (id, run, repo, execution = "completed") => ({
 });
 function fixture() {
   const nodes = [
-    n("a", "upstream", "repoA"),
-    n("b", "selected", "repoB"),
-    n("guide", "selected", "repoB", "available_reference"),
-    n("other", "unrelated", "repoC"),
+    makeNode("a", { run: "upstream", repo: "repoA" }),
+    makeNode("b", { run: "selected", repo: "repoB" }),
+    makeNode("guide", { run: "selected", repo: "repoB", execution: "available_reference" }),
+    makeNode("other", { run: "unrelated", repo: "repoC" }),
   ];
   const edges = [
     {
@@ -98,8 +100,6 @@ test("empty run remains empty rather than creating a decorative runtime", () => 
   assert.equal(view.edges.length, 0);
 });
 
-import { repositoryGroups, filterRepositories, branchName } from "./loop-repository.mjs";
-import { mechanismFigure, anatomyModel } from "./loop-anatomy.mjs";
 test("same-name repositories stay separate; native worktrees group without rewriting evidence", () => {
   const repos = [
     {
@@ -176,7 +176,7 @@ test("shared manager anatomy preserves original objects and unobserved condition
   const { graph } = fixture();
   graph.objects = [{ id: "manager", namespace: "soodles.loop" }];
   graph.ports = [];
-  for (const node of graph.nodes)
+  for (const node of graph.nodes) {
     Object.assign(node, {
       object_id: "manager",
       kind: "cli",
@@ -185,6 +185,7 @@ test("shared manager anatomy preserves original objects and unobserved condition
       output_artifact_ids: [],
       evidence_artifact_ids: [],
     });
+  }
   const before = JSON.stringify(graph);
   const model = anatomyModel(graph, { kind: "object", id: "manager" });
   assert.equal(model.template, "unknown");
@@ -203,7 +204,7 @@ test("functional mapping is producer supplied and does not change on failure", (
     },
   ];
   graph.ports = [];
-  for (const node of graph.nodes)
+  for (const node of graph.nodes) {
     Object.assign(node, {
       object_id: "m",
       kind: "cli",
@@ -212,6 +213,7 @@ test("functional mapping is producer supplied and does not change on failure", (
       output_artifact_ids: [],
       evidence_artifact_ids: [],
     });
+  }
   assert.equal(anatomyModel(graph, { kind: "object", id: "m" }).template, "testbench");
   graph.nodes[0].status.execution = "failed";
   assert.equal(anatomyModel(graph, { kind: "node", id: "a" }).template, "interlock");
@@ -244,7 +246,7 @@ test("machine inspector partitions supplied directions and preserves cross-run c
   );
   assert.equal(consumer.outgoing.length, 0);
   assert.equal(consumer.internal.length, 0);
-  assert.deepEqual([...consumer.related].sort(), ["a", "b"]);
+  assert.deepEqual([...consumer.related].toSorted(), ["a", "b"]);
   assert.deepEqual(
     consumer.findings.map((f) => f.id),
     ["failure"],
@@ -263,7 +265,7 @@ test("machine inspector partitions supplied directions and preserves cross-run c
 });
 
 test("participation requires the selected Run, native identity and a known observation", () => {
-  const node = n("x", "run", "repo");
+  const node = makeNode("x", { run: "run", repo: "repo" });
   assert.equal(observedParticipation(node, "run"), true);
   for (const status of [
     "available_reference",
@@ -281,20 +283,20 @@ test("participation requires the selected Run, native identity and a known obser
   node.identity.status = "unknown";
   assert.equal(observedParticipation(node, "run"), false);
 });
+const makeTraceEdge = (id, from, to) => ({ id, from_node_id: from, to_node_id: to });
 test("breakpoint tracing follows original directions, handles cycles and never imports sibling branches", () => {
-  const edge = (id, a, b) => ({ id, from_node_id: a, to_node_id: b });
   const scene = {
     edges: [
-      edge("ab", "a", "b"),
-      edge("bc", "b", "c"),
-      edge("cd", "c", "d"),
-      edge("dc", "d", "c"),
-      edge("ax", "a", "x"),
+      makeTraceEdge("ab", "a", "b"),
+      makeTraceEdge("bc", "b", "c"),
+      makeTraceEdge("cd", "c", "d"),
+      makeTraceEdge("dc", "d", "c"),
+      makeTraceEdge("ax", "a", "x"),
     ],
   };
   const before = JSON.stringify(scene);
   const t = traceFinding(scene, { node_ids: [], edge_ids: ["bc"] });
-  assert.deepEqual([...t.nodes].sort(), ["a", "b", "c", "d"]);
+  assert.deepEqual([...t.nodes].toSorted(), ["a", "b", "c", "d"]);
   assert.equal(t.edges.has("ax"), false);
   assert.equal(JSON.stringify(scene), before);
   assert.equal(traceFinding(scene, { node_ids: [], edge_ids: [] }).nodes.size, 0);

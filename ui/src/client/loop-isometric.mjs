@@ -641,13 +641,15 @@ export function mountIsometric(
       drawing.append(g);
     };
     frame([10, 10, 1080, 180, "整體機械 / 原 outer 與 inner Owner", "li-assemblies"]);
-    loops.forEach((o, i) => machineCard([o, 25 + i * 530, 48, 515, 132]));
+    for (const [i, o] of loops.entries()) {
+      machineCard([o, 25 + i * 530, 48, 515, 132]);
+    }
     const sharedRows = Math.ceil(shared.length / 5);
     const sharedHeight = sharedRows * 130 + 40;
     frame([10, 202, 1080, sharedHeight, "共用接口帶 / 唯一 Manager · 契約存在不代表已執行"]);
-    shared.forEach((o, i) =>
-      machineCard([o, 25 + (i % 5) * 212, 240 + Math.floor(i / 5) * 130, 202, 122]),
-    );
+    for (const [i, o] of shared.entries()) {
+      machineCard([o, 25 + (i % 5) * 212, 240 + Math.floor(i / 5) * 130, 202, 122]);
+    }
     let cursor = 214 + sharedHeight;
     for (const repo of repoGroups) {
       const regionY = cursor;
@@ -692,7 +694,7 @@ export function mountIsometric(
         drawing.append(targetRepo);
         placements.set(repo.id, [550, cursor + 130]);
       } else {
-        members.forEach((n, i) => {
+        for (const [i, n] of members.entries()) {
           const x = 26 + (i % 4) * 265;
           const y = regionY + 48 + Math.floor(i / 4) * 178;
           const w = 248;
@@ -719,7 +721,7 @@ export function mountIsometric(
           ]);
           placements.set(n.id, [x + w / 2, y]);
           drawing.append(node);
-        });
+        }
       }
       cursor += regionHeight + 16;
     }
@@ -1071,14 +1073,7 @@ export function mountIsometric(
           );
         }
         for (const id of new Set(nodes.map((n) => n.run_id))) {
-          inspector.append(
-            button(`拆解 Run ${id.slice(0, 12)}`, () => {
-              state.run = id;
-              run.value = id;
-              state.selection = null;
-              render();
-            }),
-          );
+          inspector.append(button(`拆解 Run ${id.slice(0, 12)}`, () => expandRun(id)));
         }
       } else {
         if (pick.kind === "node") {

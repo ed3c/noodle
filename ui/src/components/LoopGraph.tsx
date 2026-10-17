@@ -360,7 +360,9 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
         graph={graph}
         readArtifact={async (id) => {
           const artifact = graph.artifacts.find((a) => a.id === id);
-          if (!artifact) return null;
+          if (!artifact) {
+            return null;
+          }
           const result = await fetchArtifact(artifact);
           return result.content;
         }}
