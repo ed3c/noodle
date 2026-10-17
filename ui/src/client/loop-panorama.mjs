@@ -334,7 +334,8 @@ export function mountPanorama(
     "aria-label": "全景定位",
     "aria-live": "polite",
   });
-  root.append(journey, breadcrumb);
+  consoleView.setJourney(journey);
+  root.append(breadcrumb);
   const architecture = el("details", null, { class: "lp-architecture" });
   architecture.append(el("summary", "責任物件與跨 Repo 關係總覽"));
   root.append(architecture);
@@ -752,6 +753,9 @@ export function mountPanorama(
       );
   }
   function updatePosition() {
+    for (const card of paths.querySelectorAll("[data-panorama-run]")) {
+      card.hidden = Boolean(view.run && card.dataset.panoramaRun !== view.run);
+    }
     const run = runs.find((r) => r.id === view.run);
     const selected = view.selection;
     const record =

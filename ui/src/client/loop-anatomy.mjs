@@ -1,4 +1,14 @@
-import { slabOf, boxCorners, fitProjection, depthOf } from "./anatomy/iso-kit.mjs";
+import { geometryOrders } from "./anatomy/geometry-orders.mjs";
+import {
+  slabOf,
+  cylinder,
+  extrude,
+  radialTicks,
+  segment,
+  boxCorners,
+  fitProjection,
+  depthOf,
+} from "./anatomy/iso-kit.mjs";
 
 const machines = {
   outer: ["Outer · 審查回送分流機", "分開審查、回饋與驗收；回送路徑仍須原續行證據。"],
@@ -38,8 +48,8 @@ export function anatomyModel(graph, pick, scopeNodes = graph.nodes) {
     [...new Set(nodes.flatMap((n) => n[field]))]
       .map((id) => graph.artifacts.find((a) => a.id === id))
       .filter(Boolean);
-  const inputs = artifacts("input_artifact_ids"),
-    outputs = artifacts("output_artifact_ids");
+  const inputs = artifacts("input_artifact_ids");
+  const outputs = artifacts("output_artifact_ids");
   const selected = object ? value.mechanism?.template : value.mechanism;
   const template = Object.hasOwn(machines, selected) ? selected : "unknown";
   const peers = new Set(
@@ -68,187 +78,357 @@ export function anatomyModel(graph, pick, scopeNodes = graph.nodes) {
   };
 }
 
-/** Mechanical analogy only. Parts count is geometry, never an execution metric. */
-export function mechanismFigure(selectedTemplate, { apart = false } = {}) {
+// Cached geometry is a mechanical analogy, never execution state or an instrument reading.
+const line = (d, cls = "li-engraving") => `<path d="${d}" class="${cls}"/>`;
+export function geometryFingerprint(parts) {
+  let value = 2_166_136_261;
+  for (const part of parts) {
+    for (const character of part.shape.fill) {
+      value = Math.imul(value ^ character.codePointAt(0), 16_777_619);
+    }
+  }
+  return value < 0 ? value + 4_294_967_296 : value;
+}
+const figures = new Map();
+export function mechanismFigure(selectedTemplate, { apart = false, angle = 42 } = {}) {
   const template = Object.hasOwn(machines, selectedTemplate) ? selectedTemplate : "unknown";
+  const key = `${template}:${apart}:${angle}`;
+  if (figures.has(key)) {
+    return figures.get(key);
+  }
   const p = fitProjection(boxCorners({ x: -112, y: -75, w: 224, d: 150 }, -14, 110), 650, 410, {
-    pad: 26,
-    azimuth: 42,
-    elevation: 35,
+    pad: 20,
+    azimuth: angle,
+    elevation: 40,
   });
   const parts = [];
-  const add = ([x, y, w, d, z, h, cls = ""]) => {
-    const shape = slabOf({ x, y, w, d, r: 1.5 }, z, h, p, 4, 0.6);
-    parts.push({ depth: depthOf([x + w / 2, y + d / 2, z + h / 2], p), shape, cls });
+  const put = ([shape, center, cls = "", detail = ""]) => {
+    parts.push({ depth: depthOf(center, p), shape, cls, detail });
   };
-  // Bench: four paired feet, base, guide rails, mounting screws and end stops.
-  for (const x of [-98, 86]) {
-    for (const y of [-61, 49]) {
-      add([x, y, 12, 12, -14, 4, "li-foot", true]);
-      add([x + 2, y + 2, 8, 8, -10, 5, "", true]);
+  const box = ([x, y, w, d, z, h, cls = ""]) =>
+    put([slabOf({ x, y, w, d, r: 1.5 }, z, h, p, 4, 0.6), [x + w / 2, y + d / 2, z + h / 2], cls]);
+  const round = ([x, y, r, z, h, cls = "", detail = ""]) =>
+    put([cylinder(x, y, r, z, h, p, 40, 0.3), [x, y, z + h / 2], cls, detail]);
+
+  const bolt = (x, y, z) =>
+    round([x, y, 1.8, z, 1, "li-cap", line(segment([x - 1, y, z + 1], [x + 1, y, z + 1], p))]);
+  const dial = ([x, y, r, z, clock = false]) => {
+    round([x, y, r, z, 5, "li-cap"]);
+    const ticks = radialTicks(x, y, r - 3, clock ? 60 : 30, 5, z + 6, [1.8, 4], p);
+    const hands = clock
+      ? [
+          [x, y - r * 0.64],
+          [x + r * 0.45, y + r * 0.15],
+        ]
+      : [[x - r * 0.5, y - r * 0.32]];
+    round([
+      x,
+      y,
+      r - 2,
+      z + 5,
+      1,
+      "li-dial",
+      line(ticks.minor) +
+        line(ticks.major) +
+        hands.map((end) => line(segment([x, y, z + 6], [...end, z + 6], p), "li-needle")).join(""),
+    ]);
+    round([x, y, 2, z + 6, 1, "li-port"]);
+  };
+  const knob = ([x, y, z, r = 6]) => {
+    round([x, y, r, z, 6, "li-cap"]);
+    round([
+      x,
+      y,
+      r - 1,
+      z + 6,
+      1,
+      "li-port",
+      line(segment([x, y, z + 7], [x + r - 2, y, z + 7], p)),
+    ]);
+  };
+  const travel = template === "gauge" ? 42 : 22;
+  const lift = apart ? travel : 0;
+  for (const x of [-96, 96]) {
+    for (const y of [-60, 60]) {
+      round([x, y, 7, -12, 4, "li-foot"]);
+      round([x, y, 4, -8, 4, "li-rail"]);
     }
   }
-  add([-110, -73, 220, 146, -5, 5, "li-base"]);
-  for (const y of [-51, 47]) {
-    add([-99, y, 198, 4, 0, 5, "li-rail"]);
-    for (const x of [-99, 93]) {
-      add([x, y - 2, 6, 8, 5, 5, "li-cap"]);
+  box([-110, -73, 220, 146, -4, 4, "li-base"]);
+  for (const x of [-101, 101]) {
+    for (const y of [-64, 64]) {
+      bolt(x, y, 0);
     }
   }
-  for (const x of [-104, 100]) {
-    for (const y of [-67, 63]) {
-      add([x, y, 3, 3, 0, 1, "li-port", true]);
+  // Bound terminals belong to the explanatory fixture, not invented runtime ports.
+  for (const x of [-99, 99]) {
+    for (const y of [-30, 0, 30]) {
+      round([x, y, 5, 0, 3, "li-cap"]);
+      round([x, y, 2.7, 3, 1, "li-port"]);
     }
   }
-  // Twelve electrical terminals are paired on the original input/output sides.
-  for (const x of [-103, 89]) {
-    for (let i = 0; i < 6; i++) {
-      add([x, -38 + i * 13, 14, 8, 0, 5, "li-cap"]);
-      add([x + 4, -36 + i * 13, 5, 4, 5, 2, "li-port"]);
+  // The blank serial plate identifies the fixture; it carries no runtime measurement.
+  box([-60, 60, 120, 8, 0, 1, "li-drawer"]);
+  bolt(-54, 64, 1);
+  bolt(54, 64, 1);
+  if (template === "clock") {
+    box([-72, -47, 114, 94, 0, 14, "li-cap"]);
+    dial([-18, 0, 42, 14 + lift, true]);
+    round([65, -22, 18, 0, 8, "li-drawer"]);
+    // Eccentric cam and follower are exposed beside the clock, not a live time reading.
+    round([69, -22, 12, 8, 4, "li-port"]);
+    round([65, -22, 3, 12, 3, "li-cap"]);
+    box([54, 0, 22, 35, 0, 5, "li-rail"]);
+    box([59, 0, 12, 20, 5, 8, "li-drawer"]);
+    round([65, 1, 6, 13, 4, "li-cap"]);
+    knob([-18, -56, 0, 7]);
+  } else if (template === "outer" || template === "carrier") {
+    box([-80, -40, 160, 80, 0, 6, "li-cap"]);
+    for (const y of [-36, 28]) {
+      box([-77, y, 154, 8, 6, 8, "li-rail"]);
     }
-  }
-  const lift = apart ? 20 : 0;
-  if (template === "session") {
-    add([-61, -45, 122, 15, 0, 64, "li-cap"]);
-    add([-53, -28, 106, 3, 20, 36, "li-drawer"]);
-    add([-62, 4, 124, 38, 0, 5, "li-cap"]);
-    for (let r = 0; r < 3; r++) {
-      for (let c = 0; c < 10; c++) {
-        add([-55 + c * 11, 8 + r * 10, 8, 7, 5, 3, "li-drawer"]);
-      }
+    // Round roller ends identify a conveyor; the centre diverter belongs only to outer.
+    for (let x = -68; x <= 68; x += 17) {
+      box([x - 3, -26, 6, 52, 6, 4, "li-drawer"]);
+      round([x, -32, 4, 14, 2, "li-cap"]);
+      round([x, 32, 4, 14, 2, "li-cap"]);
     }
-  } else if (template === "carrier" || template === "outer") {
-    add([-78, -40, 156, 80, 0, 8, "li-cap"]);
-    for (let i = 0; i < 8; i++) {
-      add([-70 + i * 19, -36, 12, 72, 8, 5, "li-rail"]);
-    }
-    for (let i = 0; i < 3; i++) {
-      add([-62 + i * 48, -25, 38, 50, 13 + lift, 5, i === 1 ? "li-port" : "li-drawer"]);
-      for (let j = 0; j < 3; j++) {
-        add([-57 + i * 48, -18 + j * 12, 28, 2, 18 + lift, 0.7, "li-rail"]);
+    for (const x of [-48, 40]) {
+      box([x - 18, -23, 36, 46, 10 + lift, 2, "li-paper-sheet"]);
+      for (let y = -14; y < 19; y += 8) {
+        box([x - 12, y, 24, 1, 12 + lift, 0.5, "li-rail"]);
       }
     }
     if (template === "outer") {
-      for (const x of [-80, 72]) {
-        add([x, -43, 8, 86, 8, 42, "li-rail"]);
-      }
-      add([-80, -43, 160, 8, 50, 7, "li-cap"]);
-      add([-22, -43, 44, 8, 57, 12, "li-drawer"]);
+      round([0, 0, 10, 10, 5, "li-cap"]);
+      put([
+        extrude(
+          [
+            [0, -4],
+            [48, 17],
+            [45, 24],
+            [-3, 4],
+          ],
+          15,
+          5,
+          p,
+        ),
+        [20, 10, 17],
+        "li-port",
+      ]);
+      box([-10, -48, 20, 8, 0, 42, "li-rail"]);
+      dial([0, -44, 10, 42]);
+    } else {
+      box([-6, -47, 12, 7, 0, 42, "li-rail"]);
+      box([-6, 40, 12, 7, 0, 42, "li-rail"]);
+      box([-19, -40, 38, 80, 42 + lift, 4, "li-cap"]);
     }
-  } else if (template === "selector" || template === "interlock") {
-    for (const x of [-72, 60]) {
-      add([x, -40, 12, 80, 0, 12, "li-cap"]);
-    }
-    for (const y of [-32, 28]) {
-      add([-60, y, 120, 4, 8, 4, "li-rail"]);
-    }
-    add([-28, -35, 56, 70, 12 + lift, 7, "li-drawer"]);
-    const count = template === "selector" ? 6 : 3;
-    for (let i = 0; i < count; i++) {
-      const x = -22 + i * (44 / count);
-      add([x, -25, 5, 50, 19 + lift, 6, "li-cap"]);
-      add([x, -12, 5, 14, 25 + lift, 14, "li-port"]);
-    }
-    add([60, -15, 12, 30, 12, 32, "li-rail"]);
   } else if (template === "inner" || template === "workcell") {
-    // Gantry, vertical tool slide, isolated work holder and three feed jaws.
-    for (const x of [-74, 62]) {
-      add([x, -38, 12, 76, 0, 65, "li-rail"]);
+    box([-72, -46, 144, 92, 0, 8, "li-cap"]);
+    for (const x of [-68, 58]) {
+      box([x, -42, 10, 84, 8, 6, "li-rail"]);
+      round([x + 5, -30, 4, 14, 54, "li-rail"]);
     }
-    add([-74, -38, 148, 18, 65 + lift, 12, "li-cap"]);
-    add([-20, -34, 40, 14, 25 + lift, 40, "li-drawer"]);
-    add([-6, -27, 12, 7, 15 + lift, 10, "li-port"]);
-    add([-57, -13, 114, 55, 0, 9, "li-cap"]);
-    for (const x of [-49, -9, 31]) {
-      add([x, 2, 24, 24, 9, 6, "li-drawer"]);
+    box([-68, -36, 136, 12, 68 + lift, 9, "li-cap"]);
+    box([-18, -33, 36, 10, 43 + lift, 25, "li-drawer"]);
+    round([0, -28, 6, 31 + lift, 12, "li-port"]);
+    box([-48, -5, 96, 42, 8, 6, "li-drawer"]);
+    for (const x of [-42, 30]) {
+      box([x, 1, 12, 30, 14, 10, "li-cap"]);
     }
+    for (const y of [4, 12, 20, 28]) {
+      box([-28, y, 56, 2, 14, 0.8, "li-rail"]);
+    }
+    knob([57, 30, 14]);
+    dial([-57, 34, 9, 14]);
   } else if (template === "router") {
-    // Crosspoint board: rows are ports, not fabricated runtime connections.
-    add([-77, -43, 154, 86, 0, 10, "li-cap"]);
-    for (let r = 0; r < 4; r++) {
+    for (const x of [-78, 70]) {
+      box([x, -45, 8, 90, 0, 40, "li-rail"]);
+    }
+    for (let r = 0; r < 3; r++) {
+      box([-70, -40 + r * 29, 140, 24, 6 + r * 12 + lift, 5, "li-cap"]);
       for (let c = 0; c < 5; c++) {
-        add([-67 + c * 29, -33 + r * 21, 17, 12, 10 + lift, 6, "li-drawer"]);
-        add([-63 + c * 29, -30 + r * 21, 9, 6, 16 + lift, 3, "li-port"]);
+        const x = -56 + c * 28;
+        const y = -28 + r * 29;
+        const z = 11 + r * 12 + lift;
+        round([x, y, 7, z, 3, "li-drawer"]);
+        round([x, y, 3.5, z + 3, 1, "li-port"]);
       }
     }
   } else if (template === "gauge" || template === "testbench") {
-    add([-70, -40, 140, 80, 0, 8, "li-cap"]);
-    for (const x of [-65, 53]) {
-      add([x, -34, 12, 12, 8, 52, "li-rail"]);
-    }
-    add([-65, -34, 130, 12, 60 + lift, 8, "li-cap"]);
-    for (const x of template === "gauge" ? [-34, 28] : [-46, -4, 38]) {
-      add([x, -30, 8, 8, 28 + lift, 32, "li-drawer"]);
-      add([x + 2, -28, 4, 4, 18 + lift, 10, "li-port"]);
-      add([x - 6, -18, 20, 33, 8, 7, "li-cap"]);
-    }
-    add([-56, 26, 112, 8, 8, 9, "li-drawer"]);
-  } else if (template === "trigger" || template === "clock") {
-    add([-60, -40, 120, 80, 0, 12, "li-cap"]);
-    if (template === "trigger") {
-      add([-36, -18, 72, 36, 12, 14, "li-drawer"]);
-      add([-6, -6, 12, 12, 26 + lift, 35, "li-rail"]);
-      add([-24, -15, 48, 30, 61 + lift, 7, "li-port"]);
-    } else {
-      // Stepped program drum and discrete contact followers.
-      for (let i = 0; i < 7; i++) {
-        add([-49 + i * 14, -25, 10, 50, 12 + lift, 12 + (i % 3) * 9, "li-drawer"]);
-        add([-47 + i * 14, 29, 6, 9, 12, 9, "li-port"]);
+    box([-78, -45, 156, 90, 0, 8, "li-cap"]);
+    round([-58, -25, 7, 8, 5, "li-cap"]);
+    round([-58, -25, 4, 13, 51, "li-rail"]);
+    box([-65, -31, 96, 12, 64, 7, "li-cap"]);
+    knob([-58, -25, 71]);
+    if (template === "gauge") {
+      dial([17, -25, 24, 71 + lift]);
+      round([17, -25, 3, 34 + lift, 30, "li-port"]);
+      box([-12, -38, 58, 33, 8, 7, "li-drawer"]);
+      for (const x of [-10, 34]) {
+        box([x, -36, 10, 29, 15, 11, "li-cap"]);
       }
+      box([-40, 18, 108, 7, 8, 4, "li-rail"]);
+      box([-40, 18, 10, 23, 12, 5, "li-cap"]);
+      box([34, 18, 10, 23, 12, 5, "li-drawer"]);
+      knob([39, 25, 17, 4]);
+    } else {
+      for (const x of [-12, 16, 44]) {
+        round([x, 14, 6, 8, 5, "li-cap"]);
+        round([x, 14, 2, 13, 22 + lift, "li-port"]);
+      }
+      dial([48, -26, 17, 8]);
+      box([-62, 26, 110, 16, 8, 5, "li-drawer"]);
+      for (const x of [-48, -20, 8]) {
+        knob([x, 34, 13, 4]);
+      }
+    }
+  } else if (template === "trigger") {
+    box([-56, -35, 112, 70, 0, 16, "li-cap"]);
+    box([-43, -25, 86, 50, 16, 8, "li-drawer"]);
+    round([-27, 0, 8, 24, 5, "li-cap"]);
+    put([
+      extrude(
+        [
+          [-29, -5],
+          [47, 14],
+          [45, 23],
+          [-31, 5],
+        ],
+        29 + lift,
+        4,
+        p,
+      ),
+      [8, 8, 31 + lift],
+      "li-rail",
+    ]);
+    round([45, 18, 11, 33 + lift, 8, "li-port"]);
+    for (const x of [-24, 0, 24]) {
+      round([x, 35, 5, 16, 3, "li-cap"]);
+      bolt(x, 35, 19);
+    }
+    box([8, -16, 10, 12, 24, 4, "li-port"]);
+    box([26, -16, 10, 12, 24, 4, "li-port"]);
+  } else if (template === "selector" || template === "interlock") {
+    if (template === "selector") {
+      round([0, 0, 48, 0, 9, "li-cap"]);
+      dial([0, 0, 43, 9 + lift]);
+      knob([0, 0, 16 + lift, 12]);
+      for (let i = 0; i < 6; i++) {
+        const a = (i * Math.PI) / 3;
+        round([Math.cos(a) * 57, Math.sin(a) * 57, 5, 0, 5, "li-port"]);
+      }
+    } else {
+      box([-70, -35, 140, 70, 0, 8, "li-cap"]);
+      for (const y of [-27, 23]) {
+        box([-62, y, 124, 4, 8, 8, "li-rail"]);
+      }
+      box([-45, -20, 44, 40, 8 + lift, 8, "li-drawer"]);
+      for (const x of [4, 26, 48]) {
+        box([x, -18, 12, 36, 8, 6, "li-cap"]);
+        round([x + 6, 0, 3, 14, 15, "li-port"]);
+      }
+      knob([-23, 0, 16 + lift, 9]);
+      box([65, -19, 8, 38, 8, 24, "li-cap"]);
+    }
+  } else if (template === "session") {
+    box([-68, -42, 136, 18, 0, 65, "li-cap"]);
+    box([-59, -24, 118, 4, 22, 34, "li-screen"]);
+    box([-66, -7, 132, 47, 0, 7, "li-drawer"]);
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 10; col++) {
+        box([-57 + col * 11, 1 + row * 10, 8, 7, 7, 3, "li-cap"]);
+      }
+    }
+    knob([53, 29, 10, 5]);
+  } else if (template === "reservoir") {
+    round([-35, 0, 29, 0, 7, "li-cap"]);
+    round([-35, 0, 25, 7, 54, "li-drawer"]);
+    round([-35, 0, 29, 61 + lift, 5, "li-cap"]);
+    dial([-35, 0, 16, 66 + lift]);
+    for (const y of [-31, 0, 31]) {
+      box([7, y - 7, 62, 14, 0, 10, "li-rail"]);
+      knob([48, y, 10, 8]);
+      round([74, y, 5, 0, 10, "li-port"]);
     }
   } else if (template === "index" || template === "reader") {
-    const shelves = template === "index" ? 5 : 1;
-    for (const x of [-69, 61]) {
-      add([x, -40, 8, 80, 0, 72, "li-cap"]);
+    for (const x of [-65, 57]) {
+      box([x, -40, 8, 80, 0, 72, "li-cap"]);
     }
-    for (let i = 0; i < shelves; i++) {
-      add([-61, -38 + (apart ? i * 5 : 0), 122, 72, i * 13 + 5, 8, "li-drawer"]);
-      add([-12, 32 + (apart ? i * 5 : 0), 24, 5, i * 13 + 7, 4, "li-port"]);
+    const count = template === "index" ? 5 : 1;
+    for (let i = 0; i < count; i++) {
+      box([-57, -38 + (apart ? i * 4 : 0), 114, 72, 4 + i * 13, 8, "li-drawer"]);
+      box([-12, 34 + (apart ? i * 4 : 0), 24, 4, 7 + i * 13, 3, "li-port"]);
     }
     if (template === "reader") {
-      add([-61, -38, 122, 10, 45, 10, "li-cap"]);
-      add([-54, -26, 108, 48, 17 + lift, 3, "li-port"]);
-    }
-  } else if (template === "reservoir") {
-    add([-69, -43, 138, 86, 0, 8, "li-cap"]);
-    add([-62, -35, 55, 70, 8 + lift, 48, "li-drawer"]);
-    for (let i = 0; i < 4; i++) {
-      add([7, -33 + i * 18, 52, 10, 8, 12, "li-rail"]);
-      add([39, -35 + i * 18, 16, 14, 20 + lift, 9, "li-port"]);
+      box([-57, -40, 114, 12, 52 + lift, 7, "li-cap"]);
+      box([-50, -26, 100, 55, 12, 2, "li-paper-sheet"]);
+      for (let x = -42; x < 45; x += 7) {
+        box([x, -18, 3, 35, 14, 0.5, "li-rail"]);
+      }
     }
   } else if (template === "dock") {
-    for (const x of [-70, 30]) {
-      add([x, -36, 40, 72, 0, 22, "li-cap"]);
-      for (let i = 0; i < 5; i++) {
-        add([x + 9, -28 + i * 13, 22, 7, 22 + lift, 7, "li-port"]);
+    for (const x of [-75, 25]) {
+      box([x, -36, 50, 72, 0, 20, "li-cap"]);
+      for (const y of [-22, 0, 22]) {
+        round([x + 25, y, 8, 20 + lift, 4, "li-drawer"]);
+        round([x + 25, y, 3, 24 + lift, 3, "li-port"]);
       }
     }
-    add([-30, -30, 60, 60, 0, 7, "li-rail"]);
+    box([-25, -28, 50, 56, 0, 6, "li-rail"]);
   } else if (template === "meter" || template === "recorder") {
-    add([-75, -44, 150, 88, 0, 9, "li-cap"]);
-    for (let i = 0; i < 3; i++) {
-      const x = -64 + i * 47;
-      add([x, -32, 36, 36, 9 + lift, 12, "li-drawer"]);
-      for (let j = 0; j < 5; j++) {
-        add([x + 4 + j * 6, -25, 2, 22, 21 + lift, 1, "li-rail"]);
+    box([-78, -43, 156, 86, 0, 12, "li-cap"]);
+    if (template === "meter") {
+      for (const x of [-48, 0, 48]) {
+        dial([x, -7, 20, 12 + lift]);
       }
-      add([x + 14, -19, 6, 15, 22 + lift, 2, "li-port"]);
+    } else {
+      for (const x of [-48, 48]) {
+        round([x, -12, 23, 12, 6, "li-drawer"]);
+      }
+      box([-38, -30, 76, 36, 18 + lift, 1, "li-paper-sheet"]);
+      box([-61, 20, 122, 13, 12, 5, "li-cap"]);
+      box([-3, -22, 6, 42, 19 + lift, 3, "li-port"]);
     }
-    if (template === "recorder") {
-      add([-60, 10, 120, 30, 9 + lift, 4, "li-port"]);
+    for (const x of [-58, -29, 0, 29, 58]) {
+      knob([x, 29, template === "recorder" ? 17 : 12, 4]);
     }
   } else {
-    add([-48, -28, 96, 56, 0, 5, "li-drawer"]);
+    box([-48, -28, 96, 56, 0, 5, "li-drawer"]);
+    // Empty mounting points communicate an unclassified mechanism, not a guessed machine.
+    for (const x of [-36, -12, 12, 36]) {
+      for (const y of [-18, 18]) {
+        round([x, y, 4, 5, 1, "li-cap"]);
+        bolt(x, y, 6);
+      }
+    }
   }
-
-  parts.sort((a, b) => a.depth - b.depth);
-  const paths = parts
+  const settled = geometryOrders[key];
+  if (
+    !settled ||
+    settled.fingerprint !== geometryFingerprint(parts) ||
+    settled.order.length !== parts.length
+  ) {
+    throw new Error(`Anatomy geometry changed for ${key}; regenerate the audited drawing order.`);
+  }
+  const orderedParts = settled.order.map((index) => parts[index]);
+  const paths = orderedParts
     .map(
-      ({ shape: s, cls }) =>
-        `<g class="li-solid ${cls}"><path d="${s.fill}" class="li-fill"/>${s.shades.map((d, i) => `<path d="${d}" class="li-shade-${i}"/>`).join("")}<path d="${s.top}" class="li-top"/><path d="${s.outline}" class="li-outline"/><path d="${s.bevel || ""}" class="li-bevel"/></g>`,
+      ({ shape: s, cls, detail }) =>
+        `<g class="li-solid ${cls}"><path d="${s.fill}" class="li-fill"/>${s.shades.map((d, i) => `<path d="${d}" class="li-shade-${i}"/>`).join("")}<path d="${s.top}" class="li-top"/>${detail}<path d="${s.outline}" class="li-outline"/><path d="${s.bevel || ""}" class="li-bevel"/></g>`,
     )
     .join("");
-  return `<svg viewBox="0 0 650 410" role="img" aria-label="${machines[template][0]}" data-anatomy-template="${template}" data-parts="${parts.length}">${paths}</svg>`;
+  // Kit solids use projected M/L pairs. Fit the actual drawn silhouette, including apart parts.
+  const points = parts.flatMap(({ shape }) =>
+    [...shape.fill.matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])]),
+  );
+  const left = Math.min(...points.map((point) => point[0])) - 12;
+  const top = Math.min(...points.map((point) => point[1])) - 12;
+  const width = Math.max(...points.map((point) => point[0])) - left + 12;
+  const height = Math.max(...points.map((point) => point[1])) - top + 12;
+  const result = `<svg viewBox="${left} ${top} ${width} ${height}" role="img" aria-label="${machines[template][0]}" data-anatomy-template="${template}" data-parts="${parts.length}">${paths}</svg>`;
+  figures.set(key, result);
+  return result;
 }
 
 function el(tag, text) {
@@ -273,8 +453,8 @@ export function mountAnatomy(root, model, { onSelect, onOriginal }) {
   art.className = "li-anatomy-art";
   art.innerHTML = mechanismFigure(model.template);
   let activeTemplate = model.template;
-  let apart = false,
-    zoom = 1;
+  let apart = false;
+  let zoom = 1;
   const controls = el("div", "");
   controls.className = "li-toolbar";
   controls.append(

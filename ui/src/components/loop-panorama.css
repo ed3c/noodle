@@ -492,9 +492,7 @@
   stroke: var(--li-accent);
   stroke-width: 1.8;
 }
-.li-target.is-selected .li-top {
-  fill: #235f5b;
-}
+
 .li-route-line,
 .li-arrow {
   fill: none;
@@ -729,4 +727,235 @@
   paint-order: stroke;
   stroke: #11191f;
   stroke-width: 4px;
+}
+
+/* One workspace: dark mechanical evidence map and light, source-bound readback. */
+.li-body {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 34%);
+  align-items: stretch;
+}
+.li-viewport {
+  max-height: 850px;
+}
+.li-viewport > svg {
+  min-width: 1000px;
+}
+.li-readback {
+  background: #f1eee5;
+  color: #253a42;
+  border-left: 1px solid #778880;
+  max-height: 850px;
+  overflow: auto;
+}
+.li-readback .li-inspector {
+  max-height: none;
+  overflow: visible;
+  border: 0;
+}
+.li-readback .lp-journey {
+  padding: 16px;
+  margin: 0;
+  border-bottom: 1px solid #b5beb7;
+}
+.li-readback .lp-paths {
+  display: block;
+}
+.li-readback .lp-loop {
+  background: #fffdf6;
+  color: #253a42;
+  border-color: #bbc7bd;
+}
+.li-readback .lp-loop[hidden] {
+  display: none;
+}
+.li-readback .lp-observed {
+  color: #166652;
+}
+.li-readback .lp-unknown {
+  color: #77602d;
+}
+.li-readback .li-kicker,
+.li-readback .li-inspector code {
+  color: #43666a;
+}
+.lp-panel .li-readback button,
+#loop-graph-app .li-readback button {
+  background: #fffdf6;
+  color: #24444b;
+  border: 1px solid #aebeb6;
+}
+.li-readback .li-inspector nav[aria-label="機械檢視導航"] {
+  background: #e4e8dc;
+}
+.li-readback .li-anatomy-art {
+  background: #10171d;
+  border-radius: 8px;
+}
+.li-region-frame {
+  fill: #101e27;
+  stroke: #3a515c;
+  stroke-width: 1;
+}
+.li-assemblies .li-region-frame {
+  fill: #152b31;
+}
+.li-card-outline {
+  fill: #18262f;
+  stroke: #3a505c;
+  stroke-width: 1;
+}
+.li-target.li-participating .li-card-outline {
+  fill: #153d3c;
+  stroke: #5ecdb7;
+}
+.li-target.li-participating .li-port .li-top {
+  fill: #89efcc;
+}
+.li-target.li-unobserved .li-machine-art {
+  opacity: 0.6;
+}
+.li-target.is-selected .li-card-outline,
+.li-target:focus .li-card-outline {
+  stroke: #f3c97e;
+  stroke-width: 3;
+}
+
+.li-target.is-selected .li-outline {
+  stroke: #b0c8cc;
+  stroke-width: 0.7;
+}
+.li-target.li-dim {
+  opacity: 0.25;
+}
+.li-machine-title {
+  font-size: 12px;
+}
+.li-small {
+  font-size: 10px;
+}
+.li-dial .li-top,
+.li-paper-sheet .li-top {
+  fill: #d2d5bd;
+}
+.li-dial .li-engraving {
+  stroke: #384a4e;
+  stroke-width: 0.9;
+}
+.li-needle {
+  fill: none;
+  stroke: #ac6646;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.li-screen .li-top {
+  fill: #82b8af;
+}
+.li-gap-badge {
+  fill: #19232b;
+  stroke: #b69964;
+}
+.li-gap {
+  fill: #efce8e;
+}
+.li-run-summary {
+  border-bottom: 1px solid #b7c3b7;
+  padding: 0 0 12px;
+}
+.li-run-summary p {
+  font-size: 0.75rem;
+}
+.li-readback .li-inspector .li-anatomy {
+  color: #253a42;
+}
+@media (max-width: 850px) {
+  .li-body,
+  .li-expanded .li-body {
+    grid-template-columns: 1fr;
+  }
+  .li-viewport {
+    max-height: 480px;
+  }
+  .li-readback {
+    max-height: 650px;
+    border-left: 0;
+    border-top: 1px solid #778880;
+  }
+}
+.li-expanded .li-viewport > svg {
+  height: auto;
+  min-width: 0;
+}
+.li-viewport > svg {
+  min-width: 0;
+}
+.li-readback h3,
+.li-readback h4,
+.li-readback h5 {
+  color: #294b50;
+}
+.li-target.li-endpoint .li-outline {
+  stroke: #9aadb0;
+  stroke-width: 0.8;
+}
+.li-target.li-endpoint .li-card-outline {
+  stroke: #b5bc8b;
+  stroke-width: 2;
+}
+.li-readback .li-inspector {
+  max-height: none;
+}
+.li-expanded .li-body {
+  height: calc(100vh - 240px);
+}
+.li-expanded .li-readback {
+  max-height: 100%;
+}
+
+.li-participating {
+  --machine-port: #89efcc;
+}
+.li-port .li-top {
+  fill: var(--machine-port, #71928d);
+}
+
+.li-owner-link {
+  fill: none;
+  stroke: #83929e;
+  stroke-dasharray: 2 7;
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+/* Goal and inspection remain visible together while each reads long source material. */
+.li-readback {
+  display: grid;
+  grid-template-rows: minmax(160px, 38%) minmax(260px, 1fr);
+  height: 850px;
+  overflow: hidden;
+}
+.li-readback > div:first-child {
+  min-height: 0;
+  overflow: auto;
+}
+.li-readback .li-inspector {
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+}
+.li-expanded .li-readback {
+  height: 100%;
+}
+@media (max-width: 850px) {
+  .li-readback {
+    height: 650px;
+  }
+}
+.li-readback .li-type {
+  background: #e1e8db;
+  border-color: #347767;
+  color: #253a42;
+}
+.li-readback .li-run-summary > summary {
+  font-weight: 650;
+  color: #294b50;
 }

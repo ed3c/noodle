@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { evidenceState, projectConsole, inspectMachine } from "./loop-isometric.mjs";
+import {
+  evidenceState,
+  projectConsole,
+  inspectMachine,
+  observedParticipation,
+  traceFinding,
+} from "./loop-isometric.mjs";
 const n = (id, run, repo, execution = "completed") => ({
   id,
   run_id: run,
@@ -159,6 +165,11 @@ test("each mechanism has independently renderable static detail without executin
     assert.match(drawing, new RegExp(`data-anatomy-template="${kind}"`));
     assert.ok(Number(drawing.match(/data-parts="(\d+)"/)[1]) >= 40);
     assert.doesNotMatch(drawing, /NaN|undefined|<script|<animate/);
+    for (const angle of [20, 22, 30, 32, 40, 42, 50, 52, 60, 62, 70]) {
+      for (const apart of [false, true]) {
+        assert.match(mechanismFigure(kind, { angle, apart }), /viewBox=/);
+      }
+    }
   }
 });
 test("shared manager anatomy preserves original objects and unobserved conditions", () => {
@@ -249,4 +260,42 @@ test("machine inspector partitions supplied directions and preserves cross-run c
     inspectMachine(scene, "consumer").internal.map((e) => e.id),
     ["handoff"],
   );
+});
+
+test("participation requires the selected Run, native identity and a known observation", () => {
+  const node = n("x", "run", "repo");
+  assert.equal(observedParticipation(node, "run"), true);
+  for (const status of [
+    "available_reference",
+    "selected",
+    "source_bound_declaration",
+    "returned_not_executed",
+    "future_unknown_status",
+  ]) {
+    node.status.execution = status;
+    assert.equal(observedParticipation(node, "run"), false);
+  }
+  node.status.execution = "failed";
+  assert.equal(observedParticipation(node, "run"), true); // Participated, never successful.
+  assert.equal(observedParticipation(node, "other"), false);
+  node.identity.status = "unknown";
+  assert.equal(observedParticipation(node, "run"), false);
+});
+test("breakpoint tracing follows original directions, handles cycles and never imports sibling branches", () => {
+  const edge = (id, a, b) => ({ id, from_node_id: a, to_node_id: b });
+  const scene = {
+    edges: [
+      edge("ab", "a", "b"),
+      edge("bc", "b", "c"),
+      edge("cd", "c", "d"),
+      edge("dc", "d", "c"),
+      edge("ax", "a", "x"),
+    ],
+  };
+  const before = JSON.stringify(scene);
+  const t = traceFinding(scene, { node_ids: [], edge_ids: ["bc"] });
+  assert.deepEqual([...t.nodes].sort(), ["a", "b", "c", "d"]);
+  assert.equal(t.edges.has("ax"), false);
+  assert.equal(JSON.stringify(scene), before);
+  assert.equal(traceFinding(scene, { node_ids: [], edge_ids: [] }).nodes.size, 0);
 });
