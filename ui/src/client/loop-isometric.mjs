@@ -215,6 +215,36 @@ export function projectConsole(
   };
 }
 
+/** Partition only supplied occurrences and edges; capability descriptions are not events. */
+export function inspectMachine(scene, objectId) {
+  const nodes = scene.nodes.filter((n) => n.object_id === objectId);
+  const ids = new Set(nodes.map((n) => n.id));
+  const incoming = [],
+    internal = [],
+    outgoing = [];
+  for (const edge of scene.edges) {
+    const from = ids.has(edge.from_node_id),
+      to = ids.has(edge.to_node_id);
+    if (from && to) {
+      internal.push(edge);
+    } else if (to) {
+      incoming.push(edge);
+    } else if (from) {
+      outgoing.push(edge);
+    }
+  }
+  const edges = [...incoming, ...outgoing, ...internal];
+  return {
+    nodes,
+    incoming,
+    outgoing,
+    internal,
+    edges,
+    related: new Set([...ids, ...edges.flatMap((e) => [e.from_node_id, e.to_node_id])]),
+    findings: scene.findings.filter((f) => f.node_ids.some((id) => ids.has(id))),
+  };
+}
+
 const stateNames = {
   current: "目前交接證據完整",
   historical: "歷史記錄／目前效力未證實",
@@ -222,7 +252,10 @@ const stateNames = {
   failed: "失敗",
 };
 
-export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, view }) {
+export function mountIsometric(
+  root,
+  { graph, scope, runs, onSelect, onFocus, onRun, onInspect, renderRunCard, view },
+) {
   const state = (view.console ??= {
     run: null,
     sources: false,
@@ -234,7 +267,9 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
   if (state.run && !scope.rows.some((r) => r.run_id === state.run)) {
     state.run = null;
   }
-  let projection, sceneModel;
+  let machine, projection, sceneModel;
+  state.anchor ??= null;
+  state.onlyMachine ??= false;
   state.filter ??= { repo: "", branch: "", worktree: "", snapshot: "" };
   root.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
@@ -267,6 +302,7 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
     state.run = run.value || null;
     state.selection = null;
     render();
+    onRun?.(state.run);
   });
   const navigation = html("div", null, { class: "li-toolbar li-repository-nav" });
   const filters = {};
@@ -286,7 +322,10 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
       state.run = null;
       run.value = "";
       state.selection = null;
+      state.anchor = null;
+      state.returnView = null;
       render();
+      onRun?.(null);
     });
     filters[key] = select;
     const field = html("label", `${label} `);
@@ -373,9 +412,13 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
         zoom: 1,
         angle: 42,
         apart: false,
+        anchor: null,
+        returnView: null,
+        onlyMachine: false,
       });
       run.value = "";
       render();
+      onRun?.(null);
     }),
     sourceLabel,
   );
@@ -405,8 +448,41 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
     drawing.style.width = `${state.zoom * 100}%`;
   }
   function selectItem(kind, id) {
+    if (kind === "object" && state.anchor !== id) {
+      state.anchor = id;
+      state.onlyMachine = false;
+      state.returnView = {
+        run: state.run,
+        sources: state.sources,
+        apart: state.apart,
+        angle: state.angle,
+        zoom: state.zoom,
+        filter: { ...state.filter },
+      };
+    }
     state.selection = { kind, id };
     render();
+    onInspect?.(state.selection);
+  }
+  function expandRun(id) {
+    state.run = id;
+    run.value = id || "";
+    state.selection = state.anchor ? { kind: "object", id: state.anchor } : null;
+    render();
+    onRun?.(id);
+    onInspect?.(state.selection);
+  }
+  function returnToMachine() {
+    if (state.returnView) {
+      Object.assign(state, state.returnView, { filter: { ...state.returnView.filter } });
+    }
+    state.onlyMachine = false;
+    state.selection = state.anchor ? { kind: "object", id: state.anchor } : null;
+    run.value = state.run || "";
+    source.checked = state.sources;
+    render();
+    onRun?.(state.run);
+    onInspect?.(state.selection);
   }
   function selected(kind, id) {
     return state.selection?.kind === kind && state.selection.id === id;
@@ -456,6 +532,37 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
       group.classList.toggle("li-dim", !related);
       group.classList.toggle("li-endpoint", related && kind !== "edge");
     }
+    if (!activeEdge && state.anchor && machine) {
+      let nodeIds = machine.related;
+      let edgeIds = new Set(machine.edges.map((e) => e.id));
+      if (state.selection?.kind === "node") {
+        const adjacent = sceneModel.edges.filter((e) =>
+          [e.from_node_id, e.to_node_id].includes(state.selection.id),
+        );
+        edgeIds = new Set(adjacent.map((e) => e.id));
+        nodeIds = new Set([
+          state.selection.id,
+          ...adjacent.flatMap((e) => [e.from_node_id, e.to_node_id]),
+        ]);
+      } else if (state.selection?.kind === "finding") {
+        nodeIds = new Set(graph.findings.find((f) => f.id === state.selection.id)?.node_ids || []);
+        edgeIds = new Set();
+      }
+      let related = true;
+      if (kind === "node") {
+        related = nodeIds.has(id);
+      } else if (kind === "edge") {
+        related = edgeIds.has(id);
+      } else if (kind === "object") {
+        related =
+          id === state.anchor ||
+          sceneModel.nodes.some((n) => nodeIds.has(n.id) && n.object_id === id);
+      } else if (kind === "finding") {
+        related = machine.findings.some((f) => f.id === id);
+      }
+      group.classList.toggle("li-dim", !related);
+      group.classList.toggle("li-endpoint", related);
+    }
     group.append(svg("title", title));
     action(group, () => selectItem(kind, id));
     return group;
@@ -471,6 +578,15 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
         ? filterRepositories(graph.repositories, state.filter).map((r) => r.id)
         : null,
     });
+    machine = state.anchor ? inspectMachine(sceneModel, state.anchor) : null;
+    if (state.onlyMachine && state.run && machine) {
+      sceneModel = {
+        ...sceneModel,
+        nodes: sceneModel.nodes.filter((n) => machine.related.has(n.id)),
+        edges: machine.edges,
+        findings: machine.findings,
+      };
+    }
     const repoGroups = repositoryGroups(sceneModel.repositories);
     const groupFor = new Map(repoGroups.flatMap((g) => g.members.map((r) => [r.id, g.id])));
     drawing.replaceChildren();
@@ -672,6 +788,28 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
           class: "li-arrow",
         }),
       );
+      if (selected("edge", edge.id)) {
+        const typeNames = (ids) =>
+          [
+            ...new Set(
+              ids.map(
+                (id) => graph.artifacts.find((artifact) => artifact.id === id)?.role || "UNKNOWN",
+              ),
+            ),
+          ].join(" + ") || "未記錄";
+        g.append(
+          svg(
+            "text",
+            `${typeNames(edge.input_artifact_ids)} → ${typeNames(edge.output_artifact_ids)}`,
+            {
+              x: (start[0] + end[0]) / 2,
+              y: (start[1] + end[1]) / 2 - lift - 12,
+              class: "li-label li-flow-type",
+              "text-anchor": "middle",
+            },
+          ),
+        );
+      }
       g.append(svg("circle", null, { cx: start[0], cy: start[1], r: 3, class: "li-terminal" }));
       g.append(
         svg("text", `${edges.length > 1 ? `${edges.length} × ` : ""}→`, {
@@ -697,6 +835,99 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
     size();
     inspect();
   }
+  function machineInspector() {
+    const owner = graph.objects.find((o) => o.id === state.anchor);
+    if (!owner) {
+      return;
+    }
+    const nav = html("nav", null, { "aria-label": "機械檢視導航" });
+    nav.append(button(owner.label, () => selectItem("object", owner.id)));
+    if (state.run) {
+      nav.append(
+        html("span", " → "),
+        button(`Run ${state.run.slice(0, 12)}`, () => expandRun(state.run)),
+      );
+    }
+    if (state.selection && state.selection.kind !== "object") {
+      const record = (
+        { node: graph.nodes, edge: graph.edges, finding: graph.findings }[state.selection.kind] ||
+        []
+      ).find((r) => r.id === state.selection.id);
+      nav.append(html("span", ` → ${record?.label || record?.message || state.selection.kind}`));
+    }
+    nav.append(button("返回機械全景", returnToMachine));
+    inspector.append(nav);
+    const paths = html("section", null, { "aria-label": "此機械的閉環路徑與缺口" });
+    paths.append(html("h5", "01 / 此機械的閉環路徑與缺口"));
+    const runIds = new Set(machine.nodes.map((n) => n.run_id));
+    for (const edge of machine.edges) {
+      runIds.add(edge.run_id);
+    }
+    const rows = scope.rows.filter(
+      (r) => runIds.has(r.run_id) && (!state.run || r.run_id === state.run),
+    );
+    for (const row of rows) {
+      if (renderRunCard) {
+        paths.append(renderRunCard(row, () => expandRun(row.run_id)));
+      }
+    }
+    if (rows.length === 0) {
+      paths.append(html("p", "此範圍沒有已記錄節點；能力契約不代表已執行。"));
+    }
+    inspector.append(paths);
+    if (!state.run) {
+      inspector.append(html("p", "請選一個 Run 展開節點與資料流；不混合不同執行。"));
+      return;
+    }
+    const toggle = button(state.onlyMachine ? "顯示完整 Run 脈絡" : "只看此機械", () => {
+      state.onlyMachine = !state.onlyMachine;
+      render();
+    });
+    toggle.setAttribute("aria-pressed", String(state.onlyMachine));
+    inspector.append(toggle, html("p", "跨 Run 端點僅作交接脈絡，不擴大 Goal 驗收範圍。"));
+    const types = (ids) =>
+      [
+        ...new Set(
+          ids.map((id) => {
+            const a = graph.artifacts.find((artifact) => artifact.id === id);
+            return a ? `${a.role} / ${a.format || "未知型態"}` : "未知來源";
+          }),
+        ),
+      ].join(" + ") || "未記錄";
+    for (const [label, values, kind] of [
+      ["此機械的節點", machine.nodes, "node"],
+      ["流入", machine.incoming, "edge"],
+      ["流出", machine.outgoing, "edge"],
+      ["內部轉換", machine.internal, "edge"],
+      ["斷點", machine.findings, "finding"],
+    ]) {
+      const section = html("details", null, { "aria-label": label });
+      section.open = true;
+      section.append(html("summary", `${label} · ${values.length}`));
+      for (const value of values) {
+        const b = button(value.label || value.message, () => selectItem(kind, value.id));
+        b.setAttribute("aria-pressed", String(selected(kind, value.id)));
+        section.append(b);
+        if (kind === "edge") {
+          section.append(
+            html(
+              "p",
+              `${types(value.input_artifact_ids)} → ${types(value.output_artifact_ids)} · ${stateNames[evidenceState(value, graph)]}`,
+            ),
+          );
+        }
+        if (kind === "node") {
+          section.append(
+            html(
+              "p",
+              `${value.kind} · ${value.status.execution} · Run ${value.run_id.slice(0, 12)}${value.run_id === state.run ? "" : " · 跨界脈絡"}`,
+            ),
+          );
+        }
+      }
+      inspector.append(section);
+    }
+  }
   function inspect() {
     inspector.replaceChildren();
     const pick = state.selection;
@@ -709,6 +940,7 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
     };
     const value = pick && collection[pick.kind]?.find((v) => v.id === pick.id);
     inspector.append(html("p", "INSPECT / 原來源讀回", { class: "li-kicker" }));
+    machineInspector();
     if (value) {
       inspector.append(html("h4", value.label || value.message), html("code", value.id));
       if (pick.kind === "edge") {
@@ -810,6 +1042,9 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
         ),
       );
     }
+    if (state.anchor) {
+      return;
+    }
     const list = html("details");
     list.open = true;
     list.append(html("summary", `原始資料流 · ${sceneModel.edges.length}`));
@@ -834,8 +1069,28 @@ export function mountIsometric(root, { graph, scope, runs, onSelect, onFocus, vi
   }
   render();
   return {
+    setRun(id) {
+      expandRun(id);
+    },
+    syncRun(id) {
+      state.run = id;
+      run.value = id || "";
+      render();
+    },
     setSelection(value) {
       if (value && ["object", "node", "edge", "finding"].includes(value.kind)) {
+        if (value.kind === "object" && state.anchor !== value.id) {
+          state.anchor = value.id;
+          state.onlyMachine = false;
+          state.returnView = {
+            run: state.run,
+            sources: state.sources,
+            apart: state.apart,
+            angle: state.angle,
+            zoom: state.zoom,
+            filter: { ...state.filter },
+          };
+        }
         state.selection = value;
         render();
       } else if (!value && state.selection) {

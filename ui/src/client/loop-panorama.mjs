@@ -302,6 +302,18 @@ export function mountPanorama(
     runs,
     onSelect,
     onFocus,
+    onRun: (id) => {
+      if (id) {
+        openRun(id);
+      } else {
+        view.run = null;
+        view.selection = null;
+        detailPanel.open = false;
+        updatePosition();
+      }
+    },
+    onInspect: (value) => setSelection(value),
+    renderRunCard: (row, expand) => renderRow(row, expand),
     view,
   });
   if (model.context_run_ids.length > 0) {
@@ -758,6 +770,7 @@ export function mountPanorama(
         view.run = null;
         view.selection = null;
         detailPanel.open = false;
+        consoleView.syncRun(null);
         updatePosition();
         onReset?.();
         root.querySelector(".lp-journey")?.scrollIntoView({ block: "start" });
@@ -790,6 +803,7 @@ export function mountPanorama(
     }
     chooser.value = id;
     view.run = id;
+    consoleView.syncRun(id);
     detailPanel.open = true;
     drawDetail();
     updatePosition();
@@ -815,7 +829,10 @@ export function mountPanorama(
       return;
     }
     view.selection = value;
-    if (record.run_id) {
+    if (
+      record.run_id &&
+      (!view.run || !projectRunDetail(graph, view.run).nodes.some((n) => n.id === record.id))
+    ) {
       openRun(record.run_id);
     }
     if (
@@ -847,6 +864,7 @@ export function mountPanorama(
   });
   chooser.addEventListener("change", () => {
     view.selection = null;
+    consoleView.syncRun(chooser.value);
     drawDetail();
     updatePosition();
     onReset?.();
@@ -857,7 +875,7 @@ export function mountPanorama(
     }
   });
   root.append(detailPanel);
-  function renderRow(row) {
+  function renderRow(row, expand = null) {
     const run = runs.find((r) => r.id === row.run_id);
     const card = el("article", null, { class: "lp-loop", "data-panorama-run": row.run_id });
     card.append(
@@ -907,9 +925,13 @@ export function mountPanorama(
     card.append(
       button("展開本次執行 DAG", () => {
         view.selection = null;
-        openRun(row.run_id);
+        if (expand) {
+          expand(row.run_id);
+        } else {
+          consoleView.setRun(row.run_id);
+        }
         onFocus({ node_ids: row.node_ids, edge_ids: row.edge_ids, reveal: false });
-        root.querySelector(".lp-detail")?.scrollIntoView({ block: "start" });
+        consoleRoot.scrollIntoView({ block: "nearest" });
       }),
     );
     const failures = row.findings.filter((f) => f.status === "failed");

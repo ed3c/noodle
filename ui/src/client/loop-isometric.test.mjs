@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { evidenceState, projectConsole } from "./loop-isometric.mjs";
+import { evidenceState, projectConsole, inspectMachine } from "./loop-isometric.mjs";
 const n = (id, run, repo, execution = "completed") => ({
   id,
   run_id: run,
@@ -208,4 +208,45 @@ test("functional mapping is producer supplied and does not change on failure", (
   assert.equal(anatomyModel(graph, { kind: "node", id: "a" }).template, "unknown");
   assert.notEqual(mechanismFigure("outer"), mechanismFigure("inner"));
   assert.notEqual(mechanismFigure("gauge"), mechanismFigure("testbench"));
+});
+
+test("machine inspector partitions supplied directions and preserves cross-run context without inventing edges", () => {
+  const { graph, scope } = fixture();
+  graph.nodes[0].object_id = "producer";
+  graph.nodes[1].object_id = "consumer";
+  graph.nodes[2].object_id = "consumer";
+  graph.nodes[3].object_id = "consumer";
+  graph.findings = [
+    { id: "failure", run_id: "selected", node_ids: ["b"] },
+    { id: "unrelated", run_id: "unrelated", node_ids: ["other"] },
+  ];
+  const before = JSON.stringify(graph);
+  const scene = projectConsole(graph, scope, { runId: "selected" });
+  const consumer = inspectMachine(scene, "consumer");
+  assert.deepEqual(
+    consumer.nodes.map((n) => n.id),
+    ["b"],
+  );
+  assert.deepEqual(
+    consumer.incoming.map((e) => e.id),
+    ["handoff"],
+  );
+  assert.equal(consumer.outgoing.length, 0);
+  assert.equal(consumer.internal.length, 0);
+  assert.deepEqual([...consumer.related].sort(), ["a", "b"]);
+  assert.deepEqual(
+    consumer.findings.map((f) => f.id),
+    ["failure"],
+  );
+  assert.deepEqual(
+    inspectMachine(scene, "producer").outgoing.map((e) => e.id),
+    ["handoff"],
+  );
+  assert.equal(inspectMachine(scene, "absent").edges.length, 0);
+  assert.equal(JSON.stringify(graph), before);
+  scene.nodes[0] = { ...scene.nodes[0], object_id: "consumer" };
+  assert.deepEqual(
+    inspectMachine(scene, "consumer").internal.map((e) => e.id),
+    ["handoff"],
+  );
 });

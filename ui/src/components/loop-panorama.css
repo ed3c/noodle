@@ -709,3 +709,24 @@
   width: auto;
   flex: 1;
 }
+
+.li-inspector nav[aria-label="機械檢視導航"] {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 8px;
+  background: var(--bg, #11191f);
+  border-bottom: 1px solid #3c505a;
+}
+.li-inspector .lp-loop {
+  margin: 8px 0;
+  padding: 10px;
+}
+.li-inspector button[aria-pressed="true"] {
+  outline: 2px solid #8fd6c0;
+}
+.li-flow-type {
+  paint-order: stroke;
+  stroke: #11191f;
+  stroke-width: 4px;
+}
