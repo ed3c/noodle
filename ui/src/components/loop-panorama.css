@@ -977,3 +977,129 @@
   background: #e1e8db;
   color: #253a42;
 }
+
+/* Both representations share one selection; light review surfaces keep dark ink. */
+.li-console .li-body {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 43%);
+}
+.lc-actual-title {
+  padding: 14px 18px 0;
+  color: #e8eee7;
+}
+.li-console .lc-panel,
+.li-console .lc-review {
+  --li-ink: #253a42;
+  --li-accent: #166652;
+  background: #f1eee5;
+  color: #253a42;
+  padding: 18px;
+  min-width: 0;
+}
+.li-console .lc-panel {
+  max-height: 850px;
+  overflow: auto;
+}
+.li-console .lc-panel > svg {
+  width: 100%;
+  height: auto;
+}
+.li-console .lc-panel h3,
+.li-console .lc-panel h4,
+.li-console .lc-review h3,
+.li-console .lc-review h4,
+.li-console .lc-panel summary {
+  color: #253a42;
+}
+.lp-panel .li-console .lc-panel button,
+#loop-graph-app .li-console .lc-panel button,
+.lp-panel .li-console .lc-review button,
+#loop-graph-app .li-console .lc-review button {
+  color: #253a42;
+  background: #fffdf6;
+  border: 1px solid #9eaea6;
+  margin: 3px;
+}
+.lc-review-area {
+  display: grid;
+  grid-template-columns: minmax(300px, 36%) minmax(0, 1fr);
+}
+.lc-review-area .li-readback {
+  height: 700px;
+  max-height: 700px;
+}
+.lc-review {
+  overflow: auto;
+  max-height: 700px;
+}
+.lc-review table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.lc-review td,
+.lc-review th {
+  border-bottom: 1px solid #a3afa5;
+  padding: 10px;
+  vertical-align: top;
+  text-align: left;
+}
+.lc-review td p,
+.lc-panel p {
+  overflow-wrap: anywhere;
+}
+.lc-review pre,
+.lc-panel pre {
+  white-space: pre-wrap;
+  color: #253a42;
+  background: #e1e8db;
+  padding: 8px;
+}
+.lc-origin {
+  border-left: 3px solid #166652;
+  padding-left: 9px;
+  font-weight: 650;
+}
+.lc-dim {
+  opacity: 0.48;
+}
+.lc-route {
+  cursor: pointer;
+  color: #786331;
+}
+.lc-step {
+  cursor: pointer;
+}
+.lc-step:focus rect {
+  stroke: #166652;
+  stroke-width: 4;
+}
+.lc-matched {
+  color: #166652;
+}
+.lc-deviated {
+  color: #992e36;
+}
+.lc-unknown {
+  color: #786331;
+}
+.lc-not_applicable {
+  color: #536267;
+}
+.lc-selected {
+  background: #e1e8db;
+}
+.li-expanded .lc-panel {
+  max-height: calc(100vh - 200px);
+}
+.li-console.li-expanded {
+  overflow: auto;
+}
+@media (max-width: 850px) {
+  .li-console .li-body,
+  .lc-review-area {
+    grid-template-columns: 1fr;
+  }
+  .li-console .lc-panel {
+    max-height: 650px;
+  }
+}

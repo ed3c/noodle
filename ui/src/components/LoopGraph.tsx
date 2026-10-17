@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchLoopView } from "~/client/loop-views";
 import type { LoopViewResponse } from "~/client/loop-views";
-import { fetchLoopGraph } from "~/client/loop-graph";
+import { fetchLoopGraph, fetchArtifact } from "~/client/loop-graph";
 import type { GraphResponse, GraphView, LoopGraph } from "~/client/loop-graph";
 import { LoopViews, LoopViewsContent } from "./LoopViews";
 import { LoopGraphSourceIndex, noHighlight } from "./LoopGraphSourceIndex";
@@ -358,6 +358,12 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
     <>
       <LoopPanorama
         graph={graph}
+        readArtifact={async (id) => {
+          const artifact = graph.artifacts.find((a) => a.id === id);
+          if (!artifact) return null;
+          const result = await fetchArtifact(artifact);
+          return result.content;
+        }}
         selection={
           selection && selection.kind !== "file" && selection.kind !== "port"
             ? { kind: selection.kind, id: selection.id }

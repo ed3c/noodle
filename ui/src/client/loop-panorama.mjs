@@ -237,7 +237,17 @@ function activate(node, action) {
 }
 export function mountPanorama(
   root,
-  { graph, runs, runIds = null, goal = "", onScope, onSelect: notifySelection, onFocus, onReset },
+  {
+    graph,
+    runs,
+    runIds = null,
+    goal = "",
+    onScope,
+    onSelect: notifySelection,
+    onFocus,
+    onReset,
+    readArtifact,
+  },
 ) {
   const model = projectPanorama(graph, runIds ?? runs.map((r) => r.id));
   const scopeKey = JSON.stringify([goal, runIds]);
@@ -298,6 +308,7 @@ export function mountPanorama(
   root.append(consoleRoot);
   const consoleView = mountIsometric(consoleRoot, {
     graph,
+    readArtifact,
     scope: model,
     runs,
     onSelect,

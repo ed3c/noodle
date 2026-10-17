@@ -41,6 +41,7 @@ export function mountPanorama(
     onScope: (scope: WorkspaceScope) => void;
     onSelect: (selection: PanoramaSelection) => void;
     onReset?: () => void;
+    readArtifact?: (id: string) => Promise<string | null>;
     onFocus: (focus: PanoramaFocus) => void;
   },
 ): { setSelection: (selection: PanoramaSelection | null) => void };

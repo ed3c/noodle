@@ -7,6 +7,7 @@ import {
   worktreeKey,
 } from "./loop-repository.mjs";
 import { mechanismFigure } from "./loop-anatomy.mjs";
+import { mountComparison } from "./loop-comparison.mjs";
 
 let viewSequence = 0;
 const NS = "http://www.w3.org/2000/svg";
@@ -214,7 +215,7 @@ const stateNames = {
 
 export function mountIsometric(
   root,
-  { graph, scope, runs, onSelect, onFocus, onRun, onInspect, renderRunCard, view },
+  { graph, scope, runs, onSelect, onFocus, onRun, onInspect, renderRunCard, view, readArtifact },
 ) {
   const state = (view.console ??= {
     run: null,
@@ -402,14 +403,23 @@ export function mountIsometric(
   });
   const journeySlot = html("div", null, { class: "li-journey-slot" });
   readback.append(journeySlot, inspector);
-  body.append(viewport, readback);
+  viewport.prepend(html("h3", "左 / 原執行證據", { class: "lc-actual-title" }));
+  const expectedPanel = html("aside", null, { class: "lc-panel", "aria-label": "契約預期與假說" });
+  const comparisonReview = html("section", null, {
+    class: "lc-review",
+    "aria-label": "預期實際比較",
+  });
+  const reviewArea = html("section", null, { class: "lc-review-area" });
+  reviewArea.append(readback, comparisonReview);
+  body.append(viewport, expectedPanel);
+  state.comparison ??= {};
   const readout = html("p", null, { class: "li-readout", "aria-live": "polite" });
   const legend = html(
     "p",
     "青綠亮起：本次已觀察參與（不等於成功）　金框：目前選取　✕：原失敗　?：缺證據。連線是原資料關係，不是機械管線。",
     { class: "li-legend" },
   );
-  root.append(heading, navigation, toolbar, body, readout, legend);
+  root.append(heading, navigation, toolbar, body, readout, legend, reviewArea);
 
   function size() {
     drawing.style.width = `${state.zoom * 100}%`;
@@ -827,6 +837,20 @@ export function mountIsometric(
     readout.textContent = `${graph.objects.length} 唯一物件 · ${repoGroups.length} Repo 區域 · ${sceneModel.nodes.length} 路徑節點 · ${sceneModel.hidden} 來源節點按需展開 · ${sceneModel.edges.filter((e) => evidenceState(e, graph) === "current").length} 段目前交接證據完整`;
     size();
     inspect();
+    mountComparison(
+      { panel: expectedPanel, review: comparisonReview },
+      {
+        graph,
+        runId: state.run,
+        pick: state.selection,
+        memory: (state.comparison[state.run || "global"] ??= {}),
+      },
+      {
+        onSelect: (pick) => selectItem(pick.kind, pick.id),
+        onOriginal: openOriginal,
+        readArtifact,
+      },
+    );
   }
   function machineInspector() {
     const owner = graph.objects.find((o) => o.id === state.anchor);

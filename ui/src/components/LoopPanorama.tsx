@@ -24,6 +24,7 @@ export function LoopPanorama(
         runs,
         runIds,
         goal,
+        readArtifact: (id) => callbacks.current.readArtifact?.(id) ?? Promise.resolve(null),
         onReset: () => callbacks.current.onReset?.(),
         onScope: (value) => callbacks.current.onScope(value),
         onSelect: (value) => callbacks.current.onSelect(value),
