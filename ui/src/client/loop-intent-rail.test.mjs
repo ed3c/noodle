@@ -42,17 +42,17 @@ test("selection highlight keeps evidence inside selected Run, independent of spa
   const scene={nodes:g.nodes.filter(n=>n.run_id==="a"),edges:g.edges.filter(e=>e.run_id==="a"),findings:[]};
   const overlay={steps:[{id:"s",matches:["prompt-a"]},{id:"t",matches:["tool-a"]}],
     routes:[{id:"hyp",layer:"hypothesis",from:"s",to:"t",result:{edge_ids:["native-a","cross-b"]}}]};
-  const ref=evidenceFocus(g,scene,overlay,{kind:"expected-route",id:"hypothesis/hyp"});
+  const ref=evidenceFocus({scene,overlay,selection:{kind:"expected-route",id:"hypothesis/hyp"}});
   assert.deepEqual([...ref.edges],["native-a"]);
   assert.ok(!ref.nodes.has("tool-b"));
-  const facet=evidenceFocus(g,scene,overlay,{kind:"principle",id:"inner/assertion"},[scene.nodes[1]]);
+  const facet=evidenceFocus({scene,overlay,selection:{kind:"principle",id:"inner/assertion"},facets:[scene.nodes[1]]});
   assert.ok(facet.objects.has("inner"));
   assert.ok(facet.edges.has("native-a"));
   assert.ok(!facet.nodes.has("tool-b"));
 });
 test("unsupported or unbound hypothesis selects no invented node or edge",()=>{
   const g=fixture(),s={nodes:g.nodes,edges:[],findings:[]},o={steps:[],routes:[]};
-  const ref=evidenceFocus(g,s,o,{kind:"expected-route",id:"hypothesis/unknown"});
+  const ref=evidenceFocus({scene:s,overlay:o,selection:{kind:"expected-route",id:"hypothesis/unknown"}});
   assert.equal(ref.edges.size,0);
   assert.equal(ref.nodes.size,0);
 });

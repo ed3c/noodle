@@ -32,7 +32,7 @@ export function projectIntentRail(graph, runId) {
   });
 }
 
-export function evidenceFocus(graph, scene, overlay, selection, facets = []) {
+export function evidenceFocus({scene, overlay, selection, facets = []}) {
   if (!selection) return null;
   const nodes = new Set(), edges = new Set(), objects = new Set(), expected = new Set();
   const run = new Set(scene.nodes.map(n => n.id));

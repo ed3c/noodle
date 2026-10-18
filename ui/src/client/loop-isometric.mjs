@@ -845,8 +845,8 @@ export function mountIsometric(
     const facetNodes = state.selection?.kind === "principle" ?
       contractFacets(facetGraph(), state.selection.id.split("/")[0], state.run)
         .find(f => f.id === state.selection.id.split("/")[1])?.nodes || [] : [];
-    activeHighlight = evidenceFocus(graph, sceneModel, allExpected,
-      state.selection, facetNodes);
+    activeHighlight = evidenceFocus({scene: sceneModel, overlay: allExpected,
+      selection: state.selection, facets: facetNodes});
     const machines = partitionMachines(graph.objects, sceneModel, {
       overlay,
       run: state.run,
@@ -877,8 +877,7 @@ export function mountIsometric(
     const layout = focusedLayout(
       machines.primary.length,
       machines.index.length,
-      items.length + unmatched.length,
-      { intentRail: true },
+      { count: items.length + unmatched.length, intentRail: true },
     );
     const floor = svg("g", null, { class: "li-workspace-floor", "aria-hidden": "true" });
     const { width, height } = layout;
