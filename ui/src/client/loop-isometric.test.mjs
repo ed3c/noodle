@@ -3,6 +3,7 @@ import { mechanismFigure, anatomyModel } from "./loop-anatomy.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  gapSummary,
   evidenceState,
   projectConsole,
   inspectMachine,
@@ -364,4 +365,11 @@ test("a tool failure cannot trace through a diagnostic Session association as ca
   const trace = traceFinding(scene, { node_ids: ["result"], edge_ids: [] });
   assert.deepEqual([...trace.nodes].toSorted(), ["call", "result"]);
   assert.equal(trace.edges.has("association"), false);
+});
+
+test("absent DAG is unknown, while recorded findings retain their count", () => {
+  const { graph } = fixture();
+  assert.equal(gapSummary(graph, "missing", []), "DAG 證據未載入 · 缺口數未知");
+  assert.equal(gapSummary(graph, "selected", []), "0 個已記錄斷點／缺口");
+  assert.equal(gapSummary(graph, "selected", [{}]), "1 個已記錄斷點／缺口");
 });
