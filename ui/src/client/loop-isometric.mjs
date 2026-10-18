@@ -543,6 +543,12 @@ export function mountIsometric(
     drawing.style.width = `${state.zoom * 100}%`;
   }
   function selectItem(kind, id) {
+    if (kind === "carrier") {
+      // Source-rail selection is a new top-level inspect, not a continuation
+      // of the previously selected Owner or its native causal neighborhood.
+      state.anchor = null;
+      state.onlyMachine = false;
+    }
     if (
       (kind === "object" || kind === "principle") &&
       state.anchor !== (kind === "principle" ? id.split("/")[0] : id)
