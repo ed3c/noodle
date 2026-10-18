@@ -50,10 +50,12 @@ export function partitionMachines(objects, scene, { overlay, run, full = false }
 /** One floor: participating machines and occurrences, followed by the compact index. Position is not evidence. */
 export function focusedLayout(primaryCount, indexCount, itemCount) {
   const columns = 3;
+  const railHeight = typeof itemCount === "object" && itemCount.intentRail ? 146 : 0;
+  const count = typeof itemCount === "number" ? itemCount : itemCount.count;
   const indexHeight = indexCount ? Math.ceil(indexCount / columns) * 58 + 36 : 0;
-  const machineTop = 40;
+  const machineTop = 40 + railHeight;
   const itemTop = machineTop + Math.ceil(primaryCount / columns) * 145 + 35;
-  const indexTop = itemTop + Math.ceil(itemCount / columns) * 205 + 35;
+  const indexTop = itemTop + Math.ceil(count / columns) * 205 + 35;
   return {
     width: 880,
     height: indexTop + indexHeight + 50,
@@ -65,7 +67,7 @@ export function focusedLayout(primaryCount, indexCount, itemCount) {
       30 + (i % columns) * 280,
       machineTop + Math.floor(i / columns) * 145,
     ]),
-    items: Array.from({ length: itemCount }, (_, i) => [
+    items: Array.from({ length: count }, (_, i) => [
       30 + (i % columns) * 280,
       itemTop + Math.floor(i / columns) * 205,
     ]),

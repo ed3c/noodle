@@ -83,3 +83,44 @@ Source, camera and full-overlay controls do not dispatch runtime effects.
 This local UI revision has not been copied to medium-compiler: cloud changes are paused
 by the user. Cloud byte-equality and cloud interaction acceptance remain pending for the
 next explicitly resumed cloud delivery.
+
+## ViewEnv source-bound end-to-end intent rail (Q16–Q31)
+The complete architecture retains original Noodle source-bound geometry and
+original Soodles occurrence and comparison producers. Human Intent, Session
+Judgment, Prompt/P-class and CLI/Tool Call have a compact **source rail on the
+same floor**. Rail cards are projections of original **Run-scoped artifact
+references** only. They are not Graph.Nodes, do not synthesize Native
+Invocations or source-to-execution edges, and never become green by proximity.
+A missing carrier remains UNKNOWN. Clicking reveals registered originals,
+then existing node/edge/expectation reviewers.
+
+Object, Principle, Node, Edge, Finding and Expected Route selections now share
+a one-hop, same-scene source-bound highlight. A selected Hypothesis can only
+highlight the original matched edges and nodes in its selected Run; no guessed
+cross-Run bridge, no implicit root cause. Applicable yellow expectations,
+dashed hypotheses and evidence-backed green handoffs retain independent
+status. Real failure gets its original failure indicator.
+The scene remains a summary; original consumer review and prompt diff live
+in the Workspace's existing comparison and original Artifact readers.
+
+The source rail does not implement Whole Goal acceptance. The original
+owner-bound complete Requirement/Acceptance Ledger is still unavailable in
+v2; an observed set of green handoffs still leaves Whole Goal UNKNOWN.
+No new Scheduler, CLI route, Native P-class occurrence or executable tool
+call was added. Current cloud vendor parity and deployment remain paused.
+\n## ViewEnv Session Judgment provenance correction (Q32–Q33)
+
+The compact Session Judgment source rail distinguishes
+`intent_selection` (a proposed method/decision *input*),
+`loop_owner_readback` or `schema_feedback` (original *producer readbacks*)
+from `harness_review` (one source-bound Session submission). Merely selecting
+or returning a Schema field never establishes that a human/Agent reasoned,
+followed the P-class or executed a CLI tool. A valid `harness_review` is
+`SESSION_SUBMISSION_UNVERIFIED`, not PASS. Missing/stale original review
+stays UNKNOWN; it is not an unobserved native step or proven wiring defect.
+
+The original graph owner and existing Soodles named `loop_review_inspect`
+and `loop_review_feedback` tools own the review/refusal and continuation.
+This UI only projects and selects, without new Graph Nodes or an execution
+command. Native Agent consumption and actual provider effect require
+separate original readback; cloud promotion remains paused.

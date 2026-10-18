@@ -10,6 +10,7 @@ import { layoutGraph } from "./loop-graph-layout.mjs";
 import { mechanismFigure } from "./loop-anatomy.mjs";
 import { contractFacets, expectedScene, principleFigure } from "./loop-contract.mjs";
 import { focusExpectations, partitionMachines, focusedLayout } from "./loop-scene-focus.mjs";
+import { projectIntentRail, evidenceFocus } from "./loop-intent-rail.mjs";
 import { mountComparison } from "./loop-comparison.mjs";
 
 let viewSequence = 0;
@@ -296,6 +297,7 @@ export function mountIsometric(
   }
   let machine;
   let sceneModel;
+  let activeHighlight = null;
   state.events ??= false;
   state.anchor ??= null;
   state.onlyMachine ??= false;
@@ -548,6 +550,12 @@ export function mountIsometric(
     drawing.style.width = `${state.zoom * 100}%`;
   }
   function selectItem(kind, id) {
+    if (kind === "carrier") {
+      // Source-rail selection is a new top-level inspect, not a continuation
+      // of the previously selected Owner or its native causal neighborhood.
+      state.anchor = null;
+      state.onlyMachine = false;
+    }
     if (
       (kind === "object" || kind === "principle") &&
       state.anchor !== (kind === "principle" ? id.split("/")[0] : id)
@@ -605,7 +613,7 @@ export function mountIsometric(
     }
     render();
     readback.scrollTop = inspector.offsetTop - readback.offsetTop;
-    if (!["principle", "expected", "expected-route"].includes(kind)) {
+    if (!["principle", "expected", "expected-route", "carrier"].includes(kind)) {
       onInspect?.(state.selection);
     }
   }
@@ -736,6 +744,15 @@ export function mountIsometric(
       group.classList.toggle("li-unobserved", !participating);
       group.dataset.participation = participating ? "observed" : "not_observed";
     }
+    if (activeHighlight && ["object", "node", "edge", "expected"].includes(kind)) {
+      const related =
+        (kind === "object" && activeHighlight.objects.has(id)) ||
+        (kind === "node" && activeHighlight.nodes.has(id)) ||
+        (kind === "edge" && activeHighlight.edges.has(id)) ||
+        (kind === "expected" && activeHighlight.expected.has(id));
+      group.classList.toggle("li-dim", !related);
+      group.classList.toggle("li-endpoint", related);
+    }
     group.append(svg("title", title));
     action(group, () => selectItem(kind, id));
     return group;
@@ -839,6 +856,18 @@ export function mountIsometric(
     overlayToggle.setAttribute("aria-pressed", String(state.fullOverlay));
     architectureToggle.textContent = state.fullArchitecture ? "本次參與優先" : "完整架構";
     architectureToggle.setAttribute("aria-pressed", String(state.fullArchitecture));
+    const facetNodes =
+      state.selection?.kind === "principle"
+        ? contractFacets(facetGraph(), state.selection.id.split("/")[0], state.run).find(
+            (f) => f.id === state.selection.id.split("/")[1],
+          )?.nodes || []
+        : [];
+    activeHighlight = evidenceFocus({
+      scene: sceneModel,
+      overlay: allExpected,
+      selection: state.selection,
+      facets: facetNodes,
+    });
     const machines = partitionMachines(graph.objects, sceneModel, {
       overlay,
       run: state.run,
@@ -866,11 +895,10 @@ export function mountIsometric(
         overlay.routes.some((r) => r.from === step.id || r.to === step.id),
     );
     const items = state.run ? visibleNodes : repoGroups;
-    const layout = focusedLayout(
-      machines.primary.length,
-      machines.index.length,
-      items.length + unmatched.length,
-    );
+    const layout = focusedLayout(machines.primary.length, machines.index.length, {
+      count: items.length + unmatched.length,
+      intentRail: true,
+    });
     const floor = svg("g", null, { class: "li-workspace-floor", "aria-hidden": "true" });
     const { width, height } = layout;
     floor.append(
@@ -884,6 +912,54 @@ export function mountIsometric(
       }),
     );
     drawing.append(floor);
+    const sourceRail = projectIntentRail(graph, state.run);
+    const sourceGroup = svg("g", null, {
+      class: "li-intent-rail",
+      "aria-label": "Human Intent 與 Prompt 資料流來源導覽（非 Native Occurrence）",
+    });
+    const intentHeader = target("carrier", "overall", "整體機械 · Goal 閉環路徑與缺口");
+    intentHeader.append(
+      svg("rect", null, {
+        x: 26,
+        y: 17,
+        width: 826,
+        height: 31,
+        rx: 5,
+        class: "li-intent-heading",
+      }),
+    );
+    label([
+      intentHeader,
+      "GOAL / HUMAN INTENT → SESSION → P-CLASS → CLI / TOOL CALL",
+      37,
+      38,
+      "li-small",
+    ]);
+    sourceGroup.append(intentHeader);
+    for (const [i, lane] of sourceRail.entries()) {
+      const x = 30 + i * 205,
+        y = 59;
+      const card = target("carrier", lane.id, `${lane.title} · 原來源，非執行證據`);
+      card.classList.add("li-intent-source");
+      card.classList.toggle("is-selected", selected("carrier", lane.id));
+      card.append(
+        svg("rect", null, { x, y, width: 192, height: 75, rx: 6, class: "li-intent-source-card" }),
+      );
+      label([card, lane.title, x + 10, y + 25, "li-machine-title"]);
+      let cardStatus =
+        lane.source_status === "source_referenced"
+          ? `${lane.artifact_ids.length} 原來源引用`
+          : "UNKNOWN · 來源不足";
+      if (lane.id === "judgment") {
+        cardStatus =
+          lane.decision_status === "SESSION_SUBMISSION_UNVERIFIED"
+            ? "Session 判斷已提交 · 語義未驗證"
+            : "Session 判斷 UNKNOWN · 僅來源/讀回";
+      }
+      label([card, cardStatus, x + 10, y + 54, "li-small"]);
+      sourceGroup.append(card);
+    }
+    drawing.append(sourceGroup);
     if (machines.index.length > 0) {
       label([drawing, "其他機械索引", 30, layout.index[0][1] - 16, "li-small"]);
     }
@@ -1291,6 +1367,49 @@ export function mountIsometric(
   function inspect() {
     inspector.replaceChildren();
     const pick = state.selection;
+    if (pick?.kind === "carrier") {
+      const lane = projectIntentRail(graph, state.run).find((x) => x.id === pick.id);
+      const panel = html("section", null, { "aria-label": "端到端來源與閉環檢視" });
+      panel.append(html("h4", lane?.title || "Overall Machine · Goal 閉環"));
+      panel.append(
+        html(
+          "p",
+          pick.id === "overall"
+            ? "整體輪廓是來源導覽，並非執行 DAG。只有原 Owner 的完整 Acceptance 可關閉 Goal；本次狀態 UNKNOWN。"
+            : "來源引用與原生 Consumer 的實際交接分別驗收。SOURCE 不表示 Agent 載入、執行或語義正確。",
+        ),
+      );
+      if (lane?.id === "judgment") {
+        panel.append(
+          html(
+            "p",
+            `決策證據：${lane.decision_status}。選定 intent_selection、原 Owner Readback 和已提交的 harness_review 互不代替；註冊/來源不證明 Agent 遵循。`,
+          ),
+        );
+        panel.append(
+          html(
+            "p",
+            `輸入來源 ${lane.original_inputs.length} · 原讀回 ${lane.owner_readbacks.length} · Session Assessment ${lane.submitted_assessments.length}`,
+          ),
+        );
+      }
+      for (const id of lane?.artifact_ids || []) {
+        const a = graph.artifacts.find((x) => x.id === id);
+        panel.append(
+          button(`原始 Carrier · ${a?.role || "unknown"} / ${id}`, () =>
+            openOriginal({ kind: "artifact", id }),
+          ),
+        );
+      }
+      if (lane && lane.artifact_ids.length === 0) {
+        panel.append(html("p", "尚無此 Run 原始 Carrier；保留 UNKNOWN，不補造 Native Node。"));
+      }
+      for (const id of lane?.node_ids || []) {
+        const n = graph.nodes.find((x) => x.id === id);
+        panel.append(button(`原始節點 · ${n?.label || id}`, () => selectItem("node", id)));
+      }
+      inspector.append(panel);
+    }
     const collection = {
       object: graph.objects,
       node: graph.nodes,
