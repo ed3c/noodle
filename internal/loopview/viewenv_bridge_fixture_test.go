@@ -20,7 +20,16 @@ func TestViewEnvNativeBridgeFixture(t *testing.T) {
 	project := os.Getenv("VIEWENV_BRIDGE_PROJECT_DIR")
 	receiptPath := os.Getenv("VIEWENV_BRIDGE_RECEIPT_FILE")
 	if host == "" && requestPath == "" && project == "" && receiptPath == "" {
-		t.Skip("No explicitly selected offline integration fixture")
+		// Run the real source-only producer in ordinary Noodle CI as well:
+		// optional cross-repo paths merely change the original input owner.
+		host = t.TempDir()
+		project = t.TempDir()
+		requestPath = filepath.Join(t.TempDir(), "request.json")
+		receiptPath = filepath.Join(t.TempDir(), "fixture-receipt.json")
+		if err := os.WriteFile(requestPath,
+			[]byte(`{"goal":"source-only fixture; native model not invoked"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, item := range []string{host, requestPath, project, receiptPath} {
 		if !filepath.IsAbs(item) || item == "" {
