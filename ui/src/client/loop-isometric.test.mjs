@@ -317,3 +317,33 @@ test("native events remain available without flooding the default scene", () => 
     true,
   );
 });
+
+test("selecting one native event reveals only its evidenced pair", () => {
+  const { graph, scope } = fixture();
+  graph.artifacts.push(
+    { id: "call", role: "native_tool_call", status: "available" },
+    { id: "result", role: "native_tool_result", status: "available" },
+  );
+  const call = {
+    ...makeNode("call", { run: "selected", repo: "repoB" }),
+    output_artifact_ids: ["call"],
+  };
+  const result = {
+    ...makeNode("result", { run: "selected", repo: "repoB" }),
+    output_artifact_ids: ["result"],
+  };
+  const other = { ...call, id: "other-call" };
+  graph.nodes.push(call, result, other);
+  scope.nodes.push(call, result, other);
+  graph.edges.push({ ...graph.edges[0], id: "tool", from_node_id: "call", to_node_id: "result" });
+  const view = projectConsole(graph, scope, {
+    runId: "selected",
+    selection: { kind: "node", id: "call" },
+  });
+  assert.ok(view.nodes.some((n) => n.id === "call"));
+  assert.ok(view.nodes.some((n) => n.id === "result"));
+  assert.equal(
+    view.nodes.some((n) => n.id === "other-call"),
+    false,
+  );
+});

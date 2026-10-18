@@ -620,3 +620,30 @@ test("native event index opens a recorded tool and places its readback before se
       children.indexOf(inspector.querySelector(".li-run-summary")),
   );
 });
+
+test("original Goal is read on demand when the native API omits inline content", async (t) => {
+  const reads = [];
+  const { root, dom } = navigationFixture(
+    t,
+    {
+      readArtifact: (id) => {
+        reads.push(id);
+        return Promise.resolve(JSON.stringify({ goal: "Original human requirement" }));
+      },
+    },
+    (graph) => {
+      graph.nodes[0].output_artifact_ids = ["request"];
+      graph.artifacts.push({ id: "request", role: "loop_request", status: "available" });
+    },
+  );
+  const select = root.querySelector('[aria-label="立體視圖執行範圍"]');
+  select.value = "a";
+  select.dispatchEvent(new dom.window.Event("change"));
+  assert.deepEqual(reads, []);
+  const goal = root.querySelector('[aria-label="本次原要求"]');
+  goal.open = true;
+  goal.dispatchEvent(new dom.window.Event("toggle"));
+  await Promise.resolve();
+  assert.match(goal.textContent, /Original human requirement/);
+  assert.deepEqual(reads, ["request"]);
+});

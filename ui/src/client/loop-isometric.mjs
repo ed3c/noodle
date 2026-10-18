@@ -89,7 +89,7 @@ function isNativeTool(graph, node) {
 export function projectConsole(
   graph,
   scope,
-  { runId = null, sources = false, events = false, repositoryIds = null } = {},
+  { runId = null, sources = false, events = false, selection = null, repositoryIds = null } = {},
 ) {
   let nodes = scope.nodes.filter(
     (n) =>
@@ -109,9 +109,34 @@ export function projectConsole(
   const endpoints = new Set(
     eligible.filter((e) => e.kind === "handoff").flatMap((e) => [e.from_node_id, e.to_node_id]),
   );
+  const selectedIds = new Set(
+    selection?.kind === "finding"
+      ? graph.findings.find((f) => f.id === selection.id)?.node_ids || []
+      : [],
+  );
+  if (selection?.kind === "node") {
+    selectedIds.add(selection.id);
+  }
+  if (selection?.kind === "edge") {
+    const edge = eligible.find((e) => e.id === selection.id);
+    if (edge) {
+      selectedIds.add(edge.from_node_id);
+      selectedIds.add(edge.to_node_id);
+    }
+  }
+  const revealed = new Set(selectedIds);
+  for (const edge of eligible) {
+    if (
+      edge.kind === "handoff" &&
+      (selectedIds.has(edge.from_node_id) || selectedIds.has(edge.to_node_id))
+    ) {
+      revealed.add(edge.from_node_id);
+      revealed.add(edge.to_node_id);
+    }
+  }
   const visible = nodes.filter(
     (n) =>
-      (events || !isNativeTool(graph, n)) &&
+      (events || revealed.has(n.id) || !isNativeTool(graph, n)) &&
       (sources ||
         endpoints.has(n.id) ||
         !["available_reference", "selected"].includes(n.status.execution)),
@@ -298,6 +323,7 @@ export function mountIsometric(
   run.value = state.run || "";
   run.addEventListener("change", () => {
     state.run = run.value || null;
+    state.events = false;
     state.selection = null;
     render();
     onRun?.(state.run);
@@ -512,27 +538,7 @@ export function mountIsometric(
   function size() {
     drawing.style.width = `${state.zoom * 100}%`;
   }
-  function revealToolSelection(kind, id) {
-    let ids = [id];
-    if (kind === "finding") {
-      ids = graph.findings.find((f) => f.id === id)?.node_ids || [];
-    } else if (kind === "edge") {
-      const edge = graph.edges.find((e) => e.id === id);
-      ids = edge ? [edge.from_node_id, edge.to_node_id] : [];
-    }
-    if (
-      ids.some((nodeId) =>
-        isNativeTool(
-          graph,
-          graph.nodes.find((n) => n.id === nodeId),
-        ),
-      )
-    ) {
-      state.events = true;
-    }
-  }
   function selectItem(kind, id) {
-    revealToolSelection(kind, id);
     if (
       (kind === "object" || kind === "principle") &&
       state.anchor !== (kind === "principle" ? id.split("/")[0] : id)
@@ -738,6 +744,7 @@ export function mountIsometric(
       runId: state.run,
       sources: state.sources,
       events: state.events,
+      selection: state.selection,
       repositoryIds: filtered
         ? filterRepositories(graph.repositories, state.filter).map((r) => r.id)
         : null,
@@ -1337,17 +1344,35 @@ export function mountIsometric(
       const requestArtifact = graph.artifacts.find(
         (a) => requestNode?.output_artifact_ids.includes(a.id) && a.role === "loop_request",
       );
-      if (requestArtifact?.content) {
+      if (requestArtifact) {
         const original = html("details", null, { "aria-label": "本次原要求" });
-        try {
-          const request = JSON.parse(requestArtifact.content);
-          original.append(
-            html("summary", "本次原要求"),
-            html("p", request.goal || "原來源未提供 Goal"),
-          );
-        } catch {
-          original.append(html("summary", "本次原要求"), html("p", "原要求無法解析；請讀回來源。"));
-        }
+        const content = html("p", "按需讀取本次 Run 綁定的原要求。");
+        original.append(html("summary", "本次原要求"), content);
+        let loading = false;
+        original.addEventListener("toggle", async () => {
+          if (!original.open || loading) {
+            return;
+          }
+          loading = true;
+          state.goalContents ??= {};
+          try {
+            const raw =
+              requestArtifact.content ||
+              state.goalContents[requestArtifact.id] ||
+              (readArtifact && (await readArtifact(requestArtifact.id)));
+            if (!raw) {
+              throw new Error("原來源內容未提供");
+            }
+            state.goalContents[requestArtifact.id] = raw;
+            const request = JSON.parse(raw);
+            content.textContent =
+              typeof request.goal === "string" ? request.goal : "原來源未提供 Goal";
+          } catch (error) {
+            content.textContent = `原要求讀回未確認：${error.message}。保留未知。`;
+          } finally {
+            loading = false;
+          }
+        });
         runHeader.append(original);
       }
     }
@@ -1666,6 +1691,9 @@ export function mountIsometric(
       expandRun(id);
     },
     syncRun(id) {
+      if (state.run !== id) {
+        state.events = false;
+      }
       state.run = id;
       run.value = id || "";
       render();
@@ -1689,7 +1717,6 @@ export function mountIsometric(
             filter: { ...state.filter },
           };
         }
-        revealToolSelection(value.kind, value.id);
         state.selection = value;
         render();
       } else if (!value && state.selection) {
