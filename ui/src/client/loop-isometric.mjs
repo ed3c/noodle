@@ -7,6 +7,7 @@ import {
   worktreeKey,
 } from "./loop-repository.mjs";
 import { mechanismFigure } from "./loop-anatomy.mjs";
+import { contractFacets, expectedScene, principleFigure } from "./loop-contract.mjs";
 import { mountComparison } from "./loop-comparison.mjs";
 
 let viewSequence = 0;
@@ -65,6 +66,14 @@ export function evidenceState(edge, graph) {
     return edge.current_validity === "current" ? "current" : "historical";
   }
   return "unknown";
+}
+
+/** Evidence of transport is separate from failure, freshness and semantic acceptance. */
+export function observedFlow(edge, graph) {
+  if (!["observed", "failed"].includes(edge.status)) {
+    return false;
+  }
+  return ["current", "historical"].includes(evidenceState({ ...edge, status: "observed" }, graph));
 }
 
 /** Geometry is a view of original IDs. It never adds an execution or a relationship. */
@@ -415,30 +424,40 @@ export function mountIsometric(
   });
   const journeySlot = html("div", null, { class: "li-journey-slot" });
   readback.append(journeySlot, inspector);
-  viewport.prepend(html("h3", "左 / 原執行證據", { class: "lc-actual-title" }));
+  viewport.prepend(
+    html("h3", "同源全景 / 原執行證據 ＋ 契約預期 ＋ 可推翻假說", { class: "lc-actual-title" }),
+  );
   const expectedPanel = html("aside", null, { class: "lc-panel", "aria-label": "契約預期與假說" });
   const comparisonReview = html("section", null, {
     class: "lc-review",
     "aria-label": "預期實際比較",
   });
   const reviewArea = html("section", null, { class: "lc-review-area" });
-  reviewArea.append(readback, comparisonReview);
-  body.append(viewport, expectedPanel);
+  const sourceDetails = html("details", null, { class: "li-expectation-sources" });
+  sourceDetails.append(html("summary", "契約與假說來源索引"), expectedPanel);
+  readback.append(comparisonReview, sourceDetails);
+  reviewArea.append(readback);
+  body.append(viewport, reviewArea);
   state.comparison ??= {};
   const readout = html("p", null, { class: "li-readout", "aria-live": "polite" });
   const legend = html(
     "p",
-    "青綠亮起：本次已觀察參與（不等於成功）　金框：目前選取　✕：原失敗　?：缺證據。連線是原資料關係，不是機械管線。",
+    "綠線：有原交接證據（不等於驗收通過） · 黃實線：契約預期 · 黃虛線：可推翻假說 · 白框：選取 · ✕：已確認斷點 · ?：缺證據。舊證據另標歷史。",
     { class: "li-legend" },
   );
-  root.append(heading, navigation, toolbar, body, readout, legend, reviewArea);
+  root.append(heading, navigation, toolbar, body, readout, legend);
+  let expectedModel = null;
+  let expectedKey = "";
 
   function size() {
     drawing.style.width = `${state.zoom * 100}%`;
   }
   function selectItem(kind, id) {
-    if (kind === "object" && state.anchor !== id) {
-      state.anchor = id;
+    if (
+      (kind === "object" || kind === "principle") &&
+      state.anchor !== (kind === "principle" ? id.split("/")[0] : id)
+    ) {
+      state.anchor = kind === "principle" ? id.split("/")[0] : id;
       state.onlyMachine = false;
       state.returnView = {
         run: state.run,
@@ -450,11 +469,50 @@ export function mountIsometric(
       };
     }
     state.selection = { kind, id };
+    if (kind === "principle" && readArtifact) {
+      const owner = graph.objects.find((o) => o.id === id.split("/")[0]);
+      state.facetContents ??= {};
+      state.facetErrors ??= {};
+      const refs = graph.artifacts.filter(
+        (a) =>
+          owner?.source_artifact_ids?.includes(a.id) &&
+          a.role === "mechanism_contract" &&
+          !a.content &&
+          !a.public_content &&
+          !Object.hasOwn(state.facetContents, a.id) &&
+          !state.facetErrors[a.id],
+      );
+      if (refs.length > 0) {
+        Promise.all(
+          refs.map(async (a) => {
+            try {
+              state.facetContents[a.id] = await readArtifact(a.id);
+            } catch (error) {
+              state.facetErrors[a.id] = String(error.message || error);
+            }
+          }),
+        )
+          .then(() => {
+            if (root.isConnected && state.selection?.kind === kind && state.selection?.id === id) {
+              render();
+            }
+            return null;
+          })
+          .catch((error) => {
+            inspector.append(html("p", `分類讀回失敗：${error.message}`));
+          });
+      }
+    }
     render();
-    onInspect?.(state.selection);
+    readback.scrollTop = inspector.offsetTop - readback.offsetTop;
+    if (!["principle", "expected", "expected-route"].includes(kind)) {
+      onInspect?.(state.selection);
+    }
   }
   function expandRun(id) {
     state.run = id;
+    expectedModel = null;
+    expectedKey = "";
     run.value = id || "";
     state.selection = state.anchor ? { kind: "object", id: state.anchor } : null;
     render();
@@ -472,6 +530,14 @@ export function mountIsometric(
     render();
     onRun?.(state.run);
     onInspect?.(state.selection);
+  }
+  function facetGraph() {
+    return {
+      ...graph,
+      artifacts: graph.artifacts.map((a) =>
+        state.facetContents?.[a.id] ? { ...a, content: state.facetContents[a.id] } : a,
+      ),
+    };
   }
   function selected(kind, id) {
     return state.selection?.kind === kind && state.selection.id === id;
@@ -638,7 +704,7 @@ export function mountIsometric(
     const machineCard = ([o, x, y, w, h]) => {
       const g = target("object", o.id, `物件 · ${o.label}`);
       g.append(svg("rect", null, { x, y, width: w, height: h, rx: 8, class: "li-card-outline" }));
-      art([g, o.mechanism?.template, x + 10, y + 18, w - 20, h - 43]);
+      art([g, o.mechanism?.template, x + 10, y + 18, w - 20, h - 103]);
       label([g, o.label, x + 12, y + 18, "li-machine-title"]);
       const own = sceneModel.nodes.filter((n) => n.object_id === o.id);
       const observed = own.filter((n) => observedParticipation(n, state.run)).length;
@@ -651,18 +717,50 @@ export function mountIsometric(
       ]);
       objectPoints.set(o.id, [x + w / 2, y + h]);
       drawing.append(g);
+      const facets = contractFacets(facetGraph(), o.id, state.run);
+      for (const [i, facet] of facets.entries()) {
+        const width = (w - 12) / 5;
+        const fx = x + 6 + i * width,
+          fy = y + h - 83;
+        const port = target("principle", `${o.id}/${facet.id}`, `${o.label} / ${facet.name}`);
+        port.classList.add("li-principle");
+        port.dataset.principleStatus = facet.status;
+        port.append(
+          svg("rect", null, {
+            x: fx,
+            y: fy,
+            width: width - 3,
+            height: 60,
+            rx: 4,
+            class: "li-card-outline",
+          }),
+        );
+        const symbol = svg("svg", null, { x: fx, y: fy, width: width - 3, height: 43 });
+        symbol.innerHTML = principleFigure(facet.shape);
+        port.append(symbol);
+        label([
+          port,
+          { method: "方法", case: "案例", loop: "迴圈", assertion: "斷言", repair: "修正" }[
+            facet.id
+          ],
+          fx + 4,
+          fy + 54,
+          "li-principle-name",
+        ]);
+        drawing.append(port);
+      }
     };
-    frame([10, 10, 1080, 180, "整體機械 / 原 outer 與 inner Owner", "li-assemblies"]);
+    frame([10, 10, 1080, 240, "整體機械 / 原 outer 與 inner Owner", "li-assemblies"]);
     for (const [i, o] of loops.entries()) {
-      machineCard([o, 25 + i * 530, 48, 515, 132]);
+      machineCard([o, 25 + i * 530, 48, 515, 192]);
     }
-    const sharedRows = Math.ceil(shared.length / 5);
-    const sharedHeight = sharedRows * 130 + 40;
-    frame([10, 202, 1080, sharedHeight, "共用接口帶 / 唯一 Manager · 契約存在不代表已執行"]);
+    const sharedRows = Math.ceil(shared.length / 3);
+    const sharedHeight = sharedRows * 195 + 40;
+    frame([10, 252, 1080, sharedHeight, "共用接口帶 / 唯一 Manager · 契約存在不代表已執行"]);
     for (const [i, o] of shared.entries()) {
-      machineCard([o, 25 + (i % 5) * 212, 240 + Math.floor(i / 5) * 130, 202, 122]);
+      machineCard([o, 25 + (i % 3) * 355, 290 + Math.floor(i / 3) * 195, 345, 185]);
     }
-    let cursor = 214 + sharedHeight;
+    let cursor = 264 + sharedHeight;
     for (const repo of repoGroups) {
       const regionY = cursor;
       const members = sceneModel.nodes.filter((n) => groupFor.get(n.repository_id) === repo.id);
@@ -737,6 +835,82 @@ export function mountIsometric(
       }
       cursor += regionHeight + 16;
     }
+    const overlay = expectedScene(graph, expectedModel);
+    const expectedPoints = new Map();
+    const unmatched = [];
+    for (const step of overlay.steps) {
+      const matches = step.matches.filter((id) => placements.has(id));
+      if (step.matches.length === 1 && matches.length === 1) {
+        const point = placements.get(matches[0]);
+        expectedPoints.set(step.id, [point[0] + 100, point[1] + 18]);
+      } else if (overlay.routes.some((r) => r.from === step.id || r.to === step.id)) {
+        unmatched.push(step);
+      }
+    }
+    if (unmatched.length > 0) {
+      frame([
+        10,
+        cursor,
+        1080,
+        Math.ceil(unmatched.length / 4) * 92 + 48,
+        "契約預期位置 / 未唯一對應原節點，不代表已執行",
+        "li-expected-region",
+      ]);
+      for (const [i, step] of unmatched.entries()) {
+        const x = 26 + (i % 4) * 265,
+          y = cursor + 45 + Math.floor(i / 4) * 92;
+        const card = target("expected", step.id, `預期步驟 · ${step.name}`);
+        card.append(
+          svg("rect", null, { x, y, width: 248, height: 78, rx: 7, class: "li-expected-card" }),
+        );
+        label([card, step.name.slice(0, 30), x + 8, y + 24, "li-small"]);
+        label([
+          card,
+          `${step.owner?.label || "原歸屬未知"} · ${step.matches.length} 對應`,
+          x + 8,
+          y + 48,
+          "li-small",
+        ]);
+        drawing.append(card);
+        expectedPoints.set(step.id, [x + 124, y + 72]);
+      }
+      cursor += Math.ceil(unmatched.length / 4) * 92 + 64;
+    }
+    const lanes = new Map();
+    for (const route of overlay.routes) {
+      const from = expectedPoints.get(route.from),
+        to = expectedPoints.get(route.to);
+      if (!from || !to) {
+        continue;
+      }
+      const pair = JSON.stringify([route.from, route.to]);
+      const lane = lanes.get(pair) || 0;
+      lanes.set(pair, lane + 1);
+      const a = [from[0], from[1] - lane * 22],
+        b = [to[0], to[1] - lane * 22];
+      const wire = target(
+        "expected-route",
+        `${route.layer}/${route.id}`,
+        `${route.layer === "contract" ? "契約預期" : "可推翻假說"} · ${route.transformation}`,
+      );
+      wire.classList.add("li-expected-wire");
+      wire.classList.toggle("li-hypothesis-wire", route.layer === "hypothesis");
+      wire.dataset.comparison = route.result?.status || "unverified";
+      const d = `M${a} C${a[0] + 28} ${a[1] - 24 - lane * 22},${b[0] + 28} ${b[1] - 24 - lane * 22},${b}`;
+      wire.append(
+        svg("path", null, { d, class: "li-route-hit" }),
+        svg("path", null, { d, class: "li-route-line" }),
+      );
+      wire.append(
+        svg("path", null, {
+          d: `M${b[0] - 5} ${b[1] - 7} L${b} L${b[0] + 5} ${b[1] - 7}`,
+          class: "li-arrow",
+        }),
+      );
+      const gapLabel = { deviated: "✕", unknown: "?" };
+      label([wire, gapLabel[route.result?.status] || "", b[0] + 6, b[1], "li-gap"]);
+      drawing.append(wire);
+    }
     drawing.setAttribute("viewBox", `0 0 1100 ${Math.max(760, cursor + 20)}`);
     if (state.run && state.selection) {
       const selectedNodes = sceneModel.nodes.filter(
@@ -788,8 +962,10 @@ export function mountIsometric(
       const targetEdge = target("edge", edge.id, `資料流 · ${edge.label}`);
       targetEdge.setAttribute(
         "class",
-        `${targetEdge.getAttribute("class")} li-route li-${evidenceState(edge, graph)}`,
+        `${targetEdge.getAttribute("class")} li-route li-${evidenceState(edge, graph)} ${observedFlow(edge, graph) ? "li-observed-flow" : ""}`,
       );
+      const historical = observedFlow(edge, graph) && edge.current_validity !== "current";
+      targetEdge.classList.toggle("li-historical", historical);
       targetEdge.append(
         svg("path", null, { d, class: "li-route-hit" }),
         svg("path", null, { d, class: "li-route-casing" }),
@@ -804,6 +980,17 @@ export function mountIsometric(
           class: "li-arrow",
         }),
       );
+      if (edge.status === "failed" || historical) {
+        label([
+          targetEdge,
+          [edge.status === "failed" ? "✕ 失敗" : "", historical ? "歷史" : ""]
+            .filter(Boolean)
+            .join(" · "),
+          tip[0] + 8,
+          tip[1] + 15,
+          edge.status === "failed" ? "li-edge-failure" : "li-small",
+        ]);
+      }
       if (selected("edge", edge.id)) {
         const types = (ids) =>
           [
@@ -863,6 +1050,23 @@ export function mountIsometric(
         onSelect: (pick) => selectItem(pick.kind, pick.id),
         onOriginal: openOriginal,
         readArtifact,
+        unified: true,
+        onModel(model) {
+          const key = JSON.stringify(model);
+          if (key !== expectedKey) {
+            const needsDrawing =
+              model.status === "available" || expectedModel?.status === "available";
+            expectedKey = key;
+            expectedModel = model;
+            if (needsDrawing) {
+              queueMicrotask(() => {
+                if (root.isConnected) {
+                  render();
+                }
+              });
+            }
+          }
+        },
       },
     );
   }
@@ -1016,6 +1220,74 @@ export function mountIsometric(
     }
     inspector.append(runHeader);
     machineInspector();
+    if (pick?.kind === "principle") {
+      const [objectId, principleId] = pick.id.split("/");
+      const facet = contractFacets(facetGraph(), objectId, state.run).find(
+        (f) => f.id === principleId,
+      );
+      if (facet) {
+        inspector.append(
+          html("h4", facet.name),
+          html("p", facet.rule?.meaning || "此快照尚無版本化分類來源。"),
+          html(
+            "p",
+            facet.nodes.length > 0
+              ? "已有相關來源引用；不證明此原則已執行或語義正確。"
+              : "適用性／本次觀察未知；缺紀錄不等於不適用或未執行。",
+          ),
+        );
+        for (const reference of facet.sources) {
+          inspector.append(
+            button(`原分類來源 · ${reference.role}`, () =>
+              openOriginal({ kind: "artifact", id: reference.id }),
+            ),
+          );
+        }
+        for (const node of facet.nodes) {
+          inspector.append(
+            button(`${node.label} · ${node.status.execution}`, () => selectItem("node", node.id)),
+          );
+        }
+      }
+    }
+    if (["expected", "expected-route"].includes(pick?.kind)) {
+      const overlay = expectedScene(graph, expectedModel);
+      const record =
+        pick.kind === "expected"
+          ? overlay.steps.find((s) => s.id === pick.id)
+          : overlay.routes.find((r) => `${r.layer}/${r.id}` === pick.id);
+      if (record) {
+        inspector.append(
+          html("h4", record.name || record.transformation),
+          html("p", record.condition || "原假說，尚未證實"),
+          html(
+            "pre",
+            JSON.stringify(
+              record.result || {
+                matches: record.matches,
+                claim: record.claim,
+                falsifier: record.falsifier,
+              },
+              null,
+              2,
+            ),
+          ),
+        );
+        const ids = record.matches || record.result?.edge_ids || [];
+        for (const id of ids) {
+          inspector.append(
+            button("定位原實際證據", () =>
+              selectItem(pick.kind === "expected" ? "node" : "edge", id),
+            ),
+          );
+        }
+        inspector.append(
+          button("讀取原預期與 Prompt", () =>
+            openOriginal({ kind: "artifact", id: expectedModel.artifact.id }),
+          ),
+        );
+      }
+    }
     if (value && state.run && ["object", "node", "edge", "finding"].includes(pick.kind)) {
       const reviewStatus = html("p", "雲端／未支援交接：只讀取原資料。");
       if (onReviewSelection) {
@@ -1146,7 +1418,7 @@ export function mountIsometric(
         }
         inspector.append(button("開啟原節點與證據", () => openOriginal(pick)));
       }
-    } else {
+    } else if (!["principle", "expected", "expected-route"].includes(pick?.kind)) {
       inspector.append(
         html("h4", "選一個設備或資料流"),
         html(

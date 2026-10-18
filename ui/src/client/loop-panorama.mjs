@@ -1016,7 +1016,7 @@ export function mountPanorama(
     for (const row of unlocated) {
       section.append(renderRow(row));
     }
-    journey.append(section);
+    architecture.append(section);
   }
   architecture.append(
     regions,

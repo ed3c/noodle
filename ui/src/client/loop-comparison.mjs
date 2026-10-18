@@ -119,7 +119,12 @@ export function comparisonModel(graph, runId) {
         !Object.hasOwn(names, r.status) ||
         !Array.isArray(r.edge_ids),
     ) ||
-    Object.values(comparison.step_matches).some((ids) => !Array.isArray(ids))
+    Object.entries(comparison.step_matches).some(
+      ([step, ids]) =>
+        !stepIds.has(step) ||
+        !Array.isArray(ids) ||
+        ids.some((id) => !graph.nodes?.some((n) => n.id === id && n.run_id === runId)),
+    )
   ) {
     return invalid;
   }
@@ -157,11 +162,11 @@ export async function loadComparison(graph, runId, readArtifact) {
 export function mountComparison(
   { panel, review },
   { graph, runId, pick, memory },
-  { onSelect, onOriginal, readArtifact },
+  { onSelect, onOriginal, readArtifact, onModel, unified = false },
 ) {
   panel.replaceChildren();
   review.replaceChildren();
-  panel.append(el("h3", "右 / 契約預期與可推翻假說"));
+  panel.append(el("h3", "契約預期與可推翻假說 / 原來源讀回"));
   review.append(el("h3", "Workspace / 預期 ↔ 實際交接審查"));
   const refs = new Set(
     graph.nodes.filter((n) => n.run_id === runId).flatMap((n) => n.evidence_artifact_ids),
@@ -187,6 +192,7 @@ export function mountComparison(
     ),
   };
   const model = comparisonModel(hydrated, runId);
+  onModel?.(model);
   if (model.status !== "available") {
     panel.append(el("p", runId ? model.reason : "選擇一個 Run，與同一版本的預期對照。"));
     review.append(el("p", "缺少原投影時，實際 DAG 仍可讀取；未知不視為偏離。"));
@@ -345,7 +351,9 @@ export function mountComparison(
     });
     drawing.append(card);
   }
-  panel.append(drawing);
+  if (!unified) {
+    panel.append(drawing);
+  }
   const index = el("details", null);
   index.append(el("summary", `具名功能元件索引 · ${expected.components.length}`));
   for (const c of expected.components) {
@@ -498,6 +506,8 @@ export function mountComparison(
         onSelect,
         onOriginal,
         readArtifact,
+        onModel,
+        unified,
       },
     );
   }

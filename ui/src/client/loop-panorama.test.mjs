@@ -373,3 +373,110 @@ test("explicit local review selection keeps the chosen Run; cloud has no submiss
     false,
   );
 });
+
+test("principle selection stays in the Run and does not submit or claim missing execution", (t) => {
+  const { root, dom } = navigationFixture(t, {
+    onReviewSelection() {
+      assert.fail("selection is read-only");
+    },
+  });
+  const run = root.querySelector('[aria-label="立體視圖執行範圍"]');
+  run.value = "a";
+  run.dispatchEvent(new dom.window.Event("change"));
+  root
+    .querySelector('[data-iso-principle="outer/method"]')
+    .dispatchEvent(new dom.window.Event("click"));
+  assert.equal(run.value, "a");
+  assert.ok(root.querySelector('[data-iso-principle="outer/method"].is-selected'));
+  assert.match(root.querySelector(".li-inspector").textContent, /缺紀錄不等於不適用或未執行/);
+  assert.equal(root.querySelectorAll("[data-iso-principle]").length, 15);
+});
+
+test("one scene overlays bound expected routes without duplicating owner objects", async (t) => {
+  const { root, dom, graph } = navigationFixture(t);
+  const expected = {
+    version: 1,
+    request_sha256: "a",
+    origin: "pre_execution",
+    mode: "inner-only",
+    goal: "Original goal",
+    components: [{ id: "c", owner: "soodles.outer" }],
+    steps: [
+      { id: "s", component: "c", name: "Source" },
+      { id: "t", component: "c", name: "Target" },
+    ],
+    routes: [{ id: "r", from: "s", to: "t", applicable: true, transformation: "intent → tool" }],
+    hypotheses: [{ id: "h", from: "s", to: "t", claim: "falsifiable" }],
+    prompt_delta: "Original delta",
+  };
+  const comparison = {
+    version: 1,
+    run_id: "a",
+    expectation_artifact_id: "expect",
+    source_status: "current",
+    rows: [{ route_id: "r", status: "unknown", edge_ids: [] }],
+    step_matches: { s: ["a"], t: [] },
+    semantic_review: { node_ids: [], reason: "unknown" },
+  };
+  graph.artifacts.push(
+    {
+      id: "expect",
+      role: "loop_expectation",
+      status: "available",
+      content: JSON.stringify(expected),
+    },
+    {
+      id: "compare",
+      role: "loop_comparison",
+      status: "available",
+      content: JSON.stringify(comparison),
+    },
+  );
+  const run = root.querySelector('[aria-label="立體視圖執行範圍"]');
+  run.value = "a";
+  run.dispatchEvent(new dom.window.Event("change"));
+  await new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+  const scene = root.querySelector('[aria-label="內外迴圈立體資料流"]');
+  assert.equal(scene.querySelectorAll('[data-iso-object="outer"]').length, 1);
+  assert.ok(scene.querySelector('[data-iso-expected-route="contract/r"]'));
+  assert.ok(scene.querySelector('[data-iso-expected-route="hypothesis/h"].li-hypothesis-wire'));
+  assert.notEqual(
+    scene.querySelector('[data-iso-expected-route="contract/r"] .li-route-hit').getAttribute("d"),
+    scene.querySelector('[data-iso-expected-route="hypothesis/h"] .li-route-hit').getAttribute("d"),
+  );
+  assert.equal(root.querySelectorAll('[aria-label="預期機構資料流 DAG"]').length, 0);
+  scene
+    .querySelector('[data-iso-expected-route="contract/r"]')
+    .dispatchEvent(new dom.window.Event("click"));
+  assert.match(root.querySelector(".li-inspector").textContent, /intent → tool/);
+  const hidden = graph.nodes.find((n) => n.id === "unrelated");
+  hidden.run_id = "a";
+  hidden.kind = "pclass";
+  hidden.status.execution = "available_reference";
+  comparison.step_matches.s = ["a", "unrelated"];
+  graph.artifacts.find((a) => a.id === "compare").content = JSON.stringify(comparison);
+  run.value = "b";
+  run.dispatchEvent(new dom.window.Event("change"));
+  run.value = "a";
+  run.dispatchEvent(new dom.window.Event("change"));
+  await new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+  assert.ok(root.querySelector('[data-iso-expected="s"]'), "hidden match cannot imply uniqueness");
+});
+
+test("failed historical transport keeps green evidence, historical marker and separate failure", (t) => {
+  const { root, dom, graph } = navigationFixture(t);
+  graph.edges[0].status = "failed";
+  graph.edges[0].current_validity = "stale";
+  const run = root.querySelector('[aria-label="立體視圖執行範圍"]');
+  run.value = "b";
+  run.dispatchEvent(new dom.window.Event("change"));
+  const edge = root.querySelector('[data-iso-edge="ab"]');
+  assert.ok(edge.classList.contains("li-observed-flow"));
+  assert.ok(edge.classList.contains("li-historical"));
+  assert.match(edge.textContent, /✕.*失敗/);
+  assert.match(edge.textContent, /歷史/);
+});

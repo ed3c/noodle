@@ -1104,3 +1104,88 @@
     max-height: 650px;
   }
 }
+
+/* One scene; evidence, expectation and result remain independent encodings. */
+.li-console .li-body {
+  grid-template-columns: minmax(0, 1fr) minmax(330px, 34%);
+  align-items: start;
+}
+.li-console .lc-review-area {
+  display: block;
+  min-width: 0;
+}
+.li-console .lc-review-area .li-readback {
+  height: auto;
+  max-height: 880px;
+  overflow: auto;
+  display: block;
+}
+.li-console .li-readback .li-inspector {
+  height: auto;
+  max-height: none;
+  overflow: visible;
+}
+.li-console .lc-review,
+.li-console .lc-panel {
+  max-height: none;
+  overflow: visible;
+}
+.li-expectation-sources {
+  color: #253a42;
+  padding: 12px;
+}
+.li-principle-name {
+  font-size: 12px;
+  fill: #e0eceb;
+}
+.li-principle.is-selected .li-card-outline,
+.li-target.is-selected > .li-card-outline {
+  stroke: #fff;
+  stroke-width: 3;
+}
+.li-principle:hover .li-card-outline,
+.li-principle:focus .li-card-outline {
+  stroke: #fff;
+}
+.li-expected-card {
+  fill: #323c3b;
+  stroke: #e5bd54;
+  stroke-dasharray: 4 3;
+}
+.li-expected-wire {
+  color: #f0c85a;
+}
+.li-expected-wire .li-route-line {
+  stroke-width: 2;
+  fill: none;
+}
+.li-hypothesis-wire .li-route-line {
+  stroke-dasharray: 6 4;
+}
+.li-expected-wire.is-selected .li-route-line {
+  stroke-width: 4;
+  filter: drop-shadow(0 0 3px #fff);
+}
+.li-route.li-observed-flow {
+  color: #57d99a;
+}
+.li-route.li-observed-flow .li-route-line {
+  stroke-dasharray: none;
+}
+.li-route.li-historical .li-route-line {
+  stroke-dasharray: 2 3;
+}
+.li-edge-failure {
+  fill: #ff9292;
+  font-size: 13px;
+}
+.li-console .li-readback pre {
+  color: #253a42;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 850px) {
+  .li-console .li-body {
+    grid-template-columns: 1fr;
+  }
+}
