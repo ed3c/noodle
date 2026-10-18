@@ -941,9 +941,13 @@ export function mountIsometric(
       label([card, lane.title, x + 10, y + 25, "li-machine-title"]);
       label([
         card,
-        lane.source_status === "source_referenced"
-          ? `${lane.artifact_ids.length} 原來源引用`
-          : "UNKNOWN · 來源不足",
+        lane.id === "judgment"
+          ? (lane.decision_status === "SESSION_SUBMISSION_UNVERIFIED"
+            ? "Session 判斷已提交 · 語義未驗證"
+            : "Session 判斷 UNKNOWN · 僅來源/讀回")
+          : lane.source_status === "source_referenced"
+            ? `${lane.artifact_ids.length} 原來源引用`
+            : "UNKNOWN · 來源不足",
         x + 10,
         y + 54,
         "li-small",
@@ -1370,6 +1374,10 @@ export function mountIsometric(
             : "來源引用與原生 Consumer 的實際交接分別驗收。SOURCE 不表示 Agent 載入、執行或語義正確。",
         ),
       );
+      if (lane?.id === "judgment") {
+        panel.append(html("p", `決策證據：${lane.decision_status}。選定 intent_selection、原 Owner Readback 和已提交的 harness_review 互不代替；註冊/來源不證明 Agent 遵循。`));
+        panel.append(html("p", `輸入來源 ${lane.original_inputs.length} · 原讀回 ${lane.owner_readbacks.length} · Session Assessment ${lane.submitted_assessments.length}`));
+      }
       for (const id of lane?.artifact_ids || []) {
         const a = graph.artifacts.find((x) => x.id === id);
         panel.append(

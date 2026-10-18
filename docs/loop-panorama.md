@@ -108,3 +108,19 @@ owner-bound complete Requirement/Acceptance Ledger is still unavailable in
 v2; an observed set of green handoffs still leaves Whole Goal UNKNOWN.
 No new Scheduler, CLI route, Native P-class occurrence or executable tool
 call was added. Current cloud vendor parity and deployment remain paused.
+\n## ViewEnv Session Judgment provenance correction (Q32–Q33)
+
+The compact Session Judgment source rail distinguishes
+`intent_selection` (a proposed method/decision *input*),
+`loop_owner_readback` or `schema_feedback` (original *producer readbacks*)
+from `harness_review` (one source-bound Session submission). Merely selecting
+or returning a Schema field never establishes that a human/Agent reasoned,
+followed the P-class or executed a CLI tool. A valid `harness_review` is
+`SESSION_SUBMISSION_UNVERIFIED`, not PASS. Missing/stale original review
+stays UNKNOWN; it is not an unobserved native step or proven wiring defect.
+
+The original graph owner and existing Soodles named `loop_review_inspect`
+and `loop_review_feedback` tools own the review/refusal and continuation.
+This UI only projects and selects, without new Graph Nodes or an execution
+command. Native Agent consumption and actual provider effect require
+separate original readback; cloud promotion remains paused.

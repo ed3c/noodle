@@ -7,7 +7,7 @@ const LANES = [
   {
     id: "judgment",
     title: "Session Judgment",
-    roles: ["intent_selection", "loop_owner_readback", "schema_feedback"],
+    roles: ["intent_selection", "loop_owner_readback", "schema_feedback", "harness_review"],
   },
   {
     id: "prompt",
@@ -48,6 +48,18 @@ export function projectIntentRail(graph, runId) {
         artifacts.every((a) => ["available", "not_public"].includes(a.status))
           ? "source_referenced"
           : "unknown",
+      // Role and original Run-bound artifact identity are facts; neither
+      // selected intent nor a successful Schema readback is a Session verdict.
+      original_inputs: artifacts.filter((a) => a.role === "intent_selection").map((a) => a.id),
+      owner_readbacks: artifacts.filter((a) =>
+        ["loop_owner_readback", "schema_feedback"].includes(a.role)).map((a) => a.id),
+      submitted_assessments: artifacts.filter((a) => a.role === "harness_review")
+        .map((a) => a.id),
+      decision_status: lane.id === "judgment"
+        ? (artifacts.some((a) => a.role === "harness_review" &&
+            ["available", "not_public"].includes(a.status))
+          ? "SESSION_SUBMISSION_UNVERIFIED" : "UNKNOWN")
+        : "NOT_APPLICABLE",
       execution_status: "NOT_ESTABLISHED_BY_SOURCE_RAIL",
     };
   });

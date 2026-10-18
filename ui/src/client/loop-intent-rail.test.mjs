@@ -70,6 +70,29 @@ test("source rail binds exact original Run carriers and never creates an invocat
   );
   assert.equal(JSON.stringify(g), original);
 });
+test("Session decision is NOT inferred from intent selection or owner readbacks", () => {
+  const graph = fixture();
+  graph.nodes[1].input_artifact_ids.push("readback");
+  let lane = projectIntentRail(graph, "a").find((item) => item.id === "judgment");
+  assert.equal(lane.decision_status, "UNKNOWN");
+  assert.deepEqual(lane.original_inputs, ["selection"]);
+  assert.deepEqual(lane.owner_readbacks, ["readback"]);
+  assert.deepEqual(lane.submitted_assessments, []);
+  graph.artifacts.push({
+    id: "review", role: "harness_review", status: "available", content: "{}"
+  });
+  graph.nodes[1].output_artifact_ids.push("review");
+  lane = projectIntentRail(graph, "a").find((item) => item.id === "judgment");
+  assert.equal(lane.decision_status, "SESSION_SUBMISSION_UNVERIFIED");
+  assert.deepEqual(lane.submitted_assessments, ["review"]);
+  assert.equal(lane.execution_status, "NOT_ESTABLISHED_BY_SOURCE_RAIL");
+  graph.artifacts.at(-1).status = "stale";
+  lane = projectIntentRail(graph, "a").find((item) => item.id === "judgment");
+  assert.equal(lane.decision_status, "UNKNOWN");
+  assert.equal(projectIntentRail(graph, "b").find((item) =>
+    item.id === "judgment").decision_status, "UNKNOWN");
+});
+
 test("private source remains represented but does not imply content permission", () => {
   const g = fixture();
   g.artifacts[0].status = "not_public";
