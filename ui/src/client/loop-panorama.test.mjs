@@ -480,3 +480,18 @@ test("failed historical transport keeps green evidence, historical marker and se
   assert.match(edge.textContent, /✕.*失敗/);
   assert.match(edge.textContent, /歷史/);
 });
+
+test("all machines and facets remain selectable on one floor when a Run expands", (t) => {
+  const { root, dom, graph } = navigationFixture(t);
+  const drawing = root.querySelector('[aria-label="內外迴圈立體資料流"]');
+  assert.equal(drawing.querySelectorAll(".li-workspace-floor").length, 1);
+  assert.equal(drawing.querySelectorAll(".li-region").length, 0);
+  assert.equal(drawing.querySelectorAll(".li-station").length, graph.objects.length);
+  assert.equal(drawing.querySelectorAll(".li-principle").length, graph.objects.length * 5);
+  const run = root.querySelector('[aria-label="立體視圖執行範圍"]');
+  run.value = "b";
+  run.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  assert.equal(drawing.querySelectorAll(".li-station").length, graph.objects.length);
+  assert.equal(drawing.querySelectorAll(".li-region").length, 0);
+  assert.ok(drawing.querySelector('[aria-label="cli · b"]'));
+});

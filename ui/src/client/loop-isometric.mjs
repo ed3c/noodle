@@ -43,6 +43,37 @@ function button(text, fn) {
 }
 
 /** Only original handoffs with complete bindings can be called currently evidenced. */
+// Positions are presentation only. No adjacency here creates a dataflow edge.
+export function workspaceLayout(objectCount, itemCount) {
+  const columns = Math.max(3, Math.ceil(objectCount / 4));
+  const sideRows = Math.ceil(Math.max(0, objectCount - columns * 2) / 2);
+  const centerRows = Math.max(sideRows, Math.ceil(itemCount / columns), 1);
+  const width = (columns + 2) * 280 + 40;
+  const height = (centerRows + 2) * 225 + 80;
+  const objects = [];
+  for (let x = 0; x < columns; x++) {
+    objects.push([300 + x * 280, 40]);
+  }
+  for (let y = 0; y < sideRows; y++) {
+    objects.push([width - 270, 265 + y * 225]);
+  }
+  for (let x = columns - 1; x >= 0; x--) {
+    objects.push([300 + x * 280, height - 245]);
+  }
+  for (let y = sideRows - 1; y >= 0; y--) {
+    objects.push([20, 265 + y * 225]);
+  }
+  return {
+    width,
+    height,
+    objects: objects.slice(0, objectCount),
+    items: Array.from({ length: itemCount }, (_, i) => [
+      300 + (i % columns) * 280,
+      280 + Math.floor(i / columns) * 225,
+    ]),
+  };
+}
+
 export function evidenceState(edge, graph) {
   if (edge.status === "failed") {
     return "failed";
@@ -662,17 +693,8 @@ export function mountIsometric(
     explode.setAttribute("aria-pressed", String(state.apart));
     const placements = new Map();
     const objectPoints = new Map();
-    const loops = graph.objects.filter((o) => ["outer", "inner"].includes(o.mechanism?.template));
-    const shared = graph.objects.filter((o) => !loops.includes(o));
     const label = ([parent, text, x, y, cls = ""]) =>
       parent.append(svg("text", text, { x, y, class: `li-label ${cls}` }));
-    const frame = ([x, y, w, h, title, cls = ""]) => {
-      const g = svg("g", null, { class: `li-region ${cls}` });
-      g.append(svg("rect", null, { x, y, width: w, height: h, rx: 12, class: "li-region-frame" }));
-      label([g, title, x + 18, y + 26]);
-      drawing.append(g);
-      return g;
-    };
     const definitions = svg("defs");
     drawing.append(definitions);
     const symbolIds = new Map();
@@ -703,7 +725,13 @@ export function mountIsometric(
     };
     const machineCard = ([o, x, y, w, h]) => {
       const g = target("object", o.id, `物件 · ${o.label}`);
-      g.append(svg("rect", null, { x, y, width: w, height: h, rx: 8, class: "li-card-outline" }));
+      g.classList.add("li-station");
+      g.append(
+        svg("path", null, {
+          d: `M${x},${y + h - 22} l${w - 24},-14 l24,14 l-${w - 24},14 Z`,
+          class: "li-station-base li-card-outline",
+        }),
+      );
       art([g, o.mechanism?.template, x + 10, y + 18, w - 20, h - 103]);
       label([g, o.label, x + 12, y + 18, "li-machine-title"]);
       const own = sceneModel.nodes.filter((n) => n.object_id === o.id);
@@ -750,131 +778,110 @@ export function mountIsometric(
         drawing.append(port);
       }
     };
-    frame([10, 10, 1080, 240, "整體機械 / 原 outer 與 inner Owner", "li-assemblies"]);
-    for (const [i, o] of loops.entries()) {
-      machineCard([o, 25 + i * 530, 48, 515, 192]);
+    const overlay = expectedScene(graph, expectedModel);
+    const visibleNodes = state.run ? sceneModel.nodes : [];
+    const visibleIds = new Set(visibleNodes.map((n) => n.id));
+    const unmatched = overlay.steps.filter(
+      (step) =>
+        !(step.matches.length === 1 && visibleIds.has(step.matches[0])) &&
+        overlay.routes.some((r) => r.from === step.id || r.to === step.id),
+    );
+    const items = state.run ? visibleNodes : repoGroups;
+    const layout = workspaceLayout(graph.objects.length, items.length + unmatched.length);
+    const floor = svg("g", null, { class: "li-workspace-floor", "aria-hidden": "true" });
+    const { width, height } = layout;
+    floor.append(
+      svg("path", null, {
+        d: `M20,90 L${width - 100},20 L${width - 20},${height - 90} L100,${height - 20} Z`,
+        class: "li-floor-top",
+      }),
+      svg("path", null, {
+        d: `M100,${height - 20} L${width - 20},${height - 90} v12 L100,${height - 8} L20,102 V90 Z`,
+        class: "li-floor-side",
+      }),
+    );
+    drawing.append(floor);
+    for (const [i, o] of graph.objects.entries()) {
+      const [x, y] = layout.objects[i];
+      machineCard([o, x, y, 250, 205]);
     }
-    const sharedRows = Math.ceil(shared.length / 3);
-    const sharedHeight = sharedRows * 195 + 40;
-    frame([10, 252, 1080, sharedHeight, "共用接口帶 / 唯一 Manager · 契約存在不代表已執行"]);
-    for (const [i, o] of shared.entries()) {
-      machineCard([o, 25 + (i % 3) * 355, 290 + Math.floor(i / 3) * 195, 345, 185]);
-    }
-    let cursor = 264 + sharedHeight;
-    for (const repo of repoGroups) {
-      const regionY = cursor;
-      const members = sceneModel.nodes.filter((n) => groupFor.get(n.repository_id) === repo.id);
-      const rows = state.run ? Math.ceil(members.length / 4) : 1;
-      const regionHeight = rows * 178 + 64;
-      const g = frame([
-        10,
-        cursor,
-        1080,
-        regionHeight,
-        `${repo.label} / ${repo.members.length} 來源快照`,
-        "li-repo-region",
-      ]);
-      g.dataset.repoRegion = repo.id;
-      if (state.run === null) {
-        const r = groupView(repo);
-        const targetRepo = target("repository", r.id, `Repo · ${r.label}`);
-        targetRepo.append(
+    for (const [i, item] of items.entries()) {
+      const [x, y] = layout.items[i];
+      if (!state.run) {
+        const r = groupView(item);
+        const repo = target("repository", r.id, `Repo · ${r.label}`);
+        repo.dataset.repoRegion = item.id;
+        repo.append(
           svg("rect", null, {
-            x: 24,
-            y: cursor + 44,
-            width: 1052,
-            height: 160,
+            x,
+            y,
+            width: 248,
+            height: 158,
             rx: 8,
             class: "li-card-outline",
           }),
         );
+        label([repo, r.label, x + 10, y + 24]);
         label([
-          targetRepo,
-          `${members.length} 路徑節點 · 選擇 Run 後展開原資料流`,
-          45,
-          cursor + 85,
-        ]);
-        label([
-          targetRepo,
-          `${r.tracked_files.length} 個目錄索引 · 點選區域讀回來源`,
-          45,
-          cursor + 115,
+          repo,
+          `${item.members.length} 來源快照 · ${r.tracked_files.length} 目錄索引`,
+          x + 10,
+          y + 56,
           "li-small",
         ]);
-        drawing.append(targetRepo);
-        placements.set(repo.id, [550, cursor + 130]);
-      } else {
-        for (const [i, n] of members.entries()) {
-          const x = 26 + (i % 4) * 265;
-          const y = regionY + 48 + Math.floor(i / 4) * 178;
-          const w = 248;
-          const h = 158;
-          const node = target("node", n.id, `${n.kind} · ${n.label}`);
-          node.append(
-            svg("rect", null, { x, y, width: w, height: h, rx: 8, class: "li-card-outline" }),
-          );
-          art([node, n.mechanism, x + 24, y + 22, w - 48, 105]);
-          label([node, n.kind, x + 10, y + 16, "li-machine-title"]);
-          label([
-            node,
-            n.label.length > 32 ? `${n.label.slice(0, 31)}…` : n.label,
-            x + 10,
-            y + 132,
-            "li-small",
-          ]);
-          label([
-            node,
-            `${n.status.execution}${n.run_id === state.run ? "" : " · 跨 Run 脈絡"}`,
-            x + 10,
-            y + 148,
-            "li-small",
-          ]);
-          placements.set(n.id, [x + w / 2, y]);
-          drawing.append(node);
-        }
+        label([repo, "選擇 Run 展開原資料流", x + 10, y + 92, "li-small"]);
+        drawing.append(repo);
+        continue;
       }
-      cursor += regionHeight + 16;
-    }
-    const overlay = expectedScene(graph, expectedModel);
-    const expectedPoints = new Map();
-    const unmatched = [];
-    for (const step of overlay.steps) {
-      const matches = step.matches.filter((id) => placements.has(id));
-      if (step.matches.length === 1 && matches.length === 1) {
-        const point = placements.get(matches[0]);
-        expectedPoints.set(step.id, [point[0] + 100, point[1] + 18]);
-      } else if (overlay.routes.some((r) => r.from === step.id || r.to === step.id)) {
-        unmatched.push(step);
-      }
-    }
-    if (unmatched.length > 0) {
-      frame([
-        10,
-        cursor,
-        1080,
-        Math.ceil(unmatched.length / 4) * 92 + 48,
-        "契約預期位置 / 未唯一對應原節點，不代表已執行",
-        "li-expected-region",
+      const n = item;
+      const node = target("node", n.id, `${n.kind} · ${n.label}`);
+      node.dataset.repoRegion = groupFor.get(n.repository_id) || "unknown";
+      node.append(
+        svg("rect", null, { x, y, width: 248, height: 158, rx: 8, class: "li-card-outline" }),
+      );
+      art([node, n.mechanism, x + 24, y + 22, 200, 105]);
+      label([node, n.kind, x + 10, y + 16, "li-machine-title"]);
+      label([
+        node,
+        n.label.length > 32 ? `${n.label.slice(0, 31)}…` : n.label,
+        x + 10,
+        y + 132,
+        "li-small",
       ]);
-      for (const [i, step] of unmatched.entries()) {
-        const x = 26 + (i % 4) * 265,
-          y = cursor + 45 + Math.floor(i / 4) * 92;
-        const card = target("expected", step.id, `預期步驟 · ${step.name}`);
-        card.append(
-          svg("rect", null, { x, y, width: 248, height: 78, rx: 7, class: "li-expected-card" }),
-        );
-        label([card, step.name.slice(0, 30), x + 8, y + 24, "li-small"]);
-        label([
-          card,
-          `${step.owner?.label || "原歸屬未知"} · ${step.matches.length} 對應`,
-          x + 8,
-          y + 48,
-          "li-small",
-        ]);
-        drawing.append(card);
-        expectedPoints.set(step.id, [x + 124, y + 72]);
+      label([
+        node,
+        `${n.status.execution}${n.run_id === state.run ? "" : " · 跨 Run 脈絡"}`,
+        x + 10,
+        y + 148,
+        "li-small",
+      ]);
+      placements.set(n.id, [x + 124, y]);
+      drawing.append(node);
+    }
+    const expectedPoints = new Map();
+    for (const step of overlay.steps) {
+      if (step.matches.length === 1 && placements.has(step.matches[0])) {
+        const point = placements.get(step.matches[0]);
+        expectedPoints.set(step.id, [point[0] + 100, point[1] + 18]);
       }
-      cursor += Math.ceil(unmatched.length / 4) * 92 + 64;
+    }
+    for (const [i, step] of unmatched.entries()) {
+      const [x, y] = layout.items[items.length + i];
+      const card = target("expected", step.id, `預期步驟 · ${step.name}`);
+      card.append(
+        svg("rect", null, { x, y, width: 248, height: 158, rx: 7, class: "li-expected-card" }),
+      );
+      label([card, step.name.slice(0, 30), x + 8, y + 24, "li-small"]);
+      label([
+        card,
+        `${step.owner?.label || "原歸屬未知"} · ${step.matches.length} 對應`,
+        x + 8,
+        y + 48,
+        "li-small",
+      ]);
+      label([card, "契約預期 · 未唯一對應原節點", x + 8, y + 76, "li-small"]);
+      drawing.append(card);
+      expectedPoints.set(step.id, [x + 124, y + 150]);
     }
     const lanes = new Map();
     for (const route of overlay.routes) {
@@ -911,7 +918,7 @@ export function mountIsometric(
       label([wire, gapLabel[route.result?.status] || "", b[0] + 6, b[1], "li-gap"]);
       drawing.append(wire);
     }
-    drawing.setAttribute("viewBox", `0 0 1100 ${Math.max(760, cursor + 20)}`);
+    drawing.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
     if (state.run && state.selection) {
       const selectedNodes = sceneModel.nodes.filter(
         (n) =>

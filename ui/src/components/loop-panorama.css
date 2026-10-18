@@ -1189,3 +1189,24 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* One common floor; station footprints are selection surfaces, not region panels. */
+.li-floor-top {
+  fill: #14232b;
+  stroke: #45606b;
+  stroke-width: 1;
+}
+.li-floor-side {
+  fill: #0a141c;
+  stroke: #304751;
+  stroke-width: 1;
+}
+.li-station > .li-station-base {
+  fill: #233c45;
+}
+.li-station > .li-machine-title {
+  font-size: 14px;
+}
+.li-station .li-machine-art {
+  pointer-events: bounding-box;
+}
