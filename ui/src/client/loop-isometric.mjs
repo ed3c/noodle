@@ -797,7 +797,9 @@ export function mountIsometric(
       ? new Map(
           layoutGraph({
             nodes: sceneModel.nodes,
-            edges: sceneModel.edges.map((e) => ({ from: e.from_node_id, to: e.to_node_id })),
+            edges: sceneModel.edges
+              .filter((e) => e.kind === "handoff")
+              .map((e) => ({ from: e.from_node_id, to: e.to_node_id })),
           }).nodes.map((n) => [n.id, n.rank]),
         )
       : new Map();
@@ -832,7 +834,7 @@ export function mountIsometric(
     );
     drawing.append(floor);
     if (machines.index.length > 0) {
-      label([drawing, "其他機械索引 · 未觀察本次參與", 30, layout.index[0][1] - 16, "li-small"]);
+      label([drawing, "其他機械索引", 30, layout.index[0][1] - 16, "li-small"]);
     }
     for (const [i, o] of machines.index.entries()) {
       const [x, y] = layout.index[i];
@@ -1087,7 +1089,7 @@ export function mountIsometric(
       drawing.append(marker);
     }
     readout.textContent = `${graph.objects.length} 唯一物件 · ${repoGroups.length} Repo 區域 · ${sceneModel.nodes.length} 路徑節點 · ${sceneModel.hidden} 來源節點按需展開 · ${sceneModel.edges.filter((e) => evidenceState(e, graph) === "current").length} 段目前交接證據完整`;
-    location.textContent = `${goal || "Goal / 全機總覽"} → ${state.run ? `Run ${state.run.slice(0, 12)}` : "全部執行"} · ${state.selection ? `${state.selection.kind} / ${graph.objects.find((o) => o.id === state.anchor)?.label || state.selection.id}` : "本次路徑"}`;
+    location.textContent = `${goal || "Goal / 全機總覽"} → ${state.run ? `Run ${state.run.slice(0, 12)}` : "全部執行"} · ${state.selection ? `${state.selection.kind} / ${(state.selection.kind === "object" && graph.objects.find((o) => o.id === state.selection.id)?.label) || state.selection.id}` : "本次路徑"}`;
     size();
     inspect();
     mountComparison(

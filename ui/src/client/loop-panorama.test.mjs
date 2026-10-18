@@ -225,7 +225,7 @@ test("source-only guidance stays browseable without hiding real handoff endpoint
   assert.equal(projectDetailLayer(detail, true).nodes.length, detail.nodes.length);
 });
 
-function navigationFixture(t, extra = {}) {
+function navigationFixture(t, extra = {}, prepareGraph = null) {
   const dom = new JSDOM("<main></main>");
   const previous = globalThis.document;
   globalThis.document = dom.window.document;
@@ -257,6 +257,7 @@ function navigationFixture(t, extra = {}) {
   for (const edge of graph.edges) {
     edge.label = edge.id;
   }
+  prepareGraph?.(graph);
   const root = dom.window.document.querySelector("main");
   const calls = [];
   const resets = [];
@@ -527,4 +528,63 @@ test("review enlargement and returning to the Run preserve selected source, came
   assert.equal(run.value, "b");
   assert.equal(root.querySelectorAll("[data-iso-principle]").length, 0);
   assert.equal(root.querySelectorAll("[data-iso-edge]").length, 2);
+});
+
+test("diagnostic back-links remain inspectable without becoming causal ranks", (t) => {
+  const { root, dom, graph } = navigationFixture(t, {}, (sourceGraph) =>
+    sourceGraph.edges.push({
+      ...sourceGraph.edges[1],
+      id: "diagnostic-cb",
+      label: "diagnostic back-link",
+      kind: "diagnostic",
+      from_node_id: "c",
+      to_node_id: "b",
+      status: "unknown",
+    }),
+  );
+  const errors = [];
+  dom.window.addEventListener("error", (event) => {
+    errors.push(event.error.message);
+    event.preventDefault();
+  });
+  const run = root.querySelector('[aria-label="立體視圖執行範圍"]');
+  run.value = "b";
+  run.dispatchEvent(new dom.window.Event("change"));
+  assert.deepEqual(errors, []);
+  const scene = root.querySelector('[aria-label="內外迴圈立體資料流"]');
+  assert.equal(scene.querySelectorAll("[data-iso-node]").length, 3);
+  assert.equal(scene.querySelectorAll("[data-iso-edge]").length, 3);
+  assert.ok(scene.querySelector('[data-iso-edge="diagnostic-cb"]'));
+  const diagnostic = [...root.querySelectorAll(".li-inspector button")].find((b) =>
+    b.textContent.includes("diagnostic back-link"),
+  );
+  assert.ok(diagnostic);
+  diagnostic.click();
+  assert.match(root.querySelector(".li-inspector").textContent, /diagnostic back-link/);
+  assert.equal(graph.edges.length, 3);
+});
+
+test("location identifies the selected edge after inspecting its owner", (t) => {
+  const { root, dom } = navigationFixture(t);
+  const run = root.querySelector('[aria-label="立體視圖執行範圍"]');
+  run.value = "b";
+  run.dispatchEvent(new dom.window.Event("change"));
+  root.querySelector('[data-iso-object="outer"]').dispatchEvent(new dom.window.Event("click"));
+  root.querySelector('[data-iso-edge="ab"]').dispatchEvent(new dom.window.Event("click"));
+  assert.match(root.querySelector(".li-position").textContent, /edge \/ ab$/);
+});
+
+test("local machine filtering does not relabel recorded participation as unobserved", (t) => {
+  const { root, dom, graph } = navigationFixture(t, {}, (sourceGraph) => {
+    sourceGraph.nodes.push({ ...node("separate", "loop", ["b", "repoB"]), label: "separate" });
+  });
+  const run = root.querySelector('[aria-label="立體視圖執行範圍"]');
+  run.value = "b";
+  run.dispatchEvent(new dom.window.Event("change"));
+  assert.ok(root.querySelector('[data-iso-object="loop"].li-participating'));
+  root.querySelector('[data-iso-object="outer"]').dispatchEvent(new dom.window.Event("click"));
+  [...root.querySelectorAll("button")].find((b) => b.textContent === "只看此機械").click();
+  assert.ok(root.querySelector('[data-iso-object="loop"].li-machine-index'));
+  assert.doesNotMatch(root.querySelector(".li-viewport").textContent, /未觀察本次參與/);
+  assert.equal(graph.nodes.find((n) => n.id === "separate").status.execution, "completed");
 });
