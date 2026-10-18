@@ -213,7 +213,9 @@ export function observedParticipation(node, runId) {
 
 /** Follow supplied directional relations, retaining their evidence status. No root-cause claim. */
 export function traceFinding(scene, finding) {
-  const { edges } = scene;
+  const edges = scene.edges.filter(
+    (edge) => edge.kind === "handoff" && ["observed", "failed"].includes(edge.status),
+  );
   const seeds = new Set(finding.node_ids);
   for (const edge of edges.filter((candidate) => finding.edge_ids.includes(candidate.id))) {
     seeds.add(edge.from_node_id);
@@ -1346,10 +1348,16 @@ export function mountIsometric(
       );
       if (requestArtifact) {
         const original = html("details", null, { "aria-label": "本次原要求" });
+        const goalRun = state.run;
+        original.open = state.goalOpenRun === goalRun;
         const content = html("p", "按需讀取本次 Run 綁定的原要求。");
         original.append(html("summary", "本次原要求"), content);
         let loading = false;
         original.addEventListener("toggle", async () => {
+          if (!original.isConnected) {
+            return;
+          }
+          state.goalOpenRun = original.open ? goalRun : null;
           if (!original.open || loading) {
             return;
           }
@@ -1500,9 +1508,13 @@ export function mountIsometric(
         inspector.append(raw);
         const ids = record.matches || record.result?.edge_ids || [];
         for (const id of ids) {
+          const match = (pick.kind === "expected" ? graph.nodes : graph.edges).find(
+            (v) => v.id === id,
+          );
+          const reference = graph.artifacts.find((a) => match?.input_artifact_ids?.includes(a.id));
           inspector.append(
             button(
-              `定位 · ${(pick.kind === "expected" ? graph.nodes : graph.edges).find((v) => v.id === id)?.label || id} · ${(pick.kind === "expected" ? graph.nodes : graph.edges).find((v) => v.id === id)?.status?.execution || "原交接"}`,
+              `定位 · ${match?.label || id} · ${match?.status?.execution || "原交接"} · ${reference?.source?.sha256?.slice(0, 10) || "版本未知"}`,
               () => selectItem(pick.kind === "expected" ? "node" : "edge", id),
             ),
           );

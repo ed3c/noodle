@@ -452,6 +452,11 @@ test("one scene overlays bound expected routes without duplicating owner objects
   );
   assert.equal(root.querySelectorAll('[aria-label="預期機構資料流 DAG"]').length, 0);
   scene
+    .querySelector('[data-iso-expected-route="hypothesis/h"]')
+    .dispatchEvent(new dom.window.Event("click"));
+  assert.match(root.querySelector(".li-inspector").textContent, /可推翻假說/);
+
+  scene
     .querySelector('[data-iso-expected-route="contract/r"]')
     .dispatchEvent(new dom.window.Event("click"));
   assert.match(root.querySelector(".li-inspector").textContent, /intent → tool/);
@@ -645,5 +650,12 @@ test("original Goal is read on demand when the native API omits inline content",
   goal.dispatchEvent(new dom.window.Event("toggle"));
   await Promise.resolve();
   assert.match(goal.textContent, /Original human requirement/);
+  assert.deepEqual(reads, ["request"]);
+  select.dispatchEvent(new dom.window.Event("change"));
+  const refreshed = root.querySelector('[aria-label="本次原要求"]');
+  assert.equal(refreshed.open, true);
+  refreshed.dispatchEvent(new dom.window.Event("toggle"));
+  await Promise.resolve();
+  assert.match(refreshed.textContent, /Original human requirement/);
   assert.deepEqual(reads, ["request"]);
 });

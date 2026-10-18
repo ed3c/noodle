@@ -283,7 +283,13 @@ test("participation requires the selected Run, native identity and a known obser
   node.identity.status = "unknown";
   assert.equal(observedParticipation(node, "run"), false);
 });
-const makeTraceEdge = (id, from, to) => ({ id, from_node_id: from, to_node_id: to });
+const makeTraceEdge = (id, from, to) => ({
+  id,
+  from_node_id: from,
+  to_node_id: to,
+  kind: "handoff",
+  status: "observed",
+});
 test("breakpoint tracing follows original directions, handles cycles and never imports sibling branches", () => {
   const scene = {
     edges: [
@@ -346,4 +352,16 @@ test("selecting one native event reveals only its evidenced pair", () => {
     view.nodes.some((n) => n.id === "other-call"),
     false,
   );
+});
+
+test("a tool failure cannot trace through a diagnostic Session association as causal evidence", () => {
+  const scene = {
+    edges: [
+      { ...makeTraceEdge("association", "session", "call"), kind: "diagnostic", status: "unknown" },
+      makeTraceEdge("result", "call", "result"),
+    ],
+  };
+  const trace = traceFinding(scene, { node_ids: ["result"], edge_ids: [] });
+  assert.deepEqual([...trace.nodes].toSorted(), ["call", "result"]);
+  assert.equal(trace.edges.has("association"), false);
 });
