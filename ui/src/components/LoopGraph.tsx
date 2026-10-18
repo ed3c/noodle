@@ -465,7 +465,7 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
         ))}
       </nav>
       {newer && (
-        <div className="lg-update" role="status">
+        <div className="lg-update" role="status" aria-label="來源版本更新">
           有新版本。比較仍固定在選取時的來源；原始內容若漂移會拒絕讀取。
           <button
             type="button"

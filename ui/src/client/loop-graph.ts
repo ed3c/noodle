@@ -362,7 +362,7 @@ export function parseLoopGraph(value: unknown) {
     ...parseLoopView({ ...root, schema_version: 1 }),
     schema_version: 2,
     graph,
-    review_version: root.review_version === undefined ? null : text(root.review_version),
+    review_version: root.review_version === undefined ? null : nullable(root.review_version, text),
   };
 }
 export type GraphView = ReturnType<typeof parseLoopGraph>;
