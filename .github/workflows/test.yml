@@ -25,14 +25,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Capture final source formatter bytes
-        run: |
-          pnpm --filter noodle-ui exec oxfmt --write src/client/loop-intent-rail.mjs
-          echo "SOURCE_FORMAT_BEGIN:ui/src/client/loop-intent-rail.mjs"
-          base64 -w0 ui/src/client/loop-intent-rail.mjs
-          echo
-          echo "SOURCE_FORMAT_END:ui/src/client/loop-intent-rail.mjs"
-
       - name: Verify UI source and loop interactions
         run: |
           pnpm --filter noodle-ui verify
