@@ -309,6 +309,7 @@ export function mountPanorama(
   root.append(consoleRoot);
   const consoleView = mountIsometric(consoleRoot, {
     graph,
+    goal,
     readArtifact,
     onReviewSelection,
     scope: model,

@@ -225,7 +225,7 @@ test("source-only guidance stays browseable without hiding real handoff endpoint
   assert.equal(projectDetailLayer(detail, true).nodes.length, detail.nodes.length);
 });
 
-function navigationFixture(t, extra = {}) {
+function navigationFixture(t, extra = {}, prepareGraph = null) {
   const dom = new JSDOM("<main></main>");
   const previous = globalThis.document;
   globalThis.document = dom.window.document;
@@ -257,6 +257,7 @@ function navigationFixture(t, extra = {}) {
   for (const edge of graph.edges) {
     edge.label = edge.id;
   }
+  prepareGraph?.(graph);
   const root = dom.window.document.querySelector("main");
   const calls = [];
   const resets = [];
@@ -383,13 +384,14 @@ test("principle selection stays in the Run and does not submit or claim missing 
   const run = root.querySelector('[aria-label="立體視圖執行範圍"]');
   run.value = "a";
   run.dispatchEvent(new dom.window.Event("change"));
+  root.querySelector('[data-iso-object="outer"]').dispatchEvent(new dom.window.Event("click"));
   root
     .querySelector('[data-iso-principle="outer/method"]')
     .dispatchEvent(new dom.window.Event("click"));
   assert.equal(run.value, "a");
-  assert.ok(root.querySelector('[data-iso-principle="outer/method"].is-selected'));
+  assert.ok(root.querySelector('[data-iso-principle="outer/method"][aria-pressed="true"]'));
   assert.match(root.querySelector(".li-inspector").textContent, /缺紀錄不等於不適用或未執行/);
-  assert.equal(root.querySelectorAll("[data-iso-principle]").length, 15);
+  assert.equal(root.querySelectorAll("[data-iso-principle]").length, 5);
 });
 
 test("one scene overlays bound expected routes without duplicating owner objects", async (t) => {
@@ -441,6 +443,8 @@ test("one scene overlays bound expected routes without duplicating owner objects
   const scene = root.querySelector('[aria-label="內外迴圈立體資料流"]');
   assert.equal(scene.querySelectorAll('[data-iso-object="outer"]').length, 1);
   assert.ok(scene.querySelector('[data-iso-expected-route="contract/r"]'));
+  assert.equal(scene.querySelector('[data-iso-expected-route="hypothesis/h"]'), null);
+  [...root.querySelectorAll("button")].find((b) => b.textContent.startsWith("完整疊圖")).click();
   assert.ok(scene.querySelector('[data-iso-expected-route="hypothesis/h"].li-hypothesis-wire'));
   assert.notEqual(
     scene.querySelector('[data-iso-expected-route="contract/r"] .li-route-hit').getAttribute("d"),
@@ -481,17 +485,106 @@ test("failed historical transport keeps green evidence, historical marker and se
   assert.match(edge.textContent, /歷史/);
 });
 
-test("all machines and facets remain selectable on one floor when a Run expands", (t) => {
+test("one floor keeps all unique machines reachable and exposes only the selected owner facets", (t) => {
   const { root, dom, graph } = navigationFixture(t);
   const drawing = root.querySelector('[aria-label="內外迴圈立體資料流"]');
   assert.equal(drawing.querySelectorAll(".li-workspace-floor").length, 1);
   assert.equal(drawing.querySelectorAll(".li-region").length, 0);
   assert.equal(drawing.querySelectorAll(".li-station").length, graph.objects.length);
-  assert.equal(drawing.querySelectorAll(".li-principle").length, graph.objects.length * 5);
+  assert.equal(root.querySelectorAll("[data-iso-principle]").length, 0);
   const run = root.querySelector('[aria-label="立體視圖執行範圍"]');
   run.value = "b";
   run.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-  assert.equal(drawing.querySelectorAll(".li-station").length, graph.objects.length);
+  assert.equal(drawing.querySelectorAll(".li-station").length, 2);
+  assert.equal(drawing.querySelectorAll(".li-machine-index").length, 1);
+  assert.equal(drawing.querySelectorAll("[data-iso-object]").length, graph.objects.length);
+  drawing.querySelector('[data-iso-object="loop"]').dispatchEvent(new dom.window.Event("click"));
+  assert.equal(root.querySelectorAll("[data-iso-principle]").length, 5);
+  assert.equal(drawing.querySelectorAll("[data-iso-edge]").length, 2);
+  assert.equal(run.value, "b");
+  [...root.querySelectorAll("button")].find((b) => b.textContent === "完整架構").click();
+  assert.equal(drawing.querySelectorAll(".li-station").length, 3);
+  assert.equal(drawing.querySelectorAll(".li-machine-index").length, 0);
   assert.equal(drawing.querySelectorAll(".li-region").length, 0);
   assert.ok(drawing.querySelector('[aria-label="cli · b"]'));
+});
+
+test("review enlargement and returning to the Run preserve selected source, camera and independent viewport scroll", (t) => {
+  const { root, dom } = navigationFixture(t);
+  const run = root.querySelector('[aria-label="立體視圖執行範圍"]');
+  run.value = "b";
+  run.dispatchEvent(new dom.window.Event("change"));
+  const viewport = root.querySelector(".li-viewport");
+  viewport.scrollTop = 70;
+  root.querySelector('[data-iso-object="outer"]').dispatchEvent(new dom.window.Event("click"));
+  const choose = (text) => [...root.querySelectorAll("button")].find((b) => b.textContent === text);
+  choose("放大／返回審查").click();
+  assert.ok(root.querySelector(".li-review-expanded"));
+  assert.equal(run.value, "b");
+  choose("放大／返回審查").click();
+  assert.equal(root.querySelector(".li-review-expanded"), null);
+  assert.equal(viewport.scrollTop, 70);
+  choose("返回本次路徑").click();
+  assert.equal(run.value, "b");
+  assert.equal(root.querySelectorAll("[data-iso-principle]").length, 0);
+  assert.equal(root.querySelectorAll("[data-iso-edge]").length, 2);
+});
+
+test("diagnostic back-links remain inspectable without becoming causal ranks", (t) => {
+  const { root, dom, graph } = navigationFixture(t, {}, (sourceGraph) =>
+    sourceGraph.edges.push({
+      ...sourceGraph.edges[1],
+      id: "diagnostic-cb",
+      label: "diagnostic back-link",
+      kind: "diagnostic",
+      from_node_id: "c",
+      to_node_id: "b",
+      status: "unknown",
+    }),
+  );
+  const errors = [];
+  dom.window.addEventListener("error", (event) => {
+    errors.push(event.error.message);
+    event.preventDefault();
+  });
+  const run = root.querySelector('[aria-label="立體視圖執行範圍"]');
+  run.value = "b";
+  run.dispatchEvent(new dom.window.Event("change"));
+  assert.deepEqual(errors, []);
+  const scene = root.querySelector('[aria-label="內外迴圈立體資料流"]');
+  assert.equal(scene.querySelectorAll("[data-iso-node]").length, 3);
+  assert.equal(scene.querySelectorAll("[data-iso-edge]").length, 3);
+  assert.ok(scene.querySelector('[data-iso-edge="diagnostic-cb"]'));
+  const diagnostic = [...root.querySelectorAll(".li-inspector button")].find((b) =>
+    b.textContent.includes("diagnostic back-link"),
+  );
+  assert.ok(diagnostic);
+  diagnostic.click();
+  assert.match(root.querySelector(".li-inspector").textContent, /diagnostic back-link/);
+  assert.equal(graph.edges.length, 3);
+});
+
+test("location identifies the selected edge after inspecting its owner", (t) => {
+  const { root, dom } = navigationFixture(t);
+  const run = root.querySelector('[aria-label="立體視圖執行範圍"]');
+  run.value = "b";
+  run.dispatchEvent(new dom.window.Event("change"));
+  root.querySelector('[data-iso-object="outer"]').dispatchEvent(new dom.window.Event("click"));
+  root.querySelector('[data-iso-edge="ab"]').dispatchEvent(new dom.window.Event("click"));
+  assert.match(root.querySelector(".li-position").textContent, /edge \/ ab$/);
+});
+
+test("local machine filtering does not relabel recorded participation as unobserved", (t) => {
+  const { root, dom, graph } = navigationFixture(t, {}, (sourceGraph) => {
+    sourceGraph.nodes.push({ ...node("separate", "loop", ["b", "repoB"]), label: "separate" });
+  });
+  const run = root.querySelector('[aria-label="立體視圖執行範圍"]');
+  run.value = "b";
+  run.dispatchEvent(new dom.window.Event("change"));
+  assert.ok(root.querySelector('[data-iso-object="loop"].li-participating'));
+  root.querySelector('[data-iso-object="outer"]').dispatchEvent(new dom.window.Event("click"));
+  [...root.querySelectorAll("button")].find((b) => b.textContent === "只看此機械").click();
+  assert.ok(root.querySelector('[data-iso-object="loop"].li-machine-index'));
+  assert.doesNotMatch(root.querySelector(".li-viewport").textContent, /未觀察本次參與/);
+  assert.equal(graph.nodes.find((n) => n.id === "separate").status.execution, "completed");
 });

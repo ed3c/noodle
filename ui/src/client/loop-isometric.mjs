@@ -6,8 +6,10 @@ import {
   branchName,
   worktreeKey,
 } from "./loop-repository.mjs";
+import { layoutGraph } from "./loop-graph-layout.mjs";
 import { mechanismFigure } from "./loop-anatomy.mjs";
 import { contractFacets, expectedScene, principleFigure } from "./loop-contract.mjs";
+import { focusExpectations, partitionMachines, focusedLayout } from "./loop-scene-focus.mjs";
 import { mountComparison } from "./loop-comparison.mjs";
 
 let viewSequence = 0;
@@ -40,38 +42,6 @@ function button(text, fn) {
   const b = html("button", text, { type: "button" });
   b.addEventListener("click", fn);
   return b;
-}
-
-/** Only original handoffs with complete bindings can be called currently evidenced. */
-// Positions are presentation only. No adjacency here creates a dataflow edge.
-export function workspaceLayout(objectCount, itemCount) {
-  const columns = Math.max(3, Math.ceil(objectCount / 4));
-  const sideRows = Math.ceil(Math.max(0, objectCount - columns * 2) / 2);
-  const centerRows = Math.max(sideRows, Math.ceil(itemCount / columns), 1);
-  const width = (columns + 2) * 280 + 40;
-  const height = (centerRows + 2) * 225 + 80;
-  const objects = [];
-  for (let x = 0; x < columns; x++) {
-    objects.push([300 + x * 280, 40]);
-  }
-  for (let y = 0; y < sideRows; y++) {
-    objects.push([width - 270, 265 + y * 225]);
-  }
-  for (let x = columns - 1; x >= 0; x--) {
-    objects.push([300 + x * 280, height - 245]);
-  }
-  for (let y = sideRows - 1; y >= 0; y--) {
-    objects.push([20, 265 + y * 225]);
-  }
-  return {
-    width,
-    height,
-    objects: objects.slice(0, objectCount),
-    items: Array.from({ length: itemCount }, (_, i) => [
-      300 + (i % columns) * 280,
-      280 + Math.floor(i / columns) * 225,
-    ]),
-  };
 }
 
 export function evidenceState(edge, graph) {
@@ -257,6 +227,7 @@ export function mountIsometric(
   root,
   {
     graph,
+    goal,
     scope,
     runs,
     onSelect,
@@ -284,6 +255,9 @@ export function mountIsometric(
   let sceneModel;
   state.anchor ??= null;
   state.onlyMachine ??= false;
+  state.fullOverlay ??= false;
+  state.fullArchitecture ??= false;
+  state.sceneHeight ??= 360;
   state.filter ??= { repo: "", branch: "", worktree: "", snapshot: "" };
   root.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
@@ -396,8 +370,41 @@ export function mountIsometric(
     render();
   });
   sourceLabel.append(source);
+  const overlayToggle = button("完整疊圖", () => {
+    state.fullOverlay = !state.fullOverlay;
+    render();
+  });
+  const architectureToggle = button("完整架構", () => {
+    state.fullArchitecture = !state.fullArchitecture;
+    render();
+  });
+  const clearPick = button("返回本次路徑", () => {
+    state.selection = null;
+    state.anchor = null;
+    state.onlyMachine = false;
+    render();
+    onInspect?.(null);
+  });
+  const heightControl = html("input", null, {
+    type: "range",
+    min: 220,
+    max: 620,
+    step: 20,
+    "aria-label": "立體圖高度",
+  });
+  heightControl.value = state.sceneHeight;
+  heightControl.addEventListener("input", () => {
+    state.sceneHeight = Number(heightControl.value);
+    root.style.setProperty("--li-scene-height", `${state.sceneHeight}px`);
+  });
+  const heightLabel = html("label", "圖高度 ", { class: "li-height-control" });
+  heightLabel.append(heightControl);
   toolbar.append(
     run,
+    overlayToggle,
+    architectureToggle,
+    clearPick,
+    heightLabel,
     button("專注／返回頁面", () => {
       root.classList.toggle("li-expanded");
     }),
@@ -436,6 +443,12 @@ export function mountIsometric(
     }),
     sourceLabel,
   );
+  const viewOptions = html("details", null, { class: "li-view-options" });
+  const viewControls = html("div", null, { class: "li-toolbar" });
+  viewOptions.append(html("summary", "視角與來源"), viewControls);
+  for (const control of [...toolbar.children].slice(6)) {
+    viewControls.append(control);
+  }
   const body = html("div", null, { class: "li-body" });
   const viewport = html("div", null, {
     class: "li-viewport",
@@ -476,9 +489,15 @@ export function mountIsometric(
     "綠線：有原交接證據（不等於驗收通過） · 黃實線：契約預期 · 黃虛線：可推翻假說 · 白框：選取 · ✕：已確認斷點 · ?：缺證據。舊證據另標歷史。",
     { class: "li-legend" },
   );
-  root.append(heading, navigation, toolbar, body, readout, legend);
+  const location = html("p", null, { class: "li-position", "aria-live": "polite" });
+  const compareSize = button("放大／返回審查", () => root.classList.toggle("li-review-expanded"));
+  const positionBar = html("div", null, { class: "li-position-bar" });
+  positionBar.append(location, compareSize);
+  root.append(heading, navigation, toolbar, viewOptions, positionBar, body, readout, legend);
+  root.style.setProperty("--li-scene-height", `${state.sceneHeight}px`);
   let expectedModel = null;
   let expectedKey = "";
+  let expectedRun = state.run;
 
   function size() {
     drawing.style.width = `${state.zoom * 100}%`;
@@ -496,6 +515,10 @@ export function mountIsometric(
         apart: state.apart,
         angle: state.angle,
         zoom: state.zoom,
+        fullOverlay: state.fullOverlay,
+        fullArchitecture: state.fullArchitecture,
+        scrollTop: viewport.scrollTop,
+        scrollLeft: viewport.scrollLeft,
         filter: { ...state.filter },
       };
     }
@@ -561,6 +584,8 @@ export function mountIsometric(
     render();
     onRun?.(state.run);
     onInspect?.(state.selection);
+    viewport.scrollTop = state.returnView?.scrollTop || 0;
+    viewport.scrollLeft = state.returnView?.scrollLeft || 0;
   }
   function facetGraph() {
     return {
@@ -667,6 +692,11 @@ export function mountIsometric(
     return group;
   }
   function render() {
+    if (expectedRun !== state.run) {
+      expectedModel = null;
+      expectedKey = "";
+      expectedRun = state.run;
+    }
     source.disabled = !state.run;
     updateFilters();
     const filtered = Object.values(state.filter).some(Boolean);
@@ -732,7 +762,7 @@ export function mountIsometric(
           class: "li-station-base li-card-outline",
         }),
       );
-      art([g, o.mechanism?.template, x + 10, y + 18, w - 20, h - 103]);
+      art([g, o.mechanism?.template, x + 10, y + 24, w - 20, h - 48]);
       label([g, o.label, x + 12, y + 18, "li-machine-title"]);
       const own = sceneModel.nodes.filter((n) => n.object_id === o.id);
       const observed = own.filter((n) => observedParticipation(n, state.run)).length;
@@ -745,41 +775,39 @@ export function mountIsometric(
       ]);
       objectPoints.set(o.id, [x + w / 2, y + h]);
       drawing.append(g);
-      const facets = contractFacets(facetGraph(), o.id, state.run);
-      for (const [i, facet] of facets.entries()) {
-        const width = (w - 12) / 5;
-        const fx = x + 6 + i * width,
-          fy = y + h - 83;
-        const port = target("principle", `${o.id}/${facet.id}`, `${o.label} / ${facet.name}`);
-        port.classList.add("li-principle");
-        port.dataset.principleStatus = facet.status;
-        port.append(
-          svg("rect", null, {
-            x: fx,
-            y: fy,
-            width: width - 3,
-            height: 60,
-            rx: 4,
-            class: "li-card-outline",
-          }),
-        );
-        const symbol = svg("svg", null, { x: fx, y: fy, width: width - 3, height: 43 });
-        symbol.innerHTML = principleFigure(facet.shape);
-        port.append(symbol);
-        label([
-          port,
-          { method: "方法", case: "案例", loop: "迴圈", assertion: "斷言", repair: "修正" }[
-            facet.id
-          ],
-          fx + 4,
-          fy + 54,
-          "li-principle-name",
-        ]);
-        drawing.append(port);
-      }
     };
-    const overlay = expectedScene(graph, expectedModel);
-    const visibleNodes = state.run ? sceneModel.nodes : [];
+    const allExpected = expectedScene(graph, expectedModel);
+    const overlay = focusExpectations(allExpected, {
+      full: state.fullOverlay,
+      selection: state.selection,
+      sourceStatus: expectedModel?.comparison?.source_status,
+    });
+    overlayToggle.textContent = state.fullOverlay
+      ? "收合完整疊圖"
+      : `完整疊圖 · ${overlay.hidden} 條收合`;
+    overlayToggle.setAttribute("aria-pressed", String(state.fullOverlay));
+    architectureToggle.textContent = state.fullArchitecture ? "本次參與優先" : "完整架構";
+    architectureToggle.setAttribute("aria-pressed", String(state.fullArchitecture));
+    const machines = partitionMachines(graph.objects, sceneModel, {
+      overlay,
+      run: state.run,
+      full: state.fullArchitecture,
+    });
+    const ranks = state.run
+      ? new Map(
+          layoutGraph({
+            nodes: sceneModel.nodes,
+            edges: sceneModel.edges
+              .filter((e) => e.kind === "handoff")
+              .map((e) => ({ from: e.from_node_id, to: e.to_node_id })),
+          }).nodes.map((n) => [n.id, n.rank]),
+        )
+      : new Map();
+    const visibleNodes = state.run
+      ? sceneModel.nodes.toSorted(
+          (a, b) => ranks.get(a.id) - ranks.get(b.id) || a.id.localeCompare(b.id),
+        )
+      : [];
     const visibleIds = new Set(visibleNodes.map((n) => n.id));
     const unmatched = overlay.steps.filter(
       (step) =>
@@ -787,7 +815,11 @@ export function mountIsometric(
         overlay.routes.some((r) => r.from === step.id || r.to === step.id),
     );
     const items = state.run ? visibleNodes : repoGroups;
-    const layout = workspaceLayout(graph.objects.length, items.length + unmatched.length);
+    const layout = focusedLayout(
+      machines.primary.length,
+      machines.index.length,
+      items.length + unmatched.length,
+    );
     const floor = svg("g", null, { class: "li-workspace-floor", "aria-hidden": "true" });
     const { width, height } = layout;
     floor.append(
@@ -801,9 +833,23 @@ export function mountIsometric(
       }),
     );
     drawing.append(floor);
-    for (const [i, o] of graph.objects.entries()) {
+    if (machines.index.length > 0) {
+      label([drawing, "其他機械索引", 30, layout.index[0][1] - 16, "li-small"]);
+    }
+    for (const [i, o] of machines.index.entries()) {
+      const [x, y] = layout.index[i];
+      const g = target("object", o.id, `物件 · ${o.label}`);
+      g.classList.add("li-machine-index");
+      g.append(
+        svg("rect", null, { x, y, width: 250, height: 48, rx: 6, class: "li-card-outline" }),
+      );
+      art([g, o.mechanism?.template, x + 2, y + 2, 48, 44]);
+      label([g, o.label, x + 56, y + 29, "li-index-name"]);
+      drawing.append(g);
+    }
+    for (const [i, o] of machines.primary.entries()) {
       const [x, y] = layout.objects[i];
-      machineCard([o, x, y, 250, 205]);
+      machineCard([o, x, y, 250, 130]);
     }
     for (const [i, item] of items.entries()) {
       const [x, y] = layout.items[i];
@@ -1043,6 +1089,7 @@ export function mountIsometric(
       drawing.append(marker);
     }
     readout.textContent = `${graph.objects.length} 唯一物件 · ${repoGroups.length} Repo 區域 · ${sceneModel.nodes.length} 路徑節點 · ${sceneModel.hidden} 來源節點按需展開 · ${sceneModel.edges.filter((e) => evidenceState(e, graph) === "current").length} 段目前交接證據完整`;
+    location.textContent = `${goal || "Goal / 全機總覽"} → ${state.run ? `Run ${state.run.slice(0, 12)}` : "全部執行"} · ${state.selection ? `${state.selection.kind} / ${(state.selection.kind === "object" && graph.objects.find((o) => o.id === state.selection.id)?.label) || state.selection.id}` : "本次路徑"}`;
     size();
     inspect();
     mountComparison(
@@ -1099,6 +1146,17 @@ export function mountIsometric(
     }
     nav.append(button("返回機械全景", returnToMachine));
     inspector.append(nav);
+    const categories = html("div", null, { class: "li-principles", "aria-label": "契約分類入口" });
+    for (const facet of contractFacets(facetGraph(), owner.id, state.run)) {
+      const port = button(facet.name, () => selectItem("principle", `${owner.id}/${facet.id}`));
+      port.dataset.isoPrinciple = `${owner.id}/${facet.id}`;
+      port.setAttribute("aria-pressed", String(selected("principle", `${owner.id}/${facet.id}`)));
+      const symbol = html("span", null, { "aria-hidden": "true" });
+      symbol.innerHTML = principleFigure(facet.shape);
+      port.prepend(symbol);
+      categories.append(port);
+    }
+    inspector.append(categories);
     const paths = html("details", null, { "aria-label": "此機械的閉環路徑與缺口" });
     paths.open = !state.run;
     paths.append(html("summary", "此機械的閉環路徑與缺口"));
@@ -1226,6 +1284,35 @@ export function mountIsometric(
       }
     }
     inspector.append(runHeader);
+    const allExpected = expectedScene(graph, expectedModel);
+    const hypotheses = allExpected.routes.filter((r) => r.layer === "hypothesis");
+    const matched = allExpected.routes.filter(
+      (r) => r.layer === "contract" && r.result?.status === "matched",
+    );
+    const folded = html("details", null, { "aria-label": "收合的預期與假說" });
+    folded.append(
+      html(
+        "summary",
+        `已符合預期 ${matched.length} · 假說 ${hypotheses.length + allExpected.unbound.length}`,
+      ),
+    );
+    for (const route of [...matched, ...hypotheses]) {
+      folded.append(
+        button(
+          `${route.layer === "hypothesis" ? "假說" : "已符合"} · ${route.transformation}`,
+          () => selectItem("expected-route", `${route.layer}/${route.id}`),
+        ),
+      );
+    }
+    if (allExpected.unbound.length > 0) {
+      folded.append(
+        html(
+          "p",
+          `${allExpected.unbound.length} 項未綁定假說保留於契約與假說來源索引，不猜測端點。`,
+        ),
+      );
+    }
+    inspector.append(folded);
     machineInspector();
     if (pick?.kind === "principle") {
       const [objectId, principleId] = pick.id.split("/");
@@ -1258,7 +1345,7 @@ export function mountIsometric(
       }
     }
     if (["expected", "expected-route"].includes(pick?.kind)) {
-      const overlay = expectedScene(graph, expectedModel);
+      const overlay = allExpected;
       const record =
         pick.kind === "expected"
           ? overlay.steps.find((s) => s.id === pick.id)
@@ -1483,6 +1570,10 @@ export function mountIsometric(
             apart: state.apart,
             angle: state.angle,
             zoom: state.zoom,
+            fullOverlay: state.fullOverlay,
+            fullArchitecture: state.fullArchitecture,
+            scrollTop: viewport.scrollTop,
+            scrollLeft: viewport.scrollLeft,
             filter: { ...state.filter },
           };
         }
