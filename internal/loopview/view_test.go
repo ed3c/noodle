@@ -95,3 +95,21 @@ func TestImportDoesNotRepairCorruptRegistryOrInventConsumption(t *testing.T) {
 		t.Fatal("corrupt registry overwritten")
 	}
 }
+
+func TestRecoveryDiagnosticsFitAlongsideExistingRuns(t *testing.T) {
+	dir := t.TempDir()
+	original := testRun("history")
+	original.Stages = []Stage{{ID: "saved", Kind: "source", Status: "unknown", Prompt: strings.Repeat("x", 15<<20), InputRefs: []string{}, OutputRefs: []string{}, ConsumerStatus: "unknown"}}
+	if _, _, err := Import(dir, View{SchemaVersion: 1, Runs: []Run{original}}); err != nil {
+		t.Fatal(err)
+	}
+	diagnostic := testRun("recovery")
+	diagnostic.Stages = []Stage{{ID: "readback", Kind: "source", Status: "unknown", Prompt: strings.Repeat("y", 2<<20), InputRefs: []string{}, OutputRefs: []string{}, ConsumerStatus: "unknown"}}
+	if _, _, err := Import(dir, View{SchemaVersion: 1, Runs: []Run{diagnostic}}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := Load(dir)
+	if err != nil || len(saved.Runs) != 2 || saved.Runs[0].Stages[0].Prompt != original.Stages[0].Prompt {
+		t.Fatalf("original evidence changed: %v", err)
+	}
+}

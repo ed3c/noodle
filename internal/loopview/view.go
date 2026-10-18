@@ -10,7 +10,8 @@ import (
 	"strings"
 )
 
-const MaxBytes = 16 << 20
+// Bound the complete multi-run registry, including source-bound recovery diagnostics.
+const MaxBytes = 32 << 20
 
 var identity = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 

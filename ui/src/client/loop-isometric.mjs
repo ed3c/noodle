@@ -44,6 +44,13 @@ function button(text, fn) {
   return b;
 }
 
+export function gapSummary(graph, runId, findings) {
+  if (!graph.nodes.some((node) => node.run_id === runId)) {
+    return "DAG 證據未載入 · 缺口數未知";
+  }
+  return `${findings.length} 個已記錄斷點／缺口`;
+}
+
 export function evidenceState(edge, graph) {
   if (edge.status === "failed") {
     return "failed";
@@ -1303,7 +1310,7 @@ export function mountIsometric(
       html(
         "summary",
         state.run
-          ? `本次執行 · ${state.run.slice(0, 12)} · ${sceneModel.findings.length} 個斷點／缺口`
+          ? `本次執行 · ${state.run.slice(0, 12)} · ${gapSummary(graph, state.run, sceneModel.findings)}`
           : "全景 · 請選擇執行",
       ),
     );
@@ -1332,7 +1339,14 @@ export function mountIsometric(
         );
       }
       if (sceneModel.findings.length === 0) {
-        runHeader.append(html("p", "未記錄斷點；不等於 Goal 已驗收。"));
+        runHeader.append(
+          html(
+            "p",
+            graph.nodes.some((n) => n.run_id === state.run)
+              ? "未記錄斷點；不等於 Goal 已驗收。"
+              : "缺少本次 DAG 來源；無法判定缺口數，請讀回原 owner。",
+          ),
+        );
       }
     }
     if (state.run) {
