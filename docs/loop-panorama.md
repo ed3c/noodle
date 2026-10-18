@@ -83,3 +83,28 @@ Source, camera and full-overlay controls do not dispatch runtime effects.
 This local UI revision has not been copied to medium-compiler: cloud changes are paused
 by the user. Cloud byte-equality and cloud interaction acceptance remain pending for the
 next explicitly resumed cloud delivery.
+
+## ViewEnv source-bound end-to-end intent rail (Q16–Q31)
+The complete architecture retains original Noodle source-bound geometry and
+original Soodles occurrence and comparison producers. Human Intent, Session
+Judgment, Prompt/P-class and CLI/Tool Call have a compact **source rail on the
+same floor**. Rail cards are projections of original **Run-scoped artifact
+references** only. They are not Graph.Nodes, do not synthesize Native
+Invocations or source-to-execution edges, and never become green by proximity.
+A missing carrier remains UNKNOWN. Clicking reveals registered originals,
+then existing node/edge/expectation reviewers.
+
+Object, Principle, Node, Edge, Finding and Expected Route selections now share
+a one-hop, same-scene source-bound highlight. A selected Hypothesis can only
+highlight the original matched edges and nodes in its selected Run; no guessed
+cross-Run bridge, no implicit root cause. Applicable yellow expectations,
+dashed hypotheses and evidence-backed green handoffs retain independent
+status. Real failure gets its original failure indicator.
+The scene remains a summary; original consumer review and prompt diff live
+in the Workspace's existing comparison and original Artifact readers.
+
+The source rail does not implement Whole Goal acceptance. The original
+owner-bound complete Requirement/Acceptance Ledger is still unavailable in
+v2; an observed set of green handoffs still leaves Whole Goal UNKNOWN.
+No new Scheduler, CLI route, Native P-class occurrence or executable tool
+call was added. Current cloud vendor parity and deployment remain paused.
