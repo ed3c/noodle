@@ -1210,3 +1210,111 @@
 .li-station .li-machine-art {
   pointer-events: bounding-box;
 }
+
+/* Progressive inspection keeps one floor and one source readback at every width. */
+.li-console {
+  container-type: inline-size;
+}
+.li-console .li-body {
+  align-items: stretch;
+  height: min(76vh, 850px);
+  min-height: 420px;
+}
+.li-console .li-viewport {
+  min-height: 0;
+  max-height: none;
+  height: 100%;
+  overscroll-behavior: contain;
+}
+.li-console .li-viewport > svg {
+  min-width: 0;
+  height: auto;
+}
+.li-console .lc-review-area {
+  min-height: 0;
+  height: 100%;
+}
+.li-console .lc-review-area .li-readback {
+  height: 100%;
+  max-height: none;
+  overscroll-behavior: contain;
+}
+.li-position-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 12px;
+  border-bottom: 1px solid #45606b;
+}
+.li-position {
+  margin: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.li-machine-index .li-card-outline {
+  fill: #182c37;
+  stroke: #617b85;
+}
+.li-machine-index.li-dim,
+.li-machine-index.li-unobserved {
+  opacity: 1;
+}
+.li-index-name {
+  font-size: 14px;
+}
+.li-console .li-principles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 4px;
+}
+.li-console .li-principles button {
+  text-align: center;
+  margin: 0;
+}
+.li-principles svg {
+  height: 40px;
+  width: 50px;
+  display: block;
+  margin: auto;
+}
+.li-console .li-principles button[aria-pressed="true"] {
+  outline: 2px solid #166652;
+}
+.li-console .li-height-control {
+  display: none;
+}
+.li-console.li-review-expanded .li-body {
+  grid-template-columns: 1fr;
+}
+.li-console.li-review-expanded .li-viewport {
+  display: none;
+}
+@container (max-width: 1000px) {
+  .li-console .li-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: var(--li-scene-height, 360px) minmax(260px, 1fr);
+    height: calc(var(--li-scene-height, 360px) + 360px);
+  }
+  .li-console .li-height-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .li-height-control input {
+    width: 90px;
+  }
+  .li-console.li-review-expanded .li-body {
+    grid-template-rows: 1fr;
+    height: min(76vh, 850px);
+  }
+}
+
+.li-view-options > summary {
+  padding: 8px 16px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.li-console .li-small {
+  font-size: 14px;
+}

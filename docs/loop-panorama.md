@@ -50,7 +50,8 @@ validity and result badges remain separate. Yellow solid routes are applicable
 contract expectations; yellow dashed routes are source-bound hypotheses. An
 unconnected hypothesis stays in the source index. The renderer does not guess endpoints.
 
-Each unique owner contains five principle selectors. The original Soodles
+Selecting a unique owner reveals its five principle selectors in the shared readback.
+The overview does not render five miniature selectors on every machine. The original Soodles
 `mechanism_contract` artifact defines their source-role mapping; the separate
 `state_machine_contract` artifact retains the governing prose. Geometry is shared
 by classification. Related source references do not prove a principle was followed.
@@ -58,3 +59,27 @@ Missing classifications remain unknown, rather than becoming mandatory runtime s
 The whole machine shows Goal closure and gaps. An owner shows interfaces, state and
 neighbors. A principle selector exposes source references and matching occurrences.
 All three keep the selected Run; clicks read data and never dispatch effects.
+
+## Focused local inspection
+
+A selected Run shows actual handoffs and unmatched applicable expectations by default.
+Matched expectations and hypotheses remain accessible through the readback index and
+full-overlay control. Selecting an edge reveals its source-matched expectations.
+A source-drift comparison keeps all applicable contract routes visible. Hiding a route
+changes only presentation; it never changes evidence, applicability or a result.
+
+Machines with selected occurrences or displayed expected steps stay in the main scene.
+Other unique machines remain selectable in a compact index on the same floor. The full
+architecture control expands them without creating execution edges. Occurrences use
+ranks derived from original edges; disconnected nodes do not gain a causal relationship
+from their positions. Contract classifications are inspection dimensions, not mandatory
+runtime steps.
+
+Wide views place the scene and readback side by side. Narrow views stack independently
+scrollable panes with an adjustable scene height. Goal, Run and selection remain above
+both panes. Enlarging the review preserves the scene and its scroll position for return.
+Source, camera and full-overlay controls do not dispatch runtime effects.
+
+This local UI revision has not been copied to medium-compiler: cloud changes are paused
+by the user. Cloud byte-equality and cloud interaction acceptance remain pending for the
+next explicitly resumed cloud delivery.
