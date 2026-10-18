@@ -58,6 +58,7 @@ export function expectedScene(graph, model) {
   const { expected, comparison } = model;
   const steps = expected.steps.map((step) => ({
     ...step,
+    layer: "contract",
     owner: graph.objects.find(
       (o) => o.namespace === expected.components.find((c) => c.id === step.component)?.owner,
     ),

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { graphFixture, required } from "~/client/loop-graph-fixture";
 import { LoopGraphContent } from "./LoopGraph";
 import { knownFailureFrontier } from "~/client/loop-graph-presentation";
-import { compareJSON, compareText } from "./LoopGraphComparison";
+import { compareJSON, compareText, comparisonPurpose } from "./LoopGraphComparison";
 
 afterEach(() => vi.unstubAllGlobals());
 function setup(customize?: (view: ReturnType<typeof graphFixture>) => void) {
@@ -332,6 +332,18 @@ describe("source-backed DAG interactions", () => {
     expect(graph.findings.some((finding) => finding.id === "later")).toBe(true);
     graph.edges = [];
     expect(knownFailureFrontier(graph).has("later")).toBe(true);
+  });
+  it("distinguishes carrier consistency, representation change and original tool results", () => {
+    const { graph } = graphFixture();
+    const original = required(graph.artifacts[0]);
+    expect(comparisonPurpose(original, original)).toContain("載體一致性");
+    const call = { ...original, id: "call", role: "native_tool_call", source: null };
+    const result = { ...original, id: "result", role: "native_tool_result", source: null };
+    expect(comparisonPurpose(call, result)).toContain("原生呼叫 → 結果");
+    expect(
+      comparisonPurpose({ ...call, role: "stage_prompt" }, { ...result, role: "native_input" }),
+    ).toContain("表示轉換");
+    expect(comparisonPurpose(call)).toContain("未知");
   });
   it("compares text and JSON structurally without semantic judgments", () => {
     expect(compareText("甲😀", "甲😀乙")).toMatchObject({

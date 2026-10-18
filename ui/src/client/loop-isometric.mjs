@@ -77,11 +77,19 @@ export function observedFlow(edge, graph) {
   return ["current", "historical"].includes(evidenceState({ ...edge, status: "observed" }, graph));
 }
 
+function isNativeTool(graph, node) {
+  return node?.output_artifact_ids?.some((id) =>
+    graph.artifacts.some(
+      (a) => a.id === id && ["native_tool_call", "native_tool_result"].includes(a.role),
+    ),
+  );
+}
+
 /** Geometry is a view of original IDs. It never adds an execution or a relationship. */
 export function projectConsole(
   graph,
   scope,
-  { runId = null, sources = false, repositoryIds = null } = {},
+  { runId = null, sources = false, events = false, selection = null, repositoryIds = null } = {},
 ) {
   let nodes = scope.nodes.filter(
     (n) =>
@@ -101,11 +109,37 @@ export function projectConsole(
   const endpoints = new Set(
     eligible.filter((e) => e.kind === "handoff").flatMap((e) => [e.from_node_id, e.to_node_id]),
   );
+  const selectedIds = new Set(
+    selection?.kind === "finding"
+      ? graph.findings.find((f) => f.id === selection.id)?.node_ids || []
+      : [],
+  );
+  if (selection?.kind === "node") {
+    selectedIds.add(selection.id);
+  }
+  if (selection?.kind === "edge") {
+    const edge = eligible.find((e) => e.id === selection.id);
+    if (edge) {
+      selectedIds.add(edge.from_node_id);
+      selectedIds.add(edge.to_node_id);
+    }
+  }
+  const revealed = new Set(selectedIds);
+  for (const edge of eligible) {
+    if (
+      edge.kind === "handoff" &&
+      (selectedIds.has(edge.from_node_id) || selectedIds.has(edge.to_node_id))
+    ) {
+      revealed.add(edge.from_node_id);
+      revealed.add(edge.to_node_id);
+    }
+  }
   const visible = nodes.filter(
     (n) =>
-      sources ||
-      endpoints.has(n.id) ||
-      !["available_reference", "selected"].includes(n.status.execution),
+      (events || revealed.has(n.id) || !isNativeTool(graph, n)) &&
+      (sources ||
+        endpoints.has(n.id) ||
+        !["available_reference", "selected"].includes(n.status.execution)),
   );
   const ids = new Set(visible.map((n) => n.id));
   const edges = eligible.filter((e) => ids.has(e.from_node_id) && ids.has(e.to_node_id));
@@ -179,7 +213,9 @@ export function observedParticipation(node, runId) {
 
 /** Follow supplied directional relations, retaining their evidence status. No root-cause claim. */
 export function traceFinding(scene, finding) {
-  const { edges } = scene;
+  const edges = scene.edges.filter(
+    (edge) => edge.kind === "handoff" && ["observed", "failed"].includes(edge.status),
+  );
   const seeds = new Set(finding.node_ids);
   for (const edge of edges.filter((candidate) => finding.edge_ids.includes(candidate.id))) {
     seeds.add(edge.from_node_id);
@@ -253,6 +289,7 @@ export function mountIsometric(
   }
   let machine;
   let sceneModel;
+  state.events ??= false;
   state.anchor ??= null;
   state.onlyMachine ??= false;
   state.fullOverlay ??= false;
@@ -288,6 +325,7 @@ export function mountIsometric(
   run.value = state.run || "";
   run.addEventListener("change", () => {
     state.run = run.value || null;
+    state.events = false;
     state.selection = null;
     render();
     onRun?.(state.run);
@@ -512,6 +550,7 @@ export function mountIsometric(
       state.returnView = {
         run: state.run,
         sources: state.sources,
+        events: state.events,
         apart: state.apart,
         angle: state.angle,
         zoom: state.zoom,
@@ -564,6 +603,9 @@ export function mountIsometric(
     }
   }
   function expandRun(id) {
+    if (state.run !== id) {
+      state.events = false;
+    }
     state.run = id;
     expectedModel = null;
     expectedKey = "";
@@ -703,6 +745,8 @@ export function mountIsometric(
     sceneModel = projectConsole(graph, scope, {
       runId: state.run,
       sources: state.sources,
+      events: state.events,
+      selection: state.selection,
       repositoryIds: filtered
         ? filterRepositories(graph.repositories, state.filter).map((r) => r.id)
         : null,
@@ -1142,10 +1186,18 @@ export function mountIsometric(
         { node: graph.nodes, edge: graph.edges, finding: graph.findings }[state.selection.kind] ||
         []
       ).find((r) => r.id === state.selection.id);
-      nav.append(html("span", ` → ${record?.label || record?.message || state.selection.kind}`));
+      nav.append(
+        html(
+          "span",
+          ` → ${(record?.label || record?.message || state.selection.kind).slice(0, 90)}`,
+        ),
+      );
     }
     nav.append(button("返回機械全景", returnToMachine));
     inspector.append(nav);
+    if (!["object", "principle"].includes(state.selection?.kind)) {
+      return;
+    }
     const categories = html("div", null, { class: "li-principles", "aria-label": "契約分類入口" });
     for (const facet of contractFacets(facetGraph(), owner.id, state.run)) {
       const port = button(facet.name, () => selectItem("principle", `${owner.id}/${facet.id}`));
@@ -1283,7 +1335,83 @@ export function mountIsometric(
         runHeader.append(html("p", "未記錄斷點；不等於 Goal 已驗收。"));
       }
     }
+    if (state.run) {
+      const requestNode = graph.nodes.find(
+        (n) =>
+          n.run_id === state.run &&
+          n.output_artifact_ids.some((id) =>
+            graph.artifacts.some((a) => a.id === id && a.role === "loop_request"),
+          ),
+      );
+      const requestArtifact = graph.artifacts.find(
+        (a) => requestNode?.output_artifact_ids.includes(a.id) && a.role === "loop_request",
+      );
+      if (requestArtifact) {
+        const original = html("details", null, { "aria-label": "本次原要求" });
+        const goalRun = state.run;
+        original.open = state.goalOpenRun === goalRun;
+        const content = html("p", "按需讀取本次 Run 綁定的原要求。");
+        original.append(html("summary", "本次原要求"), content);
+        let loading = false;
+        original.addEventListener("toggle", async () => {
+          if (!original.isConnected) {
+            return;
+          }
+          state.goalOpenRun = original.open ? goalRun : null;
+          if (!original.open || loading) {
+            return;
+          }
+          loading = true;
+          state.goalContents ??= {};
+          try {
+            const raw =
+              requestArtifact.content ||
+              state.goalContents[requestArtifact.id] ||
+              (readArtifact && (await readArtifact(requestArtifact.id)));
+            if (!raw) {
+              throw new Error("原來源內容未提供");
+            }
+            state.goalContents[requestArtifact.id] = raw;
+            const request = JSON.parse(raw);
+            content.textContent =
+              typeof request.goal === "string" ? request.goal : "原來源未提供 Goal";
+          } catch (error) {
+            content.textContent = `原要求讀回未確認：${error.message}。保留未知。`;
+          } finally {
+            loading = false;
+          }
+        });
+        runHeader.append(original);
+      }
+    }
     inspector.append(runHeader);
+    const toolNodes = graph.nodes.filter(
+      (n) =>
+        n.run_id === state.run &&
+        n.output_artifact_ids.some((id) =>
+          graph.artifacts.some((a) => a.id === id && a.role === "native_tool_call"),
+        ),
+    );
+    if (toolNodes.length > 0) {
+      const tools = html("details", null, { "aria-label": "原生工具事件" });
+      tools.append(
+        html("summary", `原生工具事件 · ${toolNodes.length} 次呼叫`),
+        html("p", "原 Session／attempt 的呼叫與結果；不以時間順序推論因果或指引已被遵循。"),
+        button(state.events ? "收合工具事件 DAG" : "展開工具事件 DAG", () => {
+          state.events = !state.events;
+          state.selection = null;
+          render();
+        }),
+      );
+      for (const node of toolNodes) {
+        tools.append(
+          button(`${node.label} · ${node.identity.invocation_id}`, () =>
+            selectItem("node", node.id),
+          ),
+        );
+      }
+      inspector.append(tools);
+    }
     const allExpected = expectedScene(graph, expectedModel);
     const hypotheses = allExpected.routes.filter((r) => r.layer === "hypothesis");
     const matched = allExpected.routes.filter(
@@ -1314,6 +1442,7 @@ export function mountIsometric(
     }
     inspector.append(folded);
     machineInspector();
+    const contextNodes = new Set(inspector.children);
     if (pick?.kind === "principle") {
       const [objectId, principleId] = pick.id.split("/");
       const facet = contractFacets(facetGraph(), objectId, state.run).find(
@@ -1353,7 +1482,16 @@ export function mountIsometric(
       if (record) {
         inspector.append(
           html("h4", record.name || record.transformation),
-          html("p", record.condition || "原假說，尚未證實"),
+          html(
+            "p",
+            record.layer === "contract"
+              ? `契約預期 · ${record.condition || "依原契約的適用路徑；對應來源不代表已執行或語義通過。"}`
+              : `可推翻假說 · ${record.condition || "尚未證實"}`,
+          ),
+        );
+        const raw = html("details");
+        raw.append(
+          html("summary", "原對照紀錄"),
           html(
             "pre",
             JSON.stringify(
@@ -1367,11 +1505,17 @@ export function mountIsometric(
             ),
           ),
         );
+        inspector.append(raw);
         const ids = record.matches || record.result?.edge_ids || [];
         for (const id of ids) {
+          const match = (pick.kind === "expected" ? graph.nodes : graph.edges).find(
+            (v) => v.id === id,
+          );
+          const reference = graph.artifacts.find((a) => match?.input_artifact_ids?.includes(a.id));
           inspector.append(
-            button("定位原實際證據", () =>
-              selectItem(pick.kind === "expected" ? "node" : "edge", id),
+            button(
+              `定位 · ${match?.label || id} · ${match?.status?.execution || "原交接"} · ${reference?.source?.sha256?.slice(0, 10) || "版本未知"}`,
+              () => selectItem(pick.kind === "expected" ? "node" : "edge", id),
             ),
           );
         }
@@ -1521,6 +1665,10 @@ export function mountIsometric(
         ),
       );
     }
+    if (pick && !["object", "principle"].includes(pick.kind)) {
+      const content = [...inspector.children].filter((element) => !contextNodes.has(element));
+      inspector.prepend(...content);
+    }
     if (state.anchor) {
       return;
     }
@@ -1555,6 +1703,9 @@ export function mountIsometric(
       expandRun(id);
     },
     syncRun(id) {
+      if (state.run !== id) {
+        state.events = false;
+      }
       state.run = id;
       run.value = id || "";
       render();
@@ -1567,6 +1718,7 @@ export function mountIsometric(
           state.returnView = {
             run: state.run,
             sources: state.sources,
+            events: state.events,
             apart: state.apart,
             angle: state.angle,
             zoom: state.zoom,

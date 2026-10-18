@@ -283,7 +283,13 @@ test("participation requires the selected Run, native identity and a known obser
   node.identity.status = "unknown";
   assert.equal(observedParticipation(node, "run"), false);
 });
-const makeTraceEdge = (id, from, to) => ({ id, from_node_id: from, to_node_id: to });
+const makeTraceEdge = (id, from, to) => ({
+  id,
+  from_node_id: from,
+  to_node_id: to,
+  kind: "handoff",
+  status: "observed",
+});
 test("breakpoint tracing follows original directions, handles cycles and never imports sibling branches", () => {
   const scene = {
     edges: [
@@ -300,4 +306,62 @@ test("breakpoint tracing follows original directions, handles cycles and never i
   assert.equal(t.edges.has("ax"), false);
   assert.equal(JSON.stringify(scene), before);
   assert.equal(traceFinding(scene, { node_ids: [], edge_ids: [] }).nodes.size, 0);
+});
+
+test("native events remain available without flooding the default scene", () => {
+  const { graph, scope } = fixture();
+  graph.artifacts.push({ id: "call", role: "native_tool_call", status: "available" });
+  graph.nodes[1].output_artifact_ids = ["call"];
+  assert.equal(
+    projectConsole(graph, scope, { runId: "selected" }).nodes.some((n) => n.id === "b"),
+    false,
+  );
+  assert.equal(
+    projectConsole(graph, scope, { runId: "selected", events: true }).nodes.some(
+      (n) => n.id === "b",
+    ),
+    true,
+  );
+});
+
+test("selecting one native event reveals only its evidenced pair", () => {
+  const { graph, scope } = fixture();
+  graph.artifacts.push(
+    { id: "call", role: "native_tool_call", status: "available" },
+    { id: "result", role: "native_tool_result", status: "available" },
+  );
+  const call = {
+    ...makeNode("call", { run: "selected", repo: "repoB" }),
+    output_artifact_ids: ["call"],
+  };
+  const result = {
+    ...makeNode("result", { run: "selected", repo: "repoB" }),
+    output_artifact_ids: ["result"],
+  };
+  const other = { ...call, id: "other-call" };
+  graph.nodes.push(call, result, other);
+  scope.nodes.push(call, result, other);
+  graph.edges.push({ ...graph.edges[0], id: "tool", from_node_id: "call", to_node_id: "result" });
+  const view = projectConsole(graph, scope, {
+    runId: "selected",
+    selection: { kind: "node", id: "call" },
+  });
+  assert.ok(view.nodes.some((n) => n.id === "call"));
+  assert.ok(view.nodes.some((n) => n.id === "result"));
+  assert.equal(
+    view.nodes.some((n) => n.id === "other-call"),
+    false,
+  );
+});
+
+test("a tool failure cannot trace through a diagnostic Session association as causal evidence", () => {
+  const scene = {
+    edges: [
+      { ...makeTraceEdge("association", "session", "call"), kind: "diagnostic", status: "unknown" },
+      makeTraceEdge("result", "call", "result"),
+    ],
+  };
+  const trace = traceFinding(scene, { node_ids: ["result"], edge_ids: [] });
+  assert.deepEqual([...trace.nodes].toSorted(), ["call", "result"]);
+  assert.equal(trace.edges.has("association"), false);
 });
