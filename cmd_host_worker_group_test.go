@@ -14,6 +14,49 @@ import (
 	"time"
 )
 
+func TestHostRecoveryPreflightChecksRecordedStartIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name, started string
+		wantErr       bool
+	}{
+		{"reused-pid", "2000-01-01T00:00:00Z", false},
+		{"same-process", time.Now().UTC().Format(time.RFC3339Nano), true},
+		{"missing-start", "", true},
+		{"invalid-start", "unknown", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			session := filepath.Join(dir, "sessions", "fixture")
+			if err := os.MkdirAll(session, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(session, "meta.json"), []byte(`{"status":"completed"}`), 0600); err != nil {
+				t.Fatal(err)
+			}
+			record := map[string]any{"pid": os.Getpid()}
+			if tc.started != "" {
+				record["started_at"] = tc.started
+			}
+			raw, err := json.Marshal(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(session, "process.json"), raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := hostRecoveryPreflight(dir); (err != nil) != tc.wantErr {
+				t.Fatalf("preflight: %v", err)
+			}
+			if tc.name == "reused-pid" {
+				t.Setenv("PATH", t.TempDir())
+				if err := hostRecoveryPreflight(dir); err == nil {
+					t.Fatal("missing OS start readback accepted")
+				}
+			}
+		})
+	}
+}
+
 func TestHostRecoveryPreflightRetainsExitedWorkerGroup(t *testing.T) {
 	dir := t.TempDir()
 	cmd := exec.Command("/bin/sh", "-c", "sleep 30 </dev/null >/dev/null 2>&1 & echo $! > child.pid")
