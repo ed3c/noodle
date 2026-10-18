@@ -79,7 +79,10 @@ test("Session decision is NOT inferred from intent selection or owner readbacks"
   assert.deepEqual(lane.owner_readbacks, ["readback"]);
   assert.deepEqual(lane.submitted_assessments, []);
   graph.artifacts.push({
-    id: "review", role: "harness_review", status: "available", content: "{}"
+    id: "review",
+    role: "harness_review",
+    status: "available",
+    content: "{}",
   });
   graph.nodes[1].output_artifact_ids.push("review");
   lane = projectIntentRail(graph, "a").find((item) => item.id === "judgment");
@@ -89,8 +92,10 @@ test("Session decision is NOT inferred from intent selection or owner readbacks"
   graph.artifacts.at(-1).status = "stale";
   lane = projectIntentRail(graph, "a").find((item) => item.id === "judgment");
   assert.equal(lane.decision_status, "UNKNOWN");
-  assert.equal(projectIntentRail(graph, "b").find((item) =>
-    item.id === "judgment").decision_status, "UNKNOWN");
+  assert.equal(
+    projectIntentRail(graph, "b").find((item) => item.id === "judgment").decision_status,
+    "UNKNOWN",
+  );
 });
 
 test("private source remains represented but does not imply content permission", () => {

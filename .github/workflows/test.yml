@@ -25,15 +25,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Capture canonical changed source formatter output
-        run: |
-          pnpm --filter noodle-ui exec oxfmt --write src/client/loop-intent-rail.mjs src/client/loop-intent-rail.test.mjs src/client/loop-isometric.mjs
-          for p in ui/src/client/loop-intent-rail.mjs ui/src/client/loop-intent-rail.test.mjs ui/src/client/loop-isometric.mjs; do
-            echo "SOURCE_FORMAT_BEGIN:$p"
-            base64 -w0 "$p"
-            echo
-            echo "SOURCE_FORMAT_END:$p"
-          done
       - name: Verify UI source and loop interactions
         run: |
           pnpm --filter noodle-ui verify

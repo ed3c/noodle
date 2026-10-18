@@ -939,12 +939,15 @@ export function mountIsometric(
         svg("rect", null, { x, y, width: 192, height: 75, rx: 6, class: "li-intent-source-card" }),
       );
       label([card, lane.title, x + 10, y + 25, "li-machine-title"]);
-      let cardStatus = lane.source_status === "source_referenced"
-        ? `${lane.artifact_ids.length} 原來源引用` : "UNKNOWN · 來源不足";
+      let cardStatus =
+        lane.source_status === "source_referenced"
+          ? `${lane.artifact_ids.length} 原來源引用`
+          : "UNKNOWN · 來源不足";
       if (lane.id === "judgment") {
-        cardStatus = lane.decision_status === "SESSION_SUBMISSION_UNVERIFIED"
-          ? "Session 判斷已提交 · 語義未驗證"
-          : "Session 判斷 UNKNOWN · 僅來源/讀回";
+        cardStatus =
+          lane.decision_status === "SESSION_SUBMISSION_UNVERIFIED"
+            ? "Session 判斷已提交 · 語義未驗證"
+            : "Session 判斷 UNKNOWN · 僅來源/讀回";
       }
       label([card, cardStatus, x + 10, y + 54, "li-small"]);
       sourceGroup.append(card);
@@ -1370,8 +1373,18 @@ export function mountIsometric(
         ),
       );
       if (lane?.id === "judgment") {
-        panel.append(html("p", `決策證據：${lane.decision_status}。選定 intent_selection、原 Owner Readback 和已提交的 harness_review 互不代替；註冊/來源不證明 Agent 遵循。`));
-        panel.append(html("p", `輸入來源 ${lane.original_inputs.length} · 原讀回 ${lane.owner_readbacks.length} · Session Assessment ${lane.submitted_assessments.length}`));
+        panel.append(
+          html(
+            "p",
+            `決策證據：${lane.decision_status}。選定 intent_selection、原 Owner Readback 和已提交的 harness_review 互不代替；註冊/來源不證明 Agent 遵循。`,
+          ),
+        );
+        panel.append(
+          html(
+            "p",
+            `輸入來源 ${lane.original_inputs.length} · 原讀回 ${lane.owner_readbacks.length} · Session Assessment ${lane.submitted_assessments.length}`,
+          ),
+        );
       }
       for (const id of lane?.artifact_ids || []) {
         const a = graph.artifacts.find((x) => x.id === id);
