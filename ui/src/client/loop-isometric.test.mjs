@@ -301,3 +301,19 @@ test("breakpoint tracing follows original directions, handles cycles and never i
   assert.equal(JSON.stringify(scene), before);
   assert.equal(traceFinding(scene, { node_ids: [], edge_ids: [] }).nodes.size, 0);
 });
+
+test("native events remain available without flooding the default scene", () => {
+  const { graph, scope } = fixture();
+  graph.artifacts.push({ id: "call", role: "native_tool_call", status: "available" });
+  graph.nodes[1].output_artifact_ids = ["call"];
+  assert.equal(
+    projectConsole(graph, scope, { runId: "selected" }).nodes.some((n) => n.id === "b"),
+    false,
+  );
+  assert.equal(
+    projectConsole(graph, scope, { runId: "selected", events: true }).nodes.some(
+      (n) => n.id === "b",
+    ),
+    true,
+  );
+});

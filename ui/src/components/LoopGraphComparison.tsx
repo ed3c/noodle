@@ -73,6 +73,22 @@ export function compareJSON(
     return null;
   }
 }
+export function comparisonPurpose(left?: Artifact, right?: Artifact) {
+  if (!left || !right) {
+    return "先選擇原輸入與輸出；缺來源保持未知。";
+  }
+  if (
+    left.id === right.id ||
+    (left.source?.sha256 && left.source.sha256 === right.source?.sha256)
+  ) {
+    return "載體一致性：比較同一份內容的交接，不代表 Prompt 型態轉換。";
+  }
+  if (left.role === "native_tool_call" && right.role === "native_tool_result") {
+    return "原生呼叫 → 結果：核對呼叫參數與原結果；成功退出不等於需求驗收通過。";
+  }
+  return `表示轉換：${left.role} → ${right.role}。文字差異不證明語義改變或需求已被保留。`;
+}
+
 function Metadata({ artifact }: { artifact: Artifact }) {
   return (
     <dl className="lg-metadata">
@@ -136,6 +152,7 @@ export function LoopGraphComparison({
   );
   return (
     <section aria-label="原始輸入輸出比較">
+      <p aria-label="比較用途">{comparisonPurpose(left, right)}</p>
       <p className="lg-small">
         多輸入依原 artifact 分開選取；只讀取目前兩個選項。文字不同不代表語義改變、遵循或驗收通過。
       </p>

@@ -469,6 +469,15 @@ test("one scene overlays bound expected routes without duplicating owner objects
     setTimeout(resolve, 0);
   });
   assert.ok(root.querySelector('[data-iso-expected="s"]'), "hidden match cannot imply uniqueness");
+  root.querySelector('[data-iso-expected="s"]').dispatchEvent(new dom.window.Event("click"));
+  const readback = root.querySelector(".li-inspector");
+  assert.match(readback.textContent, /契約預期/);
+  assert.doesNotMatch(readback.textContent, /原假說，尚未證實/);
+  assert.ok(
+    [...readback.querySelectorAll("button")].some((b) =>
+      b.textContent.includes("available_reference"),
+    ),
+  );
 });
 
 test("failed historical transport keeps green evidence, historical marker and separate failure", (t) => {
@@ -587,4 +596,27 @@ test("local machine filtering does not relabel recorded participation as unobser
   assert.ok(root.querySelector('[data-iso-object="loop"].li-machine-index'));
   assert.doesNotMatch(root.querySelector(".li-viewport").textContent, /未觀察本次參與/);
   assert.equal(graph.nodes.find((n) => n.id === "separate").status.execution, "completed");
+});
+
+test("native event index opens a recorded tool and places its readback before secondary context", (t) => {
+  const { root, dom } = navigationFixture(t, {}, (graph) => {
+    graph.nodes[0].output_artifact_ids = ["call"];
+    graph.nodes[0].identity.invocation_id = "thread/1/item_2";
+    graph.artifacts.push({ id: "call", role: "native_tool_call", status: "available" });
+  });
+  const select = root.querySelector('[aria-label="立體視圖執行範圍"]');
+  select.value = "a";
+  select.dispatchEvent(new dom.window.Event("change"));
+  const index = root.querySelector('[aria-label="原生工具事件"]');
+  assert.match(index.textContent, /1 次呼叫/);
+  [...index.querySelectorAll("button")]
+    .find((b) => b.textContent.includes("thread/1/item_2"))
+    .click();
+  assert.ok(root.querySelector('[data-iso-node="a"]'));
+  const inspector = root.querySelector(".li-inspector");
+  const children = [...inspector.children];
+  assert.ok(
+    children.indexOf(inspector.querySelector("h4")) <
+      children.indexOf(inspector.querySelector(".li-run-summary")),
+  );
 });

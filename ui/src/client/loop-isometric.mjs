@@ -77,11 +77,19 @@ export function observedFlow(edge, graph) {
   return ["current", "historical"].includes(evidenceState({ ...edge, status: "observed" }, graph));
 }
 
+function isNativeTool(graph, node) {
+  return node?.output_artifact_ids?.some((id) =>
+    graph.artifacts.some(
+      (a) => a.id === id && ["native_tool_call", "native_tool_result"].includes(a.role),
+    ),
+  );
+}
+
 /** Geometry is a view of original IDs. It never adds an execution or a relationship. */
 export function projectConsole(
   graph,
   scope,
-  { runId = null, sources = false, repositoryIds = null } = {},
+  { runId = null, sources = false, events = false, repositoryIds = null } = {},
 ) {
   let nodes = scope.nodes.filter(
     (n) =>
@@ -103,9 +111,10 @@ export function projectConsole(
   );
   const visible = nodes.filter(
     (n) =>
-      sources ||
-      endpoints.has(n.id) ||
-      !["available_reference", "selected"].includes(n.status.execution),
+      (events || !isNativeTool(graph, n)) &&
+      (sources ||
+        endpoints.has(n.id) ||
+        !["available_reference", "selected"].includes(n.status.execution)),
   );
   const ids = new Set(visible.map((n) => n.id));
   const edges = eligible.filter((e) => ids.has(e.from_node_id) && ids.has(e.to_node_id));
@@ -253,6 +262,7 @@ export function mountIsometric(
   }
   let machine;
   let sceneModel;
+  state.events ??= false;
   state.anchor ??= null;
   state.onlyMachine ??= false;
   state.fullOverlay ??= false;
@@ -502,7 +512,27 @@ export function mountIsometric(
   function size() {
     drawing.style.width = `${state.zoom * 100}%`;
   }
+  function revealToolSelection(kind, id) {
+    let ids = [id];
+    if (kind === "finding") {
+      ids = graph.findings.find((f) => f.id === id)?.node_ids || [];
+    } else if (kind === "edge") {
+      const edge = graph.edges.find((e) => e.id === id);
+      ids = edge ? [edge.from_node_id, edge.to_node_id] : [];
+    }
+    if (
+      ids.some((nodeId) =>
+        isNativeTool(
+          graph,
+          graph.nodes.find((n) => n.id === nodeId),
+        ),
+      )
+    ) {
+      state.events = true;
+    }
+  }
   function selectItem(kind, id) {
+    revealToolSelection(kind, id);
     if (
       (kind === "object" || kind === "principle") &&
       state.anchor !== (kind === "principle" ? id.split("/")[0] : id)
@@ -512,6 +542,7 @@ export function mountIsometric(
       state.returnView = {
         run: state.run,
         sources: state.sources,
+        events: state.events,
         apart: state.apart,
         angle: state.angle,
         zoom: state.zoom,
@@ -564,6 +595,9 @@ export function mountIsometric(
     }
   }
   function expandRun(id) {
+    if (state.run !== id) {
+      state.events = false;
+    }
     state.run = id;
     expectedModel = null;
     expectedKey = "";
@@ -703,6 +737,7 @@ export function mountIsometric(
     sceneModel = projectConsole(graph, scope, {
       runId: state.run,
       sources: state.sources,
+      events: state.events,
       repositoryIds: filtered
         ? filterRepositories(graph.repositories, state.filter).map((r) => r.id)
         : null,
@@ -1142,10 +1177,18 @@ export function mountIsometric(
         { node: graph.nodes, edge: graph.edges, finding: graph.findings }[state.selection.kind] ||
         []
       ).find((r) => r.id === state.selection.id);
-      nav.append(html("span", ` → ${record?.label || record?.message || state.selection.kind}`));
+      nav.append(
+        html(
+          "span",
+          ` → ${(record?.label || record?.message || state.selection.kind).slice(0, 90)}`,
+        ),
+      );
     }
     nav.append(button("返回機械全景", returnToMachine));
     inspector.append(nav);
+    if (!["object", "principle"].includes(state.selection?.kind)) {
+      return;
+    }
     const categories = html("div", null, { class: "li-principles", "aria-label": "契約分類入口" });
     for (const facet of contractFacets(facetGraph(), owner.id, state.run)) {
       const port = button(facet.name, () => selectItem("principle", `${owner.id}/${facet.id}`));
@@ -1283,7 +1326,59 @@ export function mountIsometric(
         runHeader.append(html("p", "未記錄斷點；不等於 Goal 已驗收。"));
       }
     }
+    if (state.run) {
+      const requestNode = graph.nodes.find(
+        (n) =>
+          n.run_id === state.run &&
+          n.output_artifact_ids.some((id) =>
+            graph.artifacts.some((a) => a.id === id && a.role === "loop_request"),
+          ),
+      );
+      const requestArtifact = graph.artifacts.find(
+        (a) => requestNode?.output_artifact_ids.includes(a.id) && a.role === "loop_request",
+      );
+      if (requestArtifact?.content) {
+        const original = html("details", null, { "aria-label": "本次原要求" });
+        try {
+          const request = JSON.parse(requestArtifact.content);
+          original.append(
+            html("summary", "本次原要求"),
+            html("p", request.goal || "原來源未提供 Goal"),
+          );
+        } catch {
+          original.append(html("summary", "本次原要求"), html("p", "原要求無法解析；請讀回來源。"));
+        }
+        runHeader.append(original);
+      }
+    }
     inspector.append(runHeader);
+    const toolNodes = graph.nodes.filter(
+      (n) =>
+        n.run_id === state.run &&
+        n.output_artifact_ids.some((id) =>
+          graph.artifacts.some((a) => a.id === id && a.role === "native_tool_call"),
+        ),
+    );
+    if (toolNodes.length > 0) {
+      const tools = html("details", null, { "aria-label": "原生工具事件" });
+      tools.append(
+        html("summary", `原生工具事件 · ${toolNodes.length} 次呼叫`),
+        html("p", "原 Session／attempt 的呼叫與結果；不以時間順序推論因果或指引已被遵循。"),
+        button(state.events ? "收合工具事件 DAG" : "展開工具事件 DAG", () => {
+          state.events = !state.events;
+          state.selection = null;
+          render();
+        }),
+      );
+      for (const node of toolNodes) {
+        tools.append(
+          button(`${node.label} · ${node.identity.invocation_id}`, () =>
+            selectItem("node", node.id),
+          ),
+        );
+      }
+      inspector.append(tools);
+    }
     const allExpected = expectedScene(graph, expectedModel);
     const hypotheses = allExpected.routes.filter((r) => r.layer === "hypothesis");
     const matched = allExpected.routes.filter(
@@ -1314,6 +1409,7 @@ export function mountIsometric(
     }
     inspector.append(folded);
     machineInspector();
+    const contextNodes = new Set(inspector.children);
     if (pick?.kind === "principle") {
       const [objectId, principleId] = pick.id.split("/");
       const facet = contractFacets(facetGraph(), objectId, state.run).find(
@@ -1353,7 +1449,16 @@ export function mountIsometric(
       if (record) {
         inspector.append(
           html("h4", record.name || record.transformation),
-          html("p", record.condition || "原假說，尚未證實"),
+          html(
+            "p",
+            record.layer === "contract"
+              ? `契約預期 · ${record.condition || "依原契約的適用路徑；對應來源不代表已執行或語義通過。"}`
+              : `可推翻假說 · ${record.condition || "尚未證實"}`,
+          ),
+        );
+        const raw = html("details");
+        raw.append(
+          html("summary", "原對照紀錄"),
           html(
             "pre",
             JSON.stringify(
@@ -1367,11 +1472,13 @@ export function mountIsometric(
             ),
           ),
         );
+        inspector.append(raw);
         const ids = record.matches || record.result?.edge_ids || [];
         for (const id of ids) {
           inspector.append(
-            button("定位原實際證據", () =>
-              selectItem(pick.kind === "expected" ? "node" : "edge", id),
+            button(
+              `定位 · ${(pick.kind === "expected" ? graph.nodes : graph.edges).find((v) => v.id === id)?.label || id} · ${(pick.kind === "expected" ? graph.nodes : graph.edges).find((v) => v.id === id)?.status?.execution || "原交接"}`,
+              () => selectItem(pick.kind === "expected" ? "node" : "edge", id),
             ),
           );
         }
@@ -1521,6 +1628,10 @@ export function mountIsometric(
         ),
       );
     }
+    if (pick && !["object", "principle"].includes(pick.kind)) {
+      const content = [...inspector.children].filter((element) => !contextNodes.has(element));
+      inspector.prepend(...content);
+    }
     if (state.anchor) {
       return;
     }
@@ -1567,6 +1678,7 @@ export function mountIsometric(
           state.returnView = {
             run: state.run,
             sources: state.sources,
+            events: state.events,
             apart: state.apart,
             angle: state.angle,
             zoom: state.zoom,
@@ -1577,6 +1689,7 @@ export function mountIsometric(
             filter: { ...state.filter },
           };
         }
+        revealToolSelection(value.kind, value.id);
         state.selection = value;
         render();
       } else if (!value && state.selection) {
