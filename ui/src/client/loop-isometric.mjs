@@ -939,19 +939,14 @@ export function mountIsometric(
         svg("rect", null, { x, y, width: 192, height: 75, rx: 6, class: "li-intent-source-card" }),
       );
       label([card, lane.title, x + 10, y + 25, "li-machine-title"]);
-      label([
-        card,
-        lane.id === "judgment"
-          ? (lane.decision_status === "SESSION_SUBMISSION_UNVERIFIED"
-            ? "Session 判斷已提交 · 語義未驗證"
-            : "Session 判斷 UNKNOWN · 僅來源/讀回")
-          : lane.source_status === "source_referenced"
-            ? `${lane.artifact_ids.length} 原來源引用`
-            : "UNKNOWN · 來源不足",
-        x + 10,
-        y + 54,
-        "li-small",
-      ]);
+      let cardStatus = lane.source_status === "source_referenced"
+        ? `${lane.artifact_ids.length} 原來源引用` : "UNKNOWN · 來源不足";
+      if (lane.id === "judgment") {
+        cardStatus = lane.decision_status === "SESSION_SUBMISSION_UNVERIFIED"
+          ? "Session 判斷已提交 · 語義未驗證"
+          : "Session 判斷 UNKNOWN · 僅來源/讀回";
+      }
+      label([card, cardStatus, x + 10, y + 54, "li-small"]);
       sourceGroup.append(card);
     }
     drawing.append(sourceGroup);

@@ -37,6 +37,13 @@ export function projectIntentRail(graph, runId) {
         ...(n.evidence_artifact_ids || []),
       ].some((id) => ids.has(id)),
     );
+    const reviewPresent = artifacts.some(
+      (a) => a.role === "harness_review" && ["available", "not_public"].includes(a.status),
+    );
+    let decisionStatus = "NOT_APPLICABLE";
+    if (lane.id === "judgment") {
+      decisionStatus = reviewPresent ? "SESSION_SUBMISSION_UNVERIFIED" : "UNKNOWN";
+    }
     return {
       id: lane.id,
       title: lane.title,
@@ -55,11 +62,7 @@ export function projectIntentRail(graph, runId) {
         ["loop_owner_readback", "schema_feedback"].includes(a.role)).map((a) => a.id),
       submitted_assessments: artifacts.filter((a) => a.role === "harness_review")
         .map((a) => a.id),
-      decision_status: lane.id === "judgment"
-        ? (artifacts.some((a) => a.role === "harness_review" &&
-            ["available", "not_public"].includes(a.status))
-          ? "SESSION_SUBMISSION_UNVERIFIED" : "UNKNOWN")
-        : "NOT_APPLICABLE",
+      decision_status: decisionStatus,
       execution_status: "NOT_ESTABLISHED_BY_SOURCE_RAIL",
     };
   });
