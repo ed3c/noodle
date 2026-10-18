@@ -2,6 +2,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { projectIntentRail, evidenceFocus } from "./loop-intent-rail.mjs";
 
+const node = ({ id, run, object, ins, outs }) => ({
+  id,
+  run_id: run,
+  object_id: object,
+  input_artifact_ids: ins,
+  output_artifact_ids: outs,
+  evidence_artifact_ids: [],
+});
+
 function fixture() {
   const ids = ["req", "selection", "prompt", "readback", "call", "receipt"];
   const artifacts = ids.map((id) => ({
@@ -16,14 +25,6 @@ function fixture() {
     }[id],
     status: "available",
   }));
-  const node = ({ id, run, object, ins, outs }) => ({
-    id,
-    run_id: run,
-    object_id: object,
-    input_artifact_ids: ins,
-    output_artifact_ids: outs,
-    evidence_artifact_ids: [],
-  });
   const nodes = [
     node({ id: "intent-a", run: "a", object: "source", ins: [], outs: ["req"] }),
     node({ id: "prompt-a", run: "a", object: "inner", ins: ["selection"], outs: ["prompt"] }),

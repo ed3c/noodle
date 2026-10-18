@@ -44,7 +44,7 @@ export function projectIntentRail(graph, runId) {
       artifact_ids: artifacts.map((a) => a.id),
       node_ids: carriers.map((n) => n.id),
       source_status:
-        artifacts.length && artifacts.every((a) => ["available", "not_public"].includes(a.status))
+        artifacts.length > 0 && artifacts.every((a) => ["available", "not_public"].includes(a.status))
           ? "source_referenced"
           : "unknown",
       execution_status: "NOT_ESTABLISHED_BY_SOURCE_RAIL",

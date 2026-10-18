@@ -1320,10 +1320,28 @@
 }
 
 /* Source rail: original carriers, NEVER native executions or green handoffs. */
-.li-intent-heading{fill:#102c33;stroke:#9cbdc2;stroke-width:1}
-.li-intent-source-card{fill:#1d353f;stroke:#809aa8;stroke-width:1}
+.li-intent-heading {
+  fill: #102c33;
+  stroke: #9cbdc2;
+  stroke-width: 1;
+}
+.li-intent-source-card {
+  fill: #1d353f;
+  stroke: #809aa8;
+  stroke-width: 1;
+}
 .li-intent-source.is-selected .li-intent-source-card,
-.li-intent-source.li-endpoint .li-intent-source-card{stroke:#faf0bb;stroke-width:2}
-.li-intent-rail .li-machine-title{font-size:13px}
-.li-intent-rail .li-small{font-size:11px}
-.li-intent-rail .li-target:focus-visible{outline:3px solid #f0dda4;outline-offset:2px}
+.li-intent-source.li-endpoint .li-intent-source-card {
+  stroke: #faf0bb;
+  stroke-width: 2;
+}
+.li-intent-rail .li-machine-title {
+  font-size: 13px;
+}
+.li-intent-rail .li-small {
+  font-size: 11px;
+}
+.li-intent-rail .li-target:focus-visible {
+  outline: 3px solid #f0dda4;
+  outline-offset: 2px;
+}
