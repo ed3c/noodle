@@ -119,7 +119,12 @@ export function comparisonModel(graph, runId) {
         !Object.hasOwn(names, r.status) ||
         !Array.isArray(r.edge_ids),
     ) ||
-    Object.values(comparison.step_matches).some((ids) => !Array.isArray(ids))
+    Object.entries(comparison.step_matches).some(
+      ([step, ids]) =>
+        !stepIds.has(step) ||
+        !Array.isArray(ids) ||
+        ids.some((id) => !graph.nodes?.some((n) => n.id === id && n.run_id === runId)),
+    )
   ) {
     return invalid;
   }
@@ -157,11 +162,11 @@ export async function loadComparison(graph, runId, readArtifact) {
 export function mountComparison(
   { panel, review },
   { graph, runId, pick, memory },
-  { onSelect, onOriginal, readArtifact },
+  { onSelect, onOriginal, readArtifact, onModel, unified = false },
 ) {
   panel.replaceChildren();
   review.replaceChildren();
-  panel.append(el("h3", "右 / 契約預期與可推翻假說"));
+  panel.append(el("h3", "契約預期與可推翻假說 / 原來源讀回"));
   review.append(el("h3", "Workspace / 預期 ↔ 實際交接審查"));
   const refs = new Set(
     graph.nodes.filter((n) => n.run_id === runId).flatMap((n) => n.evidence_artifact_ids),
@@ -187,6 +192,7 @@ export function mountComparison(
     ),
   };
   const model = comparisonModel(hydrated, runId);
+  onModel?.(model);
   if (model.status !== "available") {
     panel.append(el("p", runId ? model.reason : "選擇一個 Run，與同一版本的預期對照。"));
     review.append(el("p", "缺少原投影時，實際 DAG 仍可讀取；未知不視為偏離。"));
@@ -345,7 +351,9 @@ export function mountComparison(
     });
     drawing.append(card);
   }
-  panel.append(drawing);
+  if (!unified) {
+    panel.append(drawing);
+  }
   const index = el("details", null);
   index.append(el("summary", `具名功能元件索引 · ${expected.components.length}`));
   for (const c of expected.components) {
@@ -383,6 +391,40 @@ export function mountComparison(
   }
   hypotheses.append(el("p", "原 Schema 宣告不是契約要求；人的採納不等於假說已驗證。"));
   panel.append(hypotheses);
+  const harness = el("section", null, "lc-harness");
+  harness.setAttribute("aria-label", "Harness 工具化缺口");
+  harness.append(el("h4", "Harness：從敘述到工具"));
+  const categories = {
+    session_judgment: "需要 Session 語義判斷",
+    tool_unwired: "已有工具但未接線",
+    capability_missing: "缺少確定性能力",
+    evidence_missing: "只有證據不足",
+  };
+  harness.append(
+    el("p", "四類判斷分開保留。缺觀察不能推成缺工具；工具已註冊不代表已載入或已執行。"),
+  );
+  for (const row of comparison.rows.filter((r) => r.status === "unknown")) {
+    harness.append(button(`證據不足 · ${row.route_id}`, () => chooseRoute(row.route_id)));
+  }
+  for (const record of comparison.harness_reviews || []) {
+    const { assessment } = record;
+    if (!assessment || !categories[assessment.category]) {
+      continue;
+    }
+    const detail = el("details", null);
+    detail.append(
+      el("summary", `${categories[assessment.category]} · Session 提交／未認證`),
+      el("p", assessment.claim),
+      el("p", `前提：${assessment.premise}`),
+      el("p", `推翻條件：${assessment.falsifier}`),
+      el("p", `原工具：${assessment.tool || "未指定；不猜測命令"}`),
+      button("檢視原判斷與來源版本", () =>
+        onOriginal({ kind: "artifact", id: record.artifact_id }),
+      ),
+    );
+    harness.append(detail);
+  }
+  review.append(harness);
   const table = el("table", null);
   const head = el("tr", null);
   for (const label of ["契約／型態轉換", "實際觀察", "機械對照"]) {
@@ -464,6 +506,8 @@ export function mountComparison(
         onSelect,
         onOriginal,
         readArtifact,
+        onModel,
+        unified,
       },
     );
   }

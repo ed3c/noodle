@@ -32,6 +32,7 @@ func newHostViewsCmd() *cobra.Command {
 	imp.Flags().StringVar(&file, "file", "", "JSON display projection (schema_version 1 or 2); refs and next are display only")
 	cmd.AddCommand(imp)
 	cmd.AddCommand(newHostViewBindCmd())
+	cmd.AddCommand(newHostReviewSelectionCmd())
 	cmd.AddCommand(&cobra.Command{Use: "inspect", Short: "Read stored loop display projections without contacting Host", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		dir, err := hostDirectory()
 		if err != nil {
@@ -46,5 +47,26 @@ func newHostViewsCmd() *cobra.Command {
 	cmd.AddCommand(&cobra.Command{Use: "capabilities", Short: "Read the display projection capability", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 2, "supported_schema_versions": []int{1, 2}, "graph_api_path": "/api/loops/graph", "offline_import": true, "readonly_web": true, "path": "/loops", "api_path": "/api/loops"})
 	}})
+	return cmd
+}
+
+func newHostReviewSelectionCmd() *cobra.Command {
+	var request, id string
+	cmd := &cobra.Command{Use: "review-selections", Short: "Read explicit UI review references without dispatch", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		if request == "" {
+			return fmt.Errorf("original request file required")
+		}
+		dir, err := hostDirectory()
+		if err != nil {
+			return err
+		}
+		result, err := loopview.InspectReviewSelections(dir, request, id)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+	}}
+	cmd.Flags().StringVar(&request, "request-file", "", "Original loop request path")
+	cmd.Flags().StringVar(&id, "id", "", "Exact review reference; omission lists references for this request")
 	return cmd
 }

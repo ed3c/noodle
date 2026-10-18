@@ -268,7 +268,7 @@ describe("source-backed DAG interactions", () => {
     const changed = structuredClone(view);
     required(changed.graph.nodes[0]).label = "New version";
     rerender(wrap(changed));
-    expect(screen.getByRole("status")).toHaveTextContent("有新版本");
+    expect(screen.getByRole("status", { name: "來源版本更新" })).toHaveTextContent("有新版本");
     expect(screen.queryByRole("button", { name: /紀錄 New version/ })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "採用新版本" }));
     expect(screen.getByRole("button", { name: /紀錄 New version/ })).toBeInTheDocument();

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchLoopView } from "~/client/loop-views";
 import type { LoopViewResponse } from "~/client/loop-views";
-import { fetchLoopGraph, fetchArtifact } from "~/client/loop-graph";
+import { fetchLoopGraph, fetchArtifact, submitReviewSelection } from "~/client/loop-graph";
 import type { GraphResponse, GraphView, LoopGraph } from "~/client/loop-graph";
 import { LoopViews, LoopViewsContent } from "./LoopViews";
 import { LoopGraphSourceIndex, noHighlight } from "./LoopGraphSourceIndex";
@@ -357,6 +357,21 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
   return (
     <>
       <LoopPanorama
+        onReviewSelection={
+          current.review_version
+            ? ({ runId, kind, id }) => {
+                if (!current.review_version) {
+                  return Promise.reject(new Error("Graph version missing"));
+                }
+                return submitReviewSelection({
+                  graphVersion: current.review_version,
+                  runId,
+                  kind,
+                  targetId: id,
+                });
+              }
+            : undefined
+        }
         graph={graph}
         readArtifact={async (id) => {
           const artifact = graph.artifacts.find((a) => a.id === id);
@@ -450,7 +465,7 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
         ))}
       </nav>
       {newer && (
-        <div className="lg-update" role="status">
+        <div className="lg-update" role="status" aria-label="來源版本更新">
           有新版本。比較仍固定在選取時的來源；原始內容若漂移會拒絕讀取。
           <button
             type="button"

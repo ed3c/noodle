@@ -96,3 +96,17 @@ test("a malformed comparison row stays unknown", () => {
   graph.artifacts[1].content = JSON.stringify(value);
   assert.equal(comparisonModel(graph, "run").status, "unknown");
 });
+test("comparison refuses another Run's existing step match", () => {
+  const graph = fixture();
+  graph.nodes = [
+    { id: "own", run_id: "run" },
+    { id: "foreign", run_id: "other" },
+  ];
+  const value = JSON.parse(graph.artifacts[1].content);
+  value.step_matches.a = ["own"];
+  graph.artifacts[1].content = JSON.stringify(value);
+  assert.equal(comparisonModel(graph, "run").status, "available");
+  value.step_matches.a = ["foreign"];
+  graph.artifacts[1].content = JSON.stringify(value);
+  assert.equal(comparisonModel(graph, "run").status, "unknown");
+});

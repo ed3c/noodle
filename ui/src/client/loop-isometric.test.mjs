@@ -3,6 +3,7 @@ import { mechanismFigure, anatomyModel } from "./loop-anatomy.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  workspaceLayout,
   evidenceState,
   projectConsole,
   inspectMachine,
@@ -300,4 +301,32 @@ test("breakpoint tracing follows original directions, handles cycles and never i
   assert.equal(t.edges.has("ax"), false);
   assert.equal(JSON.stringify(scene), before);
   assert.equal(traceFinding(scene, { node_ids: [], edge_ids: [] }).nodes.size, 0);
+});
+
+test("one workspace places every unique machine and execution item without overlapping hit areas", () => {
+  for (const count of [0, 1, 3, 12, 17]) {
+    for (const nodes of [0, 3, 15, 70]) {
+      const layout = workspaceLayout(count, nodes);
+      assert.equal(layout.objects.length, count);
+      assert.equal(layout.items.length, nodes);
+      const boxes = [
+        ...layout.objects.map(([x, y]) => [x, y, 250, 205]),
+        ...layout.items.map(([x, y]) => [x, y, 248, 158]),
+      ];
+      for (const [i, a] of boxes.entries()) {
+        assert.ok(
+          a[0] >= 0 && a[1] >= 0 && a[0] + a[2] <= layout.width && a[1] + a[3] <= layout.height,
+        );
+        for (const b of boxes.slice(i + 1)) {
+          assert.ok(
+            a[0] + a[2] <= b[0] ||
+              b[0] + b[2] <= a[0] ||
+              a[1] + a[3] <= b[1] ||
+              b[1] + b[3] <= a[1],
+            JSON.stringify({ count, nodes, a, b }),
+          );
+        }
+      }
+    }
+  }
 });

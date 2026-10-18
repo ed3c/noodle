@@ -40,3 +40,21 @@ static site vendors this module, its tests and `loop-panorama.css` unchanged. Ch
 to these files must be copied together and checked for byte equality. The cloud
 adapter still owns digest-checked public-content reads; the Noodle adapter still
 owns native local reads. Neither adapter changes execution authority.
+
+## Unified contract scene
+
+Actual handoffs and expected routes share one scene and one Run selection.
+Green identifies a bound, observed handoff, including an observed failed handoff.
+It does not certify semantic consumption, freshness or Goal acceptance. Historical
+validity and result badges remain separate. Yellow solid routes are applicable
+contract expectations; yellow dashed routes are source-bound hypotheses. An
+unconnected hypothesis stays in the source index. The renderer does not guess endpoints.
+
+Each unique owner contains five principle selectors. The original Soodles
+`mechanism_contract` artifact defines their source-role mapping; the separate
+`state_machine_contract` artifact retains the governing prose. Geometry is shared
+by classification. Related source references do not prove a principle was followed.
+Missing classifications remain unknown, rather than becoming mandatory runtime steps.
+The whole machine shows Goal closure and gaps. An owner shows interfaces, state and
+neighbors. A principle selector exposes source references and matching occurrences.
+All three keep the selected Run; clicks read data and never dispatch effects.

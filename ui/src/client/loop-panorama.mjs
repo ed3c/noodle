@@ -247,6 +247,7 @@ export function mountPanorama(
     onFocus,
     onReset,
     readArtifact,
+    onReviewSelection,
   },
 ) {
   const model = projectPanorama(graph, runIds ?? runs.map((r) => r.id));
@@ -309,6 +310,7 @@ export function mountPanorama(
   const consoleView = mountIsometric(consoleRoot, {
     graph,
     readArtifact,
+    onReviewSelection,
     scope: model,
     runs,
     onSelect,
@@ -1014,7 +1016,7 @@ export function mountPanorama(
     for (const row of unlocated) {
       section.append(renderRow(row));
     }
-    journey.append(section);
+    root.append(section);
   }
   architecture.append(
     regions,

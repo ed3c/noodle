@@ -54,11 +54,7 @@ func hostRecoveryPreflight(runtimeDir string) error {
 		} else if err != nil {
 			return err
 		}
-		pid, err := procx.ReadPIDFile(pidPath)
-		if err != nil {
-			return fmt.Errorf("session %s has unknown process identity; owner readback required", entry.Name())
-		}
-		absent, err := procx.ProcessGroupAbsent(pid)
+		absent, err := procx.RecordedProcessGroupAbsent(pidPath)
 		if err != nil {
 			return fmt.Errorf("session %s process group absence unknown; owner readback required: %w", entry.Name(), err)
 		}
