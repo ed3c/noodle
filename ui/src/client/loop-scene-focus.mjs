@@ -67,7 +67,7 @@ export function focusedLayout(primaryCount, indexCount, itemCount) {
       30 + (i % columns) * 280,
       machineTop + Math.floor(i / columns) * 145,
     ]),
-    items: Array.from({ length: itemCount }, (_, i) => [
+    items: Array.from({ length: count }, (_, i) => [
       30 + (i % columns) * 280,
       itemTop + Math.floor(i / columns) * 205,
     ]),

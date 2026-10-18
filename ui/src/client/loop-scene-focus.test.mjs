@@ -88,3 +88,13 @@ test("one floor separates compact index, machines and occurrence targets without
     }
   }
 });
+
+test("source rail reserves separate source-only floor without dropping native occurrence slots", () => {
+  const source = focusedLayout(2, 1, { count: 4, intentRail: true });
+  const baseline = focusedLayout(2, 1, 4);
+  assert.equal(source.items.length, 4);
+  assert.equal(source.objects.length, 2);
+  assert.equal(source.index.length, 1);
+  assert.equal(source.items[0][1] - baseline.items[0][1], 146);
+  assert.equal(source.height - baseline.height, 146);
+});
