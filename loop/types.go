@@ -155,6 +155,7 @@ type Dependencies struct {
 	Execution        *execution.Context
 	Admission        *admission.Budget
 	AdmissionContext string
+	CleanupCompleted bool
 	Runtimes         map[string]loopruntime.Runtime
 	Worktree         WorktreeManager
 	Adapter          AdapterRunner
@@ -191,6 +192,7 @@ type Loop struct {
 	cooks           cookTracker
 	cmds            cmdProcessor
 	resourceUnknown error
+	cleanupUnknown  error
 	completionBuf   completionBuffer
 
 	state             State

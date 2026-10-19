@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -27,23 +26,33 @@ type ResidentSpec struct {
 	Environment []string `json:"environment"`
 	Sharing     string   `json:"sharing"`
 	Transport   string   `json:"transport"`
+	// The service owner declares that no state must survive after its last lease.
+	ForceAfterGrace bool `json:"force_after_grace,omitempty"`
 }
 type Resident struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Fingerprint  string   `json:"fingerprint"`
-	Sharing      string   `json:"sharing"`
-	PID          int      `json:"pid"`
-	ProcessGroup int      `json:"process_group"`
-	Started      string   `json:"started"`
-	State        string   `json:"state"`
-	Contexts     []string `json:"contexts"`
-	Released     []string `json:"released_contexts"`
-	Error        string   `json:"error,omitempty"`
+	ID              string     `json:"id"`
+	Name            string     `json:"name"`
+	Fingerprint     string     `json:"fingerprint"`
+	Sharing         string     `json:"sharing"`
+	PID             int        `json:"pid"`
+	ProcessGroup    int        `json:"process_group"`
+	Started         string     `json:"started"`
+	State           string     `json:"state"`
+	Contexts        []string   `json:"contexts"`
+	Released        []string   `json:"released_contexts"`
+	Error           string     `json:"error,omitempty"`
+	ForceAfterGrace bool       `json:"force_after_grace,omitempty"`
+	StopRequested   string     `json:"stop_requested,omitempty"`
+	ForceRequested  string     `json:"force_requested,omitempty"`
+	History         []Resident `json:"history,omitempty"`
+	Errors          []string   `json:"errors,omitempty"`
 }
 type residentChild struct {
-	command *exec.Cmd
+	mu      sync.Mutex
+	reaped  bool
+	process *os.Process
 	permit  *Permit
+	done    chan struct{}
 }
 
 // Residents belongs to the existing Host. Only its own child handles can be stopped.
@@ -54,6 +63,17 @@ type Residents struct {
 	children map[string]*residentChild
 	failure  error
 	budget   *Budget
+	released chan struct{}
+}
+
+// Released wakes the existing Host actor after an observed allocation release.
+func (r *Residents) Released() <-chan struct{} { return r.released }
+
+func (r *Residents) notifyReleased() {
+	select {
+	case r.released <- struct{}{}:
+	default:
+	}
 }
 
 func (r *Residents) BindBudget(b *Budget) {
@@ -78,7 +98,7 @@ func (r *Residents) updateRecoveryBudget() {
 }
 
 func OpenResidents(directory string) (*Residents, error) {
-	r := &Residents{path: filepath.Join(directory, "residents.json"), records: map[string]*Resident{}, children: map[string]*residentChild{}}
+	r := &Residents{path: filepath.Join(directory, "residents.json"), records: map[string]*Resident{}, children: map[string]*residentChild{}, released: make(chan struct{}, 1)}
 	data, err := os.ReadFile(r.path)
 	if os.IsNotExist(err) {
 		return r, nil
@@ -94,6 +114,9 @@ func OpenResidents(directory string) (*Residents, error) {
 			return nil, errors.New("resident record is null")
 		}
 		if v.State != "exited" {
+			if v.Error != "" && (len(v.Errors) == 0 || v.Errors[len(v.Errors)-1] != v.Error) {
+				v.Errors = append(v.Errors, v.Error)
+			}
 			v.State = "needs_owner_readback"
 			v.Error = "prior Host child handle unavailable; do not adopt or signal by PID"
 		}
@@ -123,6 +146,11 @@ func (r *Residents) save() error {
 	return os.Rename(f.Name(), r.path)
 }
 func (r *Residents) persist() error {
+	for _, v := range r.records {
+		if v.Error != "" && (len(v.Errors) == 0 || v.Errors[len(v.Errors)-1] != v.Error) {
+			v.Errors = append(v.Errors, v.Error)
+		}
+	}
 	if err := r.save(); err != nil {
 		r.failure = err
 		return err
@@ -133,6 +161,11 @@ func cloneResident(v *Resident) Resident {
 	out := *v
 	out.Contexts = append([]string{}, v.Contexts...)
 	out.Released = append([]string{}, v.Released...)
+	out.Errors = append([]string{}, v.Errors...)
+	out.History = make([]Resident, len(v.History))
+	for i := range v.History {
+		out.History[i] = cloneResident(&v.History[i])
+	}
 	slices.Sort(out.Contexts)
 	return out
 }
@@ -230,27 +263,25 @@ func (r *Residents) Acquire(spec ResidentSpec, contextID string, budget *Budget)
 	if err != nil {
 		return Resident{}, err
 	}
-	v := &Resident{ID: key, Name: spec.Name, Fingerprint: fingerprint, Sharing: spec.Sharing, State: "starting", Contexts: []string{contextID}}
+	v := &Resident{ID: key, Name: spec.Name, Fingerprint: fingerprint, Sharing: spec.Sharing, State: "starting", Contexts: []string{contextID}, ForceAfterGrace: spec.ForceAfterGrace}
 	if old := r.records[key]; old != nil {
 		v.Released = append([]string{}, old.Released...)
+		previous := cloneResident(old)
+		previous.History = nil
+		v.History = append(append([]Resident{}, old.History...), previous)
 	}
 	r.records[key] = v
 	if err = r.persist(); err != nil {
 		permit.Release()
 		return cloneResident(v), err
 	}
-	cmd := exec.Command(spec.Argv[0], spec.Argv[1:]...)
-	configureResident(cmd)
-	cmd.Dir = spec.Directory
-	cmd.Env = append([]string{}, spec.Environment...)
 	// Each resident uses one log, not a per-context pipe or persistent proxy.
 	sum := sha256.Sum256([]byte(key))
 	logPath := filepath.Join(filepath.Dir(r.path), "resident-"+hex.EncodeToString(sum[:8])+".log")
-	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	var process *os.Process
 	if err == nil {
-		cmd.Stdout = log
-		cmd.Stderr = log
-		err = cmd.Start()
+		process, err = startResident(spec, log)
 		log.Close()
 	}
 	if err != nil {
@@ -262,8 +293,8 @@ func (r *Residents) Acquire(spec ResidentSpec, contextID string, budget *Budget)
 		saveErr := r.persist()
 		return cloneResident(v), errors.Join(err, saveErr)
 	}
-	v.PID = cmd.Process.Pid
-	v.ProcessGroup = cmd.Process.Pid
+	v.PID = process.Pid
+	v.ProcessGroup = process.Pid
 	v.Error = "process start identity not observed; restart reconciliation requires owner readback"
 	if rows, readErr := ObserveResidents(context.Background()); readErr == nil {
 		for _, row := range rows {
@@ -277,10 +308,12 @@ func (r *Residents) Acquire(spec ResidentSpec, contextID string, budget *Budget)
 		v.Error = "process start identity unavailable: " + readErr.Error()
 	}
 	v.State = "running"
-	r.children[key] = &residentChild{command: cmd, permit: permit}
+	child := &residentChild{process: process, permit: permit, done: make(chan struct{})}
+	r.children[key] = child
 	saveErr := r.persist()
 	go func() {
-		err := cmd.Wait()
+		defer close(child.done)
+		err := waitResident(child)
 		// Wait reaps only the launcher. Observe the owned group before returning quota.
 		absent, observeErr := procx.ProcessGroupAbsent(v.PID)
 		deadline := time.Now().Add(time.Second)
@@ -290,6 +323,12 @@ func (r *Residents) Acquire(spec ResidentSpec, contextID string, budget *Budget)
 		}
 		r.mu.Lock()
 		defer r.mu.Unlock()
+		if r.records[key] != v || r.children[key] != child {
+			return
+		}
+		if err != nil && !slices.Contains(v.Errors, err.Error()) {
+			v.Errors = append(v.Errors, err.Error())
+		}
 		if !absent || observeErr != nil {
 			v.State = "needs_owner_readback"
 			v.Error = fmt.Sprintf("launcher exited; owned process group absence unconfirmed: %v", observeErr)
@@ -305,6 +344,7 @@ func (r *Residents) Acquire(spec ResidentSpec, contextID string, budget *Budget)
 		delete(r.children, key)
 		permit.Release()
 		_ = r.persist()
+		r.notifyReleased()
 	}()
 	return cloneResident(v), saveErr
 }
@@ -325,6 +365,7 @@ func (r *Residents) Release(id, contextID string) (Resident, error) {
 	v.Contexts = slices.DeleteFunc(v.Contexts, func(x string) bool { return x == contextID })
 	if len(v.Contexts) == 0 && v.State == "running" {
 		v.State = "stopping"
+		v.StopRequested = time.Now().UTC().Format(time.RFC3339Nano)
 		if err := r.persist(); err != nil {
 			return cloneResident(v), err
 		}
@@ -332,9 +373,11 @@ func (r *Residents) Release(id, contextID string) (Resident, error) {
 		if child == nil {
 			v.State = "needs_owner_readback"
 			v.Error = "native child handle missing"
-		} else if err := stopResident(child.command.Process); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		} else if err := signalResident(v, child, false); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			v.State = "needs_owner_readback"
 			v.Error = err.Error()
+		} else if v.ForceAfterGrace {
+			go r.forceAfterGrace(v, child)
 		}
 	}
 	return cloneResident(v), r.persist()
@@ -366,6 +409,15 @@ func (r *Residents) Reconcile(ctx context.Context) ([]Resident, error) {
 	for _, v := range r.records {
 		if v.State != "needs_owner_readback" || v.PID <= 0 || v.Started == "" {
 			continue
+		}
+		if child := r.children[v.ID]; child != nil {
+			select {
+			case <-child.done:
+			default:
+				// The original waiter must preserve exit evidence before a
+				// replacement generation can reuse this resident identity.
+				continue
+			}
 		}
 		found := false
 		for _, row := range rows {
@@ -424,4 +476,17 @@ func (r *Residents) WaitClosed(ctx context.Context) error {
 		case <-tick.C:
 		}
 	}
+}
+
+// Direct files need no Cmd pipe goroutines or second Wait after the sole reap.
+func startResident(spec ResidentSpec, log *os.File) (*os.Process, error) {
+	input, err := os.Open(os.DevNull)
+	if err != nil {
+		return nil, err
+	}
+	defer input.Close()
+	return os.StartProcess(spec.Argv[0], spec.Argv, &os.ProcAttr{
+		Dir: spec.Directory, Env: append([]string{}, spec.Environment...),
+		Files: []*os.File{input, log, log}, Sys: residentProcessAttributes(),
+	})
 }

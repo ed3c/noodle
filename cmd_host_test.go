@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -49,6 +50,16 @@ func (f *fakeHostRuntime) Release(context.Context) error {
 	}
 	close(f.released)
 	return nil
+}
+func (f *fakeHostRuntime) CleanupAutomatic(ctx context.Context) error { return f.Cleanup(ctx, true) }
+func (f *fakeHostRuntime) Cleanup(ctx context.Context, apply bool) error {
+	if f.busy {
+		return loop.ErrReleaseBusy
+	}
+	if !apply {
+		return f.releaseErr
+	}
+	return f.Release(ctx)
 }
 func (f *fakeHostRuntime) Cycle(context.Context) error { f.cycles++; return f.cycleErr }
 func (f *fakeHostRuntime) Shutdown()                   { f.shutdowns++ }
@@ -413,7 +424,8 @@ func TestHostCapabilitiesPreservesProtocolContract(t *testing.T) {
 	if err := json.Unmarshal([]byte(output.String()), &value); err != nil {
 		t.Fatal(err)
 	}
-	if len(value) != 3 || value["schema"] != float64(1) || value["protocol"] != "noodle-host-v1" || value["resident_request_binding"] != float64(1) {
+	wantForce := float64(hostCapabilities(runtime.GOOS)["resident_force_after_grace"].(int))
+	if len(value) != 5 || value["schema"] != float64(1) || value["protocol"] != "noodle-host-v1" || value["resident_request_binding"] != float64(1) || value["completed_context_cleanup"] != float64(1) || value["resident_force_after_grace"] != wantForce {
 		t.Fatalf("host protocol changed: %v", value)
 	}
 }

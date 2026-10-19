@@ -18,6 +18,34 @@ func TestResidentChildHelper(t *testing.T) {
 		time.Sleep(time.Second)
 	}
 }
+
+func TestResidentRestartPreservesLegacyFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "residents.json")
+	before := []byte(`{"preview":{"id":"preview","state":"needs_owner_readback","error":"original stop outcome unknown"}}`)
+	if err := os.WriteFile(path, before, 0600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := OpenResidents(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := r.Snapshot()
+	if err != nil || len(rows) != 1 || len(rows[0].Errors) != 1 || rows[0].Errors[0] != "original stop outcome unknown" || rows[0].State != "needs_owner_readback" {
+		t.Fatalf("legacy failure was lost: %+v %v", rows, err)
+	}
+	if err := r.persist(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenResidents(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err = reopened.Snapshot()
+	if err != nil || len(rows[0].Errors) != 2 || rows[0].Errors[0] != "original stop outcome unknown" {
+		t.Fatalf("restart replaced prior errors: %+v %v", rows, err)
+	}
+}
 func residentFixture(t *testing.T) (*Residents, *Budget, ResidentSpec) {
 	t.Helper()
 	if runtime.GOOS == "windows" {

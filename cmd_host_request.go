@@ -21,6 +21,7 @@ type hostRequestBinding struct {
 	EnvironmentSHA256 string `json:"environment_sha256"`
 	Status            string `json:"status"`
 	HostDir           string `json:"host_dir"`
+	CleanupCompleted  bool   `json:"cleanup_completed,omitempty"`
 }
 
 func bindHostRequest(req *hostRequest) (*hostRequestBinding, func(), error) {
@@ -32,7 +33,7 @@ func bindHostRequest(req *hostRequest) (*hostRequestBinding, func(), error) {
 		return nil, nil, err
 	}
 	req.RequestFile = path
-	if req.Operation != "status" && req.Operation != "detach" {
+	if req.Operation != "status" && req.Operation != "detach" && req.Operation != "cleanup" {
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			return nil, nil, err
 		}
@@ -56,16 +57,17 @@ func bindHostRequest(req *hostRequest) (*hostRequestBinding, func(), error) {
 			return fail(errors.New("request project or binary binding changed"))
 		}
 		req.HostDir = binding.HostDir
-		if req.Operation == "status" || req.Operation == "detach" {
+		if req.Operation == "status" || req.Operation == "detach" || req.Operation == "cleanup" {
 			if req.ConfigSHA256 != "" && req.ConfigSHA256 != binding.ConfigSHA256 {
 				return fail(errors.New("request config binding changed"))
 			}
 			req.RequestID = binding.RequestID
 			req.ConfigSHA256 = binding.ConfigSHA256
 			req.Mode = binding.Mode
+			req.CleanupCompleted = binding.CleanupCompleted
 			return &binding, unlock, nil
 		}
-		if binding.Operation != req.Operation || binding.ConfigSHA256 != req.ConfigSHA256 || binding.Mode != req.Mode {
+		if binding.Operation != req.Operation || binding.ConfigSHA256 != req.ConfigSHA256 || binding.Mode != req.Mode || binding.CleanupCompleted != req.CleanupCompleted {
 			return fail(errors.New("original native request binding changed"))
 		}
 		if binding.Status != "busy" {
@@ -74,14 +76,14 @@ func bindHostRequest(req *hostRequest) (*hostRequestBinding, func(), error) {
 			req.Environment = nil
 			return &binding, unlock, nil
 		}
-	} else if !os.IsNotExist(err) || req.Operation == "status" || req.Operation == "detach" {
+	} else if !os.IsNotExist(err) || req.Operation == "status" || req.Operation == "detach" || req.Operation == "cleanup" {
 		return fail(err)
 	} else {
 		id, err := hostID()
 		if err != nil {
 			return fail(err)
 		}
-		binding = hostRequestBinding{Schema: 1, RequestID: id, Operation: req.Operation, ProjectDir: req.ProjectDir, ConfigSHA256: req.ConfigSHA256, Mode: req.Mode, BinarySHA256: req.BinarySHA256, HostDir: req.HostDir}
+		binding = hostRequestBinding{Schema: 1, RequestID: id, Operation: req.Operation, ProjectDir: req.ProjectDir, ConfigSHA256: req.ConfigSHA256, Mode: req.Mode, BinarySHA256: req.BinarySHA256, HostDir: req.HostDir, CleanupCompleted: req.CleanupCompleted}
 	}
 	binding.EnvironmentSHA256 = hostDigest([]byte(strings.Join(req.Environment, "\x00")))
 	binding.Status = "pending"
@@ -124,7 +126,7 @@ func hostReceiptMatches(req hostRequest, r hostReceipt) bool {
 		return false
 	}
 	if req.RequestID != "" {
-		return req.RequestID == r.RequestID && req.ConfigSHA256 == r.ConfigSHA256 && req.Mode == r.Mode
+		return req.RequestID == r.RequestID && req.ConfigSHA256 == r.ConfigSHA256 && req.Mode == r.Mode && req.CleanupCompleted == r.CleanupCompleted
 	}
 	if req.ContextID != "" {
 		return req.ContextID == r.ContextID && req.InstanceID == r.HostInstanceID

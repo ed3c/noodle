@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
@@ -33,19 +34,20 @@ import (
 const hostProtocol = "noodle-host-v1"
 
 type hostReceipt struct {
-	Schema         int    `json:"schema"`
-	Protocol       string `json:"protocol"`
-	HostPID        int    `json:"host_pid"`
-	HostInstanceID string `json:"host_instance_id"`
-	ContextID      string `json:"context_id"`
-	ProjectDir     string `json:"project_dir"`
-	ContextState   string `json:"context_state"`
-	Mode           string `json:"mode"`
-	ConfigSHA256   string `json:"config_sha256"`
-	BinaryPath     string `json:"binary_path"`
-	BinarySHA256   string `json:"binary_sha256"`
-	RequestID      string `json:"request_id"`
-	HostDir        string `json:"host_dir"`
+	Schema           int    `json:"schema"`
+	Protocol         string `json:"protocol"`
+	HostPID          int    `json:"host_pid"`
+	HostInstanceID   string `json:"host_instance_id"`
+	ContextID        string `json:"context_id"`
+	ProjectDir       string `json:"project_dir"`
+	ContextState     string `json:"context_state"`
+	Mode             string `json:"mode"`
+	ConfigSHA256     string `json:"config_sha256"`
+	BinaryPath       string `json:"binary_path"`
+	BinarySHA256     string `json:"binary_sha256"`
+	RequestID        string `json:"request_id"`
+	HostDir          string `json:"host_dir"`
+	CleanupCompleted bool   `json:"cleanup_completed,omitempty"`
 }
 
 type hostResponse struct {
@@ -55,25 +57,29 @@ type hostResponse struct {
 }
 
 type hostRequest struct {
-	Operation    string                  `json:"operation"`
-	ProjectDir   string                  `json:"project_dir"`
-	ContextID    string                  `json:"context_id"`
-	InstanceID   string                  `json:"instance_id"`
-	ConfigSHA256 string                  `json:"config_sha256"`
-	Mode         string                  `json:"mode"`
-	Environment  []string                `json:"environment,omitempty"`
-	BinarySHA256 string                  `json:"binary_sha256"`
-	RequestID    string                  `json:"request_id"`
-	ResidentSpec *admission.ResidentSpec `json:"resident_spec,omitempty"`
-	ResidentID   string                  `json:"resident_id,omitempty"`
-	RequestFile  string                  `json:"-"`
-	HostDir      string                  `json:"-"`
+	Operation        string                  `json:"operation"`
+	ProjectDir       string                  `json:"project_dir"`
+	ContextID        string                  `json:"context_id"`
+	InstanceID       string                  `json:"instance_id"`
+	ConfigSHA256     string                  `json:"config_sha256"`
+	Mode             string                  `json:"mode"`
+	Environment      []string                `json:"environment,omitempty"`
+	BinarySHA256     string                  `json:"binary_sha256"`
+	RequestID        string                  `json:"request_id"`
+	ResidentSpec     *admission.ResidentSpec `json:"resident_spec,omitempty"`
+	ResidentID       string                  `json:"resident_id,omitempty"`
+	Apply            bool                    `json:"apply,omitempty"`
+	CleanupCompleted bool                    `json:"cleanup_completed,omitempty"`
+	RequestFile      string                  `json:"-"`
+	HostDir          string                  `json:"-"`
 }
 
 type hostRuntime interface {
 	Run(context.Context) error
 	Cycle(context.Context) error
 	Release(context.Context) error
+	Cleanup(context.Context, bool) error
+	CleanupAutomatic(context.Context) error
 	Ready() <-chan struct{}
 	Shutdown()
 	FinishOnce() error
@@ -108,6 +114,7 @@ type noodleHost struct {
 func newHostCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{Use: "host", Short: "Manage the single persistent Noodle host"}
 	cmd.AddCommand(newHostResourcesCmd(app))
+	cmd.AddCommand(newHostCleanupCmd(app))
 	cmd.AddCommand(newHostRecoverCmd(app))
 	cmd.AddCommand(newHostViewsCmd())
 	task := &cobra.Command{Use: "task", Short: "Read native task dispatch capabilities"}
@@ -119,7 +126,7 @@ func newHostCmd(app *App) *cobra.Command {
 	}})
 	cmd.AddCommand(task)
 	cmd.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1})
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(hostCapabilities(runtime.GOOS))
 	}})
 	cmd.AddCommand(&cobra.Command{Use: "serve", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
@@ -128,8 +135,9 @@ func newHostCmd(app *App) *cobra.Command {
 	}})
 	for _, operation := range []string{"attach", "once", "status", "detach"} {
 		var mode, contextID, instanceID, configSHA, requestFile string
+		var cleanupCompleted bool
 		child := &cobra.Command{Use: operation, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-			req := hostRequest{Operation: operation, ProjectDir: app.projectDir, Mode: mode, ContextID: contextID, InstanceID: instanceID, ConfigSHA256: configSHA, RequestFile: requestFile}
+			req := hostRequest{Operation: operation, ProjectDir: app.projectDir, Mode: mode, ContextID: contextID, InstanceID: instanceID, ConfigSHA256: configSHA, RequestFile: requestFile, CleanupCompleted: cleanupCompleted}
 			response := callHost(cmd.Context(), req)
 			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(response); err != nil {
 				return err
@@ -140,6 +148,9 @@ func newHostCmd(app *App) *cobra.Command {
 			return nil
 		}}
 		child.Flags().StringVar(&requestFile, "request-file", "", "Native request binding file")
+		if operation == "attach" {
+			child.Flags().BoolVar(&cleanupCompleted, "cleanup-completed", false, "Release completed task runtime automatically; preserve manual migration holds")
+		}
 		if operation != "detach" {
 			child.Flags().StringVar(&mode, "mode", "", "Run mode")
 		}
@@ -153,6 +164,14 @@ func newHostCmd(app *App) *cobra.Command {
 		cmd.AddCommand(child)
 	}
 	return cmd
+}
+
+func hostCapabilities(platform string) map[string]any {
+	force := 1
+	if platform == "windows" {
+		force = 0
+	}
+	return map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1, "completed_context_cleanup": 1, "resident_force_after_grace": force}
 }
 
 func hostDirectory() (string, error) {
@@ -292,7 +311,7 @@ func callHost(ctx context.Context, req hostRequest) hostResponse {
 	if err = json.NewDecoder(conn).Decode(&response); err != nil {
 		return hostError("unknown_effect", err)
 	}
-	if requestBinding != nil && req.Operation != "status" {
+	if requestBinding != nil && req.Operation != "status" && req.Operation != "cleanup" {
 		requestBinding.Status = "pending"
 		if response.Status == "busy" {
 			requestBinding.Status = "busy"
@@ -510,6 +529,8 @@ func serveHost(ctx context.Context) error {
 			}
 			h.webURL = ""
 			webDone = nil
+		case <-h.residents.Released():
+			h.cleanupAutomaticContexts(ctx)
 		case id := <-h.completed:
 			if c := h.contexts[id]; c != nil && c.done != nil {
 				select {
@@ -537,7 +558,9 @@ func serveHost(ctx context.Context) error {
 				default:
 				}
 			}
-			if strings.HasPrefix(call.request.Operation, "resident_") {
+			if call.request.Operation == "cleanup_all" {
+				call.reply <- h.cleanupContexts(ctx, call.request)
+			} else if strings.HasPrefix(call.request.Operation, "resident_") {
 				call.reply <- h.residentOperation(ctx, call.request)
 			} else if call.request.Operation == "resources" {
 				call.reply <- h.resources()
@@ -634,13 +657,19 @@ func offlineHostStatus(dir string, req hostRequest, dialErr error) hostResponse 
 }
 
 func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
+	if req.Operation == "cleanup" && req.Apply && req.InstanceID != h.instanceID {
+		return hostError("refused", errors.New("cleanup Host instance changed; inspect before applying"))
+	}
+	if req.Operation == "cleanup" && req.RequestID == "" {
+		return hostError("refused", errors.New("cleanup requires the original request binding"))
+	}
 	if req.Operation == "once" {
 		req.Mode = "manual"
 	}
-	if req.BinarySHA256 != h.binarySHA && req.Operation != "status" && req.Operation != "detach" {
+	if req.BinarySHA256 != h.binarySHA && req.Operation != "status" && req.Operation != "detach" && req.Operation != "cleanup" {
 		return hostError("binary_mismatch", errors.New("client and host binaries differ"))
 	}
-	if req.Operation == "status" || req.Operation == "detach" {
+	if req.Operation == "status" || req.Operation == "detach" || req.Operation == "cleanup" {
 		if ambiguousHostLookup(req, h.receipts) {
 			return hostError("ambiguous", errors.New("multiple contexts match; use request-file or context identity"))
 		}
@@ -672,12 +701,21 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 			}
 			releaseCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
-			if err := c.runtime.Release(releaseCtx); err != nil {
+			var releaseErr error
+			if req.Operation == "cleanup" {
+				releaseErr = c.runtime.Cleanup(releaseCtx, req.Apply)
+			} else {
+				releaseErr = c.runtime.Release(releaseCtx)
+			}
+			if err := releaseErr; err != nil {
 				status := "unknown_effect"
 				if errors.Is(err, loop.ErrReleaseBusy) {
 					status = "busy"
 				}
 				return hostResponse{r, status, err.Error()}
+			}
+			if req.Operation == "cleanup" && !req.Apply {
+				return hostResponse{r, "eligible", ""}
 			}
 			select {
 			case err := <-c.done:
@@ -702,7 +740,7 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 		if r.RequestID != req.RequestID {
 			continue
 		}
-		if r.ProjectDir != req.ProjectDir || r.ConfigSHA256 != req.ConfigSHA256 || r.Mode != req.Mode {
+		if r.ProjectDir != req.ProjectDir || r.ConfigSHA256 != req.ConfigSHA256 || r.Mode != req.Mode || r.CleanupCompleted != req.CleanupCompleted {
 			return hostError("refused", errors.New("request identity has conflicting bindings"))
 		}
 		c := h.contexts[r.ContextID]
@@ -812,14 +850,14 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 	if err != nil {
 		return hostError("refused", err)
 	}
-	r := hostReceipt{1, hostProtocol, os.Getpid(), h.instanceID, id, req.ProjectDir, "active", cfg.Mode, req.ConfigSHA256, h.binaryPath, h.binarySHA, req.RequestID, h.dir}
+	r := hostReceipt{1, hostProtocol, os.Getpid(), h.instanceID, id, req.ProjectDir, "active", cfg.Mode, req.ConfigSHA256, h.binaryPath, h.binarySHA, req.RequestID, h.dir, req.CleanupCompleted}
 	h.receipts = append(h.receipts, r)
 	if err = h.save(); err != nil {
 		h.receipts = h.receipts[:len(h.receipts)-1]
 		return hostError("refused", err)
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	rt := h.newRuntime(req.ProjectDir, h.binaryPath, cfg, loop.Dependencies{ModeOverride: state.RunMode(req.Mode), Execution: e, Admission: h.budget, AdmissionContext: id})
+	rt := h.newRuntime(req.ProjectDir, h.binaryPath, cfg, loop.Dependencies{ModeOverride: state.RunMode(req.Mode), Execution: e, Admission: h.budget, AdmissionContext: id, CleanupCompleted: req.CleanupCompleted})
 	environmentSHA := hostDigest([]byte(strings.Join(req.Environment, "\x00")))
 	req.Environment = nil
 	c := &hostContext{receipt: r, request: req, runtime: rt, done: make(chan error, 1), cancel: cancel, lock: lock, environmentSHA: environmentSHA}

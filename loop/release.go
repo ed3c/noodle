@@ -11,8 +11,11 @@ import (
 var ErrReleaseBusy = errors.New("loop has unfinished work")
 
 type releaseRequest struct {
-	ctx   context.Context
-	reply chan error
+	ctx       context.Context
+	reply     chan error
+	cleanup   bool
+	automatic bool
+	apply     bool
 }
 
 func (l *Loop) Ready() <-chan struct{} { return l.runReady }
@@ -23,7 +26,20 @@ func (l *Loop) FinishOnce() error { return l.releaseIfQuiescent() }
 
 // Release asks the Run actor to stop only after its workers and inputs settle.
 func (l *Loop) Release(ctx context.Context) error {
-	request := releaseRequest{ctx: ctx, reply: make(chan error, 1)}
+	return l.requestRelease(ctx, false, true, false)
+}
+
+// Cleanup requires completed task evidence; Release also permits held migration.
+func (l *Loop) Cleanup(ctx context.Context, apply bool) error {
+	return l.requestRelease(ctx, true, apply, false)
+}
+
+func (l *Loop) CleanupAutomatic(ctx context.Context) error {
+	return l.requestRelease(ctx, true, true, true)
+}
+
+func (l *Loop) requestRelease(ctx context.Context, cleanup, apply, automatic bool) error {
+	request := releaseRequest{ctx: ctx, reply: make(chan error, 1), cleanup: cleanup, apply: apply, automatic: automatic}
 	select {
 	case l.releaseRequests <- request:
 	case <-l.runDone:
@@ -40,6 +56,13 @@ func (l *Loop) Release(ctx context.Context) error {
 }
 
 func (l *Loop) releaseIfQuiescent() error {
+	if err := l.checkQuiescent(); err != nil {
+		return err
+	}
+	return l.finishRelease()
+}
+
+func (l *Loop) checkQuiescent() error {
 	if l.resourceUnknown != nil {
 		return l.resourceUnknown
 	}
@@ -70,6 +93,10 @@ func (l *Loop) releaseIfQuiescent() error {
 			return fmt.Errorf("%w: %s is pending", ErrReleaseBusy, name)
 		}
 	}
+	return nil
+}
+
+func (l *Loop) finishRelease() error {
 	if err := l.flushState(); err != nil {
 		return err
 	}

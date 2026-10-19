@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -404,10 +405,16 @@ func (l *Loop) Run(ctx context.Context) error {
 		case request := <-l.releaseRequests:
 			err := request.ctx.Err()
 			if err == nil {
-				err = l.releaseIfQuiescent()
+				if request.automatic {
+					err = l.cleanupAutomatic()
+				} else if request.cleanup {
+					err = l.cleanupCompleted(request.apply)
+				} else {
+					err = l.releaseIfQuiescent()
+				}
 			}
 			request.reply <- err
-			if err == nil {
+			if err == nil && request.apply {
 				return nil
 			}
 		case <-ctx.Done():
@@ -417,6 +424,13 @@ func (l *Loop) Run(ctx context.Context) error {
 		case <-cycleTrigger:
 			if err := l.runOnce(ctx); err != nil {
 				return err
+			}
+			if l.cleanupUnknown == nil {
+				if err := l.cleanupAutomatic(); err == nil {
+					return nil
+				} else if !errors.Is(err, ErrReleaseBusy) {
+					l.logger.Error("automatic cleanup requires readback", "error", err)
+				}
 			}
 		case err := <-watchErr:
 			if err != nil {
@@ -691,6 +705,9 @@ func (l *Loop) emitEventChecked(eventType ingest.EventType, payload any) error {
 	next, effects, err := reducer.Reduce(l.canonical, evt)
 	if err != nil {
 		return fmt.Errorf("canonical reducer failed: %w", err)
+	}
+	if err := l.recordCompletedMergeEffect(l.canonical, next, evt); err != nil {
+		return err
 	}
 	l.canonical = next
 	if l.effectLedger == nil {
