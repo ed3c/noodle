@@ -151,17 +151,23 @@ func TestHostResidentReadbackRetainsFinishedContextAndRefusesOtherHost(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipt := hostReceipt{ContextID: "finished", RequestID: "original", HostInstanceID: "host", ProjectDir: "/original", ContextState: "detached", ConfigSHA256: "config", Mode: "manual"}
-	h := &noodleHost{instanceID: "host", binarySHA: "binary", budget: admission.NewBudget(1), residents: r, receipts: []hostReceipt{receipt}}
-	req := hostRequest{Operation: "resident_inspect_bound", ProjectDir: receipt.ProjectDir, ContextID: receipt.ContextID, RequestID: receipt.RequestID, InstanceID: receipt.HostInstanceID, BinarySHA256: "binary", ConfigSHA256: receipt.ConfigSHA256, Mode: receipt.Mode}
-	result := h.residentOperation(context.Background(), req).(map[string]any)
-	if result["status"] != "observed" {
-		t.Fatal(result)
-	}
-	req.InstanceID = "another-host"
-	result = h.residentOperation(context.Background(), req).(map[string]any)
-	if result["status"] != "refused" {
-		t.Fatal(result)
+	for _, cleanup := range []bool{false, true} {
+		receipt := hostReceipt{ContextID: "finished", RequestID: "original", HostInstanceID: "host", ProjectDir: "/original", ContextState: "detached", ConfigSHA256: "config", Mode: "manual", CleanupCompleted: cleanup}
+		h := &noodleHost{instanceID: "host", binarySHA: "binary", budget: admission.NewBudget(1), residents: r, receipts: []hostReceipt{receipt}}
+		req := hostRequest{Operation: "resident_inspect_bound", ProjectDir: receipt.ProjectDir, ContextID: receipt.ContextID, RequestID: receipt.RequestID, InstanceID: receipt.HostInstanceID, BinarySHA256: "binary", ConfigSHA256: receipt.ConfigSHA256, Mode: receipt.Mode, CleanupCompleted: cleanup}
+		result := h.residentOperation(context.Background(), req).(map[string]any)
+		if result["status"] != "observed" {
+			t.Fatal(result)
+		}
+		req.CleanupCompleted = !cleanup
+		if result = h.residentOperation(context.Background(), req).(map[string]any); result["status"] != "refused" {
+			t.Fatal(result)
+		}
+		req.CleanupCompleted = cleanup
+		req.InstanceID = "another-host"
+		if result = h.residentOperation(context.Background(), req).(map[string]any); result["status"] != "refused" {
+			t.Fatal(result)
+		}
 	}
 }
 
