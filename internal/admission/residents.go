@@ -355,6 +355,9 @@ func (r *Residents) Release(id, contextID string) (Resident, error) {
 	if v == nil {
 		return Resident{}, errors.New("resident identity not found")
 	}
+	if r.failure != nil {
+		return cloneResident(v), fmt.Errorf("resident persistence failed; readback required: %w", r.failure)
+	}
 	if v.State == "needs_owner_readback" {
 		return cloneResident(v), errors.New(v.Error)
 	}
