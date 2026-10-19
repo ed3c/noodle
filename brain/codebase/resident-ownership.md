@@ -45,6 +45,16 @@ binding remains available for recovery. A new admission can bind automatic
 cleanup; legacy requests remain unchanged and manual migration holds remain.
 The existing Cycle and resident-release notification apply this policy.
 
+After a successful Run exit, the Loop supplies its terminal cause to the
+original Host receipt: `auto-completed`, `explicit-cleanup`, or
+`migration-detach`. The two automatic triggers share one cause. Original
+`host status` reads that saved cause with the context and request identity.
+Busy inspection, failed exits and unresolved receipt persistence do not report
+a successful cause. Missing causes in historical receipts and `once` runs
+remain unknown; status does not infer them from policy or replay release.
+This cause identifies the runtime release path, not task acceptance, physical
+memory recovery or Parent Goal completion.
+
 Two producers had hidden this completion evidence. Canonical projection
 updates now retain omitted terminal orders. A native MergeCompleted transition
 completes only its uniquely matching merge effect in the same checkpoint.

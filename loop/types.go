@@ -222,6 +222,7 @@ type Loop struct {
 	releaseRequests chan releaseRequest
 	runReady        chan struct{}
 	runDone         chan struct{}
+	terminalCause   TerminalCause
 
 	lastStatus statusfile.Status
 

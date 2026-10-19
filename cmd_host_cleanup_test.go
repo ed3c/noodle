@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -73,10 +74,10 @@ func TestHostCleanupInspectApplyAndDuplicate(t *testing.T) {
 		t.Fatalf("stale cleanup accepted: %+v", got)
 	}
 	cleanup.Apply = true
-	if got := h.handle(ctx, cleanup); got.Status != "ok" || got.ContextState != "detached" {
+	if got := h.handle(ctx, cleanup); got.Status != "ok" || got.ContextState != "detached" || got.TerminalCause != loop.TerminalExplicitCleanup {
 		t.Fatalf("apply: %+v", got)
 	}
-	if got := h.handle(ctx, cleanup); got.Status != "ok" || rt.shutdowns != 1 {
+	if got := h.handle(ctx, cleanup); got.Status != "ok" || rt.shutdowns != 1 || got.TerminalCause != loop.TerminalExplicitCleanup {
 		t.Fatalf("duplicate: %+v shutdowns=%d", got, rt.shutdowns)
 	}
 }
@@ -129,6 +130,21 @@ func TestHostAutomaticCleanupUsesBoundPolicy(t *testing.T) {
 	if len(h.contexts) != 1 {
 		t.Fatalf("auto cleanup left %d contexts", len(h.contexts))
 	}
+	for _, receipt := range h.receipts {
+		want := loop.TerminalCause("")
+		if receipt.CleanupCompleted {
+			want = loop.TerminalAutoCompleted
+		}
+		lookup := hostRequest{Operation: "status", RequestID: receipt.RequestID, ProjectDir: receipt.ProjectDir, BinarySHA256: receipt.BinarySHA256, ConfigSHA256: receipt.ConfigSHA256, Mode: receipt.Mode, CleanupCompleted: receipt.CleanupCompleted}
+		if got := h.handle(ctx, lookup); got.TerminalCause != want {
+			t.Fatalf("bound policy cause: %+v", got)
+		}
+		if receipt.CleanupCompleted {
+			if got := offlineHostStatus(h.dir, lookup, errors.New("host offline")); got.Status != "ok" || got.TerminalCause != want {
+				t.Fatalf("saved automatic cause: %+v", got)
+			}
+		}
+	}
 	for _, c := range h.contexts {
 		if c.receipt.CleanupCompleted {
 			t.Fatal("policy context remained")
@@ -137,6 +153,33 @@ func TestHostAutomaticCleanupUsesBoundPolicy(t *testing.T) {
 			t.Fatal(err)
 		}
 		h.finish(c, <-c.done)
+	}
+}
+
+func TestHostHistoricalReceiptWithoutCauseRemainsUnknown(t *testing.T) {
+	dir := t.TempDir()
+	data := []byte(`[{"schema":1,"protocol":"noodle-host-v1","context_id":"old","request_id":"original","project_dir":"/original","context_state":"detached","binary_sha256":"original-binary","cleanup_completed":true}]`)
+	path := filepath.Join(dir, "receipts.json")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var receipts []hostReceipt
+	if err := json.Unmarshal(data, &receipts); err != nil {
+		t.Fatal(err)
+	}
+	h := &noodleHost{dir: dir, binarySHA: "original-binary", receipts: receipts}
+	for _, op := range []string{"status", "detach", "cleanup"} {
+		req := hostRequest{Operation: op, ProjectDir: "/original", ContextID: "old", RequestID: "original", BinarySHA256: "original-binary", CleanupCompleted: true}
+		if got := h.handle(context.Background(), req); got.Status != "ok" || got.TerminalCause != "" {
+			t.Fatalf("historical cause inferred or replayed: %+v", got)
+		}
+		if got := offlineHostStatus(dir, req, errors.New("offline")); got.TerminalCause != "" || got.Status != "ok" {
+			t.Fatalf("offline historical cause inferred: %+v", got)
+		}
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(data) {
+		t.Fatalf("historical bytes changed: %v", err)
 	}
 }
 

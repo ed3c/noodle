@@ -10,6 +10,17 @@ import (
 
 var ErrReleaseBusy = errors.New("loop has unfinished work")
 
+type TerminalCause string
+
+const (
+	TerminalAutoCompleted   TerminalCause = "auto-completed"
+	TerminalExplicitCleanup TerminalCause = "explicit-cleanup"
+	TerminalMigrationDetach TerminalCause = "migration-detach"
+)
+
+// TerminalCause is read only after Run returns. Empty means no recorded cause.
+func (l *Loop) TerminalCause() TerminalCause { return l.terminalCause }
+
 type releaseRequest struct {
 	ctx       context.Context
 	reply     chan error

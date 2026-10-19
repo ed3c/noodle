@@ -238,8 +238,84 @@ func TestCleanupAutomaticRunEventReleasesCompletedAfterManualHold(t *testing.T) 
 	if len(rt.calls) != 0 {
 		t.Fatal("cleanup dispatched new work")
 	}
+	if l.TerminalCause() != TerminalAutoCompleted {
+		t.Fatalf("automatic completion lost cause: %q", l.TerminalCause())
+	}
 	snapshot, err := reducer.ReadSnapshot(filepath.Join(runtimeDir, "state.snapshot.json"))
 	if err != nil || snapshot.State.Orders["done"].Status != state.OrderCompleted {
 		t.Fatalf("completion custody changed: %v", err)
+	}
+}
+
+func TestCleanupRunRecordsCauseOnlyAfterSuccessfulApply(t *testing.T) {
+	for _, outcome := range []string{"apply", "inspect-cancel", "unknown-cancel"} {
+		t.Run(outcome, func(t *testing.T) {
+			dir := t.TempDir()
+			runtimeDir := filepath.Join(dir, ".noodle")
+			if err := os.MkdirAll(runtimeDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			cfg := config.DefaultConfig()
+			cfg.Mode = "manual"
+			cfg.Skills.Paths = []string{t.TempDir()}
+			l := New(dir, "noodle", cfg, Dependencies{
+				Runtimes: map[string]loopruntime.Runtime{"process": newMockRuntime()},
+				Worktree: &fakeWorktree{}, Adapter: &fakeAdapterRunner{}, Mise: &fakeMise{}, Monitor: fakeMonitor{},
+				Registry: testLoopRegistry(), ModeOverride: state.RunModeManual,
+			})
+			seed := completedCleanupFixture(t)
+			if err := reducer.WriteSnapshotAtomic(filepath.Join(runtimeDir, "state.snapshot.json"), reducer.BuildSnapshot(seed.canonical, seed.effectLedger, time.Now())); err != nil {
+				t.Fatal(err)
+			}
+			seed.runtimeDir = runtimeDir
+			if err := seed.flushState(); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			result := make(chan error, 1)
+			go func() { result <- l.Run(ctx) }()
+			select {
+			case <-l.Ready():
+			case err := <-result:
+				t.Fatalf("startup: %v", err)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			if outcome == "unknown-cancel" {
+				if err := os.Remove(filepath.Join(runtimeDir, "sessions")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := l.Cleanup(ctx, outcome != "inspect-cancel")
+			if outcome == "unknown-cancel" {
+				if err == nil || errors.Is(err, ErrReleaseBusy) {
+					t.Fatalf("missing source did not remain unknown: %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			want := TerminalExplicitCleanup
+			if outcome != "apply" {
+				select {
+				case <-l.Done():
+					t.Fatal("non-apply result ended the actor")
+				default:
+				}
+				want = ""
+				cancel()
+			}
+			select {
+			case err := <-result:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("actor did not finish")
+			}
+			if l.TerminalCause() != want {
+				t.Fatalf("cause=%q want=%q", l.TerminalCause(), want)
+			}
+		})
 	}
 }

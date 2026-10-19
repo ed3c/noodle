@@ -415,6 +415,14 @@ func (l *Loop) Run(ctx context.Context) error {
 			}
 			request.reply <- err
 			if err == nil && request.apply {
+				switch {
+				case request.automatic:
+					l.terminalCause = TerminalAutoCompleted
+				case request.cleanup:
+					l.terminalCause = TerminalExplicitCleanup
+				default:
+					l.terminalCause = TerminalMigrationDetach
+				}
 				return nil
 			}
 		case <-ctx.Done():
@@ -427,6 +435,7 @@ func (l *Loop) Run(ctx context.Context) error {
 			}
 			if l.cleanupUnknown == nil {
 				if err := l.cleanupAutomatic(); err == nil {
+					l.terminalCause = TerminalAutoCompleted
 					return nil
 				} else if !errors.Is(err, ErrReleaseBusy) {
 					l.logger.Error("automatic cleanup requires readback", "error", err)

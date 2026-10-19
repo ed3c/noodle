@@ -34,20 +34,21 @@ import (
 const hostProtocol = "noodle-host-v1"
 
 type hostReceipt struct {
-	Schema           int    `json:"schema"`
-	Protocol         string `json:"protocol"`
-	HostPID          int    `json:"host_pid"`
-	HostInstanceID   string `json:"host_instance_id"`
-	ContextID        string `json:"context_id"`
-	ProjectDir       string `json:"project_dir"`
-	ContextState     string `json:"context_state"`
-	Mode             string `json:"mode"`
-	ConfigSHA256     string `json:"config_sha256"`
-	BinaryPath       string `json:"binary_path"`
-	BinarySHA256     string `json:"binary_sha256"`
-	RequestID        string `json:"request_id"`
-	HostDir          string `json:"host_dir"`
-	CleanupCompleted bool   `json:"cleanup_completed,omitempty"`
+	Schema           int                `json:"schema"`
+	Protocol         string             `json:"protocol"`
+	HostPID          int                `json:"host_pid"`
+	HostInstanceID   string             `json:"host_instance_id"`
+	ContextID        string             `json:"context_id"`
+	ProjectDir       string             `json:"project_dir"`
+	ContextState     string             `json:"context_state"`
+	Mode             string             `json:"mode"`
+	ConfigSHA256     string             `json:"config_sha256"`
+	BinaryPath       string             `json:"binary_path"`
+	BinarySHA256     string             `json:"binary_sha256"`
+	RequestID        string             `json:"request_id"`
+	HostDir          string             `json:"host_dir"`
+	CleanupCompleted bool               `json:"cleanup_completed,omitempty"`
+	TerminalCause    loop.TerminalCause `json:"terminal_cause,omitempty"`
 }
 
 type hostResponse struct {
@@ -83,6 +84,7 @@ type hostRuntime interface {
 	Ready() <-chan struct{}
 	Shutdown()
 	FinishOnce() error
+	TerminalCause() loop.TerminalCause
 }
 
 type hostContext struct {
@@ -610,6 +612,9 @@ func (h *noodleHost) finish(c *hostContext, runErr error) {
 		c.failed = true
 	} else {
 		c.receipt.ContextState = "detached"
+		if !h.blocked {
+			c.receipt.TerminalCause = c.runtime.TerminalCause()
+		}
 	}
 	for i := range h.receipts {
 		if h.receipts[i].ContextID == c.receipt.ContextID {
@@ -620,6 +625,13 @@ func (h *noodleHost) finish(c *hostContext, runErr error) {
 	if err := h.save(); err != nil {
 		c.failed = true
 		h.blocked = true
+		c.receipt.TerminalCause = ""
+		for i := range h.receipts {
+			if h.receipts[i].ContextID == c.receipt.ContextID {
+				h.receipts[i].TerminalCause = ""
+				break
+			}
+		}
 		fmt.Fprintln(os.Stderr, "host receipt persistence failed:", err)
 	}
 	if !c.failed {
@@ -850,7 +862,7 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 	if err != nil {
 		return hostError("refused", err)
 	}
-	r := hostReceipt{1, hostProtocol, os.Getpid(), h.instanceID, id, req.ProjectDir, "active", cfg.Mode, req.ConfigSHA256, h.binaryPath, h.binarySHA, req.RequestID, h.dir, req.CleanupCompleted}
+	r := hostReceipt{1, hostProtocol, os.Getpid(), h.instanceID, id, req.ProjectDir, "active", cfg.Mode, req.ConfigSHA256, h.binaryPath, h.binarySHA, req.RequestID, h.dir, req.CleanupCompleted, ""}
 	h.receipts = append(h.receipts, r)
 	if err = h.save(); err != nil {
 		h.receipts = h.receipts[:len(h.receipts)-1]

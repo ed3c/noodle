@@ -65,6 +65,9 @@ func TestReleaseRunActorRejectsBusyAndJoinsIdle(t *testing.T) {
 	default:
 		t.Fatal("merge queue was not joined")
 	}
+	if l.TerminalCause() != TerminalMigrationDetach {
+		t.Fatalf("migration release lost cause: %q", l.TerminalCause())
+	}
 }
 
 func TestReleaseRefusesUnfinishedOwnerWork(t *testing.T) {
