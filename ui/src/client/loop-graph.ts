@@ -56,6 +56,60 @@ function file(value: unknown) {
     node_ids: ids(r.node_ids),
   };
 }
+function bool(v: unknown) {
+  if (typeof v !== "boolean") {
+    throw new TypeError("observation boolean invalid");
+  }
+  return v;
+}
+
+function repositoryObservation(raw: unknown, revision: string | null) {
+  if (raw === undefined) {
+    return;
+  }
+  const o = object(raw);
+  const result = {
+    status: choice(o.status, ["observed", "unknown"]),
+    scope: choice(o.scope, ["display_readback"]),
+    observed_at: text(o.observed_at),
+    repository_id: nullable(o.repository_id, id),
+    worktree_id: nullable(o.worktree_id, id),
+    snapshot_id: nullable(o.snapshot_id, id),
+    branch: nullable(o.branch, text),
+    detached: nullable(o.detached, bool),
+    dirty: nullable(o.dirty, bool),
+    revision: nullable(o.revision, text),
+    gap: nullable(o.gap, text),
+  };
+  if (result.revision !== revision) {
+    throw new Error("observation revision differs");
+  }
+  if (result.status === "observed") {
+    if (
+      !result.repository_id ||
+      !result.worktree_id ||
+      !result.snapshot_id ||
+      result.dirty === null ||
+      result.detached === null ||
+      (result.branch === null) !== result.detached ||
+      result.gap !== null
+    ) {
+      throw new Error("observed identity incomplete");
+    }
+  } else if (
+    result.repository_id !== null ||
+    result.worktree_id !== null ||
+    result.snapshot_id !== null ||
+    result.branch !== null ||
+    result.detached !== null ||
+    result.dirty !== null ||
+    !result.gap
+  ) {
+    throw new Error("unknown observation claims state");
+  }
+  return result;
+}
+
 export function parseArtifact(value: unknown) {
   const r = object(value);
   const source = r.source === null ? null : object(r.source);
@@ -75,6 +129,36 @@ export function parseArtifact(value: unknown) {
     },
   };
 }
+function mechanism(raw: unknown) {
+  if (raw === undefined) {
+    return;
+  }
+  const m = object(raw);
+  if (m.version !== 1) {
+    throw new Error("Unknown mechanism version");
+  }
+  const capabilities = list(m.capabilities, (item) => {
+    const c = object(item);
+    return {
+      id: text(c.id),
+      function: text(c.function),
+      entry: text(c.entry),
+      input: text(c.input),
+      output: text(c.output),
+      readback: text(c.readback),
+      refusal: text(c.refusal),
+      source: text(c.source),
+    };
+  });
+  if (
+    capabilities.length === 0 ||
+    new Set(capabilities.map((c) => c.id)).size !== capabilities.length ||
+    capabilities.some((c) => Object.values(c).some((v) => !v))
+  ) {
+    throw new Error("Invalid mechanism capability");
+  }
+  return { version: 1, template: id(m.template), capabilities };
+}
 export function parseLoopGraph(value: unknown) {
   const root = object(value);
   if (root.schema_version !== 2) {
@@ -87,6 +171,7 @@ export function parseLoopGraph(value: unknown) {
       return {
         id: id(o.id),
         namespace: text(o.namespace),
+        mechanism: mechanism(o.mechanism),
         label: text(o.label),
         kind: text(o.kind),
         scope: choice(o.scope, ["shared", "repository"]),
@@ -111,6 +196,7 @@ export function parseLoopGraph(value: unknown) {
         id: id(repo.id),
         label: text(repo.label),
         root: text(repo.root),
+        observation: repositoryObservation(repo.observation, nullable(repo.revision, text)),
         revision: nullable(repo.revision, text),
         index_status: choice(repo.index_status, ["complete", "unknown", "not_public"]),
         tracked_files: list(repo.tracked_files, file),
@@ -128,6 +214,7 @@ export function parseLoopGraph(value: unknown) {
         run_id: id(n.run_id),
         repository_id: id(n.repository_id),
         object_id: id(n.object_id),
+        mechanism: n.mechanism === undefined ? undefined : id(n.mechanism),
         kind: choice(n.kind, ["session", "pclass", "cli", "observation"]),
         label: text(n.label),
         identity: {
@@ -271,7 +358,12 @@ export function parseLoopGraph(value: unknown) {
       .filter((e) => e.kind === "handoff")
       .map((e) => ({ from: e.from_node_id, to: e.to_node_id })),
   });
-  return { ...parseLoopView({ ...root, schema_version: 1 }), schema_version: 2, graph };
+  return {
+    ...parseLoopView({ ...root, schema_version: 1 }),
+    schema_version: 2,
+    graph,
+    review_version: root.review_version === undefined ? null : nullable(root.review_version, text),
+  };
 }
 export type GraphView = ReturnType<typeof parseLoopGraph>;
 export type LoopGraph = GraphView["graph"];
@@ -355,4 +447,28 @@ export async function fetchGraphFile(
     error,
     content: response.ok && status === "available" ? nullable(raw.content, text) : null,
   };
+}
+
+export async function submitReviewSelection({
+  graphVersion,
+  runId,
+  kind,
+  targetId,
+}: {
+  graphVersion: string;
+  runId: string;
+  kind: string;
+  targetId: string;
+}) {
+  const response = await fetch("/api/loops/review-selections", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ graph_version: graphVersion, run_id: runId, kind, target_id: targetId }),
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  const raw = object(await response.json());
+  const selection = object(raw.selection);
+  return { id: id(selection.id), status: text(raw.status) };
 }

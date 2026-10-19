@@ -46,7 +46,10 @@ func registerLoopGraph(mux *http.ServeMux, dir string) {
 		if !ok {
 			return
 		}
-		loopJSON(w, r, 200, loopview.Metadata(view))
+		loopJSON(w, r, 200, struct {
+			loopview.View
+			ReviewVersion string `json:"review_version"`
+		}{loopview.Metadata(view), loopview.ReviewVersion(view)})
 	})
 	mux.HandleFunc("GET /api/loops/artifacts/{id}", func(w http.ResponseWriter, r *http.Request) {
 		view, ok := graphView(w, dir)

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchGraphFile } from "~/client/loop-graph";
+import { readStructuredField } from "~/client/loop-panorama.mjs";
+import { fetchArtifact, fetchGraphFile } from "~/client/loop-graph";
 import type { LoopGraph } from "~/client/loop-graph";
 import type { GraphSelection } from "./LoopGraphCanvas";
 import { findingSymbol } from "~/client/loop-graph-presentation";
@@ -40,6 +41,56 @@ function FileContent({ selection }: { selection: Extract<GraphSelection, { kind:
     </>
   );
 }
+function StructuredField({ graph, node }: { graph: LoopGraph; node: LoopGraph["nodes"][number] }) {
+  const artifact = graph.artifacts.find(
+    (a) =>
+      a.source &&
+      node.identity.locator?.startsWith(`${a.source.path}#/`) &&
+      [
+        ...node.input_artifact_ids,
+        ...node.output_artifact_ids,
+        ...node.evidence_artifact_ids,
+      ].includes(a.id),
+  );
+  const query = useQuery({
+    queryKey: ["loop-artifact", artifact?.id, artifact?.source?.sha256, artifact?.source?.bytes],
+    queryFn: ({ signal }) => {
+      if (!artifact) {
+        throw new Error("Structured field source missing");
+      }
+      return fetchArtifact(artifact, signal);
+    },
+    enabled: artifact?.status === "available",
+    retry: false,
+    staleTime: Infinity,
+  });
+  if (!artifact) {
+    return null;
+  }
+  const field =
+    typeof query.data?.content === "string"
+      ? readStructuredField(
+          query.data.content,
+          node.identity.locator,
+          artifact.source?.path ?? null,
+        )
+      : null;
+  return (
+    <section aria-label="結構化欄位內容">
+      <h3>原 Schema 欄位</h3>
+      <p>欄位狀態：{field?.status ?? "unknown"}</p>
+      <p>{field?.pointer ?? node.identity.locator}</p>
+      <pre>
+        {field?.text ??
+          query.error?.message ??
+          query.data?.error ??
+          "UNKNOWN：原欄位內容尚未載入或不可讀。"}
+      </pre>
+      <p>這是原輸出的欄位投影；不代表 Session 判斷正確或 next 已執行。</p>
+    </section>
+  );
+}
+
 export function LoopGraphDetail({
   graph,
   selection,
@@ -133,6 +184,10 @@ export function LoopGraphDetail({
           <pre>{JSON.stringify(detail, null, 2)}</pre>
         </details>
       )}
+      {selection.kind === "node" &&
+        graph.nodes
+          .filter((n) => n.id === selection.id)
+          .map((node) => <StructuredField key={node.id} graph={graph} node={node} />)}
       {connected.length > 0 && (
         <div className="lg-related">
           <h3>明示關聯交接</h3>

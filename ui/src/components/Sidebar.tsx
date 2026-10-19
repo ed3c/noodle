@@ -277,6 +277,8 @@ export function Sidebar() {
                   return (
                     <button
                       type="button"
+                      // Native stage identity is the immutable order ID plus stage ordinal.
+                      // oxlint-disable-next-line react/no-array-index-key
                       key={stageNodeKey(order.id, i)}
                       className={`tree-stage ${info.cls} ${agentChannel ? "stage-clickable" : ""}`}
                       onClick={(event) => {
