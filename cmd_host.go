@@ -513,7 +513,7 @@ func serveHost(ctx context.Context) error {
 			}
 			for _, c := range h.contexts {
 				if c.done != nil {
-					<-c.done
+					h.finish(c, <-c.done)
 				}
 			}
 			if h.residents != nil {
