@@ -190,7 +190,7 @@ func TestHostResidentCLIContinuesOnOriginalSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	requestFile := filepath.Join(dir, "request.json")
-	binding := hostRequestBinding{Schema: 1, RequestID: "request", Operation: "attach", ProjectDir: project, ConfigSHA256: "config", Mode: "manual", BinarySHA256: hostDigest(raw), Status: "ok", HostDir: dir}
+	binding := hostRequestBinding{Schema: 1, RequestID: "request", Operation: "attach", ProjectDir: project, ConfigSHA256: "config", Mode: "manual", BinarySHA256: hostDigest(raw), Status: "ok", HostDir: dir, CleanupCompleted: true}
 	if err = saveHostRequest(requestFile, binding); err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestHostResidentCLIContinuesOnOriginalSocket(t *testing.T) {
 	defer listener.Close()
 	seen := make(chan hostRequest, 4)
 	done := make(chan error, 1)
-	receipt := hostReceipt{Schema: 1, ContextID: "context", RequestID: "request", HostInstanceID: "instance", ProjectDir: project, ContextState: "active", ConfigSHA256: "config", Mode: "manual", BinarySHA256: binding.BinarySHA256, HostDir: dir}
+	receipt := hostReceipt{Schema: 1, ContextID: "context", RequestID: "request", HostInstanceID: "instance", ProjectDir: project, ContextState: "active", ConfigSHA256: "config", Mode: "manual", BinarySHA256: binding.BinarySHA256, HostDir: dir, CleanupCompleted: binding.CleanupCompleted}
 	go func() {
 		for i := 0; i < 4; i++ {
 			conn, e := listener.Accept()
@@ -256,7 +256,7 @@ func TestHostResidentCLIContinuesOnOriginalSocket(t *testing.T) {
 			t.Fatal(output.String())
 		}
 		status, operation := <-seen, <-seen
-		if status.Operation != "status" || operation.Operation != "resident_"+op+"_bound" || operation.InstanceID != "instance" || operation.ContextID != "context" || operation.RequestID != "request" {
+		if status.Operation != "status" || operation.Operation != "resident_"+op+"_bound" || operation.InstanceID != "instance" || operation.ContextID != "context" || operation.RequestID != "request" || !operation.CleanupCompleted {
 			t.Fatal(status, operation)
 		}
 	}

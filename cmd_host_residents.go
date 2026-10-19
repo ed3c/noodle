@@ -54,6 +54,7 @@ func newHostResidentsCmd(app *App) *cobra.Command {
 				req.RequestID = original.RequestID
 				req.ConfigSHA256 = original.ConfigSHA256
 				req.Mode = original.Mode
+				req.CleanupCompleted = original.CleanupCompleted
 				req.BinarySHA256 = original.BinarySHA256
 				dir = original.HostDir
 			}
