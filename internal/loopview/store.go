@@ -2,6 +2,7 @@ package loopview
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -57,6 +58,7 @@ func Import(dir string, incoming View) (bool, int, error) {
 	if err != nil {
 		return false, 0, err
 	}
+	hadInline := hasInlineArtifacts(current)
 	before, err := json.Marshal(current)
 	if err != nil {
 		return false, 0, err
@@ -79,6 +81,7 @@ func Import(dir string, incoming View) (bool, int, error) {
 	if err := mergeGraph(&current, incoming); err != nil {
 		return false, 0, err
 	}
+	current = referencedArtifacts(current)
 	if err := validateImport(current); err != nil {
 		return false, 0, err
 	}
@@ -89,6 +92,26 @@ func Import(dir string, incoming View) (bool, int, error) {
 	if len(data) > MaxBytes {
 		return false, 0, fmt.Errorf("merged loop registry exceeds %d bytes", MaxBytes)
 	}
+	// Keep the exact previous registry and accepted incoming bodies before removing
+	// redundant inline copies. ArtifactContent still verifies the original source.
+	if hasInlineArtifacts(incoming) {
+		raw, err := json.Marshal(incoming)
+		if err != nil {
+			return false, 0, err
+		}
+		if err := archiveView(dir, raw); err != nil {
+			return false, 0, err
+		}
+	}
+	if hadInline {
+		prior, err := os.ReadFile(Path(dir))
+		if err != nil {
+			return false, 0, err
+		}
+		if err := archiveView(dir, prior); err != nil {
+			return false, 0, err
+		}
+	}
 	if bytes.Equal(before, data) {
 		return false, len(current.Runs), nil
 	}
@@ -96,4 +119,45 @@ func Import(dir string, incoming View) (bool, int, error) {
 		return false, 0, err
 	}
 	return true, len(current.Runs), nil
+}
+
+func hasInlineArtifacts(view View) bool {
+	if view.Graph != nil {
+		for _, artifact := range view.Graph.Artifacts {
+			if artifact.Content != nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func referencedArtifacts(view View) View {
+	if view.Graph != nil {
+		graph := *view.Graph
+		graph.Artifacts = append([]Artifact{}, graph.Artifacts...)
+		for i := range graph.Artifacts {
+			graph.Artifacts[i].Content = nil
+		}
+		view.Graph = &graph
+	}
+	return view
+}
+
+func archiveView(dir string, data []byte) error {
+	path := filepath.Join(dir, "loop-view-history", fmt.Sprintf("%x.json", sha256.Sum256(data)))
+	if previous, err := os.ReadFile(path); err == nil {
+		if !bytes.Equal(previous, data) {
+			return fmt.Errorf("loop view history content changed: %s", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	if err := filex.WriteFileAtomicDurable(path, data); err != nil {
+		return err
+	}
+	return filex.SyncDir(dir)
 }
