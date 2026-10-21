@@ -30,7 +30,7 @@ jobs:
         run: |
           bun --version
           bun -p process.versions.typescript
-          (cd ui && bun check --no-script)
+          (cd ui && bun check)
           (cd ui && bun --bun run build)
         timeout-minutes: 5
 
