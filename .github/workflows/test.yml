@@ -25,6 +25,15 @@ jobs:
       - name: Install dependencies from mechanically resolved TypeScript 7 lockfile
         run: pnpm install --frozen-lockfile
 
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: Bun TypeScript 7 secondary checker and Vite-compatible runtime
+        run: |
+          bun --version
+          bun -p process.versions.typescript
+          (cd ui && bun check --no-script)
+          (cd ui && bun --bun run build)
+        timeout-minutes: 5
+
       - name: Assert native TypeScript 7 CLI and legacy compiler API are separate
         run: |
           pnpm --filter noodle-ui exec tsc --version
