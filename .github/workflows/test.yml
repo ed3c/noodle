@@ -22,12 +22,8 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - name: Resolve TypeScript 7 migration lockfile (candidate only)
-        run: |
-          pnpm install --no-frozen-lockfile
-          echo "::group::PNPM_LOCK_DIFF_BEGIN"
-          git diff --no-ext-diff -- pnpm-lock.yaml
-          echo "::endgroup::PNPM_LOCK_DIFF_END"
+      - name: Install dependencies from mechanically resolved TypeScript 7 lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Assert native TypeScript 7 CLI and legacy compiler API are separate
         run: |
