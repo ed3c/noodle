@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strconv"
 
 	"github.com/poteto/noodle/internal/state"
@@ -207,5 +208,8 @@ func (l *Loop) degradedTaskDispatch(cand dispatchCandidate, attempt int, req loo
 	req.ResumeSessionID = ""
 	req.DegradedFromSessionID = selected.Refusal.ResumeSessionID
 	req.DegradationReason = selected.Refusal.Reason
+	req.Prompt += fmt.Sprintf("\n\nNative context recovery: DEGRADED. This is the single new conversation for the saved continuation after native resume refused before any turn. The current task requirements and original worktree remain in force. Original conversation memory was not restored. Retained original attempt evidence: %s. Resume refusal evidence: %s. Read relevant prior decisions and unknown effects before continuing; do not repeat effects from missing evidence.",
+		filepath.Join(l.runtimeDir, "sessions", selected.Refusal.ResumeSessionID),
+		filepath.Join(l.runtimeDir, "sessions", selected.Refusal.SessionID))
 	return req, nil
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/poteto/noodle/internal/state"
@@ -54,6 +55,9 @@ func TestMissingNativeContextDegradesOnceAndPreservesOriginalTask(t *testing.T) 
 		}
 		if calls != 2 || req.ResumeSessionID != "" || req.DegradedFromSessionID != original.session.ID() || req.DegradationReason == "" {
 			t.Fatalf("wrong degraded dispatch: %+v", req)
+		}
+		if !strings.Contains(req.Prompt, "DEGRADED") || !strings.Contains(req.Prompt, filepath.Join(l.runtimeDir, "sessions", original.session.ID())) || !strings.Contains(req.Prompt, "fix candidate") {
+			t.Fatal("degraded conversation omitted its label, original evidence or current goal")
 		}
 		if string(recoveryRead(t, filepath.Join(req.WorktreePath, "candidate.txt"))) != "reviewed candidate\n" {
 			t.Fatal("degraded dispatch lost original data")
