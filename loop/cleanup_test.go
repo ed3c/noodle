@@ -117,6 +117,13 @@ func TestCleanupAutomaticPolicyRetainsManualHoldAndPending(t *testing.T) {
 		t.Fatalf("manual hold lost: %v", err)
 	}
 	l.canonical.Mode = state.RunModeSupervised
+	for _, held := range []State{StatePaused, StateDraining} {
+		l.state = held
+		if err := l.cleanupAutomatic(); !errors.Is(err, ErrReleaseBusy) {
+			t.Fatalf("dispatch hold %s lost: %v", held, err)
+		}
+	}
+	l.state = StateRunning
 	o := l.canonical.Orders["done"]
 	o.Status = state.OrderPending
 	o.Stages[0].Status = state.StagePending

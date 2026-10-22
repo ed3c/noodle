@@ -70,6 +70,9 @@ func TestLocalTaskRequestChangesPreservesDirtyCandidateAndRequeues(t *testing.T)
 	if err := l.reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	if err := l.controlPause(); err != nil {
+		t.Fatal(err)
+	}
 	if err := l.controlEditItem(ControlCommand{OrderID: cook.orderID, Prompt: `{"kind":"local_task","goal":"fix candidate","write_paths":["candidate.txt"],"correction":"correct result"}`}); err != nil {
 		t.Fatal(err)
 	}
@@ -93,6 +96,12 @@ func TestLocalTaskRequestChangesPreservesDirtyCandidateAndRequeues(t *testing.T)
 	}
 	if string(recoveryRead(t, filepath.Join(cook.worktreePath, "candidate.txt"))) != "reviewed candidate\n" {
 		t.Fatal("candidate lost")
+	}
+	if err := l.controlMode("supervised"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, dispatch, _, err := l.buildCycleBrief(context.Background()); err != nil || dispatch || l.state != StatePaused {
+		t.Fatalf("outer review resumed a paused revision: %v", err)
 	}
 }
 

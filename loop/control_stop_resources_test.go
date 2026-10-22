@@ -103,3 +103,100 @@ func TestCancelledAdmittedLocalTaskRetainsDirtyWorktreeForRecovery(t *testing.T)
 		t.Fatal("interrupted task lost native recovery custody")
 	}
 }
+
+func TestPauseKeepsCurrentWorkerAndReleasesAcrossInnerRounds(t *testing.T) {
+	l := newControlTestLoop(t, &fakeWorktree{}, newMockRuntime())
+	b := resourceBudget(l, 1)
+	b.Observe(admission.Sample{At: time.Now(), Unsupported: true}, nil)
+	for _, id := range []string{"round-one", "round-two", "round-three"} {
+		session := &mockSession{id: id, status: "running", done: make(chan struct{})}
+		if err := l.withAdmission(context.Background(), "process", func(ctx context.Context) error {
+			l.cooks.activeCooksByOrder[id] = &cookHandle{session: l.retainDispatched(ctx, session)}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.dispatchControlCommand(ControlCommand{Action: "pause"}); err != nil {
+			t.Fatal(err)
+		}
+		if session.Status() != "running" || b.Snapshot().Active != 1 {
+			t.Fatal("pause stopped or prematurely released the current worker")
+		}
+		for _, mode := range []string{"manual", "supervised"} {
+			if err := l.dispatchControlCommand(ControlCommand{Action: "mode", Value: mode}); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, dispatch, _, err := l.buildCycleBrief(context.Background()); err != nil || dispatch {
+				t.Fatalf("outer mode change resumed paused dispatch: %v", err)
+			}
+		}
+		session.complete("completed")
+		select {
+		case <-l.cooks.activeCooksByOrder[id].session.Done():
+		case <-time.After(time.Second):
+			t.Fatal("completed worker did not join")
+		}
+		delete(l.cooks.activeCooksByOrder, id)
+		if b.Snapshot().Active != 0 || l.state != StatePaused || len(l.cooks.pendingReview) != 1 {
+			t.Fatal("round completion leaked permits, resumed dispatch or lost outer review")
+		}
+		if err := l.dispatchControlCommand(ControlCommand{Action: "resume"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, dispatch, _, err := l.buildCycleBrief(context.Background()); err != nil || !dispatch {
+			t.Fatalf("explicit resume did not enable next round: %v", err)
+		}
+	}
+}
+
+func TestDispatchHoldSurvivesRestartWithoutReplayingControls(t *testing.T) {
+	l := newControlTestLoop(t, &fakeWorktree{}, newMockRuntime())
+	for _, tc := range []struct {
+		command ControlCommand
+		want    State
+	}{
+		{ControlCommand{ID: "paused", Action: "pause"}, StatePaused},
+		{ControlCommand{ID: "outer-release", Action: "mode", Value: "supervised"}, StatePaused},
+		{ControlCommand{ID: "continued", Action: "resume"}, StateRunning},
+		{ControlCommand{ID: "paused", Action: "pause"}, StateRunning},
+		{ControlCommand{ID: "drained", Action: "drain"}, StateDraining},
+		{ControlCommand{ID: "stopped", Action: "stop-all"}, StatePaused},
+		{ControlCommand{ID: "resumed-again", Action: "resume"}, StateRunning},
+		{ControlCommand{ID: "normalized-pause", Action: " PAUSE "}, StatePaused},
+	} {
+		if ack := recoveryControl(t, l, tc.command); ack.Status != "ok" {
+			t.Fatal(ack)
+		}
+		l = New(l.projectDir, "noodle", l.config, l.deps)
+		if err := l.hydrateProcessedCommands(); err != nil {
+			t.Fatal(err)
+		}
+		if l.state != tc.want {
+			t.Fatalf("after %s restart state = %s, want %s", tc.command.ID, l.state, tc.want)
+		}
+		if len(l.deps.Runtimes["process"].(*mockRuntime).calls) != 0 {
+			t.Fatal("control hydration dispatched a worker")
+		}
+	}
+}
+
+func TestFailedStopAllRetainsDispatchHoldAfterRestart(t *testing.T) {
+	l := newControlTestLoop(t, &fakeWorktree{}, newMockRuntime())
+	session := &stopFailureSession{mockSession: &mockSession{id: "unresolved", done: make(chan struct{})}, err: errors.New("original process identity unavailable")}
+	l.cooks.activeCooksByOrder[session.ID()] = &cookHandle{session: session}
+	if ack := recoveryControl(t, l, ControlCommand{ID: "partial-stop", Action: "stop-all"}); ack.Status != "error" {
+		t.Fatal("partial stop did not preserve failure")
+	}
+	l = New(l.projectDir, "noodle", l.config, l.deps)
+	if err := l.hydrateProcessedCommands(); err != nil {
+		t.Fatal(err)
+	}
+	if l.state != StatePaused {
+		t.Fatal("restart resumed dispatch after a partial stop failure")
+	}
+	select {
+	case <-session.Done():
+		t.Fatal("hydration claimed the unresolved worker exited")
+	default:
+	}
+}

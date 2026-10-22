@@ -13,8 +13,8 @@ import (
 )
 
 func (l *Loop) cleanupAutomatic() error {
-	if !l.deps.CleanupCompleted || l.effectiveMode() == state.RunModeManual {
-		return fmt.Errorf("%w: automatic cleanup disabled or manual hold retained", ErrReleaseBusy)
+	if !l.deps.CleanupCompleted || l.effectiveMode() == state.RunModeManual || l.state == StatePaused || l.state == StateDraining {
+		return fmt.Errorf("%w: automatic cleanup disabled or dispatch hold retained", ErrReleaseBusy)
 	}
 	return l.cleanupCompleted(true)
 }

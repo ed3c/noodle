@@ -49,6 +49,22 @@ func (l *Loop) hydrateProcessedCommands() error {
 				continue
 			}
 			if strings.TrimSpace(ack.ID) != "" {
+				if _, seen := l.cmds.processedIDs[ack.ID]; !seen {
+					// Rebuild dispatch holds without replaying worker effects or old duplicate ACKs.
+					action := stringx.Normalize(ack.Action)
+					if action == "stop-all" {
+						l.setState(StatePaused) // Even a partial kill failure installed the hold.
+					} else if ack.Status == "ok" {
+						switch action {
+						case "pause":
+							l.setState(StatePaused)
+						case "drain":
+							l.setState(StateDraining)
+						case "resume":
+							l.setState(StateRunning)
+						}
+					}
+				}
 				l.cmds.processedIDs[ack.ID] = struct{}{}
 			}
 		}
