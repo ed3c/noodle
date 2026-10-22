@@ -94,7 +94,7 @@ func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, or
 	}
 	worktreePath := l.worktreePath(name)
 	if !created {
-		if opts.attempt > 0 && interruption == nil && !preserveReview {
+		if opts.attempt > 0 && interruption == nil && !preserveReview && !l.retainTaskData(cand.OrderID) {
 			resetWorktreeState(worktreePath, l.deps.Execution)
 		}
 		if hint := worktreeResumeContext(worktreePath, name, l.deps.Execution); hint != "" {
@@ -264,7 +264,7 @@ func (l *Loop) handleCookDispatchFailure(cand dispatchCandidate, stage Stage, wo
 	if errors.Is(err, errDispatchUnknown) {
 		return err
 	}
-	if created {
+	if created && !l.retainTaskData(cand.OrderID) {
 		_ = l.deps.Worktree.Cleanup(worktreeName, worktree.CleanupOpts{Force: true})
 	}
 	envelope, ok := asDispatchFailureEnvelope(err)

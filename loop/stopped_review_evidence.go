@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
+	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/filex"
 	"github.com/poteto/noodle/internal/orderx"
@@ -29,10 +31,11 @@ func decodeStoppedReview(data []byte, out any) error {
 
 func stoppedReviewDigest(i stoppedReviewIntent) string {
 	data, _ := json.Marshal(struct {
-		Claim  PublicationClaim
-		Before []byte
-		Files  map[string][]byte
-	}{i.Claim, i.Before, i.Files})
+		Claim          PublicationClaim
+		Before         []byte
+		Files          map[string][]byte
+		RetainTaskData bool `json:"retain_task_data,omitempty"`
+	}{i.Claim, i.Before, i.Files, i.RetainTaskData})
 	return publicationDigest(data)
 }
 
@@ -61,6 +64,11 @@ func captureStoppedReview(project, order, subject string, execCtx ...*execution.
 	if err := decodeStoppedReview(i.Before, &s); err != nil {
 		return i, err
 	}
+	cfg, _, err := config.Load(filepath.Join(project, config.DefaultConfigPath))
+	if err != nil {
+		return i, err
+	}
+	i.RetainTaskData = slices.Contains(cfg.Runtime.Process.AdmittedOrders, order) || retainedTaskData(s.EffectLedger, order)
 	if !orderx.ValidOrderRevision(s.OrderRevision) || s.GeneratedAt.IsZero() || s.EffectLedger == nil {
 		return i, fmt.Errorf("canonical recovery evidence is incomplete")
 	}

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
+	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/filex"
 	"github.com/poteto/noodle/internal/ingest"
@@ -28,12 +30,13 @@ type StoppedReviewInspection struct {
 }
 
 type stoppedReviewIntent struct {
-	Claim  PublicationClaim  `json:"claim"`
-	Before []byte            `json:"before_snapshot"`
-	After  []byte            `json:"after_snapshot"`
-	Files  map[string][]byte `json:"session_files"`
-	Digest string            `json:"custody_sha256"`
-	Bundle string            `json:"bundle_sha256"`
+	Claim          PublicationClaim  `json:"claim"`
+	Before         []byte            `json:"before_snapshot"`
+	After          []byte            `json:"after_snapshot"`
+	Files          map[string][]byte `json:"session_files"`
+	Digest         string            `json:"custody_sha256"`
+	Bundle         string            `json:"bundle_sha256"`
+	RetainTaskData bool              `json:"retain_task_data,omitempty"`
 }
 
 func InspectStoppedReview(project, binary, order, subject string, execCtx ...*execution.Context) StoppedReviewInspection {
@@ -125,6 +128,13 @@ func recoverStoppedReview(project, binary, order, subject, digest string, barrie
 		if err := validateStoppedIntent(project, r.EvidencePath, intent, firstExecution(execCtx)); err != nil {
 			return refuse(err)
 		}
+		cfg, _, err := config.Load(filepath.Join(project, config.DefaultConfigPath))
+		if err != nil {
+			return refuse(err)
+		}
+		if !intent.RetainTaskData && slices.Contains(cfg.Runtime.Process.AdmittedOrders, order) {
+			return refuse(fmt.Errorf("rejection cleanup policy changed; retained task data cannot be removed"))
+		}
 	}
 	present, err := stoppedReviewResidue(project, intent.Claim, firstExecution(execCtx))
 	if err != nil {
@@ -136,11 +146,14 @@ func recoverStoppedReview(project, binary, order, subject, digest string, barrie
 	r.Status = "recoverable"
 	r.Next.Argv = []string{binary, "--project-dir", project, "review", "reject", order, subject, intent.Digest}
 	r.Next.Guidance = "Only an authorized rejection may consume next.argv. Candidate Git objects and original evidence are archived before cleanup. No scheduler or provider operation occurs."
-	if after && !present {
+	if intent.RetainTaskData && !present {
+		return refuse(fmt.Errorf("retained task worktree missing; inspect before continuation"))
+	}
+	if after && (intent.RetainTaskData || !present) {
 		if err := stoppedReviewProjection(dir, intent.After, false); err == nil {
 			r.Status = "rejected"
 			r.Next.Argv = []string{}
-			r.Next.Guidance = "Local Noodle rejection and cleanup are complete. This is not provider delivery or outer-supervisor reconciliation."
+			r.Next.Guidance = stoppedReviewCompletionGuidance(intent.RetainTaskData)
 			return r
 		}
 	}
@@ -193,7 +206,7 @@ func recoverStoppedReview(project, binary, order, subject, digest string, barrie
 	if err != nil {
 		return refuse(err)
 	}
-	if present {
+	if present && !intent.RetainTaskData {
 		owner := &worktree.App{Root: project, Quiet: true}
 		if err := owner.Cleanup(intent.Claim.WorktreeName, worktree.CleanupOpts{Force: true}); err != nil {
 			return refuse(err)
@@ -206,13 +219,23 @@ func recoverStoppedReview(project, binary, order, subject, digest string, barrie
 	if err != nil {
 		return refuse(err)
 	}
-	if present {
+	if present && !intent.RetainTaskData {
 		return refuse(fmt.Errorf("cleanup left exact worktree or branch residue; inspect before continuation"))
+	}
+	if !present && intent.RetainTaskData {
+		return refuse(fmt.Errorf("retained task worktree missing after rejection"))
 	}
 	r.Status = "rejected"
 	r.Next.Argv = []string{}
-	r.Next.Guidance = "Local Noodle rejection and cleanup are complete; archived candidate and session evidence remain. No provider delivery or outer-supervisor reconciliation is claimed."
+	r.Next.Guidance = stoppedReviewCompletionGuidance(intent.RetainTaskData)
 	return r
+}
+
+func stoppedReviewCompletionGuidance(retained bool) string {
+	if retained {
+		return "Local Noodle rejection is complete. Original worktree, candidate and session evidence remain; only explicit deletion may remove them. No provider delivery or outer-supervisor reconciliation is claimed."
+	}
+	return "Local Noodle rejection and cleanup are complete; archived candidate and session evidence remain. No provider delivery or outer-supervisor reconciliation is claimed."
 }
 
 func stoppedReviewAfter(before []byte, claim PublicationClaim, at time.Time) ([]byte, error) {

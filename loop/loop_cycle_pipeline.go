@@ -126,7 +126,11 @@ func (l *Loop) recordInitialAdmissions(ids []string) error {
 	}
 	for _, id := range ids {
 		effectID := initialAdmissionEffectID(id)
-		payload, err := json.Marshal(map[string]string{"order_id": id, "initial_revision": l.orderRevision})
+		binding := map[string]string{"order_id": id, "initial_revision": l.orderRevision}
+		if l.retainTaskData(id) {
+			binding["task_data_retention"] = taskDataRetention
+		}
+		payload, err := json.Marshal(binding)
 		if err != nil {
 			return err
 		}

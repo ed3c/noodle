@@ -116,7 +116,7 @@ func (l *Loop) controlReject(orderID string) error {
 		l.canonical.Orders[orderID] = node
 	}
 	delete(l.canonical.PendingReviews, orderID)
-	if strings.TrimSpace(pending.worktreeName) != "" {
+	if !l.retainTaskData(orderID) && strings.TrimSpace(pending.worktreeName) != "" {
 		_ = l.deps.Worktree.Cleanup(pending.worktreeName, worktree.CleanupOpts{Force: true})
 	}
 	if err := l.emitEventChecked(ingest.EventStageReviewRejected, map[string]any{

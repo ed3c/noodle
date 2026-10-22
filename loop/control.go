@@ -426,6 +426,13 @@ func (l *Loop) controlStop(name string) error {
 // controlStopKill is the fallback for non-steerable sessions: kill the process
 // and clean up the cook.
 func (l *Loop) controlStopKill(cook *cookHandle) error {
+	if l.retainTaskData(cook.orderID) {
+		if err := l.controlPause(); err != nil {
+			return err
+		}
+		// Keep the original watcher and resource owner until actual exit.
+		return cook.session.ForceKill()
+	}
 	if err := cook.session.ForceKill(); err != nil {
 		return fmt.Errorf("force kill session %q failed: %w", cook.session.ID(), err)
 	}
