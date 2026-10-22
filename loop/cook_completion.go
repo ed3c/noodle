@@ -118,6 +118,14 @@ func (l *Loop) handleBootstrapResult(result StageResult) {
 }
 
 func (l *Loop) handleCompletion(ctx context.Context, cook *cookHandle, resultStatus StageResultStatus, rawStatus string) error {
+	if resultStatus == StageResultFailed {
+		if handled, err := l.recoverMissingNativeContext(ctx, cook); handled {
+			if err != nil {
+				return &completionAdapterError{err: err}
+			}
+			return err
+		}
+	}
 	if resultStatus == StageResultCancelled {
 		order, exists := l.canonical.Orders[cook.orderID]
 		if exists && cook.stageIndex >= 0 && cook.stageIndex < len(order.Stages) && l.isAdmittedLocalTask(order, order.Stages[cook.stageIndex]) {

@@ -126,6 +126,15 @@ func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, or
 	if err != nil {
 		return err
 	}
+	if req.ResumeSessionID != "" {
+		req, err = l.degradedTaskDispatch(cand, opts.attempt, req)
+		if err != nil {
+			if errors.Is(err, errDispatchUnknown) {
+				return l.retainUnknownDispatch(ctx, err)
+			}
+			return err
+		}
+	}
 	attemptID := dispatchAttemptID(cand.OrderID, cand.StageIndex, opts.attempt)
 	if interruption != nil {
 		if err := offerInterruptionDispatch(l.projectDir, *interruption, attemptID, l.deps.Execution); err != nil {

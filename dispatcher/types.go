@@ -23,28 +23,30 @@ type ProviderConfigs struct {
 
 // DispatchRequest defines one session launch.
 type DispatchRequest struct {
-	Name                 string
-	Prompt               string
-	Provider             string
-	Model                string
-	Skill                string
-	ReasoningLevel       string
-	WorktreePath         string
-	MaxTurns             int
-	EnvVars              map[string]string
-	BudgetCap            float64
-	AllowPrimaryCheckout bool
-	RequireGroupExit     bool   // resource owner retains admission until its original group is absent
-	TaskKey              string // resolved task type key (e.g., "execute", "schedule")
-	Runtime              string // runtime kind from queue item (e.g., "process", "sprites")
-	SystemPrompt         string // if set, used directly as system prompt — skips skill resolution
-	DispatchWarning      string // set by factory on runtime fallback — carries the original dispatch error
-	DisplayName          string // stable short name preserved across retries
-	Title                string // queue item title for display
-	RetryCount           int    // attempt number (0 = first try)
-	ResumeSessionID      string // original Noodle attempt selected by the loop owner
-	codexThreadID        string // resolved from that attempt's retained native evidence
-	codexThreadSourceSHA string
+	Name                  string
+	Prompt                string
+	Provider              string
+	Model                 string
+	Skill                 string
+	ReasoningLevel        string
+	WorktreePath          string
+	MaxTurns              int
+	EnvVars               map[string]string
+	BudgetCap             float64
+	AllowPrimaryCheckout  bool
+	RequireGroupExit      bool   // resource owner retains admission until its original group is absent
+	TaskKey               string // resolved task type key (e.g., "execute", "schedule")
+	Runtime               string // runtime kind from queue item (e.g., "process", "sprites")
+	SystemPrompt          string // if set, used directly as system prompt — skips skill resolution
+	DispatchWarning       string // set by factory on runtime fallback — carries the original dispatch error
+	DisplayName           string // stable short name preserved across retries
+	Title                 string // queue item title for display
+	RetryCount            int    // attempt number (0 = first try)
+	ResumeSessionID       string // original Noodle attempt selected by the loop owner
+	DegradedFromSessionID string
+	DegradationReason     string
+	codexThreadID         string // resolved from that attempt's retained native evidence
+	codexThreadSourceSHA  string
 }
 
 // Validate ensures required request fields are set at the boundary.

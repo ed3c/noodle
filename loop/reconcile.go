@@ -57,6 +57,9 @@ func (l *Loop) reconcile(ctx context.Context) error {
 	if err := l.recoverAdoptedSessions(ctx); err != nil {
 		return err
 	}
+	if err := l.reconcileNativeDegradations(ctx); err != nil {
+		return fmt.Errorf("reconcile native context degradation: %w", err)
+	}
 	if err := l.reconcileLateTypedFailed(ctx); err != nil {
 		return l.classifySystemHard(
 			"reconcile.late_typed_failed",
