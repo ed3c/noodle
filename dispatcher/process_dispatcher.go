@@ -88,6 +88,10 @@ func (d *ProcessDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 	if d.runtimeDir == "" {
 		return nil, fmt.Errorf("runtime directory not set")
 	}
+	req, err = d.resolveCodexResume(req)
+	if err != nil {
+		return nil, err
+	}
 
 	sessionID, err := generateSessionID(req.Name)
 	if err != nil {
@@ -282,6 +286,9 @@ func (d *ProcessDispatcher) buildCmd(req DispatchRequest, systemPrompt string) (
 	case "codex":
 		args := codexBaseArgs(req)
 		args = append(args, extraArgs...)
+		if req.codexThreadID != "" {
+			args = append(args, req.codexThreadID, "-")
+		}
 		return d.execution.Command(context.Background(), req.WorktreePath, binary, args...), nil
 
 	default: // claude

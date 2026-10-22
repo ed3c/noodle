@@ -22,6 +22,9 @@ type dispatchMetadata struct {
 	DisplayName     string    `json:"display_name,omitempty"`
 	Title           string    `json:"title,omitempty"`
 	RetryCount      int       `json:"retry_count,omitempty"`
+	ResumeSessionID string    `json:"resume_session_id,omitempty"`
+	ResumeThreadID  string    `json:"resume_thread_id,omitempty"`
+	ResumeSourceSHA string    `json:"resume_source_sha256,omitempty"`
 }
 
 func writeDispatchMetadata(
@@ -53,6 +56,9 @@ func writeDispatchMetadata(
 		DisplayName:     strings.TrimSpace(req.DisplayName),
 		Title:           strings.TrimSpace(req.Title),
 		RetryCount:      req.RetryCount,
+		ResumeSessionID: req.ResumeSessionID,
+		ResumeThreadID:  req.codexThreadID,
+		ResumeSourceSHA: req.codexThreadSourceSHA,
 	})
 	if err != nil {
 		return fmt.Errorf("encode spawn metadata: %w", err)

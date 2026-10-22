@@ -26,10 +26,13 @@ type codexStartupReceipt struct {
 		CloseCompletedAt *time.Time `json:"close_completed_at"`
 		CloseError       string     `json:"close_error"`
 	} `json:"stdin"`
-	FirstStdout      *codexFirstRead `json:"first_stdout"`
-	FirstStderr      *codexFirstRead `json:"first_stderr"`
-	FirstInitAt      *time.Time      `json:"first_init_at"`
-	PersistenceError string          `json:"persistence_error"`
+	FirstStdout              *codexFirstRead `json:"first_stdout"`
+	FirstStderr              *codexFirstRead `json:"first_stderr"`
+	FirstInitAt              *time.Time      `json:"first_init_at"`
+	PersistenceError         string          `json:"persistence_error"`
+	NativeThreadID           string          `json:"native_thread_id,omitempty"`
+	NativeThreadSourceSHA256 string          `json:"native_thread_source_sha256,omitempty"`
+	NativeThreadError        string          `json:"native_thread_error,omitempty"`
 }
 
 type codexFirstRead struct {
@@ -117,6 +120,20 @@ func (s *codexStartup) observeInit(typ parse.EventType) {
 		}
 		now := nowUTC()
 		r.FirstInitAt = &now
+		return true
+	})
+}
+
+func (s *codexStartup) observeThread(path string) {
+	if s == nil {
+		return
+	}
+	id, digest, err := readCodexThread(path)
+	s.update(func(r *codexStartupReceipt) bool {
+		r.NativeThreadID, r.NativeThreadSourceSHA256 = id, digest
+		if err != nil {
+			r.NativeThreadError = err.Error()
+		}
 		return true
 	})
 }

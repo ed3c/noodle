@@ -42,6 +42,9 @@ type DispatchRequest struct {
 	DisplayName          string // stable short name preserved across retries
 	Title                string // queue item title for display
 	RetryCount           int    // attempt number (0 = first try)
+	ResumeSessionID      string // original Noodle attempt selected by the loop owner
+	codexThreadID        string // resolved from that attempt's retained native evidence
+	codexThreadSourceSHA string
 }
 
 // Validate ensures required request fields are set at the boundary.

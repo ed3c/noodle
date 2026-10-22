@@ -46,11 +46,11 @@ func claudeBaseArgs(req DispatchRequest, systemPrompt string) []string {
 // Callers prepend the binary path and append site-specific extras.
 // Permission policy belongs to the carrier, not the shared execution protocol.
 func codexBaseArgs(req DispatchRequest) []string {
-	args := []string{
-		"exec",
-		"--skip-git-repo-check",
-		"--json",
+	args := []string{"exec"}
+	if req.codexThreadID != "" {
+		args = append(args, "resume")
 	}
+	args = append(args, "--skip-git-repo-check", "--json")
 	if strings.TrimSpace(req.Model) != "" {
 		args = append(args, "--model", req.Model)
 	}

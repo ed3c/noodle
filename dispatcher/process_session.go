@@ -172,6 +172,7 @@ func (s *processSession) waitForExit(ctx context.Context) {
 	if s.requireGroupExit {
 		s.waitForProcessGroupExit(ctx)
 	}
+	s.startup.observeThread(s.stampedPath)
 	s.killMu.Lock()
 	killed := s.forceKilled
 	s.killMu.Unlock()
