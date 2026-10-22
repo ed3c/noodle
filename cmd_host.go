@@ -173,7 +173,7 @@ func hostCapabilities(platform string) map[string]any {
 	if platform == "windows" {
 		force = 0
 	}
-	return map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1, "completed_context_cleanup": 1, "resident_force_after_grace": force}
+	return map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1, "completed_context_cleanup": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1}
 }
 
 func hostDirectory() (string, error) {

@@ -323,8 +323,7 @@ func (l *Loop) dispatchControlCommand(cmd ControlCommand) error {
 	case "enqueue":
 		return l.controlEnqueue(cmd)
 	case "stop-all":
-		l.controlStopAll()
-		return nil
+		return l.controlStopAll()
 	case "requeue":
 		return l.controlRequeue(cmd.OrderID)
 	case "edit-item":
@@ -369,12 +368,15 @@ func (l *Loop) controlSteer(target, prompt string) error {
 	return l.steer(target, prompt)
 }
 
-func (l *Loop) controlStopAll() {
+func (l *Loop) controlStopAll() error {
+	l.setState(StatePaused)
+	var failures []error
 	for _, cook := range l.cooks.activeCooksByOrder {
 		if err := cook.session.ForceKill(); err != nil {
-			l.logger.Warn("stop-all force kill failed", "session", cook.session.ID(), "error", err)
+			failures = append(failures, fmt.Errorf("stop-all session %q: %w", cook.session.ID(), err))
 		}
 	}
+	return errors.Join(failures...)
 }
 
 func (l *Loop) controlStop(name string) error {

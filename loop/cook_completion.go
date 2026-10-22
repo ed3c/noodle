@@ -118,6 +118,12 @@ func (l *Loop) handleBootstrapResult(result StageResult) {
 }
 
 func (l *Loop) handleCompletion(ctx context.Context, cook *cookHandle, resultStatus StageResultStatus, rawStatus string) error {
+	if resultStatus == StageResultCancelled {
+		order, exists := l.canonical.Orders[cook.orderID]
+		if exists && cook.stageIndex >= 0 && cook.stageIndex < len(order.Stages) && l.isAdmittedLocalTask(order, order.Stages[cook.stageIndex]) {
+			return l.parkPendingReview(cook, "local task interrupted; retain worktree for recovery")
+		}
+	}
 	status := stringx.Normalize(rawStatus)
 	if status == "" {
 		status = stringx.Normalize(cook.session.Outcome().Status.String())
