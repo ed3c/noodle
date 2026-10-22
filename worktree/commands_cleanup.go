@@ -7,6 +7,7 @@ import (
 
 // CleanupOpts holds optional parameters for Cleanup.
 type CleanupOpts struct {
+	ExplicitDelete bool
 	// Force removes the worktree even when unmerged commits exist.
 	Force bool
 }
@@ -16,6 +17,13 @@ func (a *App) Cleanup(name string, opts ...CleanupOpts) error {
 	var o CleanupOpts
 	if len(opts) > 0 {
 		o = opts[0]
+	}
+	retained, err := a.retainsTaskWorktree(name)
+	if err != nil {
+		return err
+	}
+	if retained && !o.ExplicitDelete {
+		return fmt.Errorf("bound task worktree retained; only explicit cleanup --delete may remove %s", name)
 	}
 	wtPath := a.resolveWorktreePath(name)
 	cleanupBranch := a.resolveBranchName(name)

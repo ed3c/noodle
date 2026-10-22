@@ -22,6 +22,11 @@ func (a *App) Merge(name string, opts ...MergeOpts) error {
 	if len(opts) > 0 {
 		o = opts[0]
 	}
+	retained, err := a.retainsTaskWorktree(name)
+	if err != nil {
+		return err
+	}
+	o.RetainWorktree = o.RetainWorktree || retained
 	base := a.integrationBranch()
 	if o.Into != "" {
 		base = o.Into
