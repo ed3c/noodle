@@ -14,14 +14,25 @@ func (l *Loop) resumeTaskSessionID(cand dispatchCandidate, attempt int) (string,
 		return "", nil
 	}
 	order, ok := l.canonical.Orders[cand.OrderID]
+	if !ok || cand.StageIndex < 0 || cand.StageIndex >= len(order.Stages) || attempt != len(order.Stages[cand.StageIndex].Attempts) {
+		return "", fmt.Errorf("native continuation current attempt differs")
+	}
+	return l.resumeTaskPredecessor(cand, attempt)
+}
+
+func (l *Loop) resumeTaskPredecessor(cand dispatchCandidate, attempt int) (string, error) {
+	if !l.retainTaskData(cand.OrderID) || cand.Stage.Provider != "codex" || attempt == 0 {
+		return "", nil
+	}
+	order, ok := l.canonical.Orders[cand.OrderID]
 	if !ok || cand.StageIndex < 0 || cand.StageIndex >= len(order.Stages) {
 		return "", fmt.Errorf("native continuation original stage missing")
 	}
 	stage := order.Stages[cand.StageIndex]
-	if stage.TaskKey != cand.Stage.TaskKey || stage.Skill != cand.Stage.Skill || stage.Provider != cand.Stage.Provider || stage.Runtime != cand.Stage.Runtime || attempt != len(stage.Attempts) {
+	if stage.TaskKey != cand.Stage.TaskKey || stage.Skill != cand.Stage.Skill || stage.Provider != cand.Stage.Provider || stage.Runtime != cand.Stage.Runtime || attempt < 0 || attempt > len(stage.Attempts) {
 		return "", fmt.Errorf("native continuation task type or attempt differs")
 	}
-	prior := stage.Attempts[len(stage.Attempts)-1]
+	prior := stage.Attempts[attempt-1]
 	if prior.SessionID == "" || (prior.Status != state.AttemptCompleted && prior.Status != state.AttemptFailed && prior.Status != state.AttemptCancelled) {
 		return "", fmt.Errorf("native continuation predecessor not terminal")
 	}
@@ -33,7 +44,7 @@ func (l *Loop) resumeTaskSessionID(cand dispatchCandidate, attempt int) (string,
 		if err != nil {
 			return "", err
 		}
-		for index := len(stage.Attempts) - 1; index >= 0; index-- {
+		for index := attempt - 1; index >= 0; index-- {
 			item := stage.Attempts[index]
 			if item.Status != state.AttemptCompleted && item.Status != state.AttemptFailed && item.Status != state.AttemptCancelled {
 				return "", fmt.Errorf("task role prior attempt not terminal")

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/poteto/noodle/internal/state"
+	loopruntime "github.com/poteto/noodle/runtime"
 )
 
 func TestTaskRoleSeparatesConversationsAndResumesItsOwnPredecessor(t *testing.T) {
@@ -71,6 +72,17 @@ func TestTaskRoleSeparatesConversationsAndResumesItsOwnPredecessor(t *testing.T)
 	cand = selectRole(first)
 	if id, err := l.resumeTaskSessionID(cand, 3); err != nil || id != "poteto-first" {
 		t.Fatalf("role did not resume its own thread: %q %v", id, err)
+	}
+
+	appendAttempt("missing-poteto", recoveryDigest([]byte("poteto-role")))
+	stage := l.canonical.Orders[cook.orderID].Stages[0]
+	refusal := loopruntime.CodexResumeRefusal{OrderID: cook.orderID, ResumeSessionID: "poteto-first"}
+	if !l.nativeRefusalPredecessor(stage, 0, refusal, 3) {
+		t.Fatal("interleaved role lost its original refusal predecessor")
+	}
+	refusal.ResumeSessionID = "review-first"
+	if l.nativeRefusalPredecessor(stage, 0, refusal, 3) {
+		t.Fatal("another role accepted as refusal predecessor")
 	}
 	requestChangesWrite(t, source, []byte("changed instructions"))
 	if _, _, err := l.taskRole(cand); err == nil {

@@ -200,3 +200,37 @@ func TestFailedStopAllRetainsDispatchHoldAfterRestart(t *testing.T) {
 	default:
 	}
 }
+
+func TestSingleBoundStopHoldSurvivesRestartEvenWhenKillFails(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		l := newControlTestLoop(t, &fakeWorktree{}, newMockRuntime())
+		l.config.Runtime.Process.AdmittedOrders = []string{"bound-task"}
+		session := &stopFailureSession{mockSession: &mockSession{id: "worker", done: make(chan struct{})}}
+		if fail {
+			session.err = errors.New("exit not confirmed")
+		}
+		l.cooks.activeCooksByOrder["bound-task"] = &cookHandle{cookIdentity: cookIdentity{orderID: "bound-task"}, session: session, worktreeName: "bound-worktree"}
+		ack := recoveryControl(t, l, ControlCommand{ID: "stop-one", Action: "stop", Name: "worker"})
+		if ack.DispatchState != StatePaused {
+			t.Fatalf("stop lost actual hold: %+v", ack)
+		}
+		restarted := New(l.projectDir, "noodle", l.config, l.deps)
+		if err := restarted.hydrateProcessedCommands(); err != nil {
+			t.Fatal(err)
+		}
+		if restarted.state != StatePaused {
+			t.Fatal("single stop resumed dispatch on restart")
+		}
+		if ack := recoveryControl(t, restarted, ControlCommand{ID: "continue", Action: "resume"}); ack.Status != "ok" {
+			t.Fatal(ack)
+		}
+		recoveryControl(t, restarted, ControlCommand{ID: "stop-one", Action: "stop", Name: "worker"})
+		final := New(l.projectDir, "noodle", l.config, l.deps)
+		if err := final.hydrateProcessedCommands(); err != nil {
+			t.Fatal(err)
+		}
+		if final.state != StateRunning {
+			t.Fatal("duplicate stop overrode later resume")
+		}
+	}
+}

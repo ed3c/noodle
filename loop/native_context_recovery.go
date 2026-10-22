@@ -70,7 +70,7 @@ func (l *Loop) recoverMissingNativeContext(ctx context.Context, cook *cookHandle
 	}
 	order := l.canonical.Orders[cook.orderID]
 	stage := order.Stages[cook.stageIndex]
-	if len(stage.Attempts) != cook.attempt+1 || stage.Attempts[cook.attempt].SessionID != cook.session.ID() || stage.Attempts[cook.attempt-1].SessionID != refusal.ResumeSessionID {
+	if len(stage.Attempts) != cook.attempt+1 || stage.Attempts[cook.attempt].SessionID != cook.session.ID() || !l.nativeRefusalPredecessor(stage, cook.stageIndex, *refusal, cook.attempt) {
 		return true, l.parkPendingReview(cook, "native context recovery original attempt differs")
 	}
 	records, err := nativeDegradations(stage)
@@ -126,7 +126,7 @@ func (l *Loop) reconcileNativeDegradations(ctx context.Context) error {
 				if _, live := l.cooks.adoptedTargets[orderID]; live {
 					return fmt.Errorf("native degradation still has an adopted worker")
 				}
-				if record.FailedAttempt != len(stage.Attempts)-1 || record.FailedAttempt < 1 || stage.Attempts[record.FailedAttempt].SessionID != record.Refusal.SessionID || stage.Attempts[record.FailedAttempt-1].SessionID != record.Refusal.ResumeSessionID || record.Refusal.OrderID != orderID || record.Refusal.StageIndex != strconv.Itoa(index) || record.Refusal.TaskKey != stage.TaskKey || record.PromptSHA256 != recoveryDigest([]byte(stage.Prompt)) {
+				if record.FailedAttempt != len(stage.Attempts)-1 || record.FailedAttempt < 1 || stage.Attempts[record.FailedAttempt].SessionID != record.Refusal.SessionID || !l.nativeRefusalPredecessor(stage, index, record.Refusal, record.FailedAttempt) || record.Refusal.OrderID != orderID || record.Refusal.StageIndex != strconv.Itoa(index) || record.Refusal.TaskKey != stage.TaskKey || record.PromptSHA256 != recoveryDigest([]byte(stage.Prompt)) {
 					return fmt.Errorf("native degradation original continuation differs")
 				}
 				fresh, err := loopruntime.ReadCodexResumeRefusal(l.runtimeDir, record.Refusal.SessionID)
@@ -212,4 +212,11 @@ func (l *Loop) degradedTaskDispatch(cand dispatchCandidate, attempt int, req loo
 		filepath.Join(l.runtimeDir, "sessions", selected.Refusal.ResumeSessionID),
 		filepath.Join(l.runtimeDir, "sessions", selected.Refusal.SessionID))
 	return req, nil
+}
+
+func (l *Loop) nativeRefusalPredecessor(stage state.StageNode, index int, refusal loopruntime.CodexResumeRefusal, attempt int) bool {
+	cand := dispatchCandidate{OrderID: refusal.OrderID, StageIndex: index, Stage: Stage{
+		TaskKey: stage.TaskKey, Skill: stage.Skill, Provider: stage.Provider, Runtime: stage.Runtime, Prompt: stage.Prompt}}
+	prior, err := l.resumeTaskPredecessor(cand, attempt)
+	return err == nil && prior != "" && prior == refusal.ResumeSessionID
 }

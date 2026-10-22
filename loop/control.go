@@ -52,7 +52,9 @@ func (l *Loop) hydrateProcessedCommands() error {
 				if _, seen := l.cmds.processedIDs[ack.ID]; !seen {
 					// Rebuild dispatch holds without replaying worker effects or old duplicate ACKs.
 					action := stringx.Normalize(ack.Action)
-					if action == "stop-all" {
+					if ack.DispatchState == StatePaused || ack.DispatchState == StateDraining || ack.DispatchState == StateRunning {
+						l.setState(ack.DispatchState)
+					} else if action == "stop-all" {
 						l.setState(StatePaused) // Even a partial kill failure installed the hold.
 					} else if ack.Status == "ok" {
 						switch action {
@@ -285,6 +287,7 @@ func (l *Loop) applyControlCommand(cmd ControlCommand) ControlAck {
 func (l *Loop) applyControlCommandOutcome(cmd ControlCommand) (ControlAck, error) {
 	ack := ControlAck{ID: cmd.ID, Action: cmd.Action, Status: "ok", At: l.deps.Now()}
 	err := l.dispatchControlCommand(cmd)
+	ack.DispatchState = l.state
 	if errors.Is(err, admission.ErrDeferred) {
 		ack.Status = "waiting"
 		ack.Message = err.Error()
