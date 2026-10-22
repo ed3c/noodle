@@ -74,3 +74,41 @@ func readStatusFile(t *testing.T, path string) statusfile.Status {
 	}
 	return s
 }
+
+func TestStampStatusReportsAndClearsStartupHold(t *testing.T) {
+	l, _, _ := newTypedOutcomeTestLoop(t)
+	l.canonical.Mode = "supervised"
+	l.deps.ModeOverride = "manual"
+	read := func() map[string]any {
+		t.Helper()
+		if err := l.stampStatus(); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(l.deps.StatusFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var status map[string]any
+		if err := json.Unmarshal(data, &status); err != nil {
+			t.Fatal(err)
+		}
+		return status
+	}
+	held := read()
+	if held["mode"] != "supervised" || held["effective_mode"] != "manual" || held["mode_override"] != "manual" {
+		t.Fatalf("startup hold hidden by checkpoint: %+v", held)
+	}
+	if l.State().Projection.Mode != "manual" {
+		t.Fatal("published loop state hides the startup hold")
+	}
+	if err := l.controlMode("supervised"); err != nil {
+		t.Fatal(err)
+	}
+	released := read()
+	if released["mode"] != "supervised" || released["effective_mode"] != "supervised" || released["mode_override"] != nil {
+		t.Fatalf("explicit release not projected: %+v", released)
+	}
+	if l.State().Projection.Mode != "supervised" {
+		t.Fatal("published loop state lost the explicit release")
+	}
+}

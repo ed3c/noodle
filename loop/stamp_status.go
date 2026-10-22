@@ -22,11 +22,17 @@ func (l *Loop) stampStatus() error {
 	if mode == "" {
 		mode = l.config.Mode
 	}
+	effective := string(l.effectiveMode())
+	if effective == "" {
+		effective = mode
+	}
 
 	status := statusfile.Status{
 		Active:         active,
 		LoopState:      string(l.state),
 		Mode:           mode,
+		EffectiveMode:  effective,
+		ModeOverride:   string(l.deps.ModeOverride),
 		MaxConcurrency: l.config.Concurrency.MaxConcurrency,
 		Warnings:       l.lastMiseWarnings,
 	}
@@ -35,6 +41,8 @@ func (l *Loop) stampStatus() error {
 	if slices.Equal(l.lastStatus.Active, status.Active) &&
 		l.lastStatus.LoopState == status.LoopState &&
 		l.lastStatus.Mode == status.Mode &&
+		l.lastStatus.EffectiveMode == status.EffectiveMode &&
+		l.lastStatus.ModeOverride == status.ModeOverride &&
 		l.lastStatus.MaxConcurrency == status.MaxConcurrency &&
 		slices.Equal(l.lastStatus.Warnings, status.Warnings) {
 		l.publishState()
