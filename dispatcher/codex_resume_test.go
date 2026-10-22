@@ -113,3 +113,93 @@ func TestCodexNativeThreadReadbackPreservesRaw(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexResumeConfiguredArgsPrecedeSubcommand(t *testing.T) {
+	for _, extra := range [][]string{{"--sandbox", "workspace-write"}, {"--profile", "ci"}, {"--sandbox", "invalid-mode"}} {
+		d := NewProcessDispatcher(ProcessDispatcherConfig{ProviderConfigs: ProviderConfigs{Codex: ProviderConfig{Args: extra}}})
+		cmd, err := d.buildCmd(DispatchRequest{Provider: "codex", Model: "test-model", codexThreadID: resumeTestThread}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := append([]string{"exec"}, extra...)
+		want = append(want, "resume", "--skip-git-repo-check", "--json", "--model", "test-model", resumeTestThread, "-")
+		if !reflect.DeepEqual(cmd.Args[1:], want) {
+			t.Fatalf("resume argv = %q, want %q", cmd.Args[1:], want)
+		}
+	}
+}
+
+func TestCodexResumeRetryRetainsThreadAfterPreTurnCLIRefusal(t *testing.T) {
+	for _, variant := range []string{"parser-refusal", "transport-unknown", "stdout-observed", "source-drift", "alive", "malformed-raw", "cycle"} {
+		t.Run(variant, func(t *testing.T) {
+			root := t.TempDir()
+			write := func(id, name string, value any) {
+				t.Helper()
+				dir := filepath.Join(root, "sessions", id)
+				if err := os.MkdirAll(dir, 0700); err != nil {
+					t.Fatal(err)
+				}
+				var data []byte
+				if text, ok := value.(string); ok {
+					data = []byte(text)
+				} else {
+					var err error
+					data, err = json.Marshal(value)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			req := DispatchRequest{Provider: "codex", Skill: "local-task", WorktreePath: "/same/worktree", ResumeSessionID: "parse-failed"}
+			for _, id := range []string{"native-prior", "parse-failed"} {
+				status := "exited"
+				if id == "parse-failed" {
+					status = "failed"
+				}
+				write(id, "meta.json", map[string]any{"session_id": id, "status": status, "alive": variant == "alive" && id == "parse-failed"})
+				write(id, "process.json", map[string]any{"session_id": id, "pid": 99999999})
+				write(id, "spawn.json", dispatchMetadata{SessionID: id, Provider: "codex", Skill: req.Skill, WorktreePath: req.WorktreePath})
+			}
+			write("native-prior", "raw.ndjson", `{"type":"thread.started","thread_id":"`+resumeTestThread+`"}`+"\n")
+			_, digest, err := readCodexThread(filepath.Join(root, "sessions/native-prior/raw.ndjson"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			parent := "native-prior"
+			if variant == "cycle" {
+				parent = "parse-failed"
+			}
+			if variant == "source-drift" {
+				digest = strings.Repeat("0", 64)
+			}
+			write("parse-failed", "spawn.json", dispatchMetadata{SessionID: "parse-failed", Provider: "codex", Skill: req.Skill, WorktreePath: req.WorktreePath, ResumeSessionID: parent, ResumeThreadID: resumeTestThread, ResumeSourceSHA: digest})
+			raw := ""
+			if variant == "malformed-raw" {
+				raw = "{"
+			}
+			write("parse-failed", "raw.ndjson", raw)
+			stderr := "error: unexpected argument '--sandbox' found\n\nUsage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]\n\nFor more information, try '--help'.\n"
+			if variant == "transport-unknown" {
+				stderr = "connection ended\n"
+			}
+			write("parse-failed", "stderr.log", stderr)
+			startup := codexStartupReceipt{SessionID: "parse-failed", FirstStderr: &codexFirstRead{Bytes: len(stderr)}}
+			if variant == "stdout-observed" {
+				startup.FirstStdout = &codexFirstRead{Bytes: 1}
+			}
+			write("parse-failed", "codex-startup.json", startup)
+			d := NewProcessDispatcher(ProcessDispatcherConfig{RuntimeDir: root})
+			got, err := d.resolveCodexResume(req)
+			if variant == "parser-refusal" {
+				if err != nil || got.codexThreadID != resumeTestThread || got.ResumeSessionID != "parse-failed" {
+					t.Fatalf("original thread not retained: %+v, %v", got, err)
+				}
+			} else if err == nil {
+				t.Fatalf("unsafe retry accepted: %s", variant)
+			}
+		})
+	}
+}

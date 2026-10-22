@@ -66,10 +66,18 @@ func readResumeJSON(path string, target any) error {
 }
 
 func (d *ProcessDispatcher) resolveCodexResume(req DispatchRequest) (DispatchRequest, error) {
+	return d.resolveCodexResumeChain(req, map[string]bool{})
+}
+
+func (d *ProcessDispatcher) resolveCodexResumeChain(req DispatchRequest, seen map[string]bool) (DispatchRequest, error) {
 	if req.ResumeSessionID == "" {
 		return req, nil
 	}
 	id := req.ResumeSessionID
+	if seen[id] {
+		return req, fmt.Errorf("resume predecessor cycle")
+	}
+	seen[id] = true
 	if id == "." || id == ".." || filepath.Base(id) != id || strings.ContainsAny(id, `/\`) || strings.TrimSpace(id) != id {
 		return req, fmt.Errorf("resume predecessor identity invalid")
 	}
@@ -97,7 +105,7 @@ func (d *ProcessDispatcher) resolveCodexResume(req DispatchRequest) (DispatchReq
 	if err := readResumeJSON(filepath.Join(dir, "meta.json"), &meta); err != nil {
 		return req, err
 	}
-	if meta.SessionID != id || meta.Status != "exited" || meta.Alive == nil || *meta.Alive {
+	if meta.SessionID != id || (meta.Status != "exited" && meta.Status != "failed") || meta.Alive == nil || *meta.Alive {
 		return req, fmt.Errorf("resume predecessor exit unconfirmed")
 	}
 	var process struct {
@@ -119,7 +127,20 @@ func (d *ProcessDispatcher) resolveCodexResume(req DispatchRequest) (DispatchReq
 	}
 	thread, digest, err := readCodexThread(filepath.Join(dir, "raw.ndjson"))
 	if err != nil {
-		return req, err
+		if !codexResumeParserRefusal(dir, id) || spawn.ResumeSessionID == "" {
+			return req, err
+		}
+		parent := req
+		parent.ResumeSessionID = spawn.ResumeSessionID
+		bound, parentErr := d.resolveCodexResumeChain(parent, seen)
+		if parentErr != nil {
+			return req, parentErr
+		}
+		if bound.codexThreadID != spawn.ResumeThreadID || bound.codexThreadSourceSHA != spawn.ResumeSourceSHA {
+			return req, fmt.Errorf("resume refused launch predecessor source changed")
+		}
+		req.codexThreadID, req.codexThreadSourceSHA = bound.codexThreadID, bound.codexThreadSourceSHA
+		return req, nil
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "codex-startup.json"))
 	if err == nil {
@@ -136,4 +157,26 @@ func (d *ProcessDispatcher) resolveCodexResume(req DispatchRequest) (DispatchReq
 	req.codexThreadID = thread
 	req.codexThreadSourceSHA = digest
 	return req, nil
+}
+
+// A CLI parser refusal never entered a native turn. An explicit retry may follow
+// its saved predecessor; transport failures and missing output remain unknown.
+func codexResumeParserRefusal(dir, id string) bool {
+	raw, err := os.ReadFile(filepath.Join(dir, "raw.ndjson"))
+	if err != nil || len(raw) != 0 {
+		return false
+	}
+	var observed codexStartupReceipt
+	if readResumeJSON(filepath.Join(dir, "codex-startup.json"), &observed) != nil || observed.SessionID != id || observed.PersistenceError != "" || observed.FirstStdout != nil || observed.FirstInitAt != nil || observed.FirstStderr == nil {
+		return false
+	}
+	stderr, err := os.ReadFile(filepath.Join(dir, "stderr.log"))
+	if err != nil {
+		return false
+	}
+	text := string(stderr)
+	if !strings.HasPrefix(text, "error: unexpected argument '") || !strings.Contains(text, "' found\n") || !strings.Contains(text, "\nUsage: codex exec resume ") || !strings.HasSuffix(text, "For more information, try '--help'.\n") {
+		return false
+	}
+	return strings.Count(text, "error:") == 1 && !strings.Contains(text, "Error:")
 }

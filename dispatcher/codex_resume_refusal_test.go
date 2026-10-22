@@ -9,7 +9,7 @@ import (
 )
 
 func TestCodexResumeRefusalRequiresNativeMissingBeforeTurnAndExit(t *testing.T) {
-	for _, which := range []string{"missing", "not_loaded", "transport", "stdout", "init", "active", "degraded", "foreign_process", "duplicate_error"} {
+	for _, which := range []string{"missing", "failed_meta", "not_loaded", "transport", "stdout", "init", "active", "degraded", "foreign_process", "duplicate_error"} {
 		t.Run(which, func(t *testing.T) {
 			root := t.TempDir()
 			dir := filepath.Join(root, "sessions", "failed-resume")
@@ -56,14 +56,18 @@ func TestCodexResumeRefusalRequiresNativeMissingBeforeTurnAndExit(t *testing.T) 
 			if err := os.WriteFile(filepath.Join(dir, "stderr.log"), []byte(stderr), 0600); err != nil {
 				t.Fatal(err)
 			}
-			write("meta.json", map[string]any{"session_id": "failed-resume", "status": "exited", "alive": which == "active"})
+			status := "exited"
+			if which == "failed_meta" {
+				status = "failed"
+			}
+			write("meta.json", map[string]any{"session_id": "failed-resume", "status": status, "alive": which == "active"})
 			processID := "failed-resume"
 			if which == "foreign_process" {
 				processID = "foreign"
 			}
 			write("process.json", map[string]any{"session_id": processID, "pid": 99999999})
 			observed, err := ReadCodexResumeRefusal(root, "failed-resume")
-			if which == "missing" {
+			if which == "missing" || which == "failed_meta" {
 				if err != nil || observed == nil || observed.ThreadID != resumeTestThread || len(observed.Files) != 4 {
 					t.Fatalf("native missing refused: %+v %v", observed, err)
 				}

@@ -102,7 +102,7 @@ func ReadCodexResumeRefusal(runtimeDir, sessionID string) (*CodexResumeRefusal, 
 		Status    string `json:"status"`
 		Alive     *bool  `json:"alive"`
 	}
-	if json.Unmarshal(data, &meta) != nil || meta.SessionID != sessionID || meta.Status != "exited" || meta.Alive == nil || *meta.Alive {
+	if json.Unmarshal(data, &meta) != nil || meta.SessionID != sessionID || (meta.Status != "exited" && meta.Status != "failed") || meta.Alive == nil || *meta.Alive {
 		return nil, fmt.Errorf("native resume failure exit unconfirmed")
 	}
 	delete(files, "meta.json")

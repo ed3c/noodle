@@ -285,9 +285,12 @@ func (d *ProcessDispatcher) buildCmd(req DispatchRequest, systemPrompt string) (
 	switch provider {
 	case "codex":
 		args := codexBaseArgs(req)
-		args = append(args, extraArgs...)
 		if req.codexThreadID != "" {
+			// Carrier flags such as --sandbox belong to exec, not exec resume.
+			args = append(append([]string{"exec"}, extraArgs...), args[1:]...)
 			args = append(args, req.codexThreadID, "-")
+		} else {
+			args = append(args, extraArgs...)
 		}
 		return d.execution.Command(context.Background(), req.WorktreePath, binary, args...), nil
 
