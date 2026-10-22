@@ -25,6 +25,9 @@ type dispatchMetadata struct {
 	ResumeSessionID string    `json:"resume_session_id,omitempty"`
 	ResumeThreadID  string    `json:"resume_thread_id,omitempty"`
 	ResumeSourceSHA string    `json:"resume_source_sha256,omitempty"`
+	TaskKey         string    `json:"task_key,omitempty"`
+	OrderID         string    `json:"order_id,omitempty"`
+	StageIndex      string    `json:"stage_index,omitempty"`
 }
 
 func writeDispatchMetadata(
@@ -59,6 +62,9 @@ func writeDispatchMetadata(
 		ResumeSessionID: req.ResumeSessionID,
 		ResumeThreadID:  req.codexThreadID,
 		ResumeSourceSHA: req.codexThreadSourceSHA,
+		TaskKey:         req.TaskKey,
+		OrderID:         req.EnvVars["NOODLE_ORDER_ID"],
+		StageIndex:      req.EnvVars["NOODLE_STAGE_INDEX"],
 	})
 	if err != nil {
 		return fmt.Errorf("encode spawn metadata: %w", err)

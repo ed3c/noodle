@@ -122,6 +122,10 @@ func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, or
 			"NOODLE_STAGE_INDEX": strconv.Itoa(cand.StageIndex),
 		},
 	}
+	req.ResumeSessionID, err = l.resumeTaskSessionID(cand, opts.attempt)
+	if err != nil {
+		return err
+	}
 	attemptID := dispatchAttemptID(cand.OrderID, cand.StageIndex, opts.attempt)
 	if interruption != nil {
 		if err := offerInterruptionDispatch(l.projectDir, *interruption, attemptID, l.deps.Execution); err != nil {

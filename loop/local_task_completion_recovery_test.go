@@ -177,6 +177,9 @@ func TestLocalTaskRevisionDispatchPreservesBoundDirtyBytes(t *testing.T) {
 			rt := newMockRuntime()
 			rt.dispatchHook = func(req loopruntime.DispatchRequest) (loopruntime.SessionHandle, error) {
 				dispatched = true
+				if req.ResumeSessionID != cook.session.ID() {
+					t.Fatalf("revision selected wrong native predecessor: %q", req.ResumeSessionID)
+				}
 				if string(recoveryRead(t, filepath.Join(req.WorktreePath, "candidate.txt"))) != "reviewed candidate\n" {
 					t.Fatal("dispatch discarded retained dirty candidate")
 				}

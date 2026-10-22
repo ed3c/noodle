@@ -84,6 +84,11 @@ func (d *ProcessDispatcher) resolveCodexResume(req DispatchRequest) (DispatchReq
 	if spawn.SessionID != id || spawn.Provider != req.Provider || spawn.Skill != req.Skill || spawn.WorktreePath != req.WorktreePath {
 		return req, fmt.Errorf("resume predecessor provider, role or worktree differs")
 	}
+	if (spawn.TaskKey != "" && spawn.TaskKey != req.TaskKey) ||
+		(spawn.OrderID != "" && spawn.OrderID != req.EnvVars["NOODLE_ORDER_ID"]) ||
+		(spawn.StageIndex != "" && spawn.StageIndex != req.EnvVars["NOODLE_STAGE_INDEX"]) {
+		return req, fmt.Errorf("resume predecessor task type, order or stage differs")
+	}
 	var meta struct {
 		SessionID string `json:"session_id"`
 		Status    string `json:"status"`
