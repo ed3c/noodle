@@ -101,7 +101,13 @@ func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, or
 			resumePrompt = stringx.JoinNonEmpty("\n\n", hint, resumePrompt)
 		}
 	}
-	prompt := buildCookPrompt(cand.OrderID, stage, order.Plan, order.Title, order.Rationale, resumePrompt)
+	roleKey, roleSkill, err := l.taskRole(cand)
+	if err != nil {
+		return err
+	}
+	methodStage := stage
+	methodStage.Skill = roleSkill
+	prompt := buildCookPrompt(cand.OrderID, methodStage, order.Plan, order.Title, order.Rationale, resumePrompt)
 
 	taskType, _ := l.registry.ByKey(stage.TaskKey)
 	req := loopruntime.DispatchRequest{
@@ -109,7 +115,8 @@ func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, or
 		Prompt:       prompt,
 		Provider:     nonEmpty(stage.Provider, l.config.Routing.Defaults.Provider),
 		Model:        nonEmpty(stage.Model, l.config.Routing.Defaults.Model),
-		Skill:        stage.Skill,
+		Skill:        roleSkill,
+		TaskRole:     roleKey,
 		WorktreePath: worktreePath,
 		TaskKey:      taskType.Key,
 		Runtime:      nonEmpty(stage.Runtime, "process"),

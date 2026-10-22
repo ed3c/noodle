@@ -97,3 +97,7 @@ func IsProcessStartFailure(err error) bool {
 	var startErr dispatcher.ProcessStartError
 	return errors.As(err, &startErr)
 }
+
+func ReadSessionTaskRole(runtimeDir, sessionID string) (string, error) {
+	return dispatcher.ReadSessionTaskRole(runtimeDir, sessionID)
+}

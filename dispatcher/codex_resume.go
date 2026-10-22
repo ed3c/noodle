@@ -89,7 +89,7 @@ func (d *ProcessDispatcher) resolveCodexResumeChain(req DispatchRequest, seen ma
 	if err := readResumeJSON(filepath.Join(dir, "spawn.json"), &spawn); err != nil {
 		return req, err
 	}
-	if spawn.SessionID != id || spawn.Provider != req.Provider || spawn.Skill != req.Skill || spawn.WorktreePath != req.WorktreePath {
+	if spawn.SessionID != id || spawn.Provider != req.Provider || spawn.Skill != req.Skill || spawn.WorktreePath != req.WorktreePath || spawn.TaskRole != req.TaskRole {
 		return req, fmt.Errorf("resume predecessor provider, role or worktree differs")
 	}
 	if (spawn.TaskKey != "" && spawn.TaskKey != req.TaskKey) ||

@@ -1,7 +1,9 @@
 package loop
 
 import (
+	"encoding/json"
 	"fmt"
+	loopruntime "github.com/poteto/noodle/runtime"
 
 	"github.com/poteto/noodle/internal/state"
 )
@@ -22,6 +24,29 @@ func (l *Loop) resumeTaskSessionID(cand dispatchCandidate, attempt int) (string,
 	prior := stage.Attempts[len(stage.Attempts)-1]
 	if prior.SessionID == "" || (prior.Status != state.AttemptCompleted && prior.Status != state.AttemptFailed && prior.Status != state.AttemptCancelled) {
 		return "", fmt.Errorf("native continuation predecessor not terminal")
+	}
+	var prompt struct {
+		Role *taskRoleFile `json:"task_role"`
+	}
+	if json.Unmarshal([]byte(cand.Stage.Prompt), &prompt) == nil && prompt.Role != nil {
+		role, _, err := l.taskRole(cand)
+		if err != nil {
+			return "", err
+		}
+		for index := len(stage.Attempts) - 1; index >= 0; index-- {
+			item := stage.Attempts[index]
+			if item.Status != state.AttemptCompleted && item.Status != state.AttemptFailed && item.Status != state.AttemptCancelled {
+				return "", fmt.Errorf("task role prior attempt not terminal")
+			}
+			observed, err := loopruntime.ReadSessionTaskRole(l.runtimeDir, item.SessionID)
+			if err != nil {
+				return "", err
+			}
+			if observed == role {
+				return item.SessionID, nil
+			}
+		}
+		return "", nil
 	}
 	return prior.SessionID, nil
 }

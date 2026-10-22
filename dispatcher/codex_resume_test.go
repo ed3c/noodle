@@ -69,11 +69,16 @@ func TestCodexResumeUsesExactBoundThread(t *testing.T) {
 		{"live", func() {
 			write("meta.json", map[string]any{"session_id": "prior-attempt", "status": "active", "alive": true})
 		}},
+		{"foreign role", func() {
+			write("spawn.json", dispatchMetadata{SessionID: "prior-attempt", Provider: "codex", Skill: req.Skill, WorktreePath: req.WorktreePath, TaskRole: "review"})
+		}},
 		{"foreign worktree", func() {
 			write("spawn.json", dispatchMetadata{SessionID: "prior-attempt", Provider: "codex", Skill: req.Skill, WorktreePath: "/another/worktree"})
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			write("meta.json", map[string]any{"session_id": "prior-attempt", "status": "exited", "alive": false})
+			write("spawn.json", dispatchMetadata{SessionID: "prior-attempt", Provider: "codex", Skill: req.Skill, WorktreePath: req.WorktreePath})
 			tc.change()
 			if _, err := d.resolveCodexResume(req); err == nil {
 				t.Fatal("unsafe resume accepted")

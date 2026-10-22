@@ -16,14 +16,15 @@ import (
 // Local tasks use native process completion, not an Issue stage_message.
 func (l *Loop) isAdmittedLocalTask(order state.OrderNode, stage state.StageNode) bool {
 	var prompt struct {
-		Kind       string   `json:"kind"`
-		Goal       string   `json:"goal"`
-		WritePaths []string `json:"write_paths"`
+		Kind       string        `json:"kind"`
+		Goal       string        `json:"goal"`
+		WritePaths []string      `json:"write_paths"`
+		Role       *taskRoleFile `json:"task_role"`
 	}
 	return slices.Contains(l.config.Runtime.Process.AdmittedOrders, order.OrderID) &&
 		len(order.Stages) == 1 && stage.StageIndex == 0 && stage.TaskKey == "local-task" && stage.Skill == "local-task" &&
 		stage.Provider == "codex" && stage.Runtime == "process" && !l.config.Agents.Codex.RequireTypedOutcome &&
-		json.Unmarshal([]byte(stage.Prompt), &prompt) == nil && prompt.Kind == "local_task" && prompt.Goal != "" && len(prompt.WritePaths) > 0
+		json.Unmarshal([]byte(stage.Prompt), &prompt) == nil && prompt.Kind == "local_task" && prompt.Goal != "" && (len(prompt.WritePaths) > 0 || prompt.Role != nil)
 }
 
 func (l *Loop) validateLocalTaskSession(order state.OrderNode, stage state.StageNode, b requestChangesBinding) error {
@@ -74,12 +75,23 @@ func (l *Loop) validateLocalTaskSession(order state.OrderNode, stage state.Stage
 		Model        string          `json:"model"`
 		Runtime      string          `json:"runtime"`
 		Skill        string          `json:"skill"`
+		TaskRole     string          `json:"task_role"`
 	}
 	data, err = os.ReadFile(filepath.Join(dir, "spawn.json"))
 	if err != nil {
 		return err
 	}
-	if json.Unmarshal(data, &spawn) != nil || spawn.SessionID != b.SessionID || spawn.WorktreePath != b.WorktreePath || spawn.RetryCount != b.Attempt || len(spawn.Sync) != 0 || spawn.Provider != stage.Provider || spawn.Model != stage.Model || spawn.Runtime != stage.Runtime || spawn.Skill != stage.Skill {
+	// The saved predecessor role survives editing the next role's prompt.
+	originalPrompt, err := json.Marshal(map[string]any{"kind": "local_task", "task_role": b.TaskRole})
+	if err != nil {
+		return err
+	}
+	roleKey, roleSkill, err := l.taskRole(dispatchCandidate{OrderID: order.OrderID, StageIndex: stage.StageIndex,
+		Stage: Stage{TaskKey: stage.TaskKey, Skill: stage.Skill, Provider: stage.Provider, Runtime: stage.Runtime, Prompt: string(originalPrompt)}})
+	if err != nil {
+		return err
+	}
+	if json.Unmarshal(data, &spawn) != nil || spawn.TaskRole != roleKey || spawn.SessionID != b.SessionID || spawn.WorktreePath != b.WorktreePath || spawn.RetryCount != b.Attempt || len(spawn.Sync) != 0 || spawn.Provider != stage.Provider || spawn.Model != stage.Model || spawn.Runtime != stage.Runtime || spawn.Skill != roleSkill {
 		return fmt.Errorf("local task spawn definition differs")
 	}
 	return nil

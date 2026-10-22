@@ -42,6 +42,7 @@ type DispatchRequest struct {
 	DisplayName           string // stable short name preserved across retries
 	Title                 string // queue item title for display
 	RetryCount            int    // attempt number (0 = first try)
+	TaskRole              string // original task owner frozen role source digest
 	ResumeSessionID       string // original Noodle attempt selected by the loop owner
 	DegradedFromSessionID string
 	DegradationReason     string

@@ -22,6 +22,7 @@ type dispatchMetadata struct {
 	DisplayName           string    `json:"display_name,omitempty"`
 	Title                 string    `json:"title,omitempty"`
 	RetryCount            int       `json:"retry_count,omitempty"`
+	TaskRole              string    `json:"task_role,omitempty"`
 	ResumeSessionID       string    `json:"resume_session_id,omitempty"`
 	ResumeThreadID        string    `json:"resume_thread_id,omitempty"`
 	ResumeSourceSHA       string    `json:"resume_source_sha256,omitempty"`
@@ -61,6 +62,7 @@ func writeDispatchMetadata(
 		DisplayName:           strings.TrimSpace(req.DisplayName),
 		Title:                 strings.TrimSpace(req.Title),
 		RetryCount:            req.RetryCount,
+		TaskRole:              req.TaskRole,
 		ResumeSessionID:       req.ResumeSessionID,
 		ResumeThreadID:        req.codexThreadID,
 		ResumeSourceSHA:       req.codexThreadSourceSHA,
@@ -77,4 +79,19 @@ func writeDispatchMetadata(
 		return fmt.Errorf("rename spawn metadata: %w", err)
 	}
 	return nil
+}
+
+// ReadSessionTaskRole reads only original dispatch provenance, not process names.
+func ReadSessionTaskRole(runtimeDir, sessionID string) (string, error) {
+	if sessionID == "." || sessionID == ".." || filepath.Base(sessionID) != sessionID || strings.ContainsAny(sessionID, `/\\`) {
+		return "", fmt.Errorf("task role session identity invalid")
+	}
+	var spawn dispatchMetadata
+	if err := readResumeJSON(filepath.Join(runtimeDir, "sessions", sessionID, "spawn.json"), &spawn); err != nil {
+		return "", err
+	}
+	if spawn.SessionID != sessionID {
+		return "", fmt.Errorf("task role session provenance differs")
+	}
+	return spawn.TaskRole, nil
 }

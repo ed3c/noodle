@@ -26,7 +26,7 @@ func TestHostTaskReviewCapabilitiesAreOfflineAndSeparate(t *testing.T) {
 			if len(result) != 5 || result["process_admitted_orders"] != true {
 				t.Fatal("original admission capability changed")
 			}
-		} else if len(result) != 6 || result["candidate_bound_merge"] != true || result["local_task_review_recovery"] != true || result["local_task_merge_recovery"] != true || result["local_task_completion_recovery"] != true || result["local_task_completion_recovery_version"] != float64(2) {
+		} else if len(result) != 7 || result["candidate_bound_merge"] != true || result["local_task_review_recovery"] != true || result["local_task_merge_recovery"] != true || result["local_task_completion_recovery"] != true || result["local_task_completion_recovery_version"] != float64(2) || result["local_task_roles"] != float64(1) {
 			t.Fatal(result)
 		}
 	}
