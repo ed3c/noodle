@@ -238,6 +238,7 @@ func (l *Loop) processStageMessage(cook *cookHandle) (bool, *string) {
 // completeWithMerge handles a successful mergeable stage by persisting merge
 // metadata and either directly merging or enqueueing to the merge queue.
 func (l *Loop) completeWithMerge(ctx context.Context, cook *cookHandle, msg *string) error {
+	cook.retainWorktree = l.retainTaskData(cook.orderID)
 	l.logger.Info("cook completing",
 		"order", cook.orderID, "session", cook.session.ID())
 	if l.mergeQueue != nil {

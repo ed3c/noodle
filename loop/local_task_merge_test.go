@@ -42,8 +42,8 @@ func TestLocalTaskMergeCommitsOnlyReviewedBytesIntoControlBranch(t *testing.T) {
 	if l.canonical.Orders[cook.orderID].Status != state.OrderCompleted {
 		t.Fatalf("not completed: %+v", l.canonical.Orders[cook.orderID])
 	}
-	if _, err := os.Stat(cook.worktreePath); !os.IsNotExist(err) {
-		t.Fatal("successful candidate not cleaned up")
+	if string(recoveryRead(t, filepath.Join(cook.worktreePath, "candidate.txt"))) != "reviewed candidate\n" {
+		t.Fatal("successful bound candidate lost its restorable worktree")
 	}
 }
 

@@ -590,6 +590,7 @@ func (l *Loop) requeueStaleMerge(md mergeRecoveryStage) error {
 	l.logger.Info("merging stage branch exists, re-enqueueing merge",
 		"order", md.orderID, "stage", md.stage.StageIndex, "branch", md.checkBranch)
 	cook := &cookHandle{
+		retainWorktree: l.retainTaskData(md.orderID),
 		cookIdentity: cookIdentity{
 			orderID:    md.orderID,
 			stageIndex: md.stage.StageIndex,

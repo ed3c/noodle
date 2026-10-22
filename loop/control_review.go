@@ -31,11 +31,12 @@ func (l *Loop) controlMerge(orderID string) error {
 
 	// Merge the worktree.
 	cook := &cookHandle{
-		cookIdentity: pending.cookIdentity,
-		orderStatus:  OrderStatusActive,
-		worktreeName: pending.worktreeName,
-		worktreePath: pending.worktreePath,
-		session:      &adoptedSession{id: pending.sessionID, status: "completed"},
+		cookIdentity:   pending.cookIdentity,
+		orderStatus:    OrderStatusActive,
+		worktreeName:   pending.worktreeName,
+		worktreePath:   pending.worktreePath,
+		session:        &adoptedSession{id: pending.sessionID, status: "completed"},
+		retainWorktree: l.retainTaskData(orderID),
 	}
 	// Bound candidates must reach the exact HEAD/tree check under the merge lock.
 	// Branch-name or patch-equivalence previews cannot establish their completion.

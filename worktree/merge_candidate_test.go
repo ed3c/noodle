@@ -40,6 +40,9 @@ func TestReviewedMergeUsesCandidateDespiteAmbiguousBranch(t *testing.T) {
 	if fileExists(filepath.Join(dir, "unreviewed.txt")) {
 		t.Fatal("unreviewed content merged")
 	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatal("standalone merge unexpectedly changed its cleanup policy")
+	}
 }
 
 func TestReviewedMergePreservesConcurrentDirtyWorktree(t *testing.T) {

@@ -27,7 +27,7 @@ func (l *Loop) mergeCookWorktree(ctx context.Context, cook *cookHandle) error {
 			return fmt.Errorf("merge remote branch %s: %w", syncResult.Branch, err)
 		}
 	} else {
-		var opts worktree.MergeOpts
+		opts := worktree.MergeOpts{RetainWorktree: cook.retainWorktree}
 		if cook.stage.TaskKey == "local-task" && slices.Contains(l.config.Runtime.Process.AdmittedOrders, cook.orderID) {
 			var binding localTaskMergeBinding
 			if json.Unmarshal(cook.stage.Extra[localTaskMergeKey], &binding) != nil || binding.Head == "" || binding.Tree == "" {

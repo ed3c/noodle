@@ -120,6 +120,7 @@ type cookHandle struct {
 	startedAt         time.Time
 	displayName       string // stable kitchen name, preserved across retries
 	dispatchedRuntime string // actual runtime used (may differ from stage.Runtime after fallback)
+	retainWorktree    bool   // selected on the loop goroutine before merge queue handoff
 }
 
 // pendingReviewCook is a completed cook waiting for human merge/reject.
