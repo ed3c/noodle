@@ -28,10 +28,6 @@ func DeriveSessionMeta(
 
 	status := SessionStatusExited
 	switch {
-	case terminalByClaims && claims.Failed:
-		status = SessionStatusFailed
-	case terminalByClaims:
-		status = SessionStatusExited
 	case observation.Alive:
 		status = SessionStatusRunning
 	case claims.Failed:
@@ -62,9 +58,9 @@ func DeriveSessionMeta(
 		health = HealthYellow
 	}
 
-	alive := observation.Alive
-	if terminalByClaims {
-		alive = false
+	exitPending := observation.Alive && terminalByClaims
+	if exitPending {
+		health = HealthYellow
 	}
 
 	durationSeconds := int64(0)
@@ -108,7 +104,8 @@ func DeriveSessionMeta(
 		Health:                  health,
 		ContextWindowUsagePct:   contextUsagePct,
 		RetryCount:              previous.RetryCount,
-		Alive:                   alive,
+		Alive:                   observation.Alive,
+		ExitPending:             exitPending,
 		Stuck:                   false,
 		LogSize:                 observation.LogSize,
 		UpdatedAt:               now,

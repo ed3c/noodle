@@ -65,6 +65,7 @@ type SessionMeta struct {
 	ContextWindowUsagePct   float64       `json:"context_window_usage_pct"`
 	RetryCount              int           `json:"retry_count"`
 	Alive                   bool          `json:"alive"`
+	ExitPending             bool          `json:"exit_pending,omitempty"`
 	Stuck                   bool          `json:"stuck"`
 	LogSize                 int64         `json:"log_size"`
 	UpdatedAt               time.Time     `json:"updated_at"`

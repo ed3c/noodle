@@ -21,7 +21,6 @@ import (
 	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/internal/taskreg"
 	"github.com/poteto/noodle/mise"
-	"github.com/poteto/noodle/monitor"
 	loopruntime "github.com/poteto/noodle/runtime"
 	"github.com/poteto/noodle/skill"
 )
@@ -205,7 +204,9 @@ func (l *Loop) Shutdown() {
 		adoptedSessions := l.adoptedSessionIDsSnapshot()
 
 		l.terminateActiveSessions(activeSessions)
-		l.terminateAdoptedSessions(adoptedSessions)
+		for _, sessionID := range adoptedSessions {
+			l.logger.Error("shutdown cannot signal recovered session without original child owner; readback required", "session", sessionID)
+		}
 		if l.waitForActiveSessionExit(shutdownDeadline, activeSessions) {
 			return
 		}
@@ -216,7 +217,6 @@ func (l *Loop) Shutdown() {
 		)
 
 		l.forceKillActiveSessions(activeSessions)
-		l.forceKillAdoptedSessions(adoptedSessions)
 		if l.waitForActiveSessionExit(shutdownDeadline, activeSessions) {
 			return
 		}
@@ -264,18 +264,6 @@ func (l *Loop) forceKillActiveSessions(sessions []loopruntime.SessionHandle) {
 		if err := session.ForceKill(); err != nil {
 			l.logger.Warn("shutdown force kill session failed", "session", session.ID(), "error", err)
 		}
-	}
-}
-
-func (l *Loop) terminateAdoptedSessions(sessionIDs []string) {
-	for _, sessionID := range sessionIDs {
-		monitor.TerminateSessionByPID(l.runtimeDir, sessionID)
-	}
-}
-
-func (l *Loop) forceKillAdoptedSessions(sessionIDs []string) {
-	for _, sessionID := range sessionIDs {
-		monitor.ForceKillSessionByPID(l.runtimeDir, sessionID)
 	}
 }
 
