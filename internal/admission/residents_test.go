@@ -205,7 +205,7 @@ func TestResidentsPriorHostNeedsReadbackNotPIDAdoption(t *testing.T) {
 	}
 }
 func TestResidentInventoryIsDiagnosticNotKillAuthority(t *testing.T) {
-	data := "101 10 Thu Oct 15 12:00:00 2026 1200 /some path/server\n102 10 Thu Oct 15 12:00:01 2026 1400 /some path/server\n103 11 Thu Oct 15 12:00:02 2026 500 /some path/server\n"
+	data := "101 10 101 Thu Oct 15 12:00:00 2026 1200 /some path/server\n102 10 101 Thu Oct 15 12:00:01 2026 1400 /some path/server\n103 11 103 Thu Oct 15 12:00:02 2026 500 /some path/server\n"
 	rows, err := parseResidents(data)
 	if err != nil || len(rows) != 3 {
 		t.Fatal(rows, err)
@@ -220,6 +220,18 @@ func TestResidentInventoryIsDiagnosticNotKillAuthority(t *testing.T) {
 		live, err := ObserveResidents(context.Background())
 		if err != nil || len(live) == 0 {
 			t.Fatal(live, err)
+		}
+		found := false
+		for _, row := range live {
+			if row.PID == os.Getpid() {
+				found = true
+				if row.ParentPID != os.Getppid() || row.ProcessGroup <= 0 || len(row.AncestorPIDs) == 0 || row.AncestorPIDs[0] != row.ParentPID {
+					t.Fatalf("live self lineage differs from runtime: %+v", row)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("live inventory omitted current process")
 		}
 	}
 }
