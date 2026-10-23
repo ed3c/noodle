@@ -21,6 +21,11 @@ func (l *Loop) runMonitorPass(ctx context.Context) {
 // back into loop stage completion handling when a process remains alive after
 // writing a terminal canonical event.
 func (l *Loop) enqueueTerminalActiveCompletions(ctx context.Context) error {
+	// Admitted workers report completion through their owned process/group handle.
+	// Derived metadata can be stale and cannot acknowledge exit or release a permit.
+	if l.deps.Admission != nil {
+		return nil
+	}
 	for _, cook := range l.cooks.activeCooksByOrder {
 		metaStatus, ok, err := l.readSessionStatus(cook.session.ID())
 		if err != nil {

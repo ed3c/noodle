@@ -2,22 +2,25 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/poteto/noodle/dispatcher"
+	"github.com/poteto/noodle/internal/jsonx"
 	"github.com/poteto/noodle/internal/procx"
 )
 
-// processRuntime adds PID-based session recovery to the base DispatcherRuntime.
+// processRuntime discovers original process records without adopting signal authority.
 type processRuntime struct {
 	*DispatcherRuntime
 }
 
 // NewProcessRuntime adapts a process dispatcher to the Runtime interface with
-// PID-based session recovery.
+// original process/group readback.
 func NewProcessRuntime(d dispatcher.Dispatcher, runtimeDir string, maxConcurrent int) Runtime {
 	r := NewDispatcherRuntime("process", d, runtimeDir)
 	r.SetMaxConcurrent(maxConcurrent)
@@ -45,25 +48,42 @@ func (p *processRuntime) Recover(_ context.Context) ([]RecoveredSession, error) 
 		sessionID := entry.Name()
 		sessionDir := filepath.Join(sessionsDir, sessionID)
 
-		pid, err := procx.ReadPIDFile(filepath.Join(sessionDir, "process.json"))
-		if err != nil {
-			// No process.json — skip.
-			continue
-		}
-
 		metaPath := filepath.Join(sessionDir, "meta.json")
 		data, err := os.ReadFile(metaPath)
+		if os.IsNotExist(err) {
+			continue
+		}
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("read session %s metadata: %w", sessionID, err)
 		}
-		if !strings.Contains(string(data), `"status":"running"`) {
-			continue
+		var meta map[string]json.RawMessage
+		if err := json.Unmarshal(data, &meta); err != nil {
+			return nil, fmt.Errorf("parse session %s metadata: %w", sessionID, err)
 		}
-
-		if !procx.IsPIDAlive(pid) {
-			// Dead process — update meta.json status.
-			updated := strings.Replace(string(data), `"status":"running"`, `"status":"exited"`, 1)
-			_ = os.WriteFile(metaPath, []byte(updated), 0o644)
+		var status string
+		if err := json.Unmarshal(meta["status"], &status); err != nil {
+			return nil, fmt.Errorf("parse session %s status: %w", sessionID, err)
+		}
+		record, err := procx.ReadProcessRecord(filepath.Join(sessionDir, "process.json"))
+		if err != nil {
+			return nil, fmt.Errorf("session %s process identity requires original owner readback: %w", sessionID, err)
+		}
+		if record.SessionID != sessionID || record.StartedAt.IsZero() {
+			return nil, fmt.Errorf("session %s process identity missing or conflicts with original Session", sessionID)
+		}
+		absent, err := record.GroupAbsent()
+		if err != nil {
+			return nil, fmt.Errorf("session %s process/group exit requires original owner readback: %w", sessionID, err)
+		}
+		if absent {
+			if status == "running" {
+				meta["status"] = json.RawMessage(`"exited"`)
+			}
+			meta["alive"] = json.RawMessage(`false`)
+			delete(meta, "exit_pending")
+			if err := jsonx.WriteJSON(metaPath, meta); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -72,7 +92,7 @@ func (p *processRuntime) Recover(_ context.Context) ([]RecoveredSession, error) 
 			OrderID:       target,
 			SessionHandle: &recoveredSessionHandle{id: sessionID, status: "running"},
 			RuntimeName:   p.name,
-			Reason:        "live PID found",
+			Reason:        "original process/group exit requires owner readback",
 		})
 	}
 
@@ -89,18 +109,19 @@ func (s *recoveredSessionHandle) ID() string              { return s.id }
 func (s *recoveredSessionHandle) Status() string          { return s.status }
 func (s *recoveredSessionHandle) Outcome() SessionOutcome { return SessionOutcome{} }
 func (s *recoveredSessionHandle) TotalCost() float64      { return 0 }
-func (s *recoveredSessionHandle) Terminate() error        { return nil }
-func (s *recoveredSessionHandle) ForceKill() error        { return nil }
-func (s *recoveredSessionHandle) VerdictPath() string     { return "" }
+func (s *recoveredSessionHandle) Terminate() error {
+	return fmt.Errorf("session %s stop unavailable without original child owner", s.id)
+}
+func (s *recoveredSessionHandle) ForceKill() error {
+	return fmt.Errorf("session %s force stop unavailable without original child owner", s.id)
+}
+func (s *recoveredSessionHandle) VerdictPath() string { return "" }
 func (s *recoveredSessionHandle) Controller() AgentController {
 	return dispatcher.NoopController()
 }
 
-func (s *recoveredSessionHandle) Done() <-chan struct{} {
-	ch := make(chan struct{})
-	close(ch)
-	return ch
-}
+// Discovery cannot acknowledge exit. The original owner must read it back.
+func (s *recoveredSessionHandle) Done() <-chan struct{} { return nil }
 
 // scheduleOrderID is the well-known order ID for the scheduler session.
 const scheduleOrderID = "schedule"
