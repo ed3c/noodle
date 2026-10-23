@@ -200,7 +200,7 @@ func (d *ProcessDispatcher) startSessionProcess(
 	}
 	cmd.Env = append(buildDispatchEnvFrom(req, cmd.Env), "NOODLE_SESSION_ID="+sessionID)
 
-	process, err := StartProcess(cmd)
+	process, err := startProcess(cmd, req.RequireGroupExit)
 	if err != nil {
 		return nil, nil, fmt.Errorf("start process: %w", err)
 	}

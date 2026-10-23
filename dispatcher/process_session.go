@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/poteto/noodle/event"
-	"github.com/poteto/noodle/internal/procx"
 	"github.com/poteto/noodle/parse"
 )
 
@@ -31,6 +30,7 @@ type processSession struct {
 	killed           chan struct{}
 	joined           chan struct{}
 	requireGroupExit bool
+	completionExit   sync.Once
 }
 
 type processSessionConfig struct {
@@ -139,14 +139,41 @@ func (s *processSession) processHook(ce parse.CanonicalEvent) {
 	if s.controller != nil {
 		s.controller.NotifyEvent(string(ce.Type))
 	}
+	if s.requireGroupExit && s.controller == nil && (ce.Type == parse.EventComplete || ce.Type == parse.EventResult) {
+		s.completionExit.Do(func() {
+			go func() {
+				timer := time.NewTimer(2 * time.Second)
+				defer timer.Stop()
+				select {
+				case <-s.process.Done():
+					return
+				case <-timer.C:
+				}
+				// One-shot completion is not process exit. Stop only our
+				// original child; the existing waiter retains quota until exit.
+				if err := s.process.Terminate(); err != nil {
+					s.publish(SessionEvent{Type: "warning", Message: fmt.Sprintf("completed worker stop requires owner readback: %v", err), Timestamp: nowUTC()})
+				}
+			}()
+		})
+	}
 }
 
 func (s *processSession) waitForExit(ctx context.Context) {
-	select {
-	case <-s.process.Done():
-	case <-ctx.Done():
-		_ = s.process.ForceKill()
-		<-s.process.Done()
+	cancellation := ctx.Done()
+wait:
+	for {
+		select {
+		case <-s.process.Done():
+			break wait
+		case err := <-s.process.waitProblem:
+			s.publish(SessionEvent{Type: "warning", Message: fmt.Sprintf("original worker exit requires owner readback: %v", err), Timestamp: nowUTC()})
+		case <-cancellation:
+			if err := s.process.ForceKill(); err != nil {
+				s.publish(SessionEvent{Type: "warning", Message: fmt.Sprintf("original worker stop requires owner readback: %v", err), Timestamp: nowUTC()})
+			}
+			cancellation = nil
+		}
 	}
 
 	// Keep draining after a normal exit, but cancellation or a forced kill
@@ -169,9 +196,6 @@ func (s *processSession) waitForExit(ctx context.Context) {
 		s.closeProcessPipes()
 		<-ioDone
 	}
-	if s.requireGroupExit {
-		s.waitForProcessGroupExit(ctx)
-	}
 	s.startup.observeThread(s.stampedPath)
 	s.killMu.Lock()
 	killed := s.forceKilled
@@ -179,42 +203,15 @@ func (s *processSession) waitForExit(ctx context.Context) {
 	exitCode, _ := s.process.ExitCode()
 	if killed {
 		<-s.streamDone
-		s.markDone("killed")
-		return
-	}
-	s.resolveAndMarkDone(exitCode, ctx.Err() != nil)
-}
-
-// The original launcher PID is also its Setpgid group identity. A terminal
-// launcher and drained pipes do not prove that redirected descendants exited.
-// Keep Done open on unknown observations, including cancellation, so the shared
-// resource owner cannot return this allocation or admit a replacement early.
-func (s *processSession) waitForProcessGroupExit(ctx context.Context) {
-	warned := false
-	cancellation := ctx.Done()
-	for {
-		absent, err := procx.ProcessGroupAbsent(s.process.PID())
-		if err == nil && absent {
+		s.trackerMu.Lock()
+		completed := s.sawComplete || s.sawResult
+		s.trackerMu.Unlock()
+		if !completed {
+			s.markDone("killed")
 			return
 		}
-		if !warned {
-			message := "worker process group exit unconfirmed; original owner readback required"
-			if err != nil {
-				message += fmt.Sprintf(": %v", err)
-			}
-			s.publish(SessionEvent{Type: "warning", Message: message, Timestamp: nowUTC()})
-			warned = true
-		}
-		select {
-		case <-cancellation:
-			// Use the original child owner; cancellation is not proof of exit.
-			if err := s.process.ForceKill(); err != nil {
-				s.publish(SessionEvent{Type: "warning", Message: fmt.Sprintf("worker group stop failed; original owner readback required: %v", err), Timestamp: nowUTC()})
-			}
-			cancellation = nil
-		case <-time.After(100 * time.Millisecond):
-		}
 	}
+	s.resolveAndMarkDone(exitCode, ctx.Err() != nil)
 }
 
 func (s *processSession) closeProcessPipes() {
