@@ -17,37 +17,32 @@ import (
 // Recovery never adopts a worker. Only a failed context with no dispatch history
 // can be detached while both the Host and project locks are held here.
 func newHostRecoverCmd(app *App) *cobra.Command {
-	var requestFile string
+	var requestFile, contextID, instanceID string
 	cmd := &cobra.Command{Use: "recover-unstarted", Short: "Detach an offline failed context only when native records prove no worker started", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		result, err := recoverUnstarted(app.projectDir, requestFile)
+		result, err := recoverUnstartedSelected(hostRequest{ProjectDir: app.projectDir, RequestFile: requestFile, ContextID: contextID, InstanceID: instanceID})
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 	}}
-	cmd.Flags().StringVar(&requestFile, "request-file", "", "Original native request binding (unchanged)")
-	_ = cmd.MarkFlagRequired("request-file")
+	cmd.Flags().StringVar(&requestFile, "request-file", "", "Optional native request selector")
+	cmd.Flags().StringVar(&contextID, "context-id", "", "Selected native context")
+	cmd.Flags().StringVar(&instanceID, "instance-id", "", "Selected Host instance")
 	return cmd
 }
 
 func recoverUnstarted(project, requestFile string) (hostResponse, error) {
+	return recoverUnstartedSelected(hostRequest{ProjectDir: project, RequestFile: requestFile})
+}
+
+func recoverUnstartedSelected(req hostRequest) (hostResponse, error) {
 	fail := func(err error) (hostResponse, error) { return hostResponse{}, err }
-	project, err := filepath.EvalSymlinks(project)
+	req, selected, err := readSelectedHostReceipt(req)
 	if err != nil {
 		return fail(err)
 	}
-	data, err := os.ReadFile(requestFile)
-	if err != nil {
-		return fail(err)
-	}
-	var binding hostRequestBinding
-	if err = json.Unmarshal(data, &binding); err != nil {
-		return fail(err)
-	}
-	if binding.Schema != 1 || binding.Operation != "attach" || binding.RequestID == "" || binding.ProjectDir != project || !filepath.IsAbs(binding.HostDir) {
-		return fail(errors.New("original attach binding invalid"))
-	}
-	hostLock, err := lockfile.TryLock(filepath.Join(binding.HostDir, "host.lock"))
+	project := req.ProjectDir
+	hostLock, err := lockfile.TryLock(filepath.Join(req.HostDir, "host.lock"))
 	if err != nil {
 		return fail(fmt.Errorf("Host must be stopped: %w", err))
 	}
@@ -58,7 +53,7 @@ func recoverUnstarted(project, requestFile string) (hostResponse, error) {
 		return fail(err)
 	}
 	defer projectLock.Close()
-	data, err = os.ReadFile(filepath.Join(binding.HostDir, "receipts.json"))
+	data, err := os.ReadFile(filepath.Join(req.HostDir, "receipts.json"))
 	if err != nil {
 		return fail(err)
 	}
@@ -68,7 +63,7 @@ func recoverUnstarted(project, requestFile string) (hostResponse, error) {
 	}
 	index := -1
 	for i, r := range receipts {
-		if r.RequestID == binding.RequestID {
+		if r.ContextID == selected.ContextID && r.HostInstanceID == selected.HostInstanceID {
 			if index != -1 {
 				return fail(errors.New("ambiguous original request"))
 			}
@@ -79,8 +74,8 @@ func recoverUnstarted(project, requestFile string) (hostResponse, error) {
 		return fail(errors.New("original receipt missing"))
 	}
 	original := receipts[index]
-	if original.ProjectDir != project || original.ConfigSHA256 != binding.ConfigSHA256 || original.BinarySHA256 != binding.BinarySHA256 || original.Mode != binding.Mode || original.HostDir != binding.HostDir {
-		return fail(errors.New("original request/receipt binding differs"))
+	if original != selected {
+		return fail(errors.New("selected receipt changed while acquiring recovery locks"))
 	}
 	if original.ContextState == "detached" {
 		return hostResponse{original, "ok", ""}, nil
@@ -89,13 +84,13 @@ func recoverUnstarted(project, requestFile string) (hostResponse, error) {
 		return fail(errors.New("only an explicitly failed context can recover"))
 	}
 	if original.HostPID <= 0 || procx.IsPIDAlive(original.HostPID) {
-		return fail(errors.New("original Host process is still alive or identity is unknown"))
+		return fail(errors.New("recorded Host process is still alive or identity is unknown"))
 	}
 	cfg, err := readHostConfig(project)
 	if err != nil {
 		return fail(err)
 	}
-	if hostDigest(cfg) != binding.ConfigSHA256 {
+	if hostDigest(cfg) != original.ConfigSHA256 {
 		return fail(errors.New("original config drifted"))
 	}
 	evidence, err := unstartedEvidence(runtimeDir)
@@ -111,10 +106,10 @@ func recoverUnstarted(project, requestFile string) (hostResponse, error) {
 	if err != nil {
 		return fail(err)
 	}
-	proofPath := filepath.Join(binding.HostDir, "unstarted-"+original.ContextID+".json")
+	proofPath := filepath.Join(req.HostDir, "unstarted-"+original.ContextID+".json")
 	if existing, err := os.ReadFile(proofPath); err == nil {
 		if string(existing) != string(proofBytes) {
-			return fail(errors.New("recovery evidence changed; original owner readback required"))
+			return fail(errors.New("recovery evidence changed; Session readback of the selected native records required"))
 		}
 	} else if !os.IsNotExist(err) {
 		return fail(err)
@@ -126,7 +121,7 @@ func recoverUnstarted(project, requestFile string) (hostResponse, error) {
 	if err != nil {
 		return fail(err)
 	}
-	if err = filex.WriteFileAtomicDurable(filepath.Join(binding.HostDir, "receipts.json"), data); err != nil {
+	if err = filex.WriteFileAtomicDurable(filepath.Join(req.HostDir, "receipts.json"), data); err != nil {
 		return fail(err)
 	}
 	return hostResponse{receipts[index], "ok", ""}, nil

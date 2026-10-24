@@ -236,3 +236,32 @@ func TestHostTaskCapabilitiesOffline(t *testing.T) {
 		t.Fatal(result)
 	}
 }
+
+func TestHostViewsBindingUsesExplicitContextWithoutOriginalRequest(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	t.Setenv("NOODLE_HOST_DIR", dir)
+	view := loopview.Empty()
+	view.Runs = append(view.Runs, loopview.Run{ID: "selected", Repository: root, Mode: "inner-only", Status: "unknown", Stages: []loopview.Stage{}, Cards: []loopview.Card{}, Notes: []loopview.Note{}, Breakpoints: []loopview.Breakpoint{}})
+	if _, _, err := loopview.Import(dir, view); err != nil {
+		t.Fatal(err)
+	}
+	receipt := hostReceipt{Schema: 1, Protocol: hostProtocol, ProjectDir: root, HostDir: dir, RequestID: "retained", ContextID: "selected-context", HostInstanceID: "stopped-host", ConfigSHA256: "config", BinarySHA256: "old-binary", Mode: "manual", ContextState: "detached"}
+	writeViewReceipts(t, dir, []hostReceipt{receipt})
+	inspectionSnapshot(t, root, "selected-order")
+	out := inspectCommand(t, root, "host", "views", "bind", "--run-id", "selected", "--order-id", "selected-order", "--context-id", "selected-context", "--instance-id", "stopped-host")
+	if !bytes.Contains(out, []byte(`"display_only":true`)) {
+		t.Fatal(string(out))
+	}
+	bindings, err := loadViewBindings(dir)
+	if err != nil || bindings["selected"].Request.RequestID != "retained" {
+		t.Fatalf("explicit association lost: %+v %v", bindings, err)
+	}
+	result := inspectCommand(t, root, "host", "views", "inspect")
+	if !bytes.Contains(result, []byte("selected-order")) {
+		t.Fatal("detached workspace facts were hidden")
+	}
+}

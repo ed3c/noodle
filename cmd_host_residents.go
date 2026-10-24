@@ -18,7 +18,7 @@ import (
 func newHostResidentsCmd(app *App) *cobra.Command {
 	parent := &cobra.Command{Use: "residents", Short: "Manage shared Host resident leases and inspect external ownership gaps"}
 	for _, operation := range []string{"inspect", "reconcile", "acquire", "release"} {
-		var specFile, id, requestFile string
+		var specFile, id, requestFile, contextID, instanceID string
 		child := &cobra.Command{Use: operation, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			req := hostRequest{Operation: "resident_" + operation, ProjectDir: app.projectDir, ResidentID: id}
 			if operation == "acquire" {
@@ -37,28 +37,29 @@ func newHostResidentsCmd(app *App) *cobra.Command {
 				}
 				req.ResidentSpec = &spec
 			}
-			dir, err := hostDirectory()
+			dir, err := hostReadDirectory()
 			if err != nil {
 				return err
 			}
-			if requestFile != "" {
-				original := callHost(cmd.Context(), hostRequest{Operation: "status", ProjectDir: app.projectDir, RequestFile: requestFile})
-				if (original.Status != "ok" && !(operation == "inspect" && original.Status == "unknown_effect")) || (operation != "inspect" && original.ContextState != "active") || original.HostInstanceID == "" || original.ContextID == "" {
-					_ = json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"owner": "noodle.swap-manager", "status": "refused", "original": original, "error": "original Host request unavailable for resident operation"})
-					return errors.New("original Host request unavailable for resident operation")
+			selected := requestFile != "" || contextID != "" || instanceID != ""
+			if operation == "acquire" || operation == "release" {
+				selected = true
+			}
+			if selected {
+				_, receipt, err := readSelectedHostReceipt(hostRequest{ProjectDir: app.projectDir, RequestFile: requestFile, ContextID: contextID, InstanceID: instanceID})
+				if err != nil {
+					return err
 				}
 				req.Operation += "_bound"
-				req.ProjectDir = original.ProjectDir
-				req.ContextID = original.ContextID
-				req.InstanceID = original.HostInstanceID
-				req.RequestID = original.RequestID
-				req.ConfigSHA256 = original.ConfigSHA256
-				req.Mode = original.Mode
-				req.BinarySHA256 = original.BinarySHA256
-				dir = original.HostDir
+				req.ProjectDir, req.ContextID, req.InstanceID = receipt.ProjectDir, receipt.ContextID, receipt.HostInstanceID
+				req.RequestID, req.ConfigSHA256, req.Mode, req.BinarySHA256 = receipt.RequestID, receipt.ConfigSHA256, receipt.Mode, receipt.BinarySHA256
+				dir = receipt.HostDir
 			}
 			conn, err := net.DialTimeout("unix", filepath.Join(dir, "host.sock"), time.Second)
 			if err != nil {
+				if operation == "inspect" {
+					return json.NewEncoder(cmd.OutOrStdout()).Encode(readRetainedResidents(dir, err))
+				}
 				return fmt.Errorf("resident Host unavailable: %w", err)
 			}
 			defer conn.Close()
@@ -70,8 +71,8 @@ func newHostResidentsCmd(app *App) *cobra.Command {
 			if err = json.NewDecoder(io.LimitReader(conn, 4<<20)).Decode(&result); err != nil {
 				return err
 			}
-			if requestFile != "" {
-				result["readback"] = map[string]any{"owner": "noodle.swap-manager", "operation": "readback", "argv": []string{os.Args[0], "--project-dir", req.ProjectDir, "host", "resources", "residents", "inspect", "--request-file", requestFile}}
+			if selected {
+				result["readback"] = map[string]any{"owner": "noodle.swap-manager", "operation": "readback", "argv": []string{os.Args[0], "--project-dir", req.ProjectDir, "host", "resources", "residents", "inspect", "--context-id", req.ContextID, "--instance-id", req.InstanceID}}
 				if result["next"] != nil {
 					result["next"] = result["readback"]
 				}
@@ -80,15 +81,14 @@ func newHostResidentsCmd(app *App) *cobra.Command {
 				return err
 			}
 			if result["status"] == "refused" {
-				return errors.New("resident operation refused; consume original readback")
+				return errors.New("resident operation refused; consume selected context readback")
 			}
 			return nil
 		}}
 		if operation == "acquire" || operation == "release" || operation == "inspect" {
-			child.Flags().StringVar(&requestFile, "request-file", "", "Original admitted Host request")
-			if operation != "inspect" {
-				_ = child.MarkFlagRequired("request-file")
-			}
+			child.Flags().StringVar(&requestFile, "request-file", "", "Optional native request selector")
+			child.Flags().StringVar(&contextID, "context-id", "", "Selected native context")
+			child.Flags().StringVar(&instanceID, "instance-id", "", "Selected Host instance")
 		}
 		if operation == "acquire" {
 			child.Flags().StringVar(&specFile, "spec-file", "", "Explicit foreground network service contract")
@@ -120,13 +120,13 @@ func (h *noodleHost) residentOperation(ctx context.Context, req hostRequest) any
 		found := false
 		for _, receipt := range h.receipts {
 			if req.ContextID != "" && req.RequestID != "" && req.InstanceID == h.instanceID &&
-				req.BinarySHA256 == h.binarySHA && hostReceiptMatches(req, receipt) {
+				hostReceiptMatches(req, receipt) {
 				found = true
 				break
 			}
 		}
 		if !found {
-			return refuse(errors.New("original resident readback binding unavailable"))
+			return refuse(errors.New("selected resident context unavailable"))
 		}
 	}
 	if req.Operation == "resident_inspect" || req.Operation == "resident_inspect_bound" {
@@ -145,7 +145,7 @@ func (h *noodleHost) residentOperation(ctx context.Context, req hostRequest) any
 	}
 	if (req.Operation != "resident_acquire_bound" && req.Operation != "resident_release_bound") ||
 		req.ContextID == "" || req.RequestID == "" || req.InstanceID != h.instanceID || req.BinarySHA256 != h.binarySHA {
-		return refuse(errors.New("exact original Host request binding required for resident mutation"))
+		return refuse(errors.New("exact selected native context required for resident mutation"))
 	}
 	project, err := filepath.Abs(req.ProjectDir)
 	if err != nil {
@@ -168,7 +168,7 @@ func (h *noodleHost) residentOperation(ctx context.Context, req hostRequest) any
 		return refuse(errors.New("active native context missing for resident lease"))
 	}
 	if owner.receipt.ContextID != req.ContextID || owner.receipt.RequestID != req.RequestID {
-		return refuse(errors.New("resident request no longer owns the active context"))
+		return refuse(errors.New("selected resident request differs from the active context"))
 	}
 	var resident admission.Resident
 	switch req.Operation {

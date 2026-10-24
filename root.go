@@ -36,7 +36,7 @@ func NewRootCmd() *cobra.Command {
 		},
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if rootSubcommandName(cmd) == "host" {
-				if cmd.Name() == "capabilities" || cmd.Name() == "serve" || cmd.Name() == "resources" || cmd.Parent().Name() == "views" {
+				if cmd.Name() == "capabilities" || cmd.Name() == "serve" {
 					return nil
 				}
 				dir, err := resolveProjectDir(projectDirFlag)
@@ -53,6 +53,9 @@ func NewRootCmd() *cobra.Command {
 			app.projectDir = dir
 			if err := os.Chdir(dir); err != nil {
 				return fmt.Errorf("change to project directory %s: %w", dir, err)
+			}
+			if rootSubcommandName(cmd) == "review" && cmd.Name() == "inspect" {
+				return nil
 			}
 			if rootSubcommandName(cmd) == "start" {
 				if err := startup.EnsureProjectStructure(".", os.Stderr); err != nil {

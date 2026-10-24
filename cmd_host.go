@@ -109,7 +109,7 @@ func newHostCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{Use: "host", Short: "Manage the single persistent Noodle host"}
 	cmd.AddCommand(newHostResourcesCmd(app))
 	cmd.AddCommand(newHostRecoverCmd(app))
-	cmd.AddCommand(newHostViewsCmd())
+	cmd.AddCommand(newHostViewsCmd(app))
 	task := &cobra.Command{Use: "task", Short: "Read native task dispatch capabilities"}
 	task.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "process_admitted_orders": true, "config_key": "runtime.process.admitted_orders", "empty_unrestricted": true, "scope": "process_dispatch"})
@@ -128,8 +128,26 @@ func newHostCmd(app *App) *cobra.Command {
 	}})
 	for _, operation := range []string{"attach", "once", "status", "detach"} {
 		var mode, contextID, instanceID, configSHA, requestFile string
+		var persistedOnly bool
 		child := &cobra.Command{Use: operation, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			req := hostRequest{Operation: operation, ProjectDir: app.projectDir, Mode: mode, ContextID: contextID, InstanceID: instanceID, ConfigSHA256: configSHA, RequestFile: requestFile}
+			if operation == "status" {
+				result, err := inspectHostWorkspace(req)
+				if err != nil {
+					return err
+				}
+				if contextID == "" && requestFile == "" {
+					return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+				}
+				selected := observeSelectedHostStatus(cmd.Context(), req, result, persistedOnly)
+				if err := json.NewEncoder(cmd.OutOrStdout()).Encode(selected); err != nil {
+					return err
+				}
+				if selected.Error != "" {
+					return errors.New(selected.Error)
+				}
+				return nil
+			}
 			response := callHost(cmd.Context(), req)
 			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(response); err != nil {
 				return err
@@ -148,7 +166,8 @@ func newHostCmd(app *App) *cobra.Command {
 			child.Flags().StringVar(&instanceID, "instance-id", "", "Native host instance identity")
 		}
 		if operation == "status" {
-			child.Flags().StringVar(&configSHA, "config-sha256", "", "Original config digest for lost response lookup")
+			child.Flags().BoolVar(&persistedOnly, "persisted-only", false, "Read retained selected facts without contacting Host")
+			child.Flags().StringVar(&configSHA, "config-sha256", "", "Optional recorded config digest filter")
 		}
 		cmd.AddCommand(child)
 	}
@@ -205,7 +224,17 @@ func readHostConfig(dir string) ([]byte, error) {
 }
 
 func callHost(ctx context.Context, req hostRequest) hostResponse {
-	dir, err := hostDirectory()
+	if req.Operation == "status" {
+		inventory, err := inspectHostWorkspace(req)
+		if err != nil {
+			return hostError("refused", err)
+		}
+		return observeSelectedHostStatus(ctx, req, inventory, false).hostResponse
+	}
+	dir, err := hostReadDirectory()
+	if req.Operation == "attach" || req.Operation == "once" {
+		dir, err = hostDirectory()
+	}
 	if err != nil {
 		return hostError("refused", err)
 	}
@@ -222,7 +251,7 @@ func callHost(ctx context.Context, req hostRequest) hostResponse {
 	if err != nil {
 		return hostError("refused", err)
 	}
-	if req.Operation == "attach" || req.Operation == "once" || (req.Operation == "status" && req.ContextID == "" && req.RequestFile == "") {
+	if req.Operation == "attach" || req.Operation == "once" {
 		data, err := readHostConfig(req.ProjectDir)
 		if err != nil {
 			return hostError("refused", err)
@@ -247,7 +276,13 @@ func callHost(ctx context.Context, req hostRequest) hostResponse {
 	}
 	req.HostDir = dir
 	var requestBinding *hostRequestBinding
-	if req.RequestFile != "" || req.Operation == "attach" || req.Operation == "once" {
+	if req.Operation == "status" || req.Operation == "detach" {
+		req, err = readHostSelector(req)
+		if err != nil {
+			return hostError("refused", err)
+		}
+		dir = req.HostDir
+	} else if req.RequestFile != "" || req.Operation == "attach" || req.Operation == "once" {
 		var unlock func()
 		requestBinding, unlock, err = bindHostRequest(&req)
 		if err != nil {
@@ -256,11 +291,11 @@ func callHost(ctx context.Context, req hostRequest) hostResponse {
 		defer unlock()
 		dir = req.HostDir
 	}
-	if (req.Operation == "detach" || (req.Operation == "status" && req.ContextID != "")) && (req.ContextID == "" || req.InstanceID == "") {
-		return hostError("refused", errors.New("context-id and instance-id are required together"))
+	if req.Operation == "detach" && req.ContextID == "" && req.RequestID == "" {
+		return hostError("refused", errors.New("detach needs an exact context or request selector"))
 	}
-	if req.Operation == "status" && req.ContextID == "" && req.ConfigSHA256 == "" {
-		return hostError("refused", errors.New("status needs context identity or config-sha256"))
+	if req.Operation == "status" {
+		return callHost(ctx, req)
 	}
 	conn, err := net.DialTimeout("unix", filepath.Join(dir, "host.sock"), time.Second)
 	if err != nil && (req.Operation == "attach" || req.Operation == "once") {
@@ -608,14 +643,14 @@ func (h *noodleHost) finish(c *hostContext, runErr error) {
 	}
 }
 
-func offlineHostStatus(dir string, req hostRequest, dialErr error) hostResponse {
-	data, err := os.ReadFile(filepath.Join(dir, "receipts.json"))
+func offlineHostStatus(dir string, req hostRequest, _ error) hostResponse {
+	receipts, err := readHostReceipts(dir)
 	if err != nil {
-		return hostError("host_unavailable", dialErr)
-	}
-	var receipts []hostReceipt
-	if err := json.Unmarshal(data, &receipts); err != nil {
-		return hostError("unknown_effect", err)
+		status := "unknown_effect"
+		if os.IsNotExist(err) {
+			status = "host_unavailable"
+		}
+		return hostError(status, fmt.Errorf("read retained receipts: %w", err))
 	}
 	if ambiguousHostLookup(req, receipts) {
 		return hostError("ambiguous", errors.New("multiple contexts match; use request-file or context identity"))
@@ -628,7 +663,7 @@ func offlineHostStatus(dir string, req hostRequest, dialErr error) hostResponse 
 		if r.ContextState == "detached" {
 			return hostResponse{r, "ok", ""}
 		}
-		return hostResponse{r, "unknown_effect", "host is unavailable; the persisted context was not detached"}
+		return hostResponse{r, "unknown_effect", "persisted context was not detached; live Host/process state is unverified"}
 	}
 	return hostError("not_found", errors.New("context identity was not found"))
 }
@@ -653,12 +688,12 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 			// fails. Only earlier detached contexts are already durable.
 			c := h.contexts[r.ContextID]
 			if r.ContextState == "detached" && c == nil {
-				if req.BinarySHA256 != r.BinarySHA256 || (req.BinarySHA256 != h.binarySHA && req.RequestID == "" && req.ContextID == "") {
-					return hostError("binary_mismatch", errors.New("historical readback requires the original binary and exact context or request identity"))
+				if req.Operation != "status" && req.BinarySHA256 != h.binarySHA {
+					return hostError("binary_mismatch", errors.New("detach client and host binaries differ"))
 				}
 				return hostResponse{r, "ok", ""}
 			}
-			if req.BinarySHA256 != h.binarySHA {
+			if req.Operation != "status" && req.BinarySHA256 != h.binarySHA {
 				return hostError("binary_mismatch", errors.New("client and host binaries differ"))
 			}
 			if h.blocked || (c != nil && c.failed) || (c == nil && r.ContextState != "detached") {

@@ -206,6 +206,11 @@ func readReview(view View, s ReviewSelection) ReviewReadback {
 
 // InspectReviewSelections reads explicit references; it neither consumes nor dispatches them.
 func InspectReviewSelections(dir, requestPath, id string) ([]ReviewReadback, error) {
+	return InspectWorkspaceReviewSelections(dir, "", requestPath, id)
+}
+
+// InspectWorkspaceReviewSelections filters by recorded repository, not actor identity.
+func InspectWorkspaceReviewSelections(dir, project, requestPath, id string) ([]ReviewReadback, error) {
 	view, err := Load(dir)
 	if err != nil {
 		return nil, err
@@ -236,13 +241,24 @@ func InspectReviewSelections(dir, requestPath, id string) ([]ReviewReadback, err
 		if s.Version != 1 || s.ID != reviewID(s) || filepath.Base(path) != s.ID+".json" {
 			return nil, fmt.Errorf("invalid review selection receipt")
 		}
-		if s.Request.Source == nil || s.Request.Source.Path != requestPath {
+		if project != "" {
+			matches := false
+			for _, run := range view.Runs {
+				if run.ID == s.RunID && run.Repository == project {
+					matches = true
+				}
+			}
+			if !matches {
+				continue
+			}
+		}
+		if requestPath != "" && (s.Request.Source == nil || s.Request.Source.Path != requestPath) {
 			continue
 		}
 		result = append(result, readReview(view, s))
 	}
 	if id != "" && len(result) != 1 {
-		return nil, fmt.Errorf("selection not found for original request")
+		return nil, fmt.Errorf("selection not found for selected workspace or request")
 	}
 	return result, nil
 }

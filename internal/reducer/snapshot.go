@@ -53,6 +53,11 @@ func ReadSnapshot(path string) (DurableSnapshot, error) {
 	if err != nil {
 		return DurableSnapshot{}, fmt.Errorf("read reducer snapshot: %w", err)
 	}
+	return DecodeSnapshot(data)
+}
+
+// DecodeSnapshot decodes the same bytes that a read-only inspector hashes.
+func DecodeSnapshot(data []byte) (DurableSnapshot, error) {
 	var snapshot DurableSnapshot
 	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return DurableSnapshot{}, fmt.Errorf("decode reducer snapshot: %w", err)

@@ -18,13 +18,14 @@ import (
 
 // StoppedReviewInspection is a non-delivery receipt, never provider authority.
 type StoppedReviewInspection struct {
-	Owner        string           `json:"owner"`
-	Status       string           `json:"status"`
-	Claim        PublicationClaim `json:"claim"`
-	Digest       string           `json:"custody_sha256"`
-	EvidencePath string           `json:"evidence_path"`
-	Invalid      string           `json:"invalid"`
-	Next         AdmissionNext    `json:"next"`
+	Owner        string               `json:"owner"`
+	Status       string               `json:"status"`
+	Claim        PublicationClaim     `json:"claim"`
+	Digest       string               `json:"custody_sha256"`
+	EvidencePath string               `json:"evidence_path"`
+	Invalid      string               `json:"invalid"`
+	Workspace    *WorkspaceInspection `json:"workspace,omitempty"`
+	Next         AdmissionNext        `json:"next"`
 }
 
 type stoppedReviewIntent struct {
@@ -37,7 +38,19 @@ type stoppedReviewIntent struct {
 }
 
 func InspectStoppedReview(project, binary, order, subject string, execCtx ...*execution.Context) StoppedReviewInspection {
-	return recoverStoppedReview(project, binary, order, subject, "", nil, firstExecution(execCtx))
+	facts := ReadWorkspaceInspection(project)
+	r := recoverStoppedReview(project, binary, order, subject, "", nil, firstExecution(execCtx))
+	after := ReadWorkspaceInspection(project)
+	if after.SnapshotSHA256 != facts.SnapshotSHA256 {
+		facts = after
+		r = stoppedReviewRefusal(r, fmt.Errorf("canonical snapshot changed during mutation preflight; inspect the current facts again"))
+	}
+	r.Workspace = &facts
+	if r.Status == "refused" {
+		r.Status = "observed"
+		r.Workspace.Gaps = append(r.Workspace.Gaps, InspectionGap{Path: facts.SnapshotPath, Code: "mutation_preflight", Detail: r.Invalid})
+	}
+	return r
 }
 
 func RejectStoppedReview(project, binary, order, subject, digest string, execCtx ...*execution.Context) StoppedReviewInspection {
@@ -56,7 +69,7 @@ func stoppedReviewRefusal(r StoppedReviewInspection, err error) StoppedReviewIns
 	r.Status, r.Invalid = "refused", err.Error()
 	r.Next.Argv = []string{}
 	r.Next.Required = err.Error()
-	r.Next.ProvidedBy = "Supervisor of the original Noodle order and session"
+	r.Next.ProvidedBy = "Session responsible for engineering judgment in this workspace"
 	r.Next.Guidance = "Preserve evidence and resolve the named condition; then consume fresh readback. Do not restart scheduling or replay historical writes."
 	return r
 }
@@ -69,11 +82,13 @@ func recoverStoppedReview(project, binary, order, subject, digest string, barrie
 		return refuse(err)
 	}
 	dir := filepath.Join(project, ".noodle")
-	lock, err := lockfile.TryLock(filepath.Join(dir, "noodle.lock"))
-	if err != nil {
-		return refuse(err)
+	if digest != "" {
+		lock, err := lockfile.TryLock(filepath.Join(dir, "noodle.lock"))
+		if err != nil {
+			return refuse(err)
+		}
+		defer lock.Close()
 	}
-	defer lock.Close()
 	// A receipt is indexed by the requested subject, never by a caller path.
 	r.EvidencePath = filepath.Join(dir, "review-rejections", publicationDigest([]byte(order+"\n"+subject)))
 	intentPath := filepath.Join(r.EvidencePath, "intent.json")
