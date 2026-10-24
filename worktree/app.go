@@ -258,9 +258,9 @@ type WorktreeEntry struct {
 	Source string // "noodle", "claude", "cursor", or "other"
 }
 
-// allWorktreeEntries returns all non-main worktrees from git metadata,
+// WorktreeEntries returns all non-main worktrees from git metadata,
 // including those under .worktrees/, .claude/worktrees/, and ~/.cursor/worktrees/.
-func (a *App) allWorktreeEntries() ([]WorktreeEntry, error) {
+func (a *App) WorktreeEntries() ([]WorktreeEntry, error) {
 	out, err := a.gitOutput("worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
@@ -325,7 +325,7 @@ func (a *App) allWorktreeEntries() ([]WorktreeEntry, error) {
 // as reported by git worktree metadata. Names are normalized with "/" separators
 // so slash-named branches (for example "feature/ui-polish") round-trip safely.
 func (a *App) managedWorktreeNames() ([]string, error) {
-	entries, err := a.allWorktreeEntries()
+	entries, err := a.WorktreeEntries()
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +349,7 @@ func (a *App) resolveWorktreePath(name string) string {
 	}
 
 	// Search all worktrees for a name match.
-	entries, err := a.allWorktreeEntries()
+	entries, err := a.WorktreeEntries()
 	if err != nil {
 		return standard
 	}

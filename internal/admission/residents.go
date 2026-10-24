@@ -94,7 +94,7 @@ func OpenResidents(directory string) (*Residents, error) {
 			return nil, errors.New("resident record is null")
 		}
 		if v.State != "exited" {
-			v.State = "needs_owner_readback"
+			v.State = "needs_process_readback"
 			v.Error = "prior Host child handle unavailable; do not adopt or signal by PID"
 		}
 	}
@@ -291,7 +291,7 @@ func (r *Residents) Acquire(spec ResidentSpec, contextID string, budget *Budget)
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		if !absent || observeErr != nil {
-			v.State = "needs_owner_readback"
+			v.State = "needs_process_readback"
 			v.Error = fmt.Sprintf("launcher exited; owned process group absence unconfirmed: %v", observeErr)
 			_ = r.persist()
 			return
@@ -315,7 +315,7 @@ func (r *Residents) Release(id, contextID string) (Resident, error) {
 	if v == nil {
 		return Resident{}, errors.New("resident identity not found")
 	}
-	if v.State == "needs_owner_readback" {
+	if v.State == "needs_process_readback" {
 		return cloneResident(v), errors.New(v.Error)
 	}
 	if !slices.Contains(v.Contexts, contextID) {
@@ -330,10 +330,10 @@ func (r *Residents) Release(id, contextID string) (Resident, error) {
 		}
 		child := r.children[id]
 		if child == nil {
-			v.State = "needs_owner_readback"
+			v.State = "needs_process_readback"
 			v.Error = "native child handle missing"
 		} else if err := stopResident(child.command.Process); err != nil && !errors.Is(err, os.ErrProcessDone) {
-			v.State = "needs_owner_readback"
+			v.State = "needs_process_readback"
 			v.Error = err.Error()
 		}
 	}
@@ -364,7 +364,7 @@ func (r *Residents) Reconcile(ctx context.Context) ([]Resident, error) {
 	defer r.mu.Unlock()
 	changed := false
 	for _, v := range r.records {
-		if v.State != "needs_owner_readback" || v.PID <= 0 || v.Started == "" {
+		if v.State != "needs_process_readback" || v.PID <= 0 || v.Started == "" {
 			continue
 		}
 		found := false

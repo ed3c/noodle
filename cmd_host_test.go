@@ -338,59 +338,47 @@ func TestHostHistoricalDetachSurvivesFailedOrUnpersistedContext(t *testing.T) {
 	}
 }
 
-func TestHostUpgradeReadsExactHistoricalReceiptWithOriginalBinary(t *testing.T) {
+func TestHostUpgradeReadsHistoricalReceiptsAcrossClientVersions(t *testing.T) {
 	req := hostTestRequest(t, t.TempDir())
 	req.Operation = "once"
 	old := &noodleHost{dir: t.TempDir(), instanceID: "old-instance", binarySHA: req.BinarySHA256,
 		newRuntime: func(string, string, config.Config, loop.Dependencies) hostRuntime { return &fakeHostRuntime{} }}
 	detached := old.handle(context.Background(), req)
 	if detached.Status != "ok" {
-		t.Fatalf("original once: %+v", detached)
+		t.Fatalf("setup: %+v", detached)
 	}
-	data, err := os.ReadFile(filepath.Join(old.dir, "receipts.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	upgraded := &noodleHost{dir: old.dir, instanceID: "new-instance", binarySHA: "new-binary"}
-	if err := json.Unmarshal(data, &upgraded.receipts); err != nil {
-		t.Fatal(err)
-	}
-	lookup := hostRequest{Operation: "status", ProjectDir: req.ProjectDir, ContextID: detached.ContextID, InstanceID: detached.HostInstanceID, BinarySHA256: req.BinarySHA256}
-	for _, op := range []string{"status", "detach"} {
-		lookup.Operation = op
+	upgraded := &noodleHost{dir: old.dir, instanceID: "new-instance", binarySHA: "new-binary", receipts: []hostReceipt{detached.hostReceipt}}
+	lookup := hostRequest{Operation: "status", ProjectDir: req.ProjectDir, ContextID: detached.ContextID, InstanceID: detached.HostInstanceID}
+	for _, binary := range []string{req.BinarySHA256, "foreign-old-binary", upgraded.binarySHA} {
+		lookup.BinarySHA256 = binary
 		if got := upgraded.handle(context.Background(), lookup); got.Status != "ok" || got.hostReceipt != detached.hostReceipt {
-			t.Errorf("original binary historical %s: %+v", op, got)
+			t.Fatalf("historical facts unavailable: %+v", got)
 		}
-		for _, binary := range []string{"foreign-old-binary", upgraded.binarySHA} {
-			foreign := lookup
-			foreign.BinarySHA256 = binary
-			if got := upgraded.handle(context.Background(), foreign); got.Status != "binary_mismatch" {
-				t.Errorf("foreign receipt binary accepted: %+v", got)
+		lookup.Operation = "detach"
+		got := upgraded.handle(context.Background(), lookup)
+		if binary == upgraded.binarySHA {
+			if got.Status != "ok" {
+				t.Fatalf("current compatible mutation unavailable: %+v", got)
 			}
+		} else if got.Status != "binary_mismatch" {
+			t.Fatalf("incompatible mutation accepted: %+v", got)
 		}
+		lookup.Operation = "status"
 	}
 	for _, op := range []string{"attach", "once"} {
 		req.Operation = op
 		if got := upgraded.handle(context.Background(), req); got.Status != "binary_mismatch" {
-			t.Fatalf("old binary %s accepted: %+v", op, got)
+			t.Fatalf("incompatible %s accepted: %+v", op, got)
 		}
-	}
-	lookup.Operation = "status"
-	lookup.ContextID, lookup.InstanceID = "", ""
-	lookup.ConfigSHA256, lookup.Mode = req.ConfigSHA256, "manual"
-	if got := upgraded.handle(context.Background(), lookup); got.Status != "binary_mismatch" {
-		t.Fatalf("inexact cross-binary lookup accepted: %+v", got)
-	}
-	lookup.RequestID = detached.RequestID
-	if got := upgraded.handle(context.Background(), lookup); got.Status != "ok" {
-		t.Errorf("original request lookup: %+v", got)
 	}
 	upgraded.receipts[0].ContextState = "active"
-	for _, op := range []string{"status", "detach"} {
-		lookup.Operation = op
-		if got := upgraded.handle(context.Background(), lookup); got.Status != "binary_mismatch" {
-			t.Fatalf("old binary active %s accepted: %+v", op, got)
-		}
+	lookup.Operation, lookup.BinarySHA256 = "status", "other-client"
+	if got := upgraded.handle(context.Background(), lookup); got.Status != "unknown_effect" || got.ContextState != "active" {
+		t.Fatalf("unresolved persisted state lost: %+v", got)
+	}
+	upgraded.receipts = append(upgraded.receipts, upgraded.receipts[0])
+	if got := upgraded.handle(context.Background(), lookup); got.Status != "ambiguous" {
+		t.Fatalf("duplicate exact target selected implicitly: %+v", got)
 	}
 }
 

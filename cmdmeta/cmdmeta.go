@@ -3,31 +3,33 @@
 // for command names and descriptions.
 package cmdmeta
 
-// StoppedReviewGuide is the single P-class route for stopped review rejection.
-const StoppedReviewGuide = `For an externally authorized rejection of one stopped completed review,
-run noodle --project-dir <known-project> review inspect ORDER_ID SUBJECT.
-Consume fresh next.argv unchanged; do not infer custody hashes or restart the
-scheduler. The owner locks the project, rechecks process absence and exact clean
-Git/session custody, archives the candidate, applies the existing rejection and
-reads cleanup back. After interruption use inspect before any continuation.
-For refused, preserve evidence and report next.required. Rejected means local
-non-delivery only: it neither closes a provider Issue nor reconciles an outer
-supervisor checkpoint. Initial proposals still use admission inspect/retire.`
+// StoppedReviewGuide is shared by CLI help and the generated skill.
+const StoppedReviewGuide = `A Session can discover retained native work with only a repository or workspace:
+run noodle --project-dir <workspace> host status or review inspect.
+Inspect every candidate and reported gap, then explicitly select ORDER_ID SUBJECT
+with review inspect. No original Owner, Session or request file is required.
+Read-only observations do not grant mutation eligibility. For an authorized
+rejection consume fresh next.argv unchanged. The mutation locks the project,
+rechecks exact Git/session custody and process absence, archives the candidate,
+applies rejection and reads cleanup back. If preflight is unavailable, the
+Session resolves the named missing facts from retained sources without guessing.
+Rejected means local non-delivery; it does not close a provider Issue or prove
+an outer checkpoint was reconciled. Initial proposals use admission inspect/retire.`
 
-// AdmissionRecoveryGuide is shared by CLI help and the generated P-class skill.
-const AdmissionRecoveryGuide = `Use the existing Noodle owner with a known project and a stopped loop.
-Run noodle --project-dir <known-project> admission inspect and consume its JSON.
-For recoverable, execute next.argv exactly as an argv array. Never reconstruct
-the digest, revision or command from memory or a historical checkpoint.
-For refused, preserve evidence and report next.required to next.provided_by.
-After that owner resolves the condition, use next.readback_argv to inspect again.
-A valid initial proposal remains available for normal admission; do not retire it.
-For retired, follow next.argv once for fresh canonical readback. For no_proposal,
-recovery is finished: next.argv is empty and next names the scheduling owner
-and inputs for a separately admitted intent. Do not loop inspection indefinitely.
+// AdmissionRecoveryGuide is shared by CLI help and the generated skill.
+const AdmissionRecoveryGuide = `The Session is responsible for engineering judgment and explicit continuation.
+A repository or workspace is sufficient to discover retained candidates with
+host status or review inspect; select a target rather than assuming the latest.
+Run noodle --project-dir <workspace> admission inspect for admission preflight.
+For recoverable, consume fresh next.argv unchanged. Never reconstruct digests
+or revisions from memory. For refused, preserve evidence and resolve the named
+condition from retained records; no original Owner or Session binding is needed.
+Use next.readback_argv after resolving a condition. A valid initial proposal
+remains available for normal admission; do not retire it. For retired, follow
+next.argv once for canonical readback. For no_proposal, recovery is finished.
+A separately admitted intent uses the existing scheduling/admission entry.
 Retirement does not dispatch, restart, complete an order or authorize provider
-writes. Record the actual JSON, argv and operation results. Missing owner/project
-inputs must be supplied by the supervising operator, not guessed by the Session.`
+writes. Exact targets, consistency checks, locks and deduplication still apply.`
 
 // Flag describes a CLI flag.
 type Flag struct {
@@ -80,18 +82,18 @@ func Commands() []Command {
 				{Name: "payload", Type: "string", Desc: "Event payload as JSON"},
 			}},
 		}},
-		{Name: "admission", Short: "Inspect or retire a rejected initial proposal with the stopped owner", Subcommands: []Command{
+		{Name: "admission", Short: "Inspect or retire a selected rejected initial proposal", Subcommands: []Command{
 			{Name: "inspect", Short: "Read admission evidence and exact supported continuation"},
 			{Name: "retire", Short: "Retire an unchanged rejected initial proposal"},
 		}},
 		{Name: "publication", Short: "Bind supervised worktree custody for publication", Subcommands: []Command{
-			{Name: "reconcile", Short: "Complete the stopped original order from an already merged publication"},
+			{Name: "reconcile", Short: "Complete the selected stopped order from an already merged publication"},
 			{Name: "claim", Short: "Emit one exact read-only publication claim", Flags: []Flag{
 				{Name: "output", Type: "string", Desc: "Fresh absolute path for the claim JSON"},
 			}},
 		}},
 		{Name: "review", Short: "Inspect or reject one exact stopped completed review", Subcommands: []Command{
-			{Name: "inspect", Short: "Read stopped review custody and exact continuation"},
+			{Name: "inspect", Short: "Discover retained review facts and selected mutation preflight"},
 			{Name: "reject", Short: "Archive and reject unchanged stopped review custody"},
 			{Name: "prepare-local-completion-recovery", Short: "Bind retained terminal local-task work for review recovery"},
 			{Name: "prepare-local-merge-recovery", Short: "Bind retained local-task candidate backup bytes"},

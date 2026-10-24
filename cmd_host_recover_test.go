@@ -88,6 +88,20 @@ func TestUnstartedRecoveryPreservesFailureAndRefusesUncertainty(t *testing.T) {
 			if got, err = recoverUnstarted(root, requestPath); err != nil || got.ContextState != "detached" {
 				t.Fatalf("idempotent recovery %+v %v", got, err)
 			}
+			// A new Session can select the retained native target after the request file is gone.
+			write(filepath.Join(host, "receipts.json"), []hostReceipt{receipt})
+			if err := os.Remove(requestPath); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("NOODLE_HOST_DIR", host)
+			got, err = recoverUnstartedSelected(hostRequest{ProjectDir: root, ContextID: "context", InstanceID: "instance"})
+			if err != nil || got.ContextState != "detached" {
+				t.Fatalf("request-free continuation: %+v %v", got, err)
+			}
+			if _, err := os.Stat(requestPath); !os.IsNotExist(err) {
+				t.Fatal("continuation recreated old request")
+			}
+
 		})
 	}
 }

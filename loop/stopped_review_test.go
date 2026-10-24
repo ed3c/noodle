@@ -183,3 +183,53 @@ func publicationTestProcess(t *testing.T) int {
 	}
 	return pid
 }
+
+func TestStoppedReviewInspectionReadsFactsUnderActiveLockWithoutWrites(t *testing.T) {
+	project, _ := stoppedReviewFixture(t)
+	dir := filepath.Join(project, ".noodle")
+	lock, err := lockfile.TryLock(filepath.Join(dir, "noodle.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	before, err := os.ReadFile(filepath.Join(dir, "state.snapshot.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := InspectStoppedReview(project, "/selected/noodle", "order-1", "example/project#7")
+	if r.Workspace == nil || r.Workspace.Snapshot == nil || r.Workspace.Snapshot.State.Orders["order-1"].OrderID != "order-1" {
+		t.Fatalf("active lock hid retained facts: %+v", r)
+	}
+	after, err := os.ReadFile(filepath.Join(dir, "state.snapshot.json"))
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("inspection changed canonical state")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "review-rejections")); !os.IsNotExist(err) {
+		t.Fatal("inspection wrote custody intent")
+	}
+	if got := RejectStoppedReview(project, "/selected/noodle", "order-1", "example/project#7", r.Digest); got.Status != "refused" {
+		t.Fatalf("mutation ignored active lock: %+v", got)
+	}
+}
+
+func TestRejectedReviewInspectionNeverRepairsProjection(t *testing.T) {
+	project, _ := stoppedReviewFixture(t)
+	r := InspectStoppedReview(project, "/selected/noodle", "order-1", "example/project#7")
+	if r.Status != "recoverable" {
+		t.Fatalf("setup: %+v", r)
+	}
+	if got := RejectStoppedReview(project, "/selected/noodle", "order-1", "example/project#7", r.Digest); got.Status != "rejected" {
+		t.Fatalf("setup rejection: %+v", got)
+	}
+	path := filepath.Join(project, ".noodle", "orders.json")
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	got := InspectStoppedReview(project, "/selected/noodle", "order-1", "example/project#7")
+	if got.Workspace == nil || got.Workspace.Snapshot == nil {
+		t.Fatalf("missing projection hid canonical facts: %+v", got)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("readback repaired missing projection")
+	}
+}

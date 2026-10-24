@@ -98,7 +98,7 @@ func TestHostRequestRetainsEndpointAndChecksContextIdentity(t *testing.T) {
 	if lookup.HostDir != binding.HostDir || lookup.RequestID != binding.RequestID || lookup.Operation != "detach" {
 		t.Fatalf("binding lost: %+v", lookup)
 	}
-	receipt := hostReceipt{ProjectDir: req.ProjectDir, ConfigSHA256: req.ConfigSHA256, Mode: req.Mode, RequestID: req.RequestID, ContextID: "context", HostInstanceID: "instance"}
+	receipt := hostReceipt{ProjectDir: lookup.ProjectDir, ConfigSHA256: req.ConfigSHA256, Mode: req.Mode, RequestID: req.RequestID, ContextID: "context", HostInstanceID: "instance"}
 	if !hostReceiptMatches(lookup, receipt) {
 		t.Fatal("original identities did not match")
 	}

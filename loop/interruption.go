@@ -81,7 +81,7 @@ func interruptionRefusal(r InterruptionInspection, err error) InterruptionInspec
 	r.Status, r.Invalid = "refused", err.Error()
 	r.Next.Argv = []string{}
 	r.Next.Required = err.Error()
-	r.Next.ProvidedBy = "Supervisor of the original Noodle order"
+	r.Next.ProvidedBy = "Session responsible for engineering judgment in this workspace"
 	return r
 }
 
@@ -197,7 +197,7 @@ func prepareInterruption(project, binary, order, subject, digest string, barrier
 			r.CandidateUnchanged = true
 			r.Status = "prepared"
 			r.Next.Argv = []string{}
-			r.Next.ProvidedBy = "Original Noodle lifecycle supervisor"
+			r.Next.ProvidedBy = "Session responsible for engineering judgment in this workspace"
 			r.Next.Required = "selected held start for the prepared original order"
 			return r
 		}
@@ -245,7 +245,7 @@ func prepareInterruption(project, binary, order, subject, digest string, barrier
 	r.CandidateUnchanged = true
 	r.Status = "prepared"
 	r.Next.Argv = []string{}
-	r.Next.ProvidedBy = "Original Noodle lifecycle supervisor"
+	r.Next.ProvidedBy = "Session responsible for engineering judgment in this workspace"
 	r.Next.Required = "selected held start for the prepared original order"
 	return r
 }
@@ -358,7 +358,7 @@ func readPreparedInterruption(project string, r InterruptionInspection, i interr
 	r.CandidateUnchanged = true
 	r.Status = "prepared"
 	r.Next.Argv = []string{}
-	r.Next.ProvidedBy = "Original Noodle lifecycle supervisor"
+	r.Next.ProvidedBy = "Session responsible for engineering judgment in this workspace"
 	r.Next.Required = "selected held start for the prepared original order"
 	return r
 }

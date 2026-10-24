@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/poteto/noodle/internal/loopview"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,8 +40,16 @@ func TestHostViewsImportOfflineAndInspect(t *testing.T) {
 	if !receipt.Changed || receipt.RunCount != 1 {
 		t.Fatalf("receipt: %s", result)
 	}
-	if got := run("host", "views", "inspect"); !strings.Contains(got, `"id":"original"`) {
+	got := run("host", "views", "inspect")
+	if !strings.Contains(got, `"id":"original"`) {
 		t.Fatalf("inspect: %s", got)
+	}
+	if _, err := loopview.Decode([]byte(got)); err != nil {
+		t.Fatalf("inspect no longer produces reusable display source: %v", err)
+	}
+	withWorkspace := run("host", "views", "inspect", "--include-workspace")
+	if !strings.Contains(withWorkspace, `"workspace_observation"`) || !strings.Contains(withWorkspace, `"runs"`) {
+		t.Fatalf("workspace observation lost display shape: %s", withWorkspace)
 	}
 	for _, name := range []string{"host.sock", "host.lock", "receipts.json"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {

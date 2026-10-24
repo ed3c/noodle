@@ -99,7 +99,7 @@ func TestHostViewsSuccessorRetainsHistoryAndOldServerMap(t *testing.T) {
 	if err := json.Unmarshal(data, &saved); err != nil {
 		t.Fatal(err)
 	}
-	if saved.Previous != old || saved.Successor != next || saved.DetachedReceipt != receipts[0] || saved.ActiveReceipt != receipts[1] {
+	if saved.Previous != old || saved.Successor != next || saved.PreviousReceipt == nil || *saved.PreviousReceipt != receipts[0] || saved.SuccessorReceipt == nil || *saved.SuccessorReceipt != receipts[1] {
 		t.Fatal("lost original binding or receipts")
 	}
 	root := next.Request.ProjectDir
@@ -128,7 +128,7 @@ func TestHostViewsSuccessorRetainsHistoryAndOldServerMap(t *testing.T) {
 }
 
 func TestHostViewsSuccessorRefusesForeignOrUnknownReceipt(t *testing.T) {
-	for _, which := range []string{"order", "repository", "config", "old-active", "new-detached", "missing", "duplicate", "binary", "instance", "context"} {
+	for _, which := range []string{"order", "repository", "duplicate", "binary", "instance", "context"} {
 		t.Run(which, func(t *testing.T) {
 			dir, _, next, receipts, path := viewSuccessorFixture(t)
 			order := "order"
@@ -176,6 +176,53 @@ func TestHostViewsSuccessorRefusesForeignOrUnknownReceipt(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(dir, "loop-view-binding-history")); !os.IsNotExist(err) {
 				t.Fatal("refusal archived an invalid successor")
+			}
+		})
+	}
+}
+
+func TestHostViewsSuccessorDoesNotRequirePriorActorOrLiveContext(t *testing.T) {
+	for _, scenario := range []string{"old-active", "new-detached", "old-missing", "receipts-missing", "config-changed"} {
+		t.Run(scenario, func(t *testing.T) {
+			dir, old, next, receipts, path := viewSuccessorFixture(t)
+			switch scenario {
+			case "old-active":
+				receipts[0].ContextState = "active"
+			case "new-detached":
+				receipts[1].ContextState = "detached"
+			case "old-missing":
+				receipts = receipts[1:]
+			case "config-changed":
+				next.Request.ConfigSHA256 = "updated-config"
+				receipts[1].ConfigSHA256 = "updated-config"
+			}
+			if scenario != "receipts-missing" {
+				writeViewReceipts(t, dir, receipts)
+			}
+			if err := saveHostRequest(path, next.Request); err != nil {
+				t.Fatal(err)
+			}
+			if err := runViewSuccessorBind(path, "order"); err != nil {
+				t.Fatalf("retained source became actor eligibility: %v", err)
+			}
+			bindings, err := loadViewBindings(dir)
+			if err != nil || bindings["run"] != next {
+				t.Fatalf("selected successor lost: %+v %v", bindings, err)
+			}
+			paths, err := filepath.Glob(filepath.Join(dir, "loop-view-binding-history", "run", "*.json"))
+			if err != nil || len(paths) != 1 {
+				t.Fatalf("prior association not retained: %v %v", paths, err)
+			}
+			data, err := os.ReadFile(paths[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var history hostViewSuccessor
+			if err := json.Unmarshal(data, &history); err != nil || history.Previous != old {
+				t.Fatalf("prior data lost: %+v %v", history, err)
+			}
+			if (scenario == "old-missing" || scenario == "receipts-missing") && len(history.Gaps) == 0 {
+				t.Fatal("missing receipt was silently inferred")
 			}
 		})
 	}

@@ -13,7 +13,6 @@ import (
 	"github.com/poteto/noodle/internal/filex"
 	"github.com/poteto/noodle/internal/lockfile"
 	"github.com/poteto/noodle/internal/loopview"
-	"github.com/poteto/noodle/internal/reducer"
 	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/loop"
 	"github.com/spf13/cobra"
@@ -43,26 +42,40 @@ func loadViewBindings(dir string) (map[string]hostViewBinding, error) {
 	}
 	return bindings, err
 }
-func newHostViewBindCmd() *cobra.Command {
-	var runID, orderID, requestFile string
-	cmd := &cobra.Command{Use: "bind --run-id RUN --request-file FILE --order-id ORDER", Short: "Bind an imported display run to an original Host request without starting Host", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		if !viewIdentity.MatchString(runID) || orderID == "" || requestFile == "" {
-			return fmt.Errorf("run-id, order-id and request-file are required")
+func newHostViewBindCmd(app *App) *cobra.Command {
+	var runID, orderID, requestFile, contextID, instanceID string
+	cmd := &cobra.Command{Use: "bind --run-id RUN --order-id ORDER", Short: "Associate an imported display run with an explicitly selected native context", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		if !viewIdentity.MatchString(runID) || orderID == "" {
+			return fmt.Errorf("run-id and order-id are missing")
 		}
 		dir, err := hostDirectory()
 		if err != nil {
 			return err
 		}
-		data, err := os.ReadFile(requestFile)
-		if err != nil {
-			return err
-		}
 		var request hostRequestBinding
-		if err = json.Unmarshal(data, &request); err != nil {
-			return err
-		}
-		if request.Schema != 1 || request.RequestID == "" || request.ConfigSHA256 == "" || request.BinarySHA256 == "" || request.HostDir != dir || request.Operation != "attach" {
-			return fmt.Errorf("invalid original Host attach request")
+		if requestFile != "" {
+			// A display association can name retained request data even without receipts.
+			request, err = readHostRequestFile(requestFile)
+			if err != nil {
+				return err
+			}
+			selector, err := readHostSelector(hostRequest{ProjectDir: request.ProjectDir, RequestFile: requestFile, ContextID: contextID, InstanceID: instanceID})
+			if err != nil {
+				return err
+			}
+			dir = selector.HostDir
+			if contextID != "" {
+				if _, _, err = readSelectedHostReceipt(selector); err != nil {
+					return err
+				}
+			}
+		} else {
+			_, receipt, err := readSelectedHostReceipt(hostRequest{ProjectDir: app.projectDir, ContextID: contextID, InstanceID: instanceID})
+			if err != nil {
+				return err
+			}
+			dir = receipt.HostDir
+			request = hostRequestBinding{Schema: 1, Operation: "attach", ProjectDir: receipt.ProjectDir, RequestID: receipt.RequestID, ConfigSHA256: receipt.ConfigSHA256, Mode: receipt.Mode, BinarySHA256: receipt.BinarySHA256, HostDir: receipt.HostDir}
 		}
 		lock, err := lockfile.TryLock(filepath.Join(dir, "loop-views.lock"))
 		if err != nil {
@@ -98,7 +111,7 @@ func newHostViewBindCmd() *cobra.Command {
 			}
 		}
 		bindings[runID] = binding
-		data, err = json.Marshal(bindings)
+		data, err := json.Marshal(bindings)
 		if err != nil {
 			return err
 		}
@@ -108,8 +121,10 @@ func newHostViewBindCmd() *cobra.Command {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "run_id": runID, "order_id": orderID, "request_id": request.RequestID, "display_only": true})
 	}}
 	cmd.Flags().StringVar(&runID, "run-id", "", "Imported run identity")
-	cmd.Flags().StringVar(&requestFile, "request-file", "", "Original native Host attach request file")
-	cmd.Flags().StringVar(&orderID, "order-id", "", "Original admitted Noodle order identity")
+	cmd.Flags().StringVar(&requestFile, "request-file", "", "Optional native request selector")
+	cmd.Flags().StringVar(&contextID, "context-id", "", "Selected native context")
+	cmd.Flags().StringVar(&instanceID, "instance-id", "", "Selected Host instance")
+	cmd.Flags().StringVar(&orderID, "order-id", "", "Selected admitted Noodle order identity")
 	return cmd
 }
 
@@ -145,26 +160,21 @@ func enrichNativeRun(run *loopview.Run, binding hostViewBinding, receipts []host
 	matched := false
 	for _, r := range receipts {
 		if r.RequestID == request.RequestID && r.ProjectDir == request.ProjectDir && r.ConfigSHA256 == request.ConfigSHA256 && r.BinarySHA256 == request.BinarySHA256 && r.Mode == request.Mode {
+			matched = true
 			run.Resources = append(run.Resources, loopview.Resource{Label: "Native context", Value: r.ContextID + " · " + r.ContextState})
-			if r.ContextState == "active" {
-				matched = true
-			}
 			break
 		}
 	}
-	if !matched {
-		return fmt.Errorf("original native context is not attached; retained source projection only")
+	observation := loop.ReadWorkspaceInspection(request.ProjectDir)
+	if observation.Snapshot == nil {
+		return fmt.Errorf("native checkpoint unavailable: %v", observation.Gaps)
 	}
-	snapshotPath := filepath.Join(request.ProjectDir, ".noodle", "state.snapshot.json")
-	snapshot, err := reducer.ReadSnapshot(snapshotPath)
-	if err != nil {
-		return fmt.Errorf("native checkpoint unavailable: %w", err)
-	}
+	snapshotPath, snapshot := observation.SnapshotPath, observation.Snapshot
 	order, ok := snapshot.State.Orders[binding.OrderID]
 	if !ok {
 		return fmt.Errorf("native order %q is not observed", binding.OrderID)
 	}
-	run.Resources = append(run.Resources, loopview.Resource{Label: "Native order status", Value: string(order.Status)}, loopview.Resource{Label: "Native mode", Value: string(snapshot.State.Mode)})
+	run.Resources = append(run.Resources, loopview.Resource{Label: "Native order", Value: binding.OrderID}, loopview.Resource{Label: "Native order status", Value: string(order.Status)}, loopview.Resource{Label: "Native mode", Value: string(snapshot.State.Mode)})
 	// Native rows are rebuilt from the original checkpoint on every read.
 	stages := make([]loopview.Stage, 0, len(run.Stages))
 	for _, s := range run.Stages {
@@ -189,6 +199,9 @@ func enrichNativeRun(run *loopview.Run, binding hostViewBinding, receipts []host
 		}
 	}
 	run.Breakpoints = breakpoints
+	if !matched {
+		run.Breakpoints = append(run.Breakpoints, loopview.Breakpoint{Kind: "native_readback", Status: "unknown", Message: "Context receipt unavailable; workspace facts remain readable"})
+	}
 	for si, stage := range order.Stages {
 		id := fmt.Sprintf("native_stage_%d", si)
 		run.Stages = append(run.Stages, loopview.Stage{ID: id, Kind: "native_stage", Status: string(stage.Status), Prompt: stage.Prompt, InputRefs: []string{snapshotPath}, OutputRefs: []string{}, ConsumerStatus: "UNKNOWN"})

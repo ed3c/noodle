@@ -96,6 +96,6 @@ func (l *Loop) retainUnknownDispatch(ctx context.Context, err error) error {
 	if accepted, ok := ctx.Value(admissionKey{}).(*launchAdmission); ok {
 		accepted.retained = true
 	}
-	l.resourceUnknown = fmt.Errorf("%w; original owner readback required: %v", errDispatchUnknown, err)
+	l.resourceUnknown = fmt.Errorf("%w; Session readback of the selected native records required: %v", errDispatchUnknown, err)
 	return l.resourceUnknown
 }

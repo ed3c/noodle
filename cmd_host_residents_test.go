@@ -201,9 +201,10 @@ func TestHostResidentCLIContinuesOnOriginalSocket(t *testing.T) {
 	defer listener.Close()
 	seen := make(chan hostRequest, 4)
 	done := make(chan error, 1)
-	receipt := hostReceipt{Schema: 1, ContextID: "context", RequestID: "request", HostInstanceID: "instance", ProjectDir: project, ContextState: "active", ConfigSHA256: "config", Mode: "manual", BinarySHA256: binding.BinarySHA256, HostDir: dir}
+	receipt := hostReceipt{Schema: 1, Protocol: hostProtocol, ContextID: "context", RequestID: "request", HostInstanceID: "instance", ProjectDir: project, ContextState: "active", ConfigSHA256: "config", Mode: "manual", BinarySHA256: binding.BinarySHA256, HostDir: dir}
+	writeViewReceipts(t, dir, []hostReceipt{receipt})
 	go func() {
-		for i := 0; i < 4; i++ {
+		for i := 0; i < 2; i++ {
 			conn, e := listener.Accept()
 			if e != nil {
 				done <- e
@@ -251,13 +252,13 @@ func TestHostResidentCLIContinuesOnOriginalSocket(t *testing.T) {
 		if err = json.Unmarshal(output.Bytes(), &result); err != nil {
 			t.Fatal(err)
 		}
-		want := []string{os.Args[0], "--project-dir", project, "host", "resources", "residents", "inspect", "--request-file", requestFile}
+		want := []string{os.Args[0], "--project-dir", project, "host", "resources", "residents", "inspect", "--context-id", "context", "--instance-id", "instance"}
 		if !slices.Equal(result.Next.Argv, want) || !slices.Equal(result.Readback.Argv, want) {
 			t.Fatal(output.String())
 		}
-		status, operation := <-seen, <-seen
-		if status.Operation != "status" || operation.Operation != "resident_"+op+"_bound" || operation.InstanceID != "instance" || operation.ContextID != "context" || operation.RequestID != "request" {
-			t.Fatal(status, operation)
+		operation := <-seen
+		if operation.Operation != "resident_"+op+"_bound" || operation.InstanceID != "instance" || operation.ContextID != "context" || operation.RequestID != "request" {
+			t.Fatal(operation)
 		}
 	}
 	if err = <-done; err != nil {

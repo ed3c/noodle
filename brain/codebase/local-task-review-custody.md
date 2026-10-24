@@ -56,3 +56,13 @@ bound. A schema 1 packet can have a new immutable successor only after its exact
 known custody-error ACK and matching remaining custody. The successor references
 the failed packet and control; it never rewrites that packet or ACK. Unknown ACKs
 require readback. The corrected control requires Host6, not only a new producer.
+
+## Continuation actor
+
+The current Session makes engineering judgments using retained native sources.
+Order, stage, attempt, session ID, snapshot digest and ACK identity identify
+records and effects; they are not a requirement to find the original human,
+Owner or Session. Workspace-only discovery lists candidates and gaps, then the
+Session explicitly selects a target. Missing original request/config/binary
+files cannot block observation. They may be relevant named facts in a selected
+mutation's integrity preflight; never infer that another actor is required.

@@ -72,47 +72,74 @@ All commands accept `--project-dir` (default: current directory, env: `NOODLE_PR
 | `noodle interruption inspect ORDER_ID SUBJECT` | Read original interruption custody and successor evidence |
 | `noodle interruption prepare ORDER_ID SUBJECT CUSTODY_SHA256` | Prepare one exact stopped execution for a successor without dispatching |
 
-### Initial proposal recovery (P-class)
+### Session discovery and continuation
 
-Use the existing Noodle owner with a known project and a stopped loop.
-Run noodle --project-dir <known-project> admission inspect and consume its JSON.
-For recoverable, execute next.argv exactly as an argv array. Never reconstruct
-the digest, revision or command from memory or a historical checkpoint.
-For refused, preserve evidence and report next.required to next.provided_by.
-After that owner resolves the condition, use next.readback_argv to inspect again.
-A valid initial proposal remains available for normal admission; do not retire it.
-For retired, follow next.argv once for fresh canonical readback. For no_proposal,
-recovery is finished: next.argv is empty and next names the scheduling owner
-and inputs for a separately admitted intent. Do not loop inspection indefinitely.
+A new Session needs only the repository or workspace. Use
+noodle --project-dir WORKSPACE host status to list all persisted contexts and
+known Git worktree snapshots, including gaps. Nothing is selected automatically.
+The output is persisted_only with live_verified=false; recorded active state is
+not process liveness. selections[].readback_argv carries the selected workspace.
+No original Owner, Session or request file is an eligibility condition.
+Selected status starts from retained facts and optionally observes a live Host
+without starting it. A refusal preserves facts with live_verified=false and a
+named gap. Successful exact live replies retain status=ok and live_verified=true.
+Use --persisted-only to suppress even the optional live read.
+
+Use --context-id CONTEXT --instance-id INSTANCE after selecting a native target.
+Those flags work for host status, detach, recover-unstarted, views bind and
+resources residents inspect/acquire/release. A retained --request-file remains
+an optional explicit selector. Actual mutations still verify exact targets,
+locks, process/effect consistency and idempotence. Discovery never starts Host.
+
+review inspect without arguments reads canonical workspace facts. With
+ORDER_ID SUBJECT it also reports selected rejection preflight; missing custody
+blocks that mutation, not access to retained facts. host views inspect retains reusable display JSON and detached native readback.
+Add --include-workspace for the same inventory in workspace_observation. Display associations
+record source relationships and never transfer process control.
+
+### Initial proposal recovery
+
+The Session is responsible for engineering judgment and explicit continuation.
+A repository or workspace is sufficient to discover retained candidates with
+host status or review inspect; select a target rather than assuming the latest.
+Run noodle --project-dir <workspace> admission inspect for admission preflight.
+For recoverable, consume fresh next.argv unchanged. Never reconstruct digests
+or revisions from memory. For refused, preserve evidence and resolve the named
+condition from retained records; no original Owner or Session binding is needed.
+Use next.readback_argv after resolving a condition. A valid initial proposal
+remains available for normal admission; do not retire it. For retired, follow
+next.argv once for canonical readback. For no_proposal, recovery is finished.
+A separately admitted intent uses the existing scheduling/admission entry.
 Retirement does not dispatch, restart, complete an order or authorize provider
-writes. Record the actual JSON, argv and operation results. Missing owner/project
-inputs must be supplied by the supervising operator, not guessed by the Session.
+writes. Exact targets, consistency checks, locks and deduplication still apply.
 
 | Command | Description |
 |---------|-------------|
-| noodle admission inspect | Inspect owner, subject, revision, invalid and exact next argv |
+| noodle admission inspect | Inspect selected proposal, revision, missing facts and exact next argv |
 | noodle admission retire PROPOSAL_SHA256 CURRENT_ORDER_REVISION | Archive and retire only the unchanged rejected initial proposal |
 
-### Stopped completed review (P-class)
+### Stopped completed review
 
-For an externally authorized rejection of one stopped completed review,
-run noodle --project-dir <known-project> review inspect ORDER_ID SUBJECT.
-Consume fresh next.argv unchanged; do not infer custody hashes or restart the
-scheduler. The owner locks the project, rechecks process absence and exact clean
-Git/session custody, archives the candidate, applies the existing rejection and
-reads cleanup back. After interruption use inspect before any continuation.
-For refused, preserve evidence and report next.required. Rejected means local
-non-delivery only: it neither closes a provider Issue nor reconciles an outer
-supervisor checkpoint. Initial proposals still use admission inspect/retire.
+A Session can discover retained native work with only a repository or workspace:
+run noodle --project-dir <workspace> host status or review inspect.
+Inspect every candidate and reported gap, then explicitly select ORDER_ID SUBJECT
+with review inspect. No original Owner, Session or request file is required.
+Read-only observations do not grant mutation eligibility. For an authorized
+rejection consume fresh next.argv unchanged. The mutation locks the project,
+rechecks exact Git/session custody and process absence, archives the candidate,
+applies rejection and reads cleanup back. If preflight is unavailable, the
+Session resolves the named missing facts from retained sources without guessing.
+Rejected means local non-delivery; it does not close a provider Issue or prove
+an outer checkpoint was reconciled. Initial proposals use admission inspect/retire.
 
 ### Already merged publication
 
-After the external landing owner confirms provider merge and closure and
-synchronizes the control checkout, stop the original loop and use:
+The Session verifies recorded provider merge and closure, synchronizes the
+selected control checkout, and ensures its loop is stopped before using:
 
 noodle --project-dir PROJECT publication reconcile CLAIM_PATH CLAIM_SHA256 MERGE_HEAD
 
-The claim is the original Noodle publication claim. This stopped owner verifies
+The retained Noodle publication claim identifies the data target. Reconciliation verifies
 session absence, completed writer outcome, unchanged candidate custody and exact
 Git ancestry. It preserves failed attempts, cancels only an obsolete pending
 merge and records original-order completion. Re-enter the same command after an

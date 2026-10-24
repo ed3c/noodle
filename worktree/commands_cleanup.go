@@ -115,7 +115,7 @@ func (a *App) List() error {
 	_ = a.gitRun("worktree", "list")
 
 	base := a.integrationBranch()
-	entries, err := a.allWorktreeEntries()
+	entries, err := a.WorktreeEntries()
 	if err != nil {
 		return fmt.Errorf("list worktrees: %w", err)
 	}
@@ -155,7 +155,7 @@ func (a *App) List() error {
 // 2) the worktree has no uncommitted changes.
 func (a *App) Prune() error {
 	base := a.integrationBranch()
-	entries, err := a.allWorktreeEntries()
+	entries, err := a.WorktreeEntries()
 	if err != nil {
 		return fmt.Errorf("list worktrees: %w", err)
 	}
