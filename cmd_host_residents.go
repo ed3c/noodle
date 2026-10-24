@@ -46,8 +46,14 @@ func newHostResidentsCmd(app *App) *cobra.Command {
 				selected = true
 			}
 			if selected {
-				_, receipt, err := readSelectedHostReceipt(hostRequest{ProjectDir: app.projectDir, RequestFile: requestFile, ContextID: contextID, InstanceID: instanceID})
+				selection, receipt, err := readSelectedHostReceipt(hostRequest{ProjectDir: app.projectDir, RequestFile: requestFile, ContextID: contextID, InstanceID: instanceID})
 				if err != nil {
+					if operation == "inspect" {
+						if selection.HostDir != "" {
+							dir = selection.HostDir
+						}
+						return json.NewEncoder(cmd.OutOrStdout()).Encode(readRetainedResidents(dir, fmt.Errorf("selected context readback: %w", err)))
+					}
 					return err
 				}
 				req.Operation += "_bound"
@@ -65,11 +71,26 @@ func newHostResidentsCmd(app *App) *cobra.Command {
 			defer conn.Close()
 			_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
 			if err = json.NewEncoder(conn).Encode(req); err != nil {
+				if operation == "inspect" {
+					return json.NewEncoder(cmd.OutOrStdout()).Encode(readRetainedResidents(dir, err))
+				}
 				return err
 			}
 			var result map[string]any
 			if err = json.NewDecoder(io.LimitReader(conn, 4<<20)).Decode(&result); err != nil {
+				if operation == "inspect" {
+					return json.NewEncoder(cmd.OutOrStdout()).Encode(readRetainedResidents(dir, err))
+				}
 				return err
+			}
+			if result == nil {
+				if operation == "inspect" {
+					return json.NewEncoder(cmd.OutOrStdout()).Encode(readRetainedResidents(dir, errors.New("resident Host response is null")))
+				}
+				return errors.New("resident Host response is null")
+			}
+			if operation == "inspect" && (result["status"] == "refused" || result["status"] == "unavailable" || result["status"] == "binary_mismatch") {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(readRetainedResidents(dir, fmt.Errorf("Host resident readback %v: %v", result["status"], result["error"])))
 			}
 			if selected {
 				result["readback"] = map[string]any{"owner": "noodle.swap-manager", "operation": "readback", "argv": []string{os.Args[0], "--project-dir", req.ProjectDir, "host", "resources", "residents", "inspect", "--context-id", req.ContextID, "--instance-id", req.InstanceID}}

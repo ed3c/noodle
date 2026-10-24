@@ -28,11 +28,24 @@ func newHostResourcesCmd(app *App) *cobra.Command {
 		defer conn.Close()
 		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 		if err := json.NewEncoder(conn).Encode(hostRequest{Operation: "resources"}); err != nil {
-			return err
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(readRetainedResidents(dir, err))
 		}
 		var result json.RawMessage
 		if err := json.NewDecoder(io.LimitReader(conn, 64<<10)).Decode(&result); err != nil {
-			return err
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(readRetainedResidents(dir, err))
+		}
+		var status *struct {
+			Status string `json:"status"`
+			Error  string `json:"error"`
+		}
+		if err := json.Unmarshal(result, &status); err != nil {
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(readRetainedResidents(dir, err))
+		}
+		if status == nil {
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(readRetainedResidents(dir, fmt.Errorf("Host resource response is null")))
+		}
+		if status.Status == "refused" || status.Status == "unavailable" || status.Status == "binary_mismatch" {
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(readRetainedResidents(dir, fmt.Errorf("Host resource readback %s: %s", status.Status, status.Error)))
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 	}}
@@ -58,7 +71,7 @@ func (h *noodleHost) resources() any {
 // Offline resource readback preserves stored process facts without opening a Host.
 func readRetainedResidents(dir string, unavailable error) any {
 	path := filepath.Join(dir, "residents.json")
-	gaps := []loop.InspectionGap{{Path: filepath.Join(dir, "host.sock"), Code: "host_unavailable", Detail: unavailable.Error()}}
+	gaps := []loop.InspectionGap{{Path: filepath.Join(dir, "host.sock"), Code: "live_unavailable", Detail: unavailable.Error()}}
 	managed := []admission.Resident{}
 	data, err := os.ReadFile(path)
 	if err != nil {

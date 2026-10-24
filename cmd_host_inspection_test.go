@@ -354,3 +354,80 @@ func mustJSON(t *testing.T, value any) []byte {
 	}
 	return data
 }
+
+func TestResidentInspectionRetainsFactsAfterSelectorGapOrHostRefusal(t *testing.T) {
+	for _, scenario := range []string{"missing_receipt", "missing_receipt_other_endpoint", "host_refused", "resource_refused"} {
+		t.Run(scenario, func(t *testing.T) {
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			host, err := os.MkdirTemp("", "n-resread-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(host)
+			host, err = filepath.EvalSymlinks(host)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("NOODLE_HOST_DIR", host)
+			data := []byte(`{"retained":{"id":"retained","state":"running","pid":12345}}`)
+			path := filepath.Join(host, "residents.json")
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			var done chan error
+			if scenario == "host_refused" || scenario == "resource_refused" {
+				receipt := hostReceipt{Schema: 1, Protocol: hostProtocol, ProjectDir: root, HostDir: host, RequestID: "request", ContextID: "context", HostInstanceID: "old-host", ConfigSHA256: "config", BinarySHA256: "old-binary", Mode: "manual", ContextState: "active"}
+				writeViewReceipts(t, host, []hostReceipt{receipt})
+				listener, err := net.Listen("unix", filepath.Join(host, "host.sock"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer listener.Close()
+				done = make(chan error, 1)
+				go func() {
+					conn, err := listener.Accept()
+					if err != nil {
+						done <- err
+						return
+					}
+					defer conn.Close()
+					_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+					var req hostRequest
+					if err := json.NewDecoder(conn).Decode(&req); err != nil {
+						done <- err
+						return
+					}
+					done <- json.NewEncoder(conn).Encode(map[string]any{"status": "refused", "error": "prior Host instance unavailable"})
+				}()
+			}
+			args := []string{"host", "resources", "residents", "inspect", "--context-id", "context", "--instance-id", "old-host"}
+			if scenario == "resource_refused" {
+				args = []string{"host", "resources"}
+			}
+			if scenario == "missing_receipt_other_endpoint" {
+				t.Setenv("NOODLE_HOST_DIR", filepath.Join(t.TempDir(), "different-host"))
+				requestPath := filepath.Join(root, "selector.json")
+				if err := saveHostRequest(requestPath, hostRequestBinding{Schema: 1, RequestID: "retained", Operation: "attach", ProjectDir: root, HostDir: host}); err != nil {
+					t.Fatal(err)
+				}
+				args = []string{"host", "resources", "residents", "inspect", "--request-file", requestPath}
+			}
+			out := inspectCommand(t, root, args...)
+			if done != nil {
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !bytes.Contains(out, []byte(`"id":"retained"`)) || !bytes.Contains(out, []byte(`"live_verified":false`)) || !bytes.Contains(out, []byte("live_unavailable")) {
+				t.Fatalf("read qualification erased retained facts: %s", out)
+			}
+			after, _ := os.ReadFile(path)
+			if !bytes.Equal(data, after) {
+				t.Fatal("readback changed native records")
+			}
+		})
+	}
+}

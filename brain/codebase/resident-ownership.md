@@ -14,7 +14,7 @@ remains an optional selector. Neither original Owner nor original Session is an
 eligibility condition. The Host revalidates the active context and request,
 instance and native binary records before acquire/release. A delayed selection
 cannot borrow a successor context's lease. The context lease remains the unit
-of deduplication, including repeated acquire/release. Host absence still permits
+of deduplication, including repeated acquire/release. Host absence, selected receipt gaps or a live readback refusal still permit
 read-only retained resident facts, marked `persisted_only` and not live verified.
 
 Unknown process identity is `needs_process_readback`: the Session resolves
