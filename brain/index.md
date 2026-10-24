@@ -59,6 +59,8 @@
 - [[codebase/worktree-skill-entrypoint]]
 - [[codebase/ws-http-snapshot-race-after-control-ack]]
 
+- [[codebase/session-workspace-discovery]]
+
 ## Backlog
 - [[todos]]
 

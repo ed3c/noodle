@@ -27,7 +27,7 @@ func TestResidentLauncherExitRetainsAllocationUntilGroupAbsent(t *testing.T) {
 		data, _ := os.ReadFile(filepath.Join(spec.Directory, "child.pid"))
 		child, _ = strconv.Atoi(strings.TrimSpace(string(data)))
 		rows, _ := r.Snapshot()
-		if child > 0 && rows[0].State == "needs_owner_readback" {
+		if child > 0 && rows[0].State == "needs_process_readback" {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -37,7 +37,7 @@ func TestResidentLauncherExitRetainsAllocationUntilGroupAbsent(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
 	rows, err := r.Reconcile(context.Background())
-	if err != nil || rows[0].State != "needs_owner_readback" || b.Snapshot().Allocations != 1 {
+	if err != nil || rows[0].State != "needs_process_readback" || b.Snapshot().Allocations != 1 {
 		t.Fatalf("live descendant lost its quota: %+v %v", rows, err)
 	}
 	if _, err := r.Acquire(spec, "b", b); err == nil {

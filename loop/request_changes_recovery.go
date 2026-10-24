@@ -603,7 +603,7 @@ func (l *Loop) readbackRequeuedRequestChanges(order state.OrderNode, stage state
 		return err
 	}
 	if receipt.Binding.Attempt < 0 || stage.Status != state.StagePending || len(stage.Attempts) != receipt.Binding.Attempt+1 || stage.Attempts[receipt.Binding.Attempt].Error != receipt.Binding.Reason {
-		return fmt.Errorf("request-changes requeue already progressed; original owner readback required")
+		return fmt.Errorf("request-changes requeue already progressed; Session readback of the selected native records required")
 	}
 	if _, exists := l.canonical.PendingReviews[order.OrderID]; exists {
 		return fmt.Errorf("request-changes requeue still has pending review")

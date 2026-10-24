@@ -142,7 +142,7 @@ func (l *Loop) interruptionForDispatch(cand dispatchCandidate, ordinal int) (*in
 		return nil, fmt.Errorf("interruption dispatch projection differs")
 	}
 	if b.NextAttemptID != dispatchAttemptID(cand.OrderID, cand.StageIndex, ordinal) {
-		return nil, fmt.Errorf("interruption continuation was already consumed; original owner readback required")
+		return nil, fmt.Errorf("interruption continuation was already consumed; Session readback of the selected native records required")
 	}
 	if st.Status != state.StagePending || len(st.Attempts) != ordinal {
 		return nil, fmt.Errorf("interruption dispatch is not the prepared attempt")

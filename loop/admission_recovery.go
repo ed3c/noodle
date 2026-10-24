@@ -70,8 +70,8 @@ func admissionRefusal(r AdmissionInspection, err error) AdmissionInspection {
 	r.Status, r.Invalid = "refused", err.Error()
 	r.Next.Argv = []string{}
 	r.Next.Required = err.Error()
-	r.Next.ProvidedBy = "Noodle operator supervising this project and its original session records"
-	r.Next.Guidance = "Preserve the reported evidence. The named operator must supply the missing evidence or resolve the reported owner state; then use readback_argv to inspect again. Inspection is not permission to restart or repeat a write."
+	r.Next.ProvidedBy = "Session responsible for engineering judgment in this workspace"
+	r.Next.Guidance = "Preserve the reported evidence. The Session resolves the missing evidence or reported runtime state from retained sources; then use readback_argv to inspect again. Inspection is not permission to restart or repeat a write."
 	return r
 }
 
@@ -147,8 +147,8 @@ func recoverAdmission(projectDir, binary, digest, revision string, barrier func(
 		r.Next = admissionReadback(projectDir, binary)
 		r.Next.Argv = []string{}
 		r.Next.Required = "A separately admitted intent and a fresh INITIAL proposal bound to current_order_revision"
-		r.Next.ProvidedBy = "Noodle scheduling owner through the existing schedule skill / orders-next.json admission entry"
-		r.Next.Guidance = "Retirement is complete. No executable recovery step remains. The scheduling owner may prepare the next proposal from this readback; do not restart a loop or republish a historical proposal from memory."
+		r.Next.ProvidedBy = "Session through the existing schedule skill / orders-next.json admission entry"
+		r.Next.Guidance = "Retirement is complete. No executable recovery step remains. The Session may prepare the next proposal from this readback; do not restart a loop or republish a historical proposal from memory."
 		return r
 	}
 	r.Subject.SHA256 = fmt.Sprintf("%x", sha256.Sum256(data))

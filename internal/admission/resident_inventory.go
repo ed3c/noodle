@@ -52,7 +52,7 @@ func parseResidents(data string) ([]ProcessObservation, error) {
 		if e1 != nil || e2 != nil || e3 != nil || pid <= 0 || rss < 0 {
 			return nil, fmt.Errorf("resident process identity or RSS invalid")
 		}
-		p := ProcessObservation{PID: pid, ParentPID: parent, Started: strings.Join(f[2:7], " "), RSSKiB: rss, Executable: strings.Join(f[8:], " "), Ownership: "needs_owner_readback"}
+		p := ProcessObservation{PID: pid, ParentPID: parent, Started: strings.Join(f[2:7], " "), RSSKiB: rss, Executable: strings.Join(f[8:], " "), Ownership: "needs_process_readback"}
 		out = append(out, p)
 		counts[strconv.Itoa(parent)+"/"+p.Executable]++
 	}

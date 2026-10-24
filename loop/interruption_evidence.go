@@ -322,7 +322,7 @@ func noInterruptionTerminal(data []byte) error {
 		}
 	}
 	if len(pending) != 0 {
-		return fmt.Errorf("unfinished session effects require original owner readback")
+		return fmt.Errorf("unfinished session effects require Session readback of retained native records")
 	}
 	return nil
 }

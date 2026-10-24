@@ -165,7 +165,7 @@ func TestResidentsPriorHostNeedsReadbackNotPIDAdoption(t *testing.T) {
 		t.Fatal(err)
 	}
 	v, err := recovered.Acquire(spec, "b", b)
-	if err == nil || v.State != "needs_owner_readback" || v.PID != first.PID {
+	if err == nil || v.State != "needs_process_readback" || v.PID != first.PID {
 		t.Fatalf("unsafe prior owner adoption: %+v %v", v, err)
 	}
 	if _, err = recovered.Release(first.ID, "a"); err == nil {
@@ -182,7 +182,7 @@ func TestResidentInventoryIsDiagnosticNotKillAuthority(t *testing.T) {
 	if err != nil || len(rows) != 3 {
 		t.Fatal(rows, err)
 	}
-	if rows[0].DuplicateCandidates != 2 || rows[2].DuplicateCandidates != 1 || rows[0].Ownership != "needs_owner_readback" {
+	if rows[0].DuplicateCandidates != 2 || rows[2].DuplicateCandidates != 1 || rows[0].Ownership != "needs_process_readback" {
 		t.Fatal(rows)
 	}
 	if _, err = parseResidents("bad row"); err == nil {
@@ -234,7 +234,7 @@ func TestResidentsReconcileOnlyObservedExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows, err := recovered.Reconcile(context.Background())
-	if err != nil || rows[0].State != "needs_owner_readback" {
+	if err != nil || rows[0].State != "needs_process_readback" {
 		t.Fatalf("live owner reclassified: %+v %v", rows, err)
 	}
 	if _, err = r.Release(v.ID, "a"); err != nil {

@@ -176,7 +176,7 @@ func (l *Loop) recoverAdoptedSessions(ctx context.Context) error {
 		recovered, err := rt.Recover(ctx)
 		if err != nil {
 			if l.deps.Admission != nil {
-				return fmt.Errorf("runtime recovery requires original owner readback before shared admission: %w", err)
+				return fmt.Errorf("runtime recovery requires Session readback of retained native records before shared admission: %w", err)
 			}
 			l.classifyDegrade(
 				"reconcile.runtime_recover",
@@ -187,7 +187,7 @@ func (l *Loop) recoverAdoptedSessions(ctx context.Context) error {
 			continue
 		}
 		if l.deps.Admission != nil && len(recovered) != 0 {
-			return fmt.Errorf("live recovered workers require original owner readback before shared admission")
+			return fmt.Errorf("live recovered workers require Session readback of retained native records before shared admission")
 		}
 		for _, rs := range recovered {
 			if rs.OrderID != "" {
