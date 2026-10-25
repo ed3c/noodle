@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/poteto/noodle/internal/state"
@@ -84,7 +83,7 @@ func (l *Loop) controlMergeLocalTask(cmd ControlCommand) error {
 		return err
 	}
 	for name := range c.Files {
-		if !slices.Contains(prompt.WritePaths, name) {
+		if !localTaskPathAllowed(prompt.WritePaths, name) {
 			return fmt.Errorf("local task candidate exceeds admitted write paths")
 		}
 	}
@@ -105,16 +104,32 @@ func (l *Loop) controlMergeLocalTask(cmd ControlCommand) error {
 		return err
 	}
 	for _, name := range strings.Split(string(committed), "\x00") {
-		if name != "" && !slices.Contains(prompt.WritePaths, name) {
+		if name != "" && !localTaskPathAllowed(prompt.WritePaths, name) {
 			return fmt.Errorf("local task committed path exceeds admission: %s", name)
 		}
 	}
-	args := []string{"add", "-A", "--"}
-	for _, name := range prompt.WritePaths {
-		args = append(args, ":(literal)"+name)
-	}
-	if _, err := recoveryGitWithExecution(l.deps.Execution, b.WorktreePath, args...); err != nil {
+	tracked, err := boundGitCommand(l.deps.Execution, b.WorktreePath, "-C", b.WorktreePath, "ls-files", "-z").Output()
+	if err != nil {
 		return err
+	}
+	indexed := map[string]bool{}
+	for _, name := range strings.Split(string(tracked), "\x00") {
+		indexed[name] = true
+	}
+	args := []string{"add", "-A", "--"}
+	for name := range c.Files {
+		_, statErr := os.Lstat(filepath.Join(b.WorktreePath, name))
+		if statErr != nil && !os.IsNotExist(statErr) {
+			return statErr
+		}
+		if statErr == nil || indexed[name] {
+			args = append(args, ":(literal)"+name)
+		}
+	}
+	if len(args) > 3 {
+		if _, err := recoveryGitWithExecution(l.deps.Execution, b.WorktreePath, args...); err != nil {
+			return err
+		}
 	}
 	// Staging may change the index; inspect the exact staged content before commit.
 	for name, expected := range c.Files {
@@ -185,7 +200,8 @@ func (l *Loop) controlMergeLocalTask(cmd ControlCommand) error {
 		return err
 	}
 	for _, name := range strings.Split(string(changedPaths), "\x00") {
-		if name != "" && !slices.Contains(prompt.WritePaths, name) {
+		_, reviewed := c.Files[name]
+		if name != "" && (!reviewed || !localTaskPathAllowed(prompt.WritePaths, name)) {
 			return fmt.Errorf("local task commit includes unreviewed path: %s", name)
 		}
 	}

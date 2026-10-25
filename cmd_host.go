@@ -60,6 +60,7 @@ type hostResponse struct {
 
 type hostRequest struct {
 	Operation        string                  `json:"operation"`
+	WarningOrderID   string                  `json:"warning_order_id"`
 	ProjectDir       string                  `json:"project_dir"`
 	ContextID        string                  `json:"context_id"`
 	InstanceID       string                  `json:"instance_id"`
@@ -126,7 +127,7 @@ func newHostCmd(app *App) *cobra.Command {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "process_admitted_orders": true, "config_key": "runtime.process.admitted_orders", "empty_unrestricted": true, "scope": "process_dispatch"})
 	}})
 	task.AddCommand(&cobra.Command{Use: "review-capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "local_task_review_recovery": true, "candidate_bound_merge": true, "local_task_merge_recovery": true, "local_task_completion_recovery": true, "local_task_completion_recovery_version": 2, "local_task_roles": 1})
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "local_task_review_recovery": true, "candidate_bound_merge": true, "local_task_merge_recovery": true, "local_task_completion_recovery": true, "local_task_completion_recovery_version": 2, "local_task_roles": 1, "local_task_directory_scope": 1})
 	}})
 	cmd.AddCommand(task)
 	cmd.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
@@ -178,7 +179,7 @@ func hostCapabilities(platform string) map[string]any {
 	if platform == "windows" {
 		force = 0
 	}
-	return map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1, "completed_context_cleanup": 1, "external_task_config": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1}
+	return map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1, "completed_context_cleanup": 1, "external_task_config": 1, "task_warning_grant": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1}
 }
 
 func hostDirectory() (string, error) {
@@ -576,6 +577,8 @@ func serveHost(ctx context.Context) error {
 				call.reply <- h.cleanupContexts(ctx, call.request)
 			} else if strings.HasPrefix(call.request.Operation, "resident_") {
 				call.reply <- h.residentOperation(ctx, call.request)
+			} else if call.request.Operation == "grant_warning" {
+				call.reply <- h.grantWarning(call.request)
 			} else if call.request.Operation == "resources" {
 				call.reply <- h.resources()
 			} else {

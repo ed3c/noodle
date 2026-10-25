@@ -109,7 +109,7 @@ func TestResourceSessionJoinedAndUnknownRetention(t *testing.T) {
 				l.deps.Runtimes["sprites"] = rt
 			}
 			var session loopruntime.SessionHandle
-			err := l.withAdmission(context.Background(), runtimeName, func(ctx context.Context) error {
+			err := l.withAdmission(context.Background(), runtimeName, "", func(ctx context.Context) error {
 				var e error
 				session, _, e = l.dispatchSession(ctx, loopruntime.DispatchRequest{Name: "test", Runtime: runtimeName})
 				return e

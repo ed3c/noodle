@@ -21,11 +21,15 @@ import (
 
 func TestWorkerGroupRetainsAdmissionAfterLauncherExit(t *testing.T) {
 	for _, stop := range []string{"terminate", "force-kill", "cancel"} {
-		t.Run(stop, func(t *testing.T) { checkWorkerGroupAdmission(t, stop) })
+		t.Run(stop, func(t *testing.T) { checkWorkerGroupAdmission(t, stop, false) })
 	}
 }
 
-func checkWorkerGroupAdmission(t *testing.T, stop string) {
+func TestWarningWorkerGroupRetainsAdmissionAfterLauncherExit(t *testing.T) {
+	checkWorkerGroupAdmission(t, "terminate", true)
+}
+
+func checkWorkerGroupAdmission(t *testing.T, stop string, warning bool) {
 	t.Helper()
 	root := t.TempDir()
 	runtimeDir := filepath.Join(root, ".noodle")
@@ -37,11 +41,23 @@ func checkWorkerGroupAdmission(t *testing.T, stop string) {
 	capacity := rt.(interface{ CapacityAvailable() bool })
 	l := &Loop{projectDir: root, runtimeDir: runtimeDir, deps: Dependencies{Runtimes: map[string]loopruntime.Runtime{"process": rt}}}
 	b := resourceBudget(l, 1)
-	b.Observe(admission.Sample{At: time.Now(), Unsupported: true}, nil)
+	orderID := ""
+	if warning {
+		orderID = "selected-task"
+		now := time.Now()
+		for i := 3; i >= 0; i-- {
+			b.Observe(admission.Sample{At: now.Add(-time.Duration(i) * admission.PollInterval), Pressure: admission.Warning}, nil)
+		}
+		if _, err := b.GrantWarning(root, orderID); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		b.Observe(admission.Sample{At: time.Now(), Unsupported: true}, nil)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var session loopruntime.SessionHandle
-	err := l.withAdmission(ctx, "process", func(ctx context.Context) error {
+	err := l.withAdmission(ctx, "process", orderID, func(ctx context.Context) error {
 		var err error
 		session, _, err = l.dispatchSession(ctx, loopruntime.DispatchRequest{
 			Name: "group-fixture", Prompt: "fixture", Provider: "codex", Model: "fixture",
