@@ -11,11 +11,19 @@ import (
 )
 
 func localTaskReviewFixture(t *testing.T) (*Loop, *cookHandle, ControlCommand) {
+	return localTaskReviewFixturePaths(t, "candidate.txt", "candidate.txt")
+}
+
+func localTaskReviewFixturePaths(t *testing.T, scope, name string) (*Loop, *cookHandle, ControlCommand) {
 	t.Helper()
 	l, _, cook := newTypedOutcomeTestLoop(t)
 	l.config.Agents.Codex.RequireTypedOutcome = false
 	l.config.Runtime.Process.AdmittedOrders = []string{cook.orderID}
-	cook.stage = Stage{TaskKey: "local-task", Skill: "local-task", Provider: "codex", Model: "gpt-5.4", Runtime: "process", Prompt: `{"kind":"local_task","goal":"fix candidate","write_paths":["candidate.txt"]}`}
+	prompt, err := json.Marshal(map[string]any{"kind": "local_task", "goal": "fix candidate", "write_paths": []string{scope}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cook.stage = Stage{TaskKey: "local-task", Skill: "local-task", Provider: "codex", Model: "gpt-5.4", Runtime: "process", Prompt: string(prompt)}
 	cook.worktreeName = cookBaseName(cook.orderID, 0, "local-task")
 	cook.worktreePath = l.worktreePath(cook.worktreeName)
 	if err := writeOrdersAtomic(l.deps.OrdersFile, OrdersFile{Orders: []Order{{ID: cook.orderID, Status: OrderStatusActive, Stages: []Stage{cook.stage}}}}); err != nil {
@@ -28,7 +36,10 @@ func localTaskReviewFixture(t *testing.T) (*Loop, *cookHandle, ControlCommand) {
 	runGitInRepo(t, l.projectDir, "add", ".gitignore")
 	runGitInRepo(t, l.projectDir, "commit", "-m", "base")
 	runGitInRepo(t, l.projectDir, "worktree", "add", "-b", cook.worktreeName, cook.worktreePath)
-	requestChangesWrite(t, filepath.Join(cook.worktreePath, "candidate.txt"), []byte("reviewed candidate\n"))
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(cook.worktreePath, name)), 0700); err != nil {
+		t.Fatal(err)
+	}
+	requestChangesWrite(t, filepath.Join(cook.worktreePath, name), []byte("reviewed candidate\n"))
 	dir := filepath.Join(l.runtimeDir, "sessions", cook.session.ID())
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -54,7 +65,7 @@ func localTaskReviewFixture(t *testing.T) (*Loop, *cookHandle, ControlCommand) {
 		t.Fatal(err)
 	}
 	source := filepath.Join(t.TempDir(), "candidate.json")
-	recoveryWriteJSON(t, source, map[string]any{"schema": 1, "order_id": cook.orderID, "session_id": b.SessionID, "attempt_id": b.AttemptID, "worktree": b.WorktreePath, "head": b.Head, "spawn_sha256": b.Files["spawn.json"], "index_sha256": recoveryDigest(index), "files": map[string]any{"candidate.txt": map[string]any{"sha256": recoveryDigest([]byte("reviewed candidate\n")), "executable": false}}})
+	recoveryWriteJSON(t, source, map[string]any{"schema": 1, "order_id": cook.orderID, "session_id": b.SessionID, "attempt_id": b.AttemptID, "worktree": b.WorktreePath, "head": b.Head, "spawn_sha256": b.Files["spawn.json"], "index_sha256": recoveryDigest(index), "files": map[string]any{name: map[string]any{"sha256": recoveryDigest([]byte("reviewed candidate\n")), "executable": false}}})
 	return l, cook, ControlCommand{ID: "recover-local", Action: "recover-local-task-review", OrderID: cook.orderID, Value: source, Target: recoveryDigest(recoveryRead(t, source)), Name: "original-review"}
 }
 

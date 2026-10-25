@@ -129,10 +129,11 @@ func (l *Loop) validateLocalTaskCandidate(c localTaskCandidate, order state.Orde
 	if err := json.Unmarshal([]byte(order.Stages[0].Prompt), &prompt); err != nil {
 		return err
 	}
-	if len(c.Files) < len(prompt.WritePaths) {
-		return fmt.Errorf("local task candidate files missing")
+	names, err := l.localTaskScopeFiles(b.WorktreePath, prompt.WritePaths)
+	if err != nil {
+		return err
 	}
-	for _, name := range prompt.WritePaths {
+	for name := range names {
 		if _, ok := c.Files[name]; !ok {
 			return fmt.Errorf("local task candidate admitted file missing")
 		}
@@ -299,9 +300,9 @@ func (l *Loop) localTaskWorktreeDigest(stage state.StageNode, root string) (stri
 	if err := json.Unmarshal([]byte(stage.Prompt), &prompt); err != nil {
 		return "", err
 	}
-	names := map[string]bool{}
-	for _, name := range prompt.WritePaths {
-		names[name] = true
+	names, err := l.localTaskScopeFiles(root, prompt.WritePaths)
+	if err != nil {
+		return "", err
 	}
 	for _, args := range [][]string{{"diff", "--name-only", "--no-renames", "-z", "HEAD", "--"}, {"ls-files", "--others", "--exclude-standard", "-z"}} {
 		data, err := boundGitCommand(l.deps.Execution, root, append([]string{"-C", root}, args...)...).Output()

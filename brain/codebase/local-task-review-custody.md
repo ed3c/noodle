@@ -56,3 +56,14 @@ bound. A schema 1 packet can have a new immutable successor only after its exact
 known custody-error ACK and matching remaining custody. The successor references
 the failed packet and control; it never rewrites that packet or ACK. Unknown ACKs
 require readback. The corrected control requires Host6, not only a new producer.
+
+Local-task `write_paths` are literal file/subtree boundaries. Directory scope
+requires `host task review-capabilities` to advertise
+`local_task_directory_scope=1`. Git-visible descendants, including tracked
+removals, receive individual candidate hashes; ignored build output stays out.
+The native owner rechecks coverage, index and bytes, stages only those reviewed
+files, and rejects additions introduced by commit hooks before integration.
+Sibling prefixes, symlinks and traversal never expand a scope. Issue atom
+contracts retain their own exact-file semantics. Frozen task inputs stay intact;
+an older Host must use the existing safe runtime successor before directory
+review effects. New Soodles admission checks this capability before dispatch.

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/poteto/noodle/event"
@@ -262,7 +261,7 @@ func (l *Loop) controlRecoverLocalTaskMerge(cmd ControlCommand) error {
 		return err
 	}
 	for name := range c.Files {
-		if !slices.Contains(prompt.WritePaths, name) {
+		if !localTaskPathAllowed(prompt.WritePaths, name) {
 			return fmt.Errorf("local task restoration exceeds admitted paths")
 		}
 	}
