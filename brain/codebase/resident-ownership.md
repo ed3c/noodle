@@ -55,6 +55,14 @@ remain unknown; status does not infer them from policy or replay release.
 This cause identifies the runtime release path, not task acceptance, physical
 memory recovery or Parent Goal completion.
 
+An original merge failure with observed Git conflicts must close its uniquely
+matching effect as failed. Generic command errors remain unresolved because
+they do not prove that the ref update failed. Otherwise an approved retry creates a second unresolved
+effect for the same stage and success cannot establish unique custody. Keep
+the original failure result when the retry succeeds; historical labels and
+ambiguous effects still cannot establish a result. The conflict-resolution
+integration test exercises failure, approval and retry through the real loop.
+
 Two producers had hidden this completion evidence. Canonical projection
 updates now retain omitted terminal orders. A native MergeCompleted transition
 completes only its uniquely matching merge effect in the same checkpoint.

@@ -9,22 +9,35 @@ import (
 	"github.com/poteto/noodle/internal/state"
 )
 
-// The merge owner has just observed success. Bind its result to the effect
+// The merge owner has just observed a result. Bind it to the effect
 // that produced this exact merging stage before checkpointing both together.
-func (l *Loop) recordCompletedMergeEffect(before, after state.State, event ingest.StateEvent) error {
-	if event.Type != string(ingest.EventMergeCompleted) || l.effectLedger == nil {
+func (l *Loop) recordMergeEffectResult(before, after state.State, event ingest.StateEvent) error {
+	if l.effectLedger == nil {
+		return nil
+	}
+	terminal := state.StageCompleted
+	switch event.Type {
+	case string(ingest.EventMergeCompleted):
+	case string(ingest.EventMergeFailed):
+		terminal = state.StageReview
+	default:
 		return nil
 	}
 	var subject struct {
-		OrderID    string `json:"order_id"`
-		StageIndex int    `json:"stage_index"`
+		OrderID          string `json:"order_id"`
+		StageIndex       int    `json:"stage_index"`
+		Error            string `json:"error"`
+		ConflictObserved bool   `json:"conflict_observed"`
 	}
 	if err := json.Unmarshal(event.Payload, &subject); err != nil {
 		return err
 	}
+	if event.Type == string(ingest.EventMergeFailed) && !subject.ConflictObserved {
+		return nil
+	}
 	_, stage, exists := before.LookupStage(subject.OrderID, subject.StageIndex)
 	_, completed, existsAfter := after.LookupStage(subject.OrderID, subject.StageIndex)
-	if !exists || !existsAfter || stage.Status != state.StageMerging || stage.Merge == nil || completed.Status != state.StageCompleted || completed.Merge != nil {
+	if !exists || !existsAfter || stage.Status != state.StageMerging || stage.Merge == nil || completed.Status != terminal || completed.Merge != nil {
 		return nil
 	}
 	var selected *reducer.EffectLedgerRecord
@@ -59,5 +72,11 @@ func (l *Loop) recordCompletedMergeEffect(before, after state.State, event inges
 			return err
 		}
 	}
-	return l.effectLedger.MarkDone(selected.EffectID, reducer.EffectResult{EffectID: selected.EffectID, Status: reducer.EffectResultCompleted, Timestamp: event.Timestamp})
+	result := reducer.EffectResult{EffectID: selected.EffectID, Status: reducer.EffectResultCompleted, Timestamp: event.Timestamp}
+	if event.Type == string(ingest.EventMergeFailed) {
+		result.Status = reducer.EffectResultFailed
+		result.Error = subject.Error
+		return l.effectLedger.MarkFailed(selected.EffectID, result)
+	}
+	return l.effectLedger.MarkDone(selected.EffectID, result)
 }

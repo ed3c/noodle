@@ -703,7 +703,7 @@ func (l *Loop) emitEventChecked(eventType ingest.EventType, payload any) error {
 	if err != nil {
 		return fmt.Errorf("canonical reducer failed: %w", err)
 	}
-	if err := l.recordCompletedMergeEffect(l.canonical, next, evt); err != nil {
+	if err := l.recordMergeEffectResult(l.canonical, next, evt); err != nil {
 		return err
 	}
 	l.canonical = next

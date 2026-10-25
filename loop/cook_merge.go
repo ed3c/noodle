@@ -156,9 +156,10 @@ func (l *Loop) handleMergeError(cook *cookHandle, err error) error {
 			WorktreeName: cook.worktreeName,
 		})
 		if err := l.emitEventChecked(ingest.EventMergeFailed, map[string]any{
-			"order_id":    cook.orderID,
-			"stage_index": cook.stageIndex,
-			"error":       reason,
+			"order_id":          cook.orderID,
+			"stage_index":       cook.stageIndex,
+			"error":             reason,
+			"conflict_observed": true,
 		}); err != nil {
 			return err
 		}

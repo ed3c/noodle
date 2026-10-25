@@ -2,6 +2,7 @@ package loop
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -52,7 +53,7 @@ func TestCompletedMergeEffectUsesExactTransitionAndPreservesOthers(t *testing.T)
 			}
 			original := l.effectLedger.All()
 			event := ingest.StateEvent{Type: string(ingest.EventMergeCompleted), Timestamp: time.Now(), Payload: []byte(`{"order_id":"done","stage_index":0}`)}
-			err := l.recordCompletedMergeEffect(before, after, event)
+			err := l.recordMergeEffectResult(before, after, event)
 			if condition == "exact" {
 				if err != nil {
 					t.Fatal(err)
@@ -73,6 +74,45 @@ func TestCompletedMergeEffectUsesExactTransitionAndPreservesOthers(t *testing.T)
 				if !reflect.DeepEqual(original, l.effectLedger.All()) {
 					t.Fatal("unknown or repeated label rewrote effect history")
 				}
+			}
+		})
+	}
+}
+
+func TestMergeFailureRequiresObservedConflict(t *testing.T) {
+	for _, observed := range []bool{false, true} {
+		t.Run(fmt.Sprint(observed), func(t *testing.T) {
+			l := completedCleanupFixture(t)
+			before := l.canonical.Clone()
+			order := before.Orders["done"]
+			order.Status = state.OrderActive
+			order.Stages[0].Status = state.StageMerging
+			order.Stages[0].Merge = &state.MergeRecoveryNode{WorktreeName: "owned", Mode: "local"}
+			before.Orders["done"] = order
+			l.effectLedger.Record(reducer.Effect{EffectID: "original", Type: reducer.EffectMerge,
+				Payload: []byte(`{"order_id":"done","stage_index":0,"worktree_name":"owned","merge_mode":"local"}`)})
+			original := l.effectLedger.All()
+			payload, err := json.Marshal(map[string]any{"order_id": "done", "stage_index": 0, "error": "merge interrupted", "conflict_observed": observed})
+			if err != nil {
+				t.Fatal(err)
+			}
+			event := ingest.StateEvent{Type: string(ingest.EventMergeFailed), Timestamp: time.Now(), Payload: payload}
+			after, _, err := reducer.Reduce(before, event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := l.recordMergeEffectResult(before, after, event); err != nil {
+				t.Fatal(err)
+			}
+			if !observed {
+				if !reflect.DeepEqual(original, l.effectLedger.All()) {
+					t.Fatal("unconfirmed command error changed original effect custody")
+				}
+				return
+			}
+			result := l.effectLedger.All()[0]
+			if result.Status != reducer.EffectLedgerFailed || result.Result == nil || result.Result.Error != "merge interrupted" {
+				t.Fatalf("observed failure was not retained: %+v", result)
 			}
 		})
 	}
