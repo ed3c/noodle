@@ -26,7 +26,7 @@ func TestStopAllPausesAndReleasesOnlyJoinedWorkers(t *testing.T) {
 	stopped := &mockSession{id: "stopped", done: make(chan struct{})}
 	failed := &stopFailureSession{mockSession: &mockSession{id: "unresolved", done: make(chan struct{})}, err: errors.New("original process identity unavailable")}
 	for _, session := range []loopruntime.SessionHandle{stopped, failed} {
-		if err := l.withAdmission(context.Background(), "process", func(ctx context.Context) error {
+		if err := l.withAdmission(context.Background(), "process", "", func(ctx context.Context) error {
 			l.cooks.activeCooksByOrder[session.ID()] = &cookHandle{session: l.retainDispatched(ctx, session)}
 			return nil
 		}); err != nil {
@@ -110,7 +110,7 @@ func TestPauseKeepsCurrentWorkerAndReleasesAcrossInnerRounds(t *testing.T) {
 	b.Observe(admission.Sample{At: time.Now(), Unsupported: true}, nil)
 	for _, id := range []string{"round-one", "round-two", "round-three"} {
 		session := &mockSession{id: id, status: "running", done: make(chan struct{})}
-		if err := l.withAdmission(context.Background(), "process", func(ctx context.Context) error {
+		if err := l.withAdmission(context.Background(), "process", "", func(ctx context.Context) error {
 			l.cooks.activeCooksByOrder[id] = &cookHandle{session: l.retainDispatched(ctx, session)}
 			return nil
 		}); err != nil {

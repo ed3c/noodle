@@ -34,6 +34,7 @@ func newHostResourcesCmd(app *App) *cobra.Command {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 	}}
 	cmd.AddCommand(newHostResidentsCmd(app))
+	cmd.AddCommand(newHostWarningGrantCmd(app))
 	return cmd
 }
 
@@ -49,5 +50,5 @@ func (h *noodleHost) resources() any {
 			residents = map[string]any{"records": rows, "error": err.Error()}
 		}
 	}
-	return map[string]any{"residents": residents, "schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot()}
+	return map[string]any{"residents": residents, "schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot(), "warning_grants": h.budget.WarningGrants()}
 }

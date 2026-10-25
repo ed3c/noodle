@@ -53,6 +53,8 @@ type Snapshot struct {
 
 type Budget struct {
 	unresolvedResidents                    int
+	warningStable                          int
+	warningGrants                          map[warningTask]WarningGrant
 	mu                                     sync.Mutex
 	maximum, active, limit, credit, stable int
 	residents                              int
@@ -117,6 +119,12 @@ func (b *Budget) Unregister(id string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.contexts, id)
+	for task, grant := range b.warningGrants {
+		if task.context == id && grant.Status == "available" {
+			grant.Status = "revoked"
+			b.warningGrants[task] = grant
+		}
+	}
 	delete(b.waited, id)
 	b.removeWaiter(id)
 }
@@ -149,6 +157,8 @@ func (b *Budget) Run(ctx context.Context, sampler Sampler) {
 func (b *Budget) Observe(s Sample, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	previousWarningStable := b.warningStable
+	b.warningStable = 0
 	b.credit = 0
 	b.rateValid = false
 	b.sampleError = nil
@@ -195,6 +205,9 @@ func (b *Budget) Observe(s Sample, err error) {
 	}
 	b.rateValid = true
 	b.rate = float64(s.Swapouts-previous.Swapouts) / s.At.Sub(previous.At).Seconds()
+	if s.Pressure == Warning && b.rate == 0 {
+		b.warningStable = previousWarningStable + 1
+	}
 	if s.Pressure != Normal || b.rate > 0 {
 		b.reason = "memory_pressure"
 		if b.rate > 0 {
@@ -222,6 +235,14 @@ func (b *Budget) stale() bool {
 }
 
 func (b *Budget) TryAcquire(id string) (*Permit, error) {
+	return b.tryAcquire(id, "")
+}
+
+func (b *Budget) TryAcquireTask(id, order string) (*Permit, error) {
+	return b.tryAcquire(id, order)
+}
+
+func (b *Budget) tryAcquire(id, order string) (*Permit, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if !b.contexts[id] || b.unresolvedResidents != 0 {
@@ -239,10 +260,12 @@ func (b *Budget) TryAcquire(id string) (*Permit, error) {
 		b.waiters = b.waiters[1:]
 		delete(b.waited, first)
 	}
-	if b.stale() || b.active >= b.limit || (!b.unsupported && b.credit == 0) || len(b.waiters) == 0 || b.waiters[0] != id {
+	exception := b.warningAvailable(id, order)
+	if !exception && (b.stale() || b.active >= b.limit || (!b.unsupported && b.credit == 0) || len(b.waiters) == 0 || b.waiters[0] != id) {
 		return nil, ErrDeferred
 	}
 	b.active++
+	b.consumeWarningGrant(id, order)
 	if !b.unsupported {
 		b.credit = 0
 	}

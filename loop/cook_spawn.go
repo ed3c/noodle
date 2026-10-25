@@ -44,13 +44,15 @@ func (l *Loop) atMaxConcurrency() bool {
 
 func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Order, opts spawnOptions) error {
 	runtimeName := nonEmpty(cand.Stage.Runtime, "process")
+	admissionOrder := cand.OrderID
 	if isScheduleStage(cand.Stage) {
 		runtimeName = l.config.Runtime.Default
+		admissionOrder = ""
 	}
 	if err := l.requireProcessOrder(runtimeName, cand.OrderID); err != nil {
 		return err
 	}
-	return l.withAdmission(ctx, runtimeName, func(ctx context.Context) error { return l.spawnCookAdmitted(ctx, cand, order, opts) })
+	return l.withAdmission(ctx, runtimeName, admissionOrder, func(ctx context.Context) error { return l.spawnCookAdmitted(ctx, cand, order, opts) })
 }
 
 func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, order Order, opts spawnOptions) error {
