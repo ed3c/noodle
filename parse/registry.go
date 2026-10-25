@@ -39,11 +39,26 @@ var claudeLineTypes = map[string]struct{}{
 	"controlresponse":  {},
 }
 
+// Pi v1.3.0 JSON/RPC session events. Keep provider detection explicit so
+// unrecognized records still produce the existing routing diagnostic.
+var piLineTypes = map[string]struct{}{
+	"session": {}, "agent_start": {}, "agent_end": {}, "agent_settled": {},
+	"turn_start": {}, "turn_end": {},
+	"message_start": {}, "message_update": {}, "message_end": {},
+	"tool_execution_start": {}, "tool_execution_update": {}, "tool_execution_end": {},
+	"queue_update": {}, "entry_appended": {}, "session_info_changed": {}, "thinking_level_changed": {},
+	"compaction_start": {}, "compaction_end": {},
+	"auto_retry_start": {}, "auto_retry_end": {},
+	"summarization_retry_scheduled": {}, "summarization_retry_attempt_start": {}, "summarization_retry_finished": {},
+	"bash_execution_update": {}, "extension_error": {},
+}
+
 func NewRegistry() *Registry {
 	return &Registry{
 		adapters: map[string]LogAdapter{
 			"claude": ClaudeAdapter{},
 			"codex":  CodexAdapter{},
+			"pi":     &PiAdapter{},
 		},
 	}
 }
@@ -98,6 +113,9 @@ func DetectProvider(line []byte) (string, error) {
 	}
 	if _, ok := claudeLineTypes[lineType]; ok {
 		return "claude", nil
+	}
+	if _, ok := piLineTypes[lineType]; ok {
+		return "pi", nil
 	}
 
 	// Claude transport control responses can appear with type variants across
