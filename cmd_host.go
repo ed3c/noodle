@@ -42,6 +42,7 @@ type hostReceipt struct {
 	ProjectDir       string             `json:"project_dir"`
 	ContextState     string             `json:"context_state"`
 	Mode             string             `json:"mode"`
+	ConfigPath       string             `json:"config_path"`
 	ConfigSHA256     string             `json:"config_sha256"`
 	BinaryPath       string             `json:"binary_path"`
 	BinarySHA256     string             `json:"binary_sha256"`
@@ -62,6 +63,7 @@ type hostRequest struct {
 	ProjectDir       string                  `json:"project_dir"`
 	ContextID        string                  `json:"context_id"`
 	InstanceID       string                  `json:"instance_id"`
+	ConfigPath       string                  `json:"config_path"`
 	ConfigSHA256     string                  `json:"config_sha256"`
 	Mode             string                  `json:"mode"`
 	Environment      []string                `json:"environment,omitempty"`
@@ -136,10 +138,10 @@ func newHostCmd(app *App) *cobra.Command {
 		return serveHost(ctx)
 	}})
 	for _, operation := range []string{"attach", "once", "status", "detach"} {
-		var mode, contextID, instanceID, configSHA, requestFile string
+		var mode, contextID, instanceID, configSHA, requestFile, configPath string
 		var cleanupCompleted bool
 		child := &cobra.Command{Use: operation, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-			req := hostRequest{Operation: operation, ProjectDir: app.projectDir, Mode: mode, ContextID: contextID, InstanceID: instanceID, ConfigSHA256: configSHA, RequestFile: requestFile, CleanupCompleted: cleanupCompleted}
+			req := hostRequest{Operation: operation, ProjectDir: app.projectDir, Mode: mode, ContextID: contextID, InstanceID: instanceID, ConfigPath: configPath, ConfigSHA256: configSHA, RequestFile: requestFile, CleanupCompleted: cleanupCompleted}
 			response := callHost(cmd.Context(), req)
 			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(response); err != nil {
 				return err
@@ -150,6 +152,9 @@ func newHostCmd(app *App) *cobra.Command {
 			return nil
 		}}
 		child.Flags().StringVar(&requestFile, "request-file", "", "Native request binding file")
+		if operation == "attach" || operation == "once" {
+			child.Flags().StringVar(&configPath, "config-file", "", "Exact absolute task config source (repository config remains unchanged)")
+		}
 		if operation == "attach" {
 			child.Flags().BoolVar(&cleanupCompleted, "cleanup-completed", false, "Release completed task runtime automatically; preserve manual migration holds")
 		}
@@ -173,7 +178,7 @@ func hostCapabilities(platform string) map[string]any {
 	if platform == "windows" {
 		force = 0
 	}
-	return map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1, "completed_context_cleanup": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1}
+	return map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1, "completed_context_cleanup": 1, "external_task_config": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1}
 }
 
 func hostDirectory() (string, error) {
@@ -225,6 +230,13 @@ func readHostConfig(dir string) ([]byte, error) {
 	return data, err
 }
 
+func readHostRequestConfig(req hostRequest) ([]byte, error) {
+	if req.ConfigPath != "" {
+		return config.ReadExplicitSource(req.ConfigPath)
+	}
+	return readHostConfig(req.ProjectDir)
+}
+
 func callHost(ctx context.Context, req hostRequest) hostResponse {
 	dir, err := hostDirectory()
 	if err != nil {
@@ -244,7 +256,7 @@ func callHost(ctx context.Context, req hostRequest) hostResponse {
 		return hostError("refused", err)
 	}
 	if req.Operation == "attach" || req.Operation == "once" || (req.Operation == "status" && req.ContextID == "" && req.RequestFile == "") {
-		data, err := readHostConfig(req.ProjectDir)
+		data, err := readHostRequestConfig(req)
 		if err != nil {
 			return hostError("refused", err)
 		}
@@ -752,7 +764,7 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 		if r.RequestID != req.RequestID {
 			continue
 		}
-		if r.ProjectDir != req.ProjectDir || r.ConfigSHA256 != req.ConfigSHA256 || r.Mode != req.Mode || r.CleanupCompleted != req.CleanupCompleted {
+		if r.ProjectDir != req.ProjectDir || r.ConfigSHA256 != req.ConfigSHA256 || r.ConfigPath != req.ConfigPath || r.Mode != req.Mode || r.CleanupCompleted != req.CleanupCompleted {
 			return hostError("refused", errors.New("request identity has conflicting bindings"))
 		}
 		c := h.contexts[r.ContextID]
@@ -780,7 +792,7 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 }
 
 func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
-	data, err := readHostConfig(req.ProjectDir)
+	data, err := readHostRequestConfig(req)
 	if err != nil {
 		return hostError("refused", err)
 	}
@@ -862,11 +874,25 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 	if err != nil {
 		return hostError("refused", err)
 	}
-	r := hostReceipt{1, hostProtocol, os.Getpid(), h.instanceID, id, req.ProjectDir, "active", cfg.Mode, req.ConfigSHA256, h.binaryPath, h.binarySHA, req.RequestID, h.dir, req.CleanupCompleted, ""}
+	r := hostReceipt{1, hostProtocol, os.Getpid(), h.instanceID, id, req.ProjectDir, "active", cfg.Mode, req.ConfigPath, req.ConfigSHA256, h.binaryPath, h.binarySHA, req.RequestID, h.dir, req.CleanupCompleted, ""}
+	source := config.RuntimeSource{Path: req.ConfigPath, SHA256: req.ConfigSHA256}
+	created, err := config.SaveRuntimeSource(req.ProjectDir, source)
+	failBeforeRuntime := func(cause error) hostResponse {
+		if created {
+			if rollback := config.RollbackRuntimeSource(req.ProjectDir, source); rollback != nil {
+				h.blocked = true
+				return hostError("unknown_effect", fmt.Errorf("config binding rollback failed after %v: %w", cause, rollback))
+			}
+		}
+		return hostError("refused", cause)
+	}
+	if err != nil {
+		return failBeforeRuntime(err)
+	}
 	h.receipts = append(h.receipts, r)
 	if err = h.save(); err != nil {
 		h.receipts = h.receipts[:len(h.receipts)-1]
-		return hostError("refused", err)
+		return failBeforeRuntime(err)
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	rt := h.newRuntime(req.ProjectDir, h.binaryPath, cfg, loop.Dependencies{ModeOverride: state.RunMode(req.Mode), Execution: e, Admission: h.budget, AdmissionContext: id, CleanupCompleted: req.CleanupCompleted})

@@ -128,7 +128,7 @@ func recoverStoppedReview(project, binary, order, subject, digest string, barrie
 		if err := validateStoppedIntent(project, r.EvidencePath, intent, firstExecution(execCtx)); err != nil {
 			return refuse(err)
 		}
-		cfg, _, err := config.Load(filepath.Join(project, config.DefaultConfigPath))
+		cfg, _, err := config.LoadRuntime(project)
 		if err != nil {
 			return refuse(err)
 		}

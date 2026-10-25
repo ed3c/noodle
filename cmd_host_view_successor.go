@@ -21,7 +21,7 @@ type hostViewSuccessor struct {
 }
 
 func retainHostViewSuccessor(dir string, previous, successor hostViewBinding) error {
-	if previous.RunID != successor.RunID || previous.OrderID != successor.OrderID || previous.Request.ProjectDir != successor.Request.ProjectDir || previous.Request.ConfigSHA256 != successor.Request.ConfigSHA256 || previous.Request.HostDir != dir || successor.Request.HostDir != dir || previous.Request.RequestID == successor.Request.RequestID {
+	if previous.RunID != successor.RunID || previous.OrderID != successor.OrderID || previous.Request.ProjectDir != successor.Request.ProjectDir || previous.Request.ConfigSHA256 != successor.Request.ConfigSHA256 || previous.Request.ConfigPath != successor.Request.ConfigPath || previous.Request.HostDir != dir || successor.Request.HostDir != dir || previous.Request.RequestID == successor.Request.RequestID {
 		return fmt.Errorf("display successor run, repository, order or config differs")
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "receipts.json"))
@@ -76,7 +76,7 @@ func exactViewReceipt(request hostRequestBinding, receipts []hostReceipt) (hostR
 			continue
 		}
 		count++
-		if request.Schema != 1 || request.Operation != "attach" || r.Schema != 1 || r.Protocol != hostProtocol || r.ProjectDir != request.ProjectDir || r.ConfigSHA256 != request.ConfigSHA256 || r.BinarySHA256 != request.BinarySHA256 || r.Mode != request.Mode || r.HostDir != request.HostDir || r.ContextID == "" || r.HostInstanceID == "" || r.HostPID <= 1 || !filepath.IsAbs(r.BinaryPath) {
+		if request.Schema != 1 || request.Operation != "attach" || r.Schema != 1 || r.Protocol != hostProtocol || r.ProjectDir != request.ProjectDir || r.ConfigSHA256 != request.ConfigSHA256 || r.ConfigPath != request.ConfigPath || r.BinarySHA256 != request.BinarySHA256 || r.Mode != request.Mode || r.HostDir != request.HostDir || r.ContextID == "" || r.HostInstanceID == "" || r.HostPID <= 1 || !filepath.IsAbs(r.BinaryPath) {
 			return found, fmt.Errorf("display successor native receipt binding differs")
 		}
 		found = r

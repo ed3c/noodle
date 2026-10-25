@@ -64,7 +64,7 @@ func captureStoppedReview(project, order, subject string, execCtx ...*execution.
 	if err := decodeStoppedReview(i.Before, &s); err != nil {
 		return i, err
 	}
-	cfg, _, err := config.Load(filepath.Join(project, config.DefaultConfigPath))
+	cfg, _, err := config.LoadRuntime(project)
 	if err != nil {
 		return i, err
 	}

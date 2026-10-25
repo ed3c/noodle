@@ -12,7 +12,7 @@ import (
 )
 
 func (a *App) retainsTaskWorktree(name string) (bool, error) {
-	cfg, _, err := config.Load(filepath.Join(a.Root, ".noodle.toml"))
+	cfg, _, err := config.LoadRuntime(a.Root)
 	if err != nil {
 		return false, err
 	}

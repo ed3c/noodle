@@ -59,7 +59,7 @@ func NewRootCmd() *cobra.Command {
 					return err
 				}
 			}
-			loaded, validation, err := config.Load(config.DefaultConfigPath)
+			loaded, validation, err := config.LoadRuntime(app.projectDir)
 			if err != nil {
 				return err
 			}

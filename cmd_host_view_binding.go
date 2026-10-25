@@ -144,7 +144,7 @@ func enrichNativeRun(run *loopview.Run, binding hostViewBinding, receipts []host
 	}
 	matched := false
 	for _, r := range receipts {
-		if r.RequestID == request.RequestID && r.ProjectDir == request.ProjectDir && r.ConfigSHA256 == request.ConfigSHA256 && r.BinarySHA256 == request.BinarySHA256 && r.Mode == request.Mode {
+		if r.RequestID == request.RequestID && r.ProjectDir == request.ProjectDir && r.ConfigSHA256 == request.ConfigSHA256 && r.ConfigPath == request.ConfigPath && r.BinarySHA256 == request.BinarySHA256 && r.Mode == request.Mode {
 			run.Resources = append(run.Resources, loopview.Resource{Label: "Native context", Value: r.ContextID + " · " + r.ContextState})
 			if r.ContextState == "active" {
 				matched = true

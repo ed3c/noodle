@@ -15,6 +15,7 @@ type hostRequestBinding struct {
 	RequestID         string `json:"request_id"`
 	Operation         string `json:"operation"`
 	ProjectDir        string `json:"project_dir"`
+	ConfigPath        string `json:"config_path"`
 	ConfigSHA256      string `json:"config_sha256"`
 	Mode              string `json:"mode"`
 	BinarySHA256      string `json:"binary_sha256"`
@@ -63,11 +64,12 @@ func bindHostRequest(req *hostRequest) (*hostRequestBinding, func(), error) {
 			}
 			req.RequestID = binding.RequestID
 			req.ConfigSHA256 = binding.ConfigSHA256
+			req.ConfigPath = binding.ConfigPath
 			req.Mode = binding.Mode
 			req.CleanupCompleted = binding.CleanupCompleted
 			return &binding, unlock, nil
 		}
-		if binding.Operation != req.Operation || binding.ConfigSHA256 != req.ConfigSHA256 || binding.Mode != req.Mode || binding.CleanupCompleted != req.CleanupCompleted {
+		if binding.Operation != req.Operation || binding.ConfigSHA256 != req.ConfigSHA256 || binding.ConfigPath != req.ConfigPath || binding.Mode != req.Mode || binding.CleanupCompleted != req.CleanupCompleted {
 			return fail(errors.New("original native request binding changed"))
 		}
 		if binding.Status != "busy" {
@@ -83,7 +85,7 @@ func bindHostRequest(req *hostRequest) (*hostRequestBinding, func(), error) {
 		if err != nil {
 			return fail(err)
 		}
-		binding = hostRequestBinding{Schema: 1, RequestID: id, Operation: req.Operation, ProjectDir: req.ProjectDir, ConfigSHA256: req.ConfigSHA256, Mode: req.Mode, BinarySHA256: req.BinarySHA256, HostDir: req.HostDir, CleanupCompleted: req.CleanupCompleted}
+		binding = hostRequestBinding{Schema: 1, RequestID: id, Operation: req.Operation, ProjectDir: req.ProjectDir, ConfigPath: req.ConfigPath, ConfigSHA256: req.ConfigSHA256, Mode: req.Mode, BinarySHA256: req.BinarySHA256, HostDir: req.HostDir, CleanupCompleted: req.CleanupCompleted}
 	}
 	binding.EnvironmentSHA256 = hostDigest([]byte(strings.Join(req.Environment, "\x00")))
 	binding.Status = "pending"
@@ -126,12 +128,12 @@ func hostReceiptMatches(req hostRequest, r hostReceipt) bool {
 		return false
 	}
 	if req.RequestID != "" {
-		return req.RequestID == r.RequestID && req.ConfigSHA256 == r.ConfigSHA256 && req.Mode == r.Mode && req.CleanupCompleted == r.CleanupCompleted
+		return req.RequestID == r.RequestID && req.ConfigSHA256 == r.ConfigSHA256 && req.ConfigPath == r.ConfigPath && req.Mode == r.Mode && req.CleanupCompleted == r.CleanupCompleted
 	}
 	if req.ContextID != "" {
 		return req.ContextID == r.ContextID && req.InstanceID == r.HostInstanceID
 	}
-	return req.ConfigSHA256 != "" && req.ConfigSHA256 == r.ConfigSHA256 && req.Mode == r.Mode
+	return req.ConfigSHA256 != "" && req.ConfigSHA256 == r.ConfigSHA256 && req.ConfigPath == r.ConfigPath && req.Mode == r.Mode
 }
 
 func ambiguousHostLookup(req hostRequest, receipts []hostReceipt) bool {

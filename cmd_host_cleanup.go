@@ -145,7 +145,7 @@ func (h *noodleHost) cleanupContexts(ctx context.Context, req hostRequest) any {
 		r := c.receipt
 		response := h.handle(ctx, hostRequest{Operation: "cleanup", Apply: req.Apply,
 			ProjectDir: r.ProjectDir, ContextID: r.ContextID, InstanceID: r.HostInstanceID,
-			RequestID: r.RequestID, ConfigSHA256: r.ConfigSHA256, Mode: r.Mode, BinarySHA256: h.binarySHA, CleanupCompleted: r.CleanupCompleted})
+			RequestID: r.RequestID, ConfigPath: r.ConfigPath, ConfigSHA256: r.ConfigSHA256, Mode: r.Mode, BinarySHA256: h.binarySHA, CleanupCompleted: r.CleanupCompleted})
 		rows = append(rows, response)
 		eligible = eligible || response.Status == "eligible"
 		if response.Status == "unknown_effect" {

@@ -55,6 +55,24 @@ remain unknown; status does not infer them from policy or replay release.
 This cause identifies the runtime release path, not task acceptance, physical
 memory recovery or Parent Goal completion.
 
+Task admission may select `host attach --config-file` (also supported by
+`host once`) when `external_task_config=1` is present. The original request and
+receipt bind the absolute regular source path and its byte digest. The Host
+checks both before constructing the runtime; the repository configuration is
+not overwritten. Request-based status and detach retain this identity even if
+the source later becomes unreadable. Reattaching cannot change the source.
+
+Under the project lock, the Host saves the explicit source reference in
+`.noodle/host-config.json`. Offline review, completion recovery and worktree
+retention use `config.LoadRuntime` to read those same bytes. Missing or changed
+source files refuse rather than select repository defaults. Another Host
+request can use the same source, but cannot replace its path or digest. This
+file is a configuration reference, not a second task or ownership record.
+Projects without this reference still use their repository configuration.
+Deleting runtime state (including `reset`) destroys the reference; it does not
+establish continuation of the original task. Original admission readback is
+still required. These checks do not recover deleted owner evidence.
+
 An original merge failure with observed Git conflicts must close its uniquely
 matching effect as failed. Generic command errors remain unresolved because
 they do not prove that the ref update failed. Otherwise an approved retry creates a second unresolved
