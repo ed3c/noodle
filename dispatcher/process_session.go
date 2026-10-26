@@ -105,6 +105,14 @@ func (s *processSession) Outcome() SessionOutcome {
 
 func (s *processSession) start(ctx context.Context) {
 	s.writeInitialHeartbeat()
+	for _, warning := range s.warnings {
+		s.publish(SessionEvent{
+			Type:      "warning",
+			Message:   warning,
+			Timestamp: nowUTC(),
+		})
+	}
+
 	s.wg.Add(2)
 
 	go func() {
@@ -124,13 +132,6 @@ func (s *processSession) start(ctx context.Context) {
 
 	go func() { s.closeEventsWhenDone(); close(s.joined) }()
 
-	for _, warning := range s.warnings {
-		s.publish(SessionEvent{
-			Type:      "warning",
-			Message:   warning,
-			Timestamp: nowUTC(),
-		})
-	}
 }
 
 func (s *processSession) processHook(ce parse.CanonicalEvent) {

@@ -12,7 +12,6 @@ import (
 
 	"github.com/poteto/noodle/event"
 	"github.com/poteto/noodle/internal/execution"
-	"github.com/poteto/noodle/internal/stringx"
 	"github.com/poteto/noodle/skill"
 	wt "github.com/poteto/noodle/worktree"
 )
@@ -65,6 +64,10 @@ func (d *ProcessDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
+	harness, err := selectHarness(req.Provider)
+	if err != nil {
+		return nil, err
+	}
 	if req.RequireGroupExit && runtime.GOOS == "windows" {
 		return nil, fmt.Errorf("worker process-group exit observation unavailable on Windows")
 	}
@@ -104,15 +107,16 @@ func (d *ProcessDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 		return nil, err
 	}
 
+	launch := d.planProcessLaunch(harness, req, systemPrompt)
 	var startup *codexStartup
-	if stringx.Normalize(req.Provider) == "codex" {
+	if launch.input == inputPromptEOF {
 		startup, err = newCodexStartup(sessionDir, sessionID, len(composedPrompt))
 		if err != nil {
 			return nil, err
 		}
 	}
 	stderrDone := make(chan struct{})
-	controller, process, err := d.startSessionProcess(ctx, req, systemPrompt, composedPrompt, sessionID, sessionDir, stderrPath, stderrDone, startup)
+	controller, process, err := d.startSessionProcess(ctx, req, launch, composedPrompt, sessionID, sessionDir, stderrPath, stderrDone, startup)
 	if err != nil {
 		return nil, err
 	}
@@ -189,12 +193,12 @@ func (d *ProcessDispatcher) prepareSessionDir(
 // startSessionProcess builds the command, starts the child process, configures
 // the controller for stdin steering, drains stderr, and writes metadata.
 func (d *ProcessDispatcher) startSessionProcess(
-	ctx context.Context, req DispatchRequest,
-	systemPrompt, composedPrompt, sessionID, sessionDir, stderrPath string,
+	ctx context.Context, req DispatchRequest, launch processLaunch,
+	composedPrompt, sessionID, sessionDir, stderrPath string,
 	stderrDone chan struct{},
 	startup *codexStartup,
 ) (*claudeController, *ProcessHandle, error) {
-	cmd, err := d.buildCmd(req, systemPrompt)
+	cmd, err := d.buildCmd(req, launch)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build command: %w", err)
 	}
@@ -216,7 +220,7 @@ func (d *ProcessDispatcher) startSessionProcess(
 		}
 	}()
 
-	controller, err := d.configureStdin(ctx, process, req.Provider, composedPrompt, startup)
+	controller, err := d.configureStdin(ctx, process, launch.input, composedPrompt, startup)
 	if err != nil {
 		_ = process.ForceKill()
 		_ = process.Stdout().Close()
@@ -249,13 +253,13 @@ func (d *ProcessDispatcher) startSessionProcess(
 
 // configureStdin sets up stdin handling for the started process. For Claude,
 // creates a controller that owns stdin for live steering and sends the prompt
-// as the first stream-json user message. For other providers (codex), writes
+// as the first stream-json user message. For Codex, writes
 // the prompt to stdin and closes it.
 func (d *ProcessDispatcher) configureStdin(
-	ctx context.Context, process *ProcessHandle, provider, composedPrompt string,
+	ctx context.Context, process *ProcessHandle, input processInput, composedPrompt string,
 	startup *codexStartup,
 ) (*claudeController, error) {
-	if stringx.Normalize(provider) == "codex" {
+	if input == inputPromptEOF {
 		process.ioWG.Add(1)
 		go func() {
 			defer process.ioWG.Done()
@@ -272,37 +276,12 @@ func (d *ProcessDispatcher) configureStdin(
 
 // buildCmd constructs an exec.Cmd for the provider. The stamp processor runs
 // in-process via processSession.processStream, so no shell pipeline is needed.
-func (d *ProcessDispatcher) buildCmd(req DispatchRequest, systemPrompt string) (*exec.Cmd, error) {
+func (d *ProcessDispatcher) buildCmd(req DispatchRequest, launch processLaunch) (*exec.Cmd, error) {
 	runtimeCmd := strings.TrimSpace(d.runtimeDefault)
 	if runtimeCmd != "" {
 		return d.buildCustomRuntimeCmd(req, runtimeCmd)
 	}
-
-	provider := stringx.Normalize(req.Provider)
-	binary := d.resolveAgentBinary(provider)
-	extraArgs := d.resolveExtraArgs(provider)
-
-	switch provider {
-	case "codex":
-		args := codexBaseArgs(req)
-		if req.codexThreadID != "" {
-			// Carrier flags such as --sandbox belong to exec, not exec resume.
-			args = append(append([]string{"exec"}, extraArgs...), args[1:]...)
-			args = append(args, req.codexThreadID, "-")
-		} else {
-			args = append(args, extraArgs...)
-		}
-		return d.execution.Command(context.Background(), req.WorktreePath, binary, args...), nil
-
-	default: // claude
-		args := claudeBaseArgs(req, systemPrompt)
-		// Replace -p (pipe mode) with --input-format stream-json for
-		// bidirectional streaming. The prompt is sent as a user message
-		// through the claudeController rather than piped to stdin.
-		args = replaceFlag(args, "-p", "--input-format", "stream-json")
-		args = append(args, extraArgs...)
-		return d.execution.Command(context.Background(), req.WorktreePath, binary, args...), nil
-	}
+	return d.execution.Command(context.Background(), req.WorktreePath, launch.binary, launch.args...), nil
 }
 
 // buildCustomRuntimeCmd handles user-provided runtime command templates.
@@ -315,38 +294,6 @@ func (d *ProcessDispatcher) buildCustomRuntimeCmd(req DispatchRequest, runtimeCm
 	}
 	resolved := resolveTemplateVars(runtimeCmd, vars)
 	return d.execution.Command(context.Background(), req.WorktreePath, "sh", "-c", resolved), nil
-}
-
-func (d *ProcessDispatcher) resolveAgentBinary(provider string) string {
-	switch stringx.Normalize(provider) {
-	case "codex":
-		if path := strings.TrimSpace(d.providerConfigs.Codex.Path); path != "" {
-			resolved, _ := d.execution.ResolvePath(path)
-			candidate := filepath.Join(resolved, "codex")
-			if _, err := os.Stat(candidate); err == nil {
-				return candidate
-			}
-		}
-		return "codex"
-	default:
-		if path := strings.TrimSpace(d.providerConfigs.Claude.Path); path != "" {
-			resolved, _ := d.execution.ResolvePath(path)
-			candidate := filepath.Join(resolved, "claude")
-			if _, err := os.Stat(candidate); err == nil {
-				return candidate
-			}
-		}
-		return "claude"
-	}
-}
-
-func (d *ProcessDispatcher) resolveExtraArgs(provider string) []string {
-	switch stringx.Normalize(provider) {
-	case "codex":
-		return d.providerConfigs.Codex.Args
-	default:
-		return d.providerConfigs.Claude.Args
-	}
 }
 
 // drainToFile reads from r and writes to the named file.

@@ -37,7 +37,7 @@ func TestCodexResumeUsesExactBoundThread(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd, err := d.buildCmd(bound, "")
+	cmd, err := processCommandForTest(t, d, bound, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestCodexNativeThreadReadbackPreservesRaw(t *testing.T) {
 func TestCodexResumeConfiguredArgsPrecedeSubcommand(t *testing.T) {
 	for _, extra := range [][]string{{"--sandbox", "workspace-write"}, {"--profile", "ci"}, {"--sandbox", "invalid-mode"}} {
 		d := NewProcessDispatcher(ProcessDispatcherConfig{ProviderConfigs: ProviderConfigs{Codex: ProviderConfig{Args: extra}}})
-		cmd, err := d.buildCmd(DispatchRequest{Provider: "codex", Model: "test-model", codexThreadID: resumeTestThread}, "")
+		cmd, err := processCommandForTest(t, d, DispatchRequest{Provider: "codex", Model: "test-model", codexThreadID: resumeTestThread}, "")
 		if err != nil {
 			t.Fatal(err)
 		}

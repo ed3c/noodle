@@ -73,6 +73,10 @@ func (d *SpritesDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
+	harness, err := selectHarness(req.Provider)
+	if err != nil {
+		return nil, err
+	}
 	reqRuntime := NormalizeRuntime(req.Runtime)
 	if reqRuntime != "sprites" {
 		return nil, fmt.Errorf("runtime %q not supported by sprites dispatcher", reqRuntime)
@@ -98,7 +102,7 @@ func (d *SpritesDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 	}
 
 	sprite := d.newSprite(d.spriteName)
-	cmd, stdout, remoteURL, err := d.startSpriteAgent(ctx, sprite, req, systemPrompt, inputFile)
+	cmd, stdout, remoteURL, err := d.startSpriteAgent(ctx, sprite, harness, req, systemPrompt, inputFile)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +135,7 @@ func (d *SpritesDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 // and starts the agent command on the sprite. Returns the running command,
 // its stdout pipe, and the remote URL for later sync.
 func (d *SpritesDispatcher) startSpriteAgent(
-	ctx context.Context, sprite spriteHandle, req DispatchRequest, systemPrompt, inputFile string,
+	ctx context.Context, sprite spriteHandle, harness harnessKind, req DispatchRequest, systemPrompt, inputFile string,
 ) (*sprites.Cmd, io.ReadCloser, string, error) {
 	remoteURL, err := d.prepareRemoteRepo(ctx, sprite, req)
 	if err != nil {
@@ -140,7 +144,7 @@ func (d *SpritesDispatcher) startSpriteAgent(
 	if err := d.uploadPromptFile(ctx, sprite, inputFile); err != nil {
 		return nil, nil, "", err
 	}
-	cmd, stdout, err := d.buildSpriteCommand(ctx, sprite, req, systemPrompt)
+	cmd, stdout, err := d.buildSpriteCommand(ctx, sprite, harness, req, systemPrompt)
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -217,12 +221,13 @@ func (d *SpritesDispatcher) uploadPromptFile(ctx context.Context, sprite spriteH
 // execution, and starts the agent process on the sprite. Returns the running
 // command and its stdout pipe.
 func (d *SpritesDispatcher) buildSpriteCommand(
-	ctx context.Context, sprite spriteHandle, req DispatchRequest, systemPrompt string,
+	ctx context.Context, sprite spriteHandle, harness harnessKind, req DispatchRequest, systemPrompt string,
 ) (*sprites.Cmd, io.ReadCloser, error) {
 	var agentArgs []string
-	if strings.EqualFold(strings.TrimSpace(req.Provider), "codex") {
+	switch harness {
+	case harnessCodex:
 		agentArgs = buildSpriteCodexArgs(req)
-	} else {
+	case harnessClaude:
 		agentArgs = buildSpriteClaudeArgs(req, systemPrompt)
 	}
 
