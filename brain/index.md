@@ -37,6 +37,8 @@
 - [[codebase/local-task-review-custody]]
 - [[codebase/merge-recovery-synthetic-cooks-must-preserve-task-key]]
 - [[codebase/orders-lifecycle-defaults-on-promotion]]
+- [[codebase/openshell-custody-and-native-identity]]
+- [[codebase/owned-worker-exit-and-recovery-evidence]]
 - [[codebase/provider-routing-must-fail-loudly]]
 - [[codebase/projection-owns-snapshot-active-order-ids]]
 - [[codebase/release-changelog-wrapper-script]]
