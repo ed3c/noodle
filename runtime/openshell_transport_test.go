@@ -35,10 +35,23 @@ const openShellRequestID = "e63f82eb-c577-49ba-b145-394483dbdc08"
 type openShellNativeServer struct {
 	pb.UnimplementedOpenShellServer
 	get        func(context.Context, *pb.GetSandboxRequest) (*pb.SandboxResponse, error)
+	create     func(context.Context, *pb.CreateSandboxRequest) (*pb.SandboxResponse, error)
+	list       func(context.Context, *pb.ListSandboxesRequest) (*pb.ListSandboxesResponse, error)
+	stop       func(context.Context, *pb.StopSandboxRequest) (*pb.SandboxResponse, error)
 	exec       func(pb.OpenShell_ExecSandboxInteractiveServer) error
 	gets       atomic.Int32
 	execs      atomic.Int32
 	disconnect func()
+}
+
+func (s *openShellNativeServer) CreateSandbox(ctx context.Context, req *pb.CreateSandboxRequest) (*pb.SandboxResponse, error) {
+	return s.create(ctx, req)
+}
+func (s *openShellNativeServer) ListSandboxes(ctx context.Context, req *pb.ListSandboxesRequest) (*pb.ListSandboxesResponse, error) {
+	return s.list(ctx, req)
+}
+func (s *openShellNativeServer) StopSandbox(ctx context.Context, req *pb.StopSandboxRequest) (*pb.SandboxResponse, error) {
+	return s.stop(ctx, req)
 }
 
 func (s *openShellNativeServer) GetSandbox(ctx context.Context, req *pb.GetSandboxRequest) (*pb.SandboxResponse, error) {

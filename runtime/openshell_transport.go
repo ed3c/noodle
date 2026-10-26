@@ -41,11 +41,12 @@ type OpenShellTLS struct {
 // OpenShellTransport owns its connection; Close cancels all its local streams,
 // without stopping any VM. It is deliberately neither a Runtime nor a Stopper.
 type OpenShellTransport struct {
-	conn   *grpc.ClientConn
-	client pb.OpenShellClient
-	target OpenShellTarget
-	ctx    context.Context
-	cancel context.CancelFunc
+	conn           *grpc.ClientConn
+	client         pb.OpenShellClient
+	target         OpenShellTarget
+	ctx            context.Context
+	cancel         context.CancelFunc
+	observeSandbox func(*pb.Sandbox) error // optional owner preflight, called before any exec stream
 }
 
 func NewOpenShellTransport(target OpenShellTarget, security OpenShellTLS) (*OpenShellTransport, error) {
@@ -58,7 +59,17 @@ func NewOpenShellTransport(target OpenShellTarget, security OpenShellTLS) (*Open
 			return nil, fmt.Errorf("openshell transport %s missing or invalid", field.name)
 		}
 	}
-	u, err := url.Parse(target.Sandbox.Gateway)
+	conn, err := newOpenShellConnection(target.Sandbox.Gateway, security)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &OpenShellTransport{conn: conn, client: pb.NewOpenShellClient(conn), target: target, ctx: ctx, cancel: cancel}, nil
+}
+
+// Shared native connection policy: verified mTLS, no RPC retries or service config.
+func newOpenShellConnection(gateway string, security OpenShellTLS) (*grpc.ClientConn, error) {
+	u, err := url.Parse(gateway)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return nil, fmt.Errorf("openshell gateway is not an HTTPS endpoint")
 	}
@@ -82,8 +93,7 @@ func NewOpenShellTransport(target OpenShellTarget, security OpenShellTLS) (*Open
 	if err != nil {
 		return nil, fmt.Errorf("create openshell connection: %w", err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	return &OpenShellTransport{conn: conn, client: pb.NewOpenShellClient(conn), target: target, ctx: ctx, cancel: cancel}, nil
+	return conn, nil
 }
 
 func (t *OpenShellTransport) Close() error {
@@ -159,6 +169,11 @@ func (t *OpenShellTransport) Start(ctx context.Context, command OpenShellCommand
 	meta := response.GetSandbox().GetMetadata()
 	if meta.GetId() == "" || meta.GetId() != t.target.Sandbox.SandboxID || meta.GetName() != t.target.Name || meta.GetWorkspace() != t.target.Sandbox.Workspace {
 		return nil, fmt.Errorf("openshell sandbox identity missing or conflicts with gateway/workspace/name/ID binding")
+	}
+	if t.observeSandbox != nil {
+		if err := t.observeSandbox(response.GetSandbox()); err != nil {
+			return nil, err
+		}
 	}
 	stream, err := t.client.ExecSandboxInteractive(ctx)
 	if err != nil {
