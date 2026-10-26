@@ -37,6 +37,7 @@ func defaultDependencies(projectDir, runtimeDir, noodleBin string, cfg config.Co
 		RuntimeKind:   "process",
 		Sink:          sink,
 		ProviderConfigs: dispatcher.ProviderConfigs{
+			Pi: dispatcher.ProviderConfig{Path: cfg.Agents.Pi.Path, Args: cfg.Agents.Pi.Args},
 			Claude: dispatcher.ProviderConfig{
 				Path: cfg.Agents.Claude.Path,
 				Args: cfg.Agents.Claude.Args,

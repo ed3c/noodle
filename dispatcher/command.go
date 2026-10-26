@@ -127,6 +127,9 @@ func composePrompts(provider, requestPrompt, preamble, skillSystemPrompt string)
 		systemPrompt = fullSystemPrompt
 		return systemPrompt, finalPrompt
 	}
+	if strings.EqualFold(strings.TrimSpace(provider), "pi") {
+		finalPrompt = stringx.JoinNonEmpty("\n\n---\n\n", requestPrompt, fullSystemPrompt)
+	}
 	// Codex loads skills natively via Skill(name) — only inline the preamble.
 	if strings.EqualFold(provider, "codex") && strings.TrimSpace(preamble) != "" {
 		finalPrompt = requestPrompt + "\n\n---\n\n" + preamble

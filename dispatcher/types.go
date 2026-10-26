@@ -19,6 +19,7 @@ type ProviderConfig struct {
 type ProviderConfigs struct {
 	Claude ProviderConfig
 	Codex  ProviderConfig
+	Pi     ProviderConfig
 }
 
 // DispatchRequest defines one session launch.

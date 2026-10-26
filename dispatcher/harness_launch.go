@@ -16,12 +16,15 @@ type harnessKind string
 const (
 	harnessClaude harnessKind = "claude"
 	harnessCodex  harnessKind = "codex"
+	harnessPi     harnessKind = "pi"
 )
 
 func selectHarness(provider string) (harnessKind, error) {
 	switch stringx.Normalize(provider) {
 	case string(harnessClaude):
 		return harnessClaude, nil
+	case string(harnessPi):
+		return harnessPi, nil
 	case string(harnessCodex):
 		return harnessCodex, nil
 	default:
@@ -34,6 +37,7 @@ type processInput uint8
 const (
 	inputClaudeStreamJSON processInput = iota + 1
 	inputPromptEOF
+	inputPiRPC
 )
 
 // processLaunch keeps command arguments and their stdin protocol together.
@@ -48,6 +52,15 @@ func (d *ProcessDispatcher) planProcessLaunch(harness harnessKind, req DispatchR
 	var plan processLaunch
 	var config ProviderConfig
 	switch harness {
+	case harnessPi:
+		config = d.providerConfigs.Pi
+		plan = processLaunch{binary: "pi", input: inputPiRPC}
+		provider, model, _ := strings.Cut(req.Model, "/")
+		plan.args = []string{"--mode", "rpc", "--provider", provider, "--model", model,
+			"--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files"}
+		if req.ReasoningLevel != "" {
+			plan.args = append(plan.args, "--thinking", req.ReasoningLevel)
+		}
 	case harnessCodex:
 		config = d.providerConfigs.Codex
 		plan = processLaunch{binary: "codex", args: codexBaseArgs(req), input: inputPromptEOF}
@@ -67,6 +80,10 @@ func (d *ProcessDispatcher) planProcessLaunch(harness harnessKind, req DispatchR
 	if path := strings.TrimSpace(config.Path); path != "" {
 		resolved, _ := d.execution.ResolvePath(path)
 		candidate := filepath.Join(resolved, plan.binary)
+		if harness == harnessPi {
+			plan.binary = candidate
+			return plan
+		}
 		if _, err := os.Stat(candidate); err == nil {
 			plan.binary = candidate
 		}

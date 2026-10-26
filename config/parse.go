@@ -74,7 +74,7 @@ func applyDefaultsFromMetadata(config *Config, metadata toml.MetaData, diagnosti
 	if !metadata.IsDefined("routing", "defaults", "provider") {
 		config.Routing.Defaults.Provider = defaultRoutingProvider
 	}
-	if !metadata.IsDefined("routing", "defaults", "model") {
+	if !metadata.IsDefined("routing", "defaults", "model") && stringx.Normalize(config.Routing.Defaults.Provider) != "pi" {
 		config.Routing.Defaults.Model = defaultRoutingModel
 	}
 
@@ -233,7 +233,7 @@ func normalizeParsedValues(config *Config, metadata toml.MetaData, diagnostics *
 			)
 		}
 		config.Routing.Defaults.Provider = defaultRoutingProvider
-	case "claude", "codex":
+	case "claude", "codex", "pi":
 		config.Routing.Defaults.Provider = provider
 	default:
 		appendNormalizedValueDiagnostic(diagnostics, "routing.defaults.provider",
@@ -242,7 +242,7 @@ func normalizeParsedValues(config *Config, metadata toml.MetaData, diagnostics *
 		config.Routing.Defaults.Provider = defaultRoutingProvider
 	}
 
-	if strings.TrimSpace(config.Routing.Defaults.Model) == "" {
+	if strings.TrimSpace(config.Routing.Defaults.Model) == "" && provider != "pi" {
 		if metadata.IsDefined("routing", "defaults", "model") {
 			appendNormalizedValueDiagnostic(diagnostics, "routing.defaults.model",
 				fmt.Sprintf("model not set; using %q", defaultRoutingModel),

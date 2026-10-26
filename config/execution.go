@@ -23,7 +23,7 @@ func Bind(cfg Config, e *execution.Context) (Config, error) {
 		}
 		cfg.Skills.Paths[i] = resolved
 	}
-	for _, provider := range []*ProviderConfig{&cfg.Agents.Claude, &cfg.Agents.Codex} {
+	for _, provider := range []*ProviderConfig{&cfg.Agents.Claude, &cfg.Agents.Codex, &cfg.Agents.Pi} {
 		if provider.Path == "" {
 			continue
 		}

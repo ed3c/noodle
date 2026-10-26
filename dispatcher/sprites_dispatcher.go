@@ -77,6 +77,9 @@ func (d *SpritesDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 	if err != nil {
 		return nil, err
 	}
+	if harness == harnessPi {
+		return nil, fmt.Errorf("Pi RPC unavailable for sprites runtime")
+	}
 	reqRuntime := NormalizeRuntime(req.Runtime)
 	if reqRuntime != "sprites" {
 		return nil, fmt.Errorf("runtime %q not supported by sprites dispatcher", reqRuntime)

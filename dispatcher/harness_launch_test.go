@@ -65,7 +65,7 @@ func readHarnessArgs(t *testing.T, root string) []string {
 }
 
 func TestHarnessRejectionPrecedesSideEffects(t *testing.T) {
-	for _, provider := range []string{"unknown", "pi", " Pi ", "openshell"} {
+	for _, provider := range []string{"unknown", "openshell"} {
 		for _, carrier := range []string{"process", "custom", "sprites"} {
 			t.Run(provider+"/"+carrier, func(t *testing.T) {
 				root := t.TempDir()

@@ -55,6 +55,7 @@ type ProviderConfig struct {
 type AgentsConfig struct {
 	Claude ProviderConfig `toml:"claude"`
 	Codex  ProviderConfig `toml:"codex"`
+	Pi     ProviderConfig `toml:"pi"`
 }
 
 // RuntimeConfig controls the default runtime for spawned cook sessions.

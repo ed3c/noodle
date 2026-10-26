@@ -68,6 +68,11 @@ func (d *ProcessDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 	if err != nil {
 		return nil, err
 	}
+	if harness == harnessPi {
+		if err := d.validatePi(req); err != nil {
+			return nil, err
+		}
+	}
 	if req.RequireGroupExit && runtime.GOOS == "windows" {
 		return nil, fmt.Errorf("worker process-group exit observation unavailable on Windows")
 	}
@@ -108,6 +113,14 @@ func (d *ProcessDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 	}
 
 	launch := d.planProcessLaunch(harness, req, systemPrompt)
+	var pi *piRPC
+	if harness == harnessPi {
+		pi, err = newPiRPC(sessionDir, req.Model, composedPrompt)
+		if err != nil {
+			return nil, err
+		}
+		launch.args = append(launch.args, "--session-dir", filepath.Join(sessionDir, "pi"))
+	}
 	var startup *codexStartup
 	if launch.input == inputPromptEOF {
 		startup, err = newCodexStartup(sessionDir, sessionID, len(composedPrompt))
@@ -116,7 +129,7 @@ func (d *ProcessDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 		}
 	}
 	stderrDone := make(chan struct{})
-	controller, process, err := d.startSessionProcess(ctx, req, launch, composedPrompt, sessionID, sessionDir, stderrPath, stderrDone, startup)
+	controller, process, err := d.startSessionProcess(ctx, req, launch, composedPrompt, sessionID, sessionDir, stderrPath, stderrDone, startup, pi)
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +148,7 @@ func (d *ProcessDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (
 		stderrPath:       stderrPath,
 		stderrDone:       stderrDone,
 		startup:          startup,
+		pi:               pi,
 		requireGroupExit: req.RequireGroupExit,
 	})
 	session.start(ctx)
@@ -196,7 +210,7 @@ func (d *ProcessDispatcher) startSessionProcess(
 	ctx context.Context, req DispatchRequest, launch processLaunch,
 	composedPrompt, sessionID, sessionDir, stderrPath string,
 	stderrDone chan struct{},
-	startup *codexStartup,
+	startup *codexStartup, pi *piRPC,
 ) (*claudeController, *ProcessHandle, error) {
 	cmd, err := d.buildCmd(req, launch)
 	if err != nil {
@@ -228,11 +242,16 @@ func (d *ProcessDispatcher) startSessionProcess(
 		return nil, nil, err
 	}
 
+	if pi != nil {
+		pi.process = process
+	}
 	process.ioWG.Add(1)
 	go func() {
 		defer process.ioWG.Done()
 		defer close(stderrDone)
-		drainToFile(startup.reader(process.Stderr(), true), stderrPath)
+		if err := drainToFile(startup.reader(process.Stderr(), true), stderrPath); err != nil && pi != nil {
+			pi.fail(fmt.Errorf("retain Pi stderr: %w", err))
+		}
 	}()
 
 	if err := WriteProcessMetadata(sessionDir, sessionID, process.PID(), nowUTC()); err != nil {
@@ -259,6 +278,9 @@ func (d *ProcessDispatcher) configureStdin(
 	ctx context.Context, process *ProcessHandle, input processInput, composedPrompt string,
 	startup *codexStartup,
 ) (*claudeController, error) {
+	if input == inputPiRPC {
+		return nil, nil
+	}
 	if input == inputPromptEOF {
 		process.ioWG.Add(1)
 		go func() {
@@ -297,17 +319,18 @@ func (d *ProcessDispatcher) buildCustomRuntimeCmd(req DispatchRequest, runtimeCm
 }
 
 // drainToFile reads from r and writes to the named file.
-func drainToFile(r io.ReadCloser, path string) {
+func drainToFile(r io.ReadCloser, path string) error {
 	if r == nil || strings.TrimSpace(path) == "" {
-		return
+		return nil
 	}
 	defer r.Close()
 	f, err := os.Create(path)
 	if err != nil {
-		return
+		return err
 	}
 	defer f.Close()
-	_, _ = io.Copy(f, r)
+	_, err = io.Copy(f, r)
+	return err
 }
 
 // replaceFlag removes old from args and appends the replacement key-value pair.

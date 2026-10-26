@@ -25,6 +25,7 @@ type processSession struct {
 	stderrPath       string
 	stderrDone       <-chan struct{}
 	startup          *codexStartup
+	pi               *piRPC
 	killMu           sync.Mutex
 	forceKilled      bool
 	killed           chan struct{}
@@ -47,6 +48,7 @@ type processSessionConfig struct {
 	stderrPath       string
 	stderrDone       <-chan struct{}
 	startup          *codexStartup
+	pi               *piRPC
 	requireGroupExit bool
 }
 
@@ -67,6 +69,7 @@ func newProcessSession(cfg processSessionConfig) *processSession {
 		stderrPath:       cfg.stderrPath,
 		stderrDone:       cfg.stderrDone,
 		startup:          cfg.startup,
+		pi:               cfg.pi,
 		joined:           make(chan struct{}),
 		killed:           make(chan struct{}),
 		requireGroupExit: cfg.requireGroupExit,
@@ -113,12 +116,19 @@ func (s *processSession) start(ctx context.Context) {
 		})
 	}
 
+	if s.pi != nil {
+		s.pi.start(ctx, s.process)
+	}
 	s.wg.Add(2)
 
 	go func() {
 		defer s.wg.Done()
 		defer s.closeStreamDone()
 		defer s.process.Stdout().Close()
+		if s.pi != nil {
+			s.processPiStream()
+			return
+		}
 		interceptor := &canonicalLineInterceptor{onLine: func(line []byte) {
 			s.consumeCanonicalLine(line, s.processHook)
 		}}
@@ -140,7 +150,7 @@ func (s *processSession) processHook(ce parse.CanonicalEvent) {
 	if s.controller != nil {
 		s.controller.NotifyEvent(string(ce.Type))
 	}
-	if s.requireGroupExit && s.controller == nil && (ce.Type == parse.EventComplete || ce.Type == parse.EventResult) {
+	if s.pi == nil && s.requireGroupExit && s.controller == nil && (ce.Type == parse.EventComplete || ce.Type == parse.EventResult) {
 		s.completionExit.Do(func() {
 			go func() {
 				timer := time.NewTimer(2 * time.Second)
@@ -202,6 +212,16 @@ wait:
 	killed := s.forceKilled
 	s.killMu.Unlock()
 	exitCode, _ := s.process.ExitCode()
+	if s.pi != nil {
+		outcome := s.pi.outcome(exitCode, ctx.Err() != nil, killed)
+		s.doneOnce.Do(func() {
+			s.mu.Lock()
+			s.status, s.outcome = outcome.Status.String(), outcome
+			s.mu.Unlock()
+			close(s.done)
+		})
+		return
+	}
 	if killed {
 		<-s.streamDone
 		s.trackerMu.Lock()
