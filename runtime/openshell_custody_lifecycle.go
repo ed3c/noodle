@@ -22,7 +22,7 @@ func (c *OpenShellCustody) Create(ctx context.Context, task OpenShellTask, spec 
 	if task.OrderID == "" || task.AttemptID == "" || task.SessionID == "" || spec == nil {
 		return "", fmt.Errorf("openshell create task/spec missing")
 	}
-	if err := c.available(); err != nil {
+	if err := c.mutable(); err != nil {
 		return "", err
 	}
 	for _, r := range c.state.Records {
@@ -139,6 +139,9 @@ func (c *OpenShellCustody) ReadSandbox(ctx context.Context, ref OpenShellSandbox
 func (c *OpenShellCustody) StopSandbox(ctx context.Context, ref OpenShellSandboxRef) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if err := c.mutable(); err != nil {
+		return err
+	}
 	r, err := c.owned(ref)
 	if err != nil {
 		return err
@@ -234,6 +237,9 @@ func (c *OpenShellCustody) StartOwned(ctx context.Context, ref OpenShellSandboxR
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if err := c.mutable(); err != nil {
+		return nil, err
+	}
 	r, err := c.owned(ref)
 	if err != nil {
 		return nil, err

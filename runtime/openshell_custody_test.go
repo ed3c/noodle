@@ -33,7 +33,7 @@ import (
 type custodyGateway struct {
 	mu                                          sync.Mutex
 	sandboxes                                   map[string]*pb.Sandbox
-	creates, stops, execs, lists                int
+	creates, stops, execs, lists, gets          int
 	pageSize                                    int
 	createErr, stopErr, execErr                 error
 	afterCreate, afterStop, afterList, afterGet func()
@@ -95,6 +95,7 @@ func custodyServer(t *testing.T) (*custodyGateway, *openShellNativeServer) {
 	server.get = func(_ context.Context, r *pb.GetSandboxRequest) (*pb.SandboxResponse, error) {
 		g.mu.Lock()
 		defer g.mu.Unlock()
+		g.gets++
 		if r.WorkspaceScope.GetWorkspace() != "owned-workspace" {
 			return nil, status.Error(codes.InvalidArgument, "workspace changed")
 		}

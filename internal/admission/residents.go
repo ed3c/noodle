@@ -42,17 +42,20 @@ type Resident struct {
 	Released        []string   `json:"released_contexts"`
 	Error           string     `json:"error,omitempty"`
 	ForceAfterGrace bool       `json:"force_after_grace,omitempty"`
+	GuardID         string     `json:"guard_id"`
 	StopRequested   string     `json:"stop_requested,omitempty"`
 	ForceRequested  string     `json:"force_requested,omitempty"`
 	History         []Resident `json:"history,omitempty"`
 	Errors          []string   `json:"errors,omitempty"`
 }
 type residentChild struct {
-	mu      sync.Mutex
-	reaped  bool
-	process *os.Process
-	permit  *Permit
-	done    chan struct{}
+	mu       sync.Mutex
+	reaped   bool
+	process  *os.Process
+	permit   *Permit
+	done     chan struct{}
+	guard    *ResidentGuard
+	checking bool
 }
 
 // Residents belongs to the existing Host. Only its own child handles can be stopped.
@@ -229,6 +232,10 @@ func residentIdentity(spec ResidentSpec, contextID string) (string, string, erro
 	return key, hex.EncodeToString(sum[:]), nil
 }
 func (r *Residents) Acquire(spec ResidentSpec, contextID string, budget *Budget) (Resident, error) {
+	return r.acquire(spec, contextID, budget, nil)
+}
+
+func (r *Residents) acquire(spec ResidentSpec, contextID string, budget *Budget, guard *ResidentGuard) (Resident, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.failure != nil {
@@ -237,6 +244,32 @@ func (r *Residents) Acquire(spec ResidentSpec, contextID string, budget *Budget)
 	key, fingerprint, err := residentIdentity(spec, contextID)
 	if err != nil {
 		return Resident{}, err
+	}
+	guardID := ""
+	if guard != nil {
+		guardID = guard.id
+		if spec.ForceAfterGrace {
+			return Resident{}, errors.New("guarded resident force_after_grace unsupported")
+		}
+		fingerprint = guardedFingerprint(fingerprint, guardID)
+	}
+	for _, old := range r.records {
+		if old.Name == spec.Name && old.Sharing != spec.Sharing && (old.GuardID != "" || guardID != "") {
+			return cloneResident(old), errors.New("guarded resident sharing conflicts with original service identity")
+		}
+	}
+	if old := r.records[key]; old != nil {
+		if old.GuardID != guardID {
+			return cloneResident(old), errors.New("resident release guard identity conflicts with original owner")
+		}
+		if child := r.children[key]; child != nil {
+			if child.checking {
+				return cloneResident(old), errors.New("resident release guard check in progress")
+			}
+			if child.guard != guard {
+				return cloneResident(old), errors.New("resident release guard callback belongs to original owner")
+			}
+		}
 	}
 	if old := r.records[key]; old != nil && slices.Contains(old.Released, contextID) {
 		return cloneResident(old), errors.New("resident lease already released; use original context lifecycle")
@@ -263,7 +296,7 @@ func (r *Residents) Acquire(spec ResidentSpec, contextID string, budget *Budget)
 	if err != nil {
 		return Resident{}, err
 	}
-	v := &Resident{ID: key, Name: spec.Name, Fingerprint: fingerprint, Sharing: spec.Sharing, State: "starting", Contexts: []string{contextID}, ForceAfterGrace: spec.ForceAfterGrace}
+	v := &Resident{ID: key, Name: spec.Name, Fingerprint: fingerprint, Sharing: spec.Sharing, State: "starting", Contexts: []string{contextID}, ForceAfterGrace: spec.ForceAfterGrace, GuardID: guardID}
 	if old := r.records[key]; old != nil {
 		v.Released = append([]string{}, old.Released...)
 		previous := cloneResident(old)
@@ -308,7 +341,7 @@ func (r *Residents) Acquire(spec ResidentSpec, contextID string, budget *Budget)
 		v.Error = "process start identity unavailable: " + readErr.Error()
 	}
 	v.State = "running"
-	child := &residentChild{process: process, permit: permit, done: make(chan struct{})}
+	child := &residentChild{process: process, permit: permit, done: make(chan struct{}), guard: guard}
 	r.children[key] = child
 	saveErr := r.persist()
 	go func() {
@@ -363,6 +396,15 @@ func (r *Residents) Release(id, contextID string) (Resident, error) {
 	}
 	if !slices.Contains(v.Contexts, contextID) {
 		return cloneResident(v), nil
+	}
+	if child := r.children[id]; child != nil && child.checking {
+		return cloneResident(v), errors.New("resident release guard check in progress")
+	}
+	if len(v.Contexts) == 1 && v.State == "running" && v.GuardID != "" {
+		if err := r.checkRelease(v); err != nil {
+			v.Error = "resident release guard refused: " + err.Error()
+			return cloneResident(v), errors.Join(err, r.persist())
+		}
 	}
 	v.Released = append(v.Released, contextID)
 	v.Contexts = slices.DeleteFunc(v.Contexts, func(x string) bool { return x == contextID })

@@ -82,15 +82,16 @@ type OpenShellCustodyState struct {
 // OpenShellCustody serializes local admission and native lifecycle operations.
 // Close releases only local streams/lock, and never stops remote compute.
 type OpenShellCustody struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	mu     sync.Mutex
-	state  OpenShellCustodyState
-	lock   *lockfile.Lock
-	conn   *grpc.ClientConn
-	client pb.OpenShellClient
-	fault  error
-	closed bool
+	ctx      context.Context
+	cancel   context.CancelFunc
+	mu       sync.Mutex
+	state    OpenShellCustodyState
+	lock     *lockfile.Lock
+	conn     *grpc.ClientConn
+	client   pb.OpenShellClient
+	fault    error
+	closed   bool
+	quiesced bool
 }
 
 // OpenOpenShellCustody returns a non-nil owner on an inventory/binding block.
