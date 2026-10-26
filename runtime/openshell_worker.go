@@ -56,15 +56,19 @@ type OpenShellSandboxStopper interface {
 	StopSandbox(context.Context, OpenShellSandboxRef) error
 }
 
-// OpenShellExecResult deliberately has no fabricated native exec ID. A local
-// launch ID cannot fill that gap in OpenShell's CLI protocol. ExitObserved is
-// false after a lost response, even when the local CLI returned an exit code.
+// OpenShellExecResult keeps native exit separate from local transport/CLI
+// evidence. RequestID is a launch admission fence, not a reattach or exec ID.
+// ExitObserved is false after a lost response, even when the local CLI exited.
 type OpenShellExecResult struct {
-	CLIExited    bool
-	CLIExitCode  int
-	ExitObserved bool
-	ExitCode     int
-	Reason       string
+	RequestID      string
+	StartAttempted bool // submission is possible; not proof of remote launch
+	CLIExited      bool
+	CLIExitCode    int
+	ExitObserved   bool
+	ExitCode       int
+	Reason         string
+	InputError     string
+	StreamError    string // retained even if a native exit was already observed
 }
 
 // OpenShellWorkerRecord keeps model, exec and VM evidence independent. Boundary
