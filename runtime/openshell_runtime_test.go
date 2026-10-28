@@ -294,8 +294,9 @@ func waitProgressFixture(t *testing.T, root, name string) {
 
 func TestOpenShellRuntimeStopPreservesProgressAfterBothNativeExits(t *testing.T) {
 	r, f, target := openShellRuntimeFixture(t)
+	managedMarker(t, f.root, "completion-observation")
 	managedMarker(t, f.root, "progress-await-stop")
-	h, err := r.Dispatch(t.Context(), DispatchRequest{Name: "interrupted", Provider: "codex", Model: "fixture", Prompt: "produce partial result", SystemPrompt: "test", Runtime: "openshell", WorktreePath: target, AllowPrimaryCheckout: true})
+	h, err := r.Dispatch(t.Context(), DispatchRequest{Name: "interrupted", EnvVars: map[string]string{"NOODLE_ORDER_ID": "interrupted", "NOODLE_STAGE_INDEX": "0"}, Provider: "codex", Model: "fixture", Prompt: "produce partial result", SystemPrompt: "test", Runtime: "openshell", WorktreePath: target, AllowPrimaryCheckout: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,6 +357,28 @@ func TestOpenShellRuntimeStopPreservesProgressAfterBothNativeExits(t *testing.T)
 	sessionData, err := os.ReadFile(filepath.Join(session.dir, "guest-session", "native.jsonl"))
 	if err != nil || string(sessionData) != "native session evidence\n" {
 		t.Fatal("guest session not retained")
+	}
+	writeReadbackJSON(t, filepath.Join(session.dir, "meta.json"), map[string]any{"session_id": h.ID(), "provider": "codex", "model": "fixture", "runtime": "openshell", "status": "exited", "alive": false})
+	binding := CompletedSessionBinding{OrderID: "interrupted", SessionID: h.ID(), Provider: "codex", Model: "fixture", WorktreePath: target}
+	observed, err := r.ReadSavedProgress(t.Context(), binding)
+	if err != nil || observed.Status != "saved" || observed.ProgressHead != receipt.ProgressHead || observed.HarnessExitCode != 143 || observed.OutcomeStatus != StatusCancelled {
+		t.Fatalf("saved progress readback: %+v %v", observed, err)
+	}
+	if _, err := r.ReadCompletedSession(t.Context(), binding); err == nil {
+		t.Fatal("interrupted progress accepted as successful candidate")
+	}
+	session.custody.mu.Lock()
+	originalResult := session.custody.state.Records[0].ProgressStop.Result
+	session.custody.state.Records[0].ProgressStop.Result.ExitObserved = false
+	session.custody.mu.Unlock()
+	if _, err := r.ReadSavedProgress(t.Context(), binding); err == nil {
+		t.Fatal("original unknown control result replaced by saved JSON")
+	}
+	session.custody.mu.Lock()
+	session.custody.state.Records[0].ProgressStop.Result = originalResult
+	session.custody.mu.Unlock()
+	if _, err := r.ReadSavedProgress(t.Context(), binding); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := f.owner.Release("a"); err != nil {
 		t.Fatal(err)

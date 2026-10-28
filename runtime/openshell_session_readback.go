@@ -88,7 +88,19 @@ func (r *OpenShellRuntime) ReadCompletedSession(ctx context.Context, b Completed
 		return r.config.Gateway.ObserveCompleted(ctx, r.config.ContextID, identity)
 	})
 }
-func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b CompletedSessionBinding, observe func(context.Context, OpenShellIdentity) (OpenShellCompletedObservation, error)) (result CompletedSessionReadback, err error) {
+func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b CompletedSessionBinding, observe func(context.Context, OpenShellIdentity) (OpenShellCompletedObservation, error)) (CompletedSessionReadback, error) {
+	result, err := r.readSettledSession(ctx, b, observe, false)
+	return result.completed, err
+}
+
+type settledSessionEvidence struct {
+	completed       CompletedSessionReadback
+	progressHead    string
+	harnessExitCode int
+	status          SessionStatus
+}
+
+func (r *OpenShellRuntime) readSettledSession(ctx context.Context, b CompletedSessionBinding, observe func(context.Context, OpenShellIdentity) (OpenShellCompletedObservation, error), progress bool) (result settledSessionEvidence, err error) {
 	if b.SessionID == "" || filepath.Base(b.SessionID) != b.SessionID || b.SessionID == "." || b.SessionID == ".." || b.OrderID == "" || b.Provider == "" || b.Model == "" || b.StageIndex < 0 || b.RetryCount < 0 || !filepath.IsAbs(b.WorktreePath) {
 		return result, fmt.Errorf("session readback binding incomplete")
 	}
@@ -120,8 +132,17 @@ func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b Completed
 	if err = read("openshell-dispatch.json", &receipt); err != nil {
 		return result, err
 	}
-	if receipt.ProfileSHA256 != profileSHA || receipt.Version != 1 || receipt.ContextID != r.config.ContextID || receipt.OrderID != b.OrderID || receipt.SessionID != b.SessionID || receipt.Target != b.WorktreePath || receipt.AttemptID == "" || receipt.Phase != "settled" || receipt.Error != "" || receipt.Outcome.Status != StatusCompleted || receipt.Outcome.ExitCode != 0 || receipt.Worker == nil || receipt.CandidateHead == "" || receipt.Baseline == nil {
+	if receipt.ProfileSHA256 != profileSHA || receipt.Version != 1 || receipt.ContextID != r.config.ContextID || receipt.OrderID != b.OrderID || receipt.SessionID != b.SessionID || receipt.Target != b.WorktreePath || receipt.AttemptID == "" || receipt.Phase != "settled" || receipt.Error != "" || receipt.Worker == nil || receipt.Baseline == nil {
 		return result, fmt.Errorf("original OpenShell dispatch is not a bound successful settled result")
+	}
+	publishedHead := receipt.CandidateHead
+	if progress {
+		if (receipt.Outcome.Status != StatusCancelled && receipt.Outcome.Status != StatusFailed) || receipt.ProgressHead == "" || receipt.CandidateHead != "" {
+			return result, fmt.Errorf("original dispatch is not saved interrupted progress")
+		}
+		publishedHead = receipt.ProgressHead
+	} else if receipt.Outcome.Status != StatusCompleted || receipt.Outcome.ExitCode != 0 || receipt.CandidateHead == "" || receipt.ProgressHead != "" {
+		return result, fmt.Errorf("original dispatch is not a completed candidate")
 	}
 	var spawn struct {
 		InstructionBundle *dispatcher.InstructionBundleRef `json:"instruction_bundle"`
@@ -174,14 +195,14 @@ func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b Completed
 	if err = read("delivery/publish.json", &publication); err != nil {
 		return result, err
 	}
-	if publication.Phase != "published" || publication.Parent != receipt.Baseline.Head || publication.ObservedHead != receipt.CandidateHead || publication.Error != "" {
+	if publication.Phase != "published" || publication.Parent != receipt.Baseline.Head || publication.ObservedHead != publishedHead || publication.Error != "" {
 		return result, fmt.Errorf("OpenShell candidate publication differs")
 	}
 	head, err := sessionReadbackHead(ctx, b.WorktreePath)
 	if err != nil {
 		return result, err
 	}
-	if head != receipt.CandidateHead {
+	if head != publishedHead {
 		return result, fmt.Errorf("OpenShell candidate HEAD drifted")
 	}
 	identity := receipt.Worker.Identity
@@ -210,7 +231,11 @@ func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b Completed
 	if count != 1 {
 		return result, fmt.Errorf("original OpenShell completion source missing or ambiguous")
 	}
-	if err = validateCompletedRecord(original, identity); err != nil {
+	validate := validateCompletedRecord
+	if progress {
+		validate = validateProgressRecord
+	}
+	if err = validate(original, identity); err != nil {
 		return result, err
 	}
 	sources["native_custody"] = custodyRef
@@ -228,8 +253,19 @@ func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b Completed
 	if observed.CommandSHA256 != commandSHA256 {
 		return result, fmt.Errorf("OpenShell native command differs from original owner")
 	}
-	progressRef, err := readSavedProgress(dir, receipt, original.Exec.Command, "")
-	if err != nil || receipt.Progress.ExitCode != 0 {
+	controlID, controlSHA := "", ""
+	if original.ProgressStop != nil {
+		controlID = original.ProgressStop.Command.RequestID
+		controlSHA, err = OpenShellCommandSHA256(original.ProgressStop.Command)
+		if err != nil {
+			return result, err
+		}
+	}
+	if observed.ProgressStopRequestID != controlID || observed.ProgressStopCommandSHA256 != controlSHA {
+		return result, fmt.Errorf("OpenShell original progress control differs")
+	}
+	progressRef, err := readSavedProgress(dir, receipt, original.Exec.Command, controlID)
+	if err != nil || (!progress && receipt.Progress.ExitCode != 0) || (err == nil && receipt.Progress.ExitCode != receipt.Outcome.ExitCode) {
 		return result, errors.Join(err, fmt.Errorf("OpenShell saved harness progress is not successful"))
 	}
 	sources["progress_receipt"] = progressRef
@@ -260,5 +296,6 @@ func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b Completed
 	if err = VerifyOpenShellProfile(r.config.Profile); err != nil {
 		return result, err
 	}
-	return CompletedSessionReadback{ProfileSHA256: profileSHA, CommandSHA256: commandSHA256, Instructions: instructions, NativeAttemptID: receipt.AttemptID, CandidateHead: head, NativeExecExitCode: observed.ExecExitCode, NativePhase: observed.Phase, StopAcknowledged: observed.StopAcknowledged, MainProcessInstanceID: observed.MainProcessInstanceID, Sources: sources}, nil
+	completed := CompletedSessionReadback{ProfileSHA256: profileSHA, CommandSHA256: commandSHA256, Instructions: instructions, NativeAttemptID: receipt.AttemptID, CandidateHead: receipt.CandidateHead, NativeExecExitCode: observed.ExecExitCode, NativePhase: observed.Phase, StopAcknowledged: observed.StopAcknowledged, MainProcessInstanceID: observed.MainProcessInstanceID, Sources: sources}
+	return settledSessionEvidence{completed: completed, progressHead: receipt.ProgressHead, harnessExitCode: receipt.Progress.ExitCode, status: receipt.Outcome.Status}, nil
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -21,16 +22,18 @@ const openShellObservationTimeout = 5 * time.Second
 // Task.AttemptID nor ExecAttemptID is a canonical scheduling-attempt identity.
 // The caller must separately bind its canonical attempt and published artifacts.
 type OpenShellCompletedObservation struct {
-	CommandSHA256         string `json:"command_sha256"`
-	Identity              OpenShellIdentity
-	Task                  OpenShellTask
-	ExecAttemptID         string
-	ExecRequestID         string
-	ExecExitCode          int
-	MainProcessInstanceID string
-	Phase                 string
-	CreateAcknowledged    bool
-	StopAcknowledged      bool
+	CommandSHA256             string `json:"command_sha256"`
+	ProgressStopCommandSHA256 string `json:"progress_stop_command_sha256"`
+	ProgressStopRequestID     string `json:"progress_stop_request_id"`
+	Identity                  OpenShellIdentity
+	Task                      OpenShellTask
+	ExecAttemptID             string
+	ExecRequestID             string
+	ExecExitCode              int
+	MainProcessInstanceID     string
+	Phase                     string
+	CreateAcknowledged        bool
+	StopAcknowledged          bool
 }
 
 // OpenShellCommandSHA256 binds every command field without exposing argv or env.
@@ -47,6 +50,16 @@ func OpenShellCommandSHA256(command OpenShellCommand) (string, error) {
 // originally owned worker. It never initializes, reconciles, saves, blocks or
 // adopts evidence. Read errors leave both memory and the durable ledger intact.
 func (c *OpenShellCustody) ObserveCompleted(ctx context.Context, expected OpenShellIdentity) (OpenShellCompletedObservation, error) {
+	return c.observeSettled(ctx, expected, false)
+}
+
+// ObserveSavedProgress proves original native transport and VM completion. It
+// does not convert the interrupted harness result into a successful candidate.
+func (c *OpenShellCustody) ObserveSavedProgress(ctx context.Context, expected OpenShellIdentity) (OpenShellCompletedObservation, error) {
+	return c.observeSettled(ctx, expected, true)
+}
+
+func (c *OpenShellCustody) observeSettled(ctx context.Context, expected OpenShellIdentity, progress bool) (OpenShellCompletedObservation, error) {
 	if !c.mu.TryLock() {
 		return OpenShellCompletedObservation{}, fmt.Errorf("openshell custody operation in progress")
 	}
@@ -81,7 +94,11 @@ func (c *OpenShellCustody) ObserveCompleted(ctx context.Context, expected OpenSh
 	if count != 1 {
 		return OpenShellCompletedObservation{}, fmt.Errorf("openshell original completion identity is missing or ambiguous")
 	}
-	if err := validateCompletedRecord(record, expected); err != nil {
+	validate := validateCompletedRecord
+	if progress {
+		validate = validateProgressRecord
+	}
+	if err := validate(record, expected); err != nil {
 		return OpenShellCompletedObservation{}, err
 	}
 	response, err := c.client.GetSandbox(ctx, &pb.GetSandboxRequest{Name: record.Name, WorkspaceScope: c.scope()})
@@ -119,10 +136,47 @@ func (c *OpenShellCustody) ObserveCompleted(ctx context.Context, expected OpenSh
 	if err != nil {
 		return OpenShellCompletedObservation{}, err
 	}
-	return OpenShellCompletedObservation{CommandSHA256: commandSHA256, Identity: record.Worker.Identity, Task: record.Task, ExecAttemptID: record.Exec.AttemptID, ExecRequestID: record.Exec.Command.RequestID, ExecExitCode: record.Exec.Result.ExitCode, MainProcessInstanceID: record.MainProcessInstanceID, Phase: "Stopped", CreateAcknowledged: true, StopAcknowledged: true}, nil
+	controlSHA, controlID := "", ""
+	if record.ProgressStop != nil {
+		controlID = record.ProgressStop.Command.RequestID
+		controlSHA, err = OpenShellCommandSHA256(record.ProgressStop.Command)
+		if err != nil {
+			return OpenShellCompletedObservation{}, err
+		}
+	}
+	return OpenShellCompletedObservation{ProgressStopCommandSHA256: controlSHA, ProgressStopRequestID: controlID, CommandSHA256: commandSHA256, Identity: record.Worker.Identity, Task: record.Task, ExecAttemptID: record.Exec.AttemptID, ExecRequestID: record.Exec.Command.RequestID, ExecExitCode: record.Exec.Result.ExitCode, MainProcessInstanceID: record.MainProcessInstanceID, Phase: "Stopped", CreateAcknowledged: true, StopAcknowledged: true}, nil
 }
 
 func validateCompletedRecord(record OpenShellCustodyRecord, expected OpenShellIdentity) error {
+	if record.ProgressStop != nil {
+		return fmt.Errorf("openshell completion has a progress-stop operation; interruption readback required")
+	}
+	return validateStoppedRecord(record, expected)
+}
+
+func validateProgressRecord(record OpenShellCustodyRecord, expected OpenShellIdentity) error {
+	if err := validateStoppedRecord(record, expected); err != nil {
+		return err
+	}
+	if _, _, err := unwrapOpenShellProgress(record.Exec.Command); err != nil {
+		return err
+	}
+	if record.ProgressStop == nil {
+		return nil
+	}
+	control := record.ProgressStop
+	command, err := progressStopCommand(record.Exec.Command, control.Command.RequestID)
+	if err != nil || !reflect.DeepEqual(command, control.Command) || control.AttemptID != record.Exec.AttemptID+"/progress-stop" {
+		return fmt.Errorf("original progress-stop command differs")
+	}
+	result := control.Result
+	if result.RequestID != control.Command.RequestID || !result.StartAttempted || !result.ExitObserved || result.ExitCode != 0 || result.InputError != "" || result.StreamError != "" {
+		return fmt.Errorf("original progress-stop completion is unresolved")
+	}
+	return nil
+}
+
+func validateStoppedRecord(record OpenShellCustodyRecord, expected OpenShellIdentity) error {
 	for _, value := range []string{expected.OrderID, expected.AttemptID, expected.SessionID, expected.Sandbox.Gateway, expected.Sandbox.Workspace, expected.Sandbox.SandboxID, expected.SandboxName, expected.ConfigSource} {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("openshell completion identity is incomplete")
@@ -136,9 +190,6 @@ func validateCompletedRecord(record OpenShellCustodyRecord, expected OpenShellId
 	}
 	if record.Exec == nil || record.Exec.AttemptID == "" || record.Exec.Command.RequestID == "" {
 		return fmt.Errorf("openshell completion original exec evidence is unavailable")
-	}
-	if record.ProgressStop != nil {
-		return fmt.Errorf("openshell completion has a progress-stop operation; interruption readback required")
 	}
 	exec := record.Exec.Result
 	if !exec.StartAttempted || !exec.ExitObserved || exec.ExitCode != 0 || exec.RequestID != record.Exec.Command.RequestID || exec.InputError != "" || exec.StreamError != "" {
@@ -157,6 +208,12 @@ func validateCompletedRecord(record OpenShellCustodyRecord, expected OpenShellId
 // lease. It releases the gateway mutex across the bounded native read, then
 // rechecks that original generation and lease without acquiring or renewing it.
 func (o *OpenShellGateway) ObserveCompleted(ctx context.Context, contextID string, expected OpenShellIdentity) (OpenShellCompletedObservation, error) {
+	return o.observeSettled(ctx, contextID, expected, false)
+}
+func (o *OpenShellGateway) ObserveSavedProgress(ctx context.Context, contextID string, expected OpenShellIdentity) (OpenShellCompletedObservation, error) {
+	return o.observeSettled(ctx, contextID, expected, true)
+}
+func (o *OpenShellGateway) observeSettled(ctx context.Context, contextID string, expected OpenShellIdentity, progress bool) (OpenShellCompletedObservation, error) {
 	if err := ctx.Err(); err != nil {
 		return OpenShellCompletedObservation{}, err
 	}
@@ -170,7 +227,7 @@ func (o *OpenShellGateway) ObserveCompleted(ctx context.Context, contextID strin
 	}
 	ctx, cancel := context.WithTimeout(ctx, openShellObservationTimeout)
 	defer cancel()
-	observed, err := custody.ObserveCompleted(ctx, expected)
+	observed, err := custody.observeSettled(ctx, expected, progress)
 	if err != nil {
 		return OpenShellCompletedObservation{}, err
 	}
