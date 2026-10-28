@@ -23,7 +23,7 @@ func StaticPreview(source string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("HTML preview parse failed: %w", err)
 	}
-	allowed := " html head body title meta style div span p br hr section article main header footer aside h1 h2 h3 h4 h5 h6 ul ol li dl dt dd table thead tbody tfoot tr th td caption colgroup col pre code b strong i em small sub sup blockquote figure figcaption svg g defs path rect circle ellipse line polyline polygon text tspan marker pattern clippath mask lineargradient radialgradient stop "
+	allowed := " html head body title meta style div span p br hr section article main header footer aside h1 h2 h3 h4 h5 h6 ul ol li dl dt dd table thead tbody tfoot tr th td caption colgroup col pre code b strong i em small sub sup blockquote figure figcaption svg desc g defs path rect circle ellipse line polyline polygon text tspan marker pattern clippath mask lineargradient radialgradient stop "
 	var head *html.Node
 	count := 0
 	var visit func(*html.Node) error

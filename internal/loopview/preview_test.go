@@ -13,11 +13,22 @@ func TestStaticPreviewRejectsActiveDocuments(t *testing.T) {
 		`<iframe srcdoc="hello"></iframe>`, `<svg><foreignObject><p>x</p></foreignObject></svg>`,
 		`<svg><animate attributeName="href" values="https://evil.test"/></svg>`,
 		`<svg><use href="#x"/></svg>`, `<img src="https://evil.test">`,
+		`<svg><desc><script>alert(1)</script></desc></svg>`,
 		`<form action="/api/control"></form>`, strings.Repeat("x", MaxPreviewBytes+1),
 	} {
 		if _, err := StaticPreview(source); err == nil {
 			t.Fatalf("active/oversized document accepted: %.100s", source)
 		}
+	}
+}
+
+func TestStaticPreviewPreservesAccessibleSVGDescription(t *testing.T) {
+	result, err := StaticPreview(`<svg role="img" aria-labelledby="title description"><title id="title">Card geometry</title><desc id="description">Measured container and three regions.</desc><rect width="384" height="246"/></svg>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, `aria-labelledby="title description"`) || !strings.Contains(result, `<desc id="description">Measured container and three regions.</desc>`) {
+		t.Fatalf("preview lost accessible drawing description: %s", result)
 	}
 }
 
