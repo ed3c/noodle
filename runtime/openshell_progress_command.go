@@ -14,7 +14,7 @@ type openShellProgressBinding struct{ Binary, Directory, SessionID, CommandSHA25
 
 func progressDirectory(session string) string {
 	sum := sha256.Sum256([]byte(session))
-	return "/tmp/noodle-progress-" + hex.EncodeToString(sum[:12])
+	return "/sandbox/noodle-progress-" + hex.EncodeToString(sum[:12])
 }
 
 func wrapOpenShellProgress(command OpenShellCommand, binary, session, token string) (OpenShellCommand, error) {

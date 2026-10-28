@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +49,11 @@ func TestOpenShellTransferChild(t *testing.T) {
 		return
 	}
 	source, dest := args[len(args)-2], args[len(args)-1]
+	// The native CLI only downloads from its sandbox workspace.
+	if !strings.HasPrefix(source, "/sandbox/") || path.Clean(source) != source {
+		fmt.Fprintln(os.Stderr, "download source is outside the sandbox workspace (/sandbox)")
+		os.Exit(1)
+	}
 	var content []byte
 	if filepath.Base(source) == "result.json" {
 		data, err := os.ReadFile(os.Getenv("NOODLE_PROGRESS_FIXTURE_CUSTODY"))
