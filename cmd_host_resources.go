@@ -55,5 +55,5 @@ func (h *noodleHost) resources() any {
 		shutdown["pending_finalizations"] = h.shutdown.pending
 		shutdown["diagnostic"] = h.shutdown.diagnostic
 	}
-	return map[string]any{"shutdown": shutdown, "residents": residents, "schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot(), "warning_grants": h.budget.WarningGrants()}
+	return map[string]any{"shutdown": shutdown, "residents": residents, "schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "binary_sha256": h.binarySHA, "host_dir": h.dir, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot(), "warning_grants": h.budget.WarningGrants()}
 }

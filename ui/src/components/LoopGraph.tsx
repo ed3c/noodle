@@ -754,6 +754,7 @@ export function LoopGraphPanel() {
         <div>
           <p className="lv-eyebrow">NOODLE · 唯讀來源與交接</p>
           <h1>LoopManager</h1>
+          <a href="/contexts">固定組合與任務控制</a>
           <p>從原來源，讀取每一次具證據的交接。</p>
           <p className="lg-small">
             來源：Host 已登記的唯讀投影；每 3 秒讀回。Snapshot 與 live Owner 狀態、驗收分開。

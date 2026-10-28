@@ -13,13 +13,13 @@ import (
 	"github.com/poteto/noodle/server"
 )
 
-func startHostWeb(dir string, observe func(context.Context, *loopview.View) error) (*http.Server, string, <-chan error, error) {
+func startHostWeb(dir string, identity contextOwnerIdentity, observe func(context.Context, *loopview.View) error) (*http.Server, string, <-chan error, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, "", nil, err
 	}
 	authority := listener.Addr().String()
-	views := server.LoopViewsHandler(dir, uiClientFS(), observe)
+	views := contextControlsHandler(dir, identity, server.LoopViewsHandler(dir, uiClientFS(), observe), runContextOwner)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if r.Host != authority || (origin != "" && origin != "http://"+authority) {

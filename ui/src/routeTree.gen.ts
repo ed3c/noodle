@@ -14,6 +14,7 @@ import { Route as ReviewsRouteImport } from './routes/reviews'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as LoopsRouteImport } from './routes/loops'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as ContextsRouteImport } from './routes/contexts'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ActorIdRouteImport } from './routes/actor.$id'
 
@@ -42,6 +43,11 @@ const DashboardRoute = DashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ContextsRoute = ContextsRouteImport.update({
+  id: '/contexts',
+  path: '/contexts',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -55,6 +61,7 @@ const ActorIdRoute = ActorIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/contexts': typeof ContextsRoute
   '/dashboard': typeof DashboardRoute
   '/loops': typeof LoopsRoute
   '/onboarding': typeof OnboardingRoute
@@ -64,6 +71,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/contexts': typeof ContextsRoute
   '/dashboard': typeof DashboardRoute
   '/loops': typeof LoopsRoute
   '/onboarding': typeof OnboardingRoute
@@ -74,6 +82,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/contexts': typeof ContextsRoute
   '/dashboard': typeof DashboardRoute
   '/loops': typeof LoopsRoute
   '/onboarding': typeof OnboardingRoute
@@ -85,6 +94,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/contexts'
     | '/dashboard'
     | '/loops'
     | '/onboarding'
@@ -94,6 +104,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/contexts'
     | '/dashboard'
     | '/loops'
     | '/onboarding'
@@ -103,6 +114,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/contexts'
     | '/dashboard'
     | '/loops'
     | '/onboarding'
@@ -113,6 +125,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ContextsRoute: typeof ContextsRoute
   DashboardRoute: typeof DashboardRoute
   LoopsRoute: typeof LoopsRoute
   OnboardingRoute: typeof OnboardingRoute
@@ -158,6 +171,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/contexts': {
+      id: '/contexts'
+      path: '/contexts'
+      fullPath: '/contexts'
+      preLoaderRoute: typeof ContextsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -177,6 +197,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ContextsRoute: ContextsRoute,
   DashboardRoute: DashboardRoute,
   LoopsRoute: LoopsRoute,
   OnboardingRoute: OnboardingRoute,

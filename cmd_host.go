@@ -61,26 +61,27 @@ type hostResponse struct {
 }
 
 type hostRequest struct {
-	ReadbackOrderID   string                             `json:"readback_order_id"`
-	ReadbackSessionID string                             `json:"readback_session_id"`
-	ReadbackRequest   loopruntime.SessionReadbackFileRef `json:"readback_request"`
-	Operation         string                             `json:"operation"`
-	WarningOrderID    string                             `json:"warning_order_id"`
-	ProjectDir        string                             `json:"project_dir"`
-	ContextID         string                             `json:"context_id"`
-	InstanceID        string                             `json:"instance_id"`
-	ConfigPath        string                             `json:"config_path"`
-	ConfigSHA256      string                             `json:"config_sha256"`
-	Mode              string                             `json:"mode"`
-	Environment       []string                           `json:"environment,omitempty"`
-	BinarySHA256      string                             `json:"binary_sha256"`
-	RequestID         string                             `json:"request_id"`
-	ResidentSpec      *admission.ResidentSpec            `json:"resident_spec,omitempty"`
-	ResidentID        string                             `json:"resident_id,omitempty"`
-	Apply             bool                               `json:"apply,omitempty"`
-	CleanupCompleted  bool                               `json:"cleanup_completed,omitempty"`
-	RequestFile       string                             `json:"-"`
-	HostDir           string                             `json:"-"`
+	ReadbackOrderID        string                             `json:"readback_order_id"`
+	ReadbackSessionID      string                             `json:"readback_session_id"`
+	ReadbackRequest        loopruntime.SessionReadbackFileRef `json:"readback_request"`
+	Operation              string                             `json:"operation"`
+	WarningOrderID         string                             `json:"warning_order_id"`
+	ProjectDir             string                             `json:"project_dir"`
+	ContextID              string                             `json:"context_id"`
+	RequiredHostInstanceID string                             `json:"required_host_instance_id"`
+	InstanceID             string                             `json:"instance_id"`
+	ConfigPath             string                             `json:"config_path"`
+	ConfigSHA256           string                             `json:"config_sha256"`
+	Mode                   string                             `json:"mode"`
+	Environment            []string                           `json:"environment,omitempty"`
+	BinarySHA256           string                             `json:"binary_sha256"`
+	RequestID              string                             `json:"request_id"`
+	ResidentSpec           *admission.ResidentSpec            `json:"resident_spec,omitempty"`
+	ResidentID             string                             `json:"resident_id,omitempty"`
+	Apply                  bool                               `json:"apply,omitempty"`
+	CleanupCompleted       bool                               `json:"cleanup_completed,omitempty"`
+	RequestFile            string                             `json:"-"`
+	HostDir                string                             `json:"-"`
 }
 
 type hostRuntime interface {
@@ -135,6 +136,7 @@ func newHostCmd(app *App) *cobra.Command {
 	cmd.AddCommand(newHostCleanupCmd(app))
 	cmd.AddCommand(newHostRecoverCmd(app))
 	cmd.AddCommand(newHostViewsCmd())
+	cmd.AddCommand(newHostContextsCmd())
 	task := &cobra.Command{Use: "task", Short: "Read native task dispatch capabilities"}
 	task.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 2, "runtime_admitted_orders": true, "config_key": "runtime.admitted_orders", "empty_unrestricted": true, "scope": "runtime_dispatch"})
@@ -153,10 +155,13 @@ func newHostCmd(app *App) *cobra.Command {
 		return serveHost(ctx)
 	}})
 	for _, operation := range []string{"attach", "once", "status", "detach"} {
-		var mode, contextID, instanceID, configSHA, requestFile, configPath string
+		var mode, contextID, instanceID, requiredInstanceID, configSHA, requestFile, configPath string
 		var cleanupCompleted bool
 		child := &cobra.Command{Use: operation, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-			req := hostRequest{Operation: operation, ProjectDir: app.projectDir, Mode: mode, ContextID: contextID, InstanceID: instanceID, ConfigPath: configPath, ConfigSHA256: configSHA, RequestFile: requestFile, CleanupCompleted: cleanupCompleted}
+			if cmd.Flags().Changed("require-existing-instance") && requiredInstanceID == "" {
+				return errors.New("required original Host instance is empty")
+			}
+			req := hostRequest{Operation: operation, ProjectDir: app.projectDir, Mode: mode, ContextID: contextID, InstanceID: instanceID, RequiredHostInstanceID: requiredInstanceID, ConfigPath: configPath, ConfigSHA256: configSHA, RequestFile: requestFile, CleanupCompleted: cleanupCompleted}
 			response := callHost(cmd.Context(), req)
 			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(response); err != nil {
 				return err
@@ -168,6 +173,7 @@ func newHostCmd(app *App) *cobra.Command {
 		}}
 		child.Flags().StringVar(&requestFile, "request-file", "", "Native request binding file")
 		if operation == "attach" || operation == "once" {
+			child.Flags().StringVar(&requiredInstanceID, "require-existing-instance", "", "Require this original running Host; never start a replacement")
 			child.Flags().StringVar(&configPath, "config-file", "", "Exact absolute task config source (repository config remains unchanged)")
 		}
 		if operation == "attach" {
@@ -193,7 +199,7 @@ func hostCapabilities(platform string) map[string]any {
 	if platform == "windows" {
 		force = 0
 	}
-	return map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1, "completed_context_cleanup": 1, "external_task_config": 1, "task_warning_grant": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1}
+	return map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1, "existing_instance_admission": 1, "completed_context_cleanup": 1, "external_task_config": 1, "task_warning_grant": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1}
 }
 
 func hostDirectory() (string, error) {
@@ -311,7 +317,7 @@ func callHost(ctx context.Context, req hostRequest) hostResponse {
 		return hostError("refused", errors.New("status needs context identity or config-sha256"))
 	}
 	conn, err := net.DialTimeout("unix", filepath.Join(dir, "host.sock"), time.Second)
-	if err != nil && (req.Operation == "attach" || req.Operation == "once") {
+	if err != nil && req.RequiredHostInstanceID == "" && (req.Operation == "attach" || req.Operation == "once") {
 		if err = startHostProcess(ctx, path, dir); err == nil {
 			conn, err = net.DialTimeout("unix", filepath.Join(dir, "host.sock"), time.Second)
 		}
@@ -474,7 +480,7 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 		reply   chan any
 	}
 	calls := make(chan call)
-	web, url, webDone, err := startHostWeb(dir, func(requestCtx context.Context, view *loopview.View) error {
+	web, url, webDone, err := startHostWeb(dir, contextOwnerIdentity{h.instanceID, h.binarySHA, h.dir}, func(requestCtx context.Context, view *loopview.View) error {
 		requestCtx, stop := context.WithTimeout(requestCtx, 2*time.Second)
 		defer stop()
 		read := call{hostRequest{Operation: "view_resources"}, make(chan any, 1)}
@@ -662,6 +668,9 @@ func offlineHostStatus(dir string, req hostRequest, dialErr error) hostResponse 
 }
 
 func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
+	if req.RequiredHostInstanceID != "" && req.RequiredHostInstanceID != h.instanceID {
+		return hostError("refused", errors.New("required original Host instance differs; no admission attempted"))
+	}
 	if req.Operation == "cleanup" && req.Apply && req.InstanceID != h.instanceID {
 		return hostError("refused", errors.New("cleanup Host instance changed; inspect before applying"))
 	}

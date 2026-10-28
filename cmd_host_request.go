@@ -11,18 +11,19 @@ import (
 )
 
 type hostRequestBinding struct {
-	Schema            int    `json:"schema"`
-	RequestID         string `json:"request_id"`
-	Operation         string `json:"operation"`
-	ProjectDir        string `json:"project_dir"`
-	ConfigPath        string `json:"config_path"`
-	ConfigSHA256      string `json:"config_sha256"`
-	Mode              string `json:"mode"`
-	BinarySHA256      string `json:"binary_sha256"`
-	EnvironmentSHA256 string `json:"environment_sha256"`
-	Status            string `json:"status"`
-	HostDir           string `json:"host_dir"`
-	CleanupCompleted  bool   `json:"cleanup_completed,omitempty"`
+	RequiredHostInstanceID string `json:"required_host_instance_id"`
+	Schema                 int    `json:"schema"`
+	RequestID              string `json:"request_id"`
+	Operation              string `json:"operation"`
+	ProjectDir             string `json:"project_dir"`
+	ConfigPath             string `json:"config_path"`
+	ConfigSHA256           string `json:"config_sha256"`
+	Mode                   string `json:"mode"`
+	BinarySHA256           string `json:"binary_sha256"`
+	EnvironmentSHA256      string `json:"environment_sha256"`
+	Status                 string `json:"status"`
+	HostDir                string `json:"host_dir"`
+	CleanupCompleted       bool   `json:"cleanup_completed,omitempty"`
 }
 
 func bindHostRequest(req *hostRequest) (*hostRequestBinding, func(), error) {
@@ -57,6 +58,10 @@ func bindHostRequest(req *hostRequest) (*hostRequestBinding, func(), error) {
 		if binding.ProjectDir != req.ProjectDir || binding.BinarySHA256 != req.BinarySHA256 {
 			return fail(errors.New("request project or binary binding changed"))
 		}
+		if req.RequiredHostInstanceID != "" && req.RequiredHostInstanceID != binding.RequiredHostInstanceID {
+			return fail(errors.New("original Host instance requirement changed"))
+		}
+		req.RequiredHostInstanceID = binding.RequiredHostInstanceID
 		req.HostDir = binding.HostDir
 		if req.Operation == "status" || req.Operation == "detach" || req.Operation == "cleanup" {
 			if req.ConfigSHA256 != "" && req.ConfigSHA256 != binding.ConfigSHA256 {
@@ -85,7 +90,7 @@ func bindHostRequest(req *hostRequest) (*hostRequestBinding, func(), error) {
 		if err != nil {
 			return fail(err)
 		}
-		binding = hostRequestBinding{Schema: 1, RequestID: id, Operation: req.Operation, ProjectDir: req.ProjectDir, ConfigPath: req.ConfigPath, ConfigSHA256: req.ConfigSHA256, Mode: req.Mode, BinarySHA256: req.BinarySHA256, HostDir: req.HostDir, CleanupCompleted: req.CleanupCompleted}
+		binding = hostRequestBinding{RequiredHostInstanceID: req.RequiredHostInstanceID, Schema: 1, RequestID: id, Operation: req.Operation, ProjectDir: req.ProjectDir, ConfigPath: req.ConfigPath, ConfigSHA256: req.ConfigSHA256, Mode: req.Mode, BinarySHA256: req.BinarySHA256, HostDir: req.HostDir, CleanupCompleted: req.CleanupCompleted}
 	}
 	binding.EnvironmentSHA256 = hostDigest([]byte(strings.Join(req.Environment, "\x00")))
 	binding.Status = "pending"
