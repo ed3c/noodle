@@ -300,6 +300,9 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 		err = s.transfer("upload", s.owner.config.Profile.PayloadDirectory, "/sandbox")
 	}
 	if err == nil && !s.interrupted() {
+		err = s.waitProviders(route.Spec.GetProviders())
+	}
+	if err == nil && !s.interrupted() {
 		err = s.phase("executing")
 	}
 	if err != nil || s.interrupted() {

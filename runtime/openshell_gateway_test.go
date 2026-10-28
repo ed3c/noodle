@@ -129,6 +129,13 @@ func TestManagedOpenShellGatewayChild(t *testing.T) {
 			}
 		}
 	}
+	if _, err := os.Stat(filepath.Join(root, "provider-ready")); err == nil {
+		g.afterCreate = func() {
+			for _, sandbox := range g.sandboxes {
+				sandbox.Status.MainProcessInstanceId = "11111111-1111-4111-8111-111111111111"
+			}
+		}
+	}
 	nativeList, nativeGet := native.list, native.get
 	native.list = func(ctx context.Context, req *pb.ListSandboxesRequest) (*pb.ListSandboxesResponse, error) {
 		server.event("list")
