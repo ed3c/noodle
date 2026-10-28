@@ -9,6 +9,7 @@
   "scripts": {
     "setup": "pnpm install",
     "build": "pnpm --filter noodle-ui build && go build -o ./bin/noodle .",
+    "build:progress": "go build -o ./bin/noodle-progress ./cmd/noodle-progress",
     "build:instructions": "go build -o ./bin/noodle-instructions ./cmd/noodle-instructions",
     "generate": "go generate ./generate/...",
     "release": "node ./scripts/release.mjs",

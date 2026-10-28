@@ -153,7 +153,7 @@ func hostDeferralProfile(t *testing.T) string {
 	write("payload/codex", []byte("fixture"))
 	write("spec.json", []byte(`{"template":{"image":"fixture"},"providers":["noodle-codex"],"command":["hold"]}`))
 	profile := map[string]any{
-		"schema_version": 1, "cli": executable, "gateway_name": "fixture", "environment": []string{"XDG_CONFIG_HOME=" + clientRoot}, "payload_directory": "payload", "routes": map[string]any{"codex": map[string]string{"binary": "/sandbox/payload/codex", "spec_file": "spec.json"}},
+		"schema_version": 1, "cli": executable, "gateway_name": "fixture", "environment": []string{"XDG_CONFIG_HOME=" + clientRoot}, "payload_directory": "payload", "progress_supervisor": "/sandbox/payload/codex", "routes": map[string]any{"codex": map[string]string{"binary": "/sandbox/payload/codex", "spec_file": "spec.json"}},
 		"gateway": map[string]any{"resident": admission.ResidentSpec{Name: "host-openshell", Argv: []string{executable, "-test.run=^TestHostOpenShellAdmissionChild$"}, Directory: root, Environment: []string{"NOODLE_DEFERRAL_GATEWAY_CHILD=" + root}, Sharing: "shared", Transport: "network"}, "binding": map[string]string{"state_root": filepath.Join(root, "custody"), "gateway": endpoint, "workspace": "default", "owner": "host-fixture"}, "tls": map[string]string{"ca_file": "ca.crt", "certificate_file": "client.crt", "key_file": "client.key", "server_name": "gateway.test"}, "version": "fixture", "compute_driver": "vm", "readiness_timeout_seconds": 5, "identity_source": "address", "config_files": []string{"address"}},
 	}
 	data, err := json.Marshal(profile)

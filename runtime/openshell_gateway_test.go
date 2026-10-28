@@ -156,8 +156,35 @@ func TestManagedOpenShellGatewayChild(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "runtime-dispatch")); err == nil {
 		native.exec = func(stream pb.OpenShell_ExecSandboxInteractiveServer) error {
-			if _, err := openShellReceiveStart(stream); err != nil {
+			start, err := openShellReceiveStart(stream)
+			if err != nil {
 				return err
+			}
+			isStop := len(start.GetCommand()) > 1 && start.GetCommand()[1] == "stop"
+			if _, err := os.Stat(filepath.Join(root, "progress-await-stop")); err == nil {
+				name := "progress-supervisor"
+				if isStop {
+					name = "progress-control"
+				}
+				if err := os.WriteFile(filepath.Join(root, name+"-started"), nil, 0600); err != nil {
+					return err
+				}
+				for {
+					if _, err := os.Stat(filepath.Join(root, name+"-release")); err == nil {
+						break
+					}
+					select {
+					case <-stream.Context().Done():
+						return stream.Context().Err()
+					case <-time.After(5 * time.Millisecond):
+					}
+				}
+				if isStop {
+					if _, err := os.Stat(filepath.Join(root, "progress-control-unknown")); err == nil {
+						return status.Error(codes.Unavailable, "control exit acknowledgement lost")
+					}
+					return stream.Send(openShellExit(0))
+				}
 			}
 			for {
 				_, err := stream.Recv()

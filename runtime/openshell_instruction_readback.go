@@ -23,6 +23,13 @@ type CompletedInstructionEvidence struct {
 }
 
 func (r *OpenShellRuntime) instructionReadback(ctx context.Context, dir string, b CompletedSessionBinding, ref *dispatcher.InstructionBundleRef, command OpenShellCommand) (*CompletedInstructionEvidence, map[string]SessionReadbackFileRef, error) {
+	if r.config.Profile.ProgressSupervisor != "" {
+		base, progress, err := unwrapOpenShellProgress(command)
+		if err != nil || progress.Binary != r.config.Profile.ProgressSupervisor || progress.SessionID != b.SessionID {
+			return nil, nil, fmt.Errorf("original progress supervisor binding differs")
+		}
+		command = base
+	}
 	mappingPath := filepath.Join(dir, "instruction-mapping.json")
 	if ref == nil {
 		route, ok := r.config.Profile.Routes[b.Provider]

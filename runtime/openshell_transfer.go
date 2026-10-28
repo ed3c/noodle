@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/poteto/noodle/internal/workspaceartifacts"
 )
 
 // Native file transfer is name based. The dedicated gateway contract excludes
@@ -16,13 +15,15 @@ import (
 func (s *openShellSession) transfer(direction, source, destination string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	go func() {
-		select {
-		case <-s.stopRequested:
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
+	if direction == "upload" {
+		go func() {
+			select {
+			case <-s.stopRequested:
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+	}
 	if err := s.worker.Readback(ctx, s.custody); err != nil {
 		return err
 	}
@@ -63,22 +64,4 @@ func (s *openShellSession) transfer(direction, source, destination string) error
 		return fmt.Errorf("openshell VM changed during file transfer")
 	}
 	return nil
-}
-
-func (s *openShellSession) downloadArchive(name, destination string) error {
-	staging, err := os.MkdirTemp(s.dir, "download-")
-	if err != nil {
-		return err
-	}
-	if err = s.transfer("download", "/sandbox/"+name, staging); err != nil {
-		return err
-	}
-	entries, err := os.ReadDir(staging)
-	if err != nil {
-		return err
-	}
-	if len(entries) != 1 || entries[0].Name() != name {
-		return fmt.Errorf("openshell download contains unexpected archive entries")
-	}
-	return workspaceartifacts.Extract(context.Background(), filepath.Join(staging, name), destination)
 }

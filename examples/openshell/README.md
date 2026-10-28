@@ -25,6 +25,7 @@ The profile JSON has `schema_version: 1` and these fields:
   environment. Set an explicit absolute `XDG_CONFIG_HOME` for the dedicated
   native client configuration; do not put API
   keys, OAuth tokens, or passwords here.
+- `progress_supervisor`: required fixed guest executable under `/sandbox/payload/`, built with `GOOS=linux GOARCH=arm64 CGO_ENABLED=0 pnpm build:progress`. The payload must contain that exact executable; missing support is refused rather than falling back to a VM stop that discards guest progress.
 - `payload_directory`: path to the prepared Linux executable bundle, whose final
   directory name is `payload`. It is uploaded to `/sandbox/payload`.
 - `routes`: keys `codex` and/or `pi`, each with `binary` (an absolute guest path

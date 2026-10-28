@@ -33,6 +33,7 @@ type OpenShellProfile struct {
 	PayloadDirectory, PayloadSHA256 string
 	ClientSHA256                    string
 	InstructionVerifier             string
+	ProgressSupervisor              string
 	Routes                          map[string]OpenShellRoute
 }
 type OpenShellRoute struct {
@@ -47,6 +48,7 @@ type openShellProfileFile struct {
 	Environment         []string `json:"environment"`
 	PayloadDirectory    string   `json:"payload_directory"`
 	InstructionVerifier string   `json:"instruction_verifier"`
+	ProgressSupervisor  string   `json:"progress_supervisor"`
 	Routes              map[string]struct {
 		Binary   string `json:"binary"`
 		SpecFile string `json:"spec_file"`
@@ -173,6 +175,15 @@ func LoadOpenShellProfile(filename string) (OpenShellProfile, error) {
 		}
 		p.InstructionVerifier = f.InstructionVerifier
 	}
+	if !path.IsAbs(f.ProgressSupervisor) || path.Clean(f.ProgressSupervisor) != f.ProgressSupervisor || strings.ContainsRune(f.ProgressSupervisor, 0) || !strings.HasPrefix(f.ProgressSupervisor, "/sandbox/payload/") {
+		return p, fmt.Errorf("OpenShell progress supervisor is missing or outside the guest payload")
+	}
+	localSupervisor := filepath.Join(p.PayloadDirectory, filepath.FromSlash(strings.TrimPrefix(f.ProgressSupervisor, "/sandbox/payload/")))
+	info, statErr := os.Lstat(localSupervisor)
+	if statErr != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+		return p, fmt.Errorf("OpenShell progress supervisor executable unavailable in payload")
+	}
+	p.ProgressSupervisor = f.ProgressSupervisor
 	p.Routes = make(map[string]OpenShellRoute, len(f.Routes))
 	// JSON map order is intentionally irrelevant; include routes in a fixed order.
 	for key := range f.Routes {
@@ -443,12 +454,12 @@ func OpenShellDispatchSHA256(p OpenShellProfile) (string, error) {
 		routes[name] = routeBinding{route.Binary, spec}
 	}
 	data, err := json.Marshal(struct {
-		SourcePath, SourceSHA256                                                             string
-		Gateway                                                                              OpenShellCustodyBinding
-		CLI, GatewayName, PayloadDirectory, PayloadSHA256, ClientSHA256, InstructionVerifier string
-		Environment                                                                          []string
-		Routes                                                                               map[string]routeBinding
-	}{p.SourcePath, p.SourceSHA256, p.Gateway.Binding, p.CLI, p.GatewayName, p.PayloadDirectory, p.PayloadSHA256, p.ClientSHA256, p.InstructionVerifier, p.Environment, routes})
+		SourcePath, SourceSHA256                                                                                 string
+		Gateway                                                                                                  OpenShellCustodyBinding
+		CLI, GatewayName, PayloadDirectory, PayloadSHA256, ClientSHA256, InstructionVerifier, ProgressSupervisor string
+		Environment                                                                                              []string
+		Routes                                                                                                   map[string]routeBinding
+	}{p.SourcePath, p.SourceSHA256, p.Gateway.Binding, p.CLI, p.GatewayName, p.PayloadDirectory, p.PayloadSHA256, p.ClientSHA256, p.InstructionVerifier, p.ProgressSupervisor, p.Environment, routes})
 	if err != nil {
 		return "", err
 	}

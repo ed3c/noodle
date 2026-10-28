@@ -36,11 +36,13 @@ func profileFixture(t *testing.T) (string, openShellProfileFile) {
 		t.Fatal(err)
 	}
 	write("payload/codex", []byte("guest executable"))
+	write("payload/noodle-progress", []byte("guest supervisor"))
 	var f openShellProfileFile
 	f.SchemaVersion = 1
 	f.CLI = "gateway"
 	f.GatewayName = "dedicated"
 	f.PayloadDirectory = "payload"
+	f.ProgressSupervisor = "/sandbox/payload/noodle-progress"
 	f.Routes = map[string]struct {
 		Binary   string `json:"binary"`
 		SpecFile string `json:"spec_file"`
@@ -247,6 +249,34 @@ func TestOpenShellProfileRequiresExplicitGatewayIdentitySource(t *testing.T) {
 			writeProfileFixture(t, filename, f)
 			if _, err := LoadOpenShellProfile(filename); err == nil {
 				t.Fatal("missing or unrelated gateway identity source accepted")
+			}
+		})
+	}
+}
+
+func TestOpenShellProfileRequiresBoundProgressSupervisor(t *testing.T) {
+	for _, kind := range []string{"missing", "outside", "not-executable"} {
+		t.Run(kind, func(t *testing.T) {
+			filename, profile := profileFixture(t)
+			switch kind {
+			case "missing":
+				profile.ProgressSupervisor = ""
+			case "outside":
+				profile.ProgressSupervisor = "/tmp/unbound"
+			case "not-executable":
+				if err := os.Chmod(filepath.Join(filepath.Dir(filename), "payload", "noodle-progress"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			data, err := json.Marshal(profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filename, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadOpenShellProfile(filename); err == nil {
+				t.Fatal("profile without a bound supervisor accepted")
 			}
 		})
 	}

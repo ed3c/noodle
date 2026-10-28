@@ -139,7 +139,9 @@ func privateDirectory(directory string) error {
 	return nil
 }
 
-func validateReceipt(result Receipt, identity Identity, requestID string) error {
+// ValidateReceipt checks data binding only. Callers must independently require
+// successful original supervisor completion; guest JSON is not attestation.
+func ValidateReceipt(result Receipt, identity Identity, requestID string) error {
 	if result.Schema != 1 || result.Identity != identity || (result.RequestID != "" && result.RequestID != requestID) || !result.ChildrenReaped || result.Status != "archived" || result.Error != "" || len(result.Archives) != 2 {
 		return fmt.Errorf("progress result does not match this completed stop")
 	}
@@ -159,6 +161,9 @@ func validateReceipt(result Receipt, identity Identity, requestID string) error 
 // read back, never re-signalled. A different ID cannot take over the operation.
 func Stop(ctx context.Context, directory string, request Request) (Receipt, error) {
 	var result Receipt
+	if err := waitControlReady(ctx, directory); err != nil {
+		return result, err
+	}
 	if err := privateDirectory(directory); err != nil {
 		return result, err
 	}
@@ -170,7 +175,7 @@ func Stop(ctx context.Context, directory string, request Request) (Receipt, erro
 		return result, err
 	}
 	if err := readJSON(filepath.Join(directory, "result.json"), &result); err == nil {
-		return result, validateReceipt(result, identity, request.RequestID)
+		return result, ValidateReceipt(result, identity, request.RequestID)
 	} else if !os.IsNotExist(err) {
 		return result, err
 	}
@@ -207,5 +212,46 @@ func Stop(ctx context.Context, directory string, request Request) (Receipt, erro
 			return result, err
 		}
 	}
-	return result, validateReceipt(result, identity, request.RequestID)
+	return result, ValidateReceipt(result, identity, request.RequestID)
+}
+
+// Waiting for the original supervisor to publish its endpoint is read-only.
+// Once a request is sent, Stop never retries an uncertain control operation.
+func waitControlReady(ctx context.Context, directory string) error {
+	if !filepath.IsAbs(directory) {
+		return fmt.Errorf("progress directory is not absolute")
+	}
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		_, resultErr := os.Lstat(filepath.Join(directory, "result.json"))
+		if resultErr == nil {
+			return nil
+		}
+		if !os.IsNotExist(resultErr) {
+			return resultErr
+		}
+		_, failureErr := os.Lstat(filepath.Join(directory, "failure.json"))
+		if failureErr == nil {
+			return fmt.Errorf("original progress supervisor retained a failure")
+		}
+		if !os.IsNotExist(failureErr) {
+			return failureErr
+		}
+		_, processErr := os.Lstat(filepath.Join(directory, "process.json"))
+		if processErr == nil {
+			return nil
+		}
+		if !os.IsNotExist(processErr) {
+			return processErr
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }

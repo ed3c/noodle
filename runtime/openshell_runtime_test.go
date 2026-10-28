@@ -2,7 +2,10 @@ package runtime
 
 import (
 	"archive/tar"
+	"bytes"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -14,6 +17,7 @@ import (
 	"time"
 
 	pb "github.com/NVIDIA/OpenShell/sdk/go/proto/openshellv1"
+	"github.com/poteto/noodle/internal/guestprogress"
 )
 
 func TestOpenShellTransferChild(t *testing.T) {
@@ -43,27 +47,64 @@ func TestOpenShellTransferChild(t *testing.T) {
 		return
 	}
 	source, dest := args[len(args)-2], args[len(args)-1]
-	f, err := os.Create(filepath.Join(dest, filepath.Base(source)))
-	if err != nil {
+	var content []byte
+	if filepath.Base(source) == "result.json" {
+		data, err := os.ReadFile(os.Getenv("NOODLE_PROGRESS_FIXTURE_CUSTODY"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var state OpenShellCustodyState
+		if err = json.Unmarshal(data, &state); err != nil {
+			t.Fatal(err)
+		}
+		record := state.Records[len(state.Records)-1]
+		_, binding, err := unwrapOpenShellProgress(record.Exec.Command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tokenHash := sha256.Sum256([]byte(binding.Token))
+		receipt := guestprogress.Receipt{Schema: 1, Identity: guestprogress.Identity{SessionID: binding.SessionID, CommandSHA256: binding.CommandSHA256, TokenSHA256: hex.EncodeToString(tokenHash[:])}, Status: "archived", ChildrenReaped: true}
+		if record.ProgressStop != nil {
+			receipt.RequestID = record.ProgressStop.Command.RequestID
+			receipt.ExitCode = 143
+		}
+		for _, name := range []string{"noodle-result.tar", "noodle-session.tar"} {
+			data := progressFixtureArchive(t, name)
+			hash := sha256.Sum256(data)
+			receipt.Archives = append(receipt.Archives, guestprogress.Archive{Name: name, SHA256: hex.EncodeToString(hash[:]), Bytes: int64(len(data))})
+		}
+		content, err = json.Marshal(receipt)
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		content = progressFixtureArchive(t, filepath.Base(source))
+		if os.Getenv("NOODLE_PROGRESS_FIXTURE_BAD_ARCHIVE") == "1" {
+			content = append(content, 'x')
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dest, filepath.Base(source)), content, 0600); err != nil {
 		t.Fatal(err)
 	}
-	tw := tar.NewWriter(f)
+}
+func progressFixtureArchive(t *testing.T, archive string) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	tw := tar.NewWriter(&output)
 	name, data := "result.txt", "accepted output\n"
-	if filepath.Base(source) == "noodle-session.tar" {
+	if archive == "noodle-session.tar" {
 		name, data = "native.jsonl", "native session evidence\n"
 	}
-	if err = tw.WriteHeader(&tar.Header{Name: "./" + name, Size: int64(len(data)), Mode: 0644}); err != nil {
+	if err := tw.WriteHeader(&tar.Header{Name: "./" + name, Size: int64(len(data)), Mode: 0644}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = tw.Write([]byte(data)); err != nil {
+	if _, err := tw.Write([]byte(data)); err != nil {
 		t.Fatal(err)
 	}
-	if err = tw.Close(); err != nil {
+	if err := tw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err = f.Close(); err != nil {
-		t.Fatal(err)
-	}
+	return output.Bytes()
 }
 func openShellRuntimeFixture(t *testing.T) (*OpenShellRuntime, *managedFixture, string) {
 	t.Helper()
@@ -94,11 +135,14 @@ func openShellRuntimeFixture(t *testing.T) (*OpenShellRuntime, *managedFixture, 
 	if err = os.Mkdir(payload, 0700); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(payload, "noodle-progress"), []byte("fixture supervisor"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	hash, err := openShellPayloadHash(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := NewOpenShellRuntime(OpenShellRuntimeConfig{ContextID: "a", RuntimeDir: filepath.Join(root, "runtime"), Gateway: owner, MaxConcurrent: 1, Profile: OpenShellProfile{CLI: cli, GatewayName: "fixture", Environment: []string{"NOODLE_TRANSFER_CHILD=1", "XDG_CONFIG_HOME=" + filepath.Join(root, "client")}, PayloadDirectory: payload, PayloadSHA256: hash, Routes: map[string]OpenShellRoute{"codex": {Binary: "/sandbox/payload/codex", Spec: &pb.SandboxSpec{Command: []string{"hold"}}}}}})
+	runtime, err := NewOpenShellRuntime(OpenShellRuntimeConfig{ContextID: "a", RuntimeDir: filepath.Join(root, "runtime"), Gateway: owner, MaxConcurrent: 1, Profile: OpenShellProfile{ProgressSupervisor: "/sandbox/payload/noodle-progress", CLI: cli, GatewayName: "fixture", Environment: []string{"NOODLE_PROGRESS_FIXTURE_CUSTODY=" + filepath.Join(f.spec.Binding.StateRoot, "owner.json"), "NOODLE_TRANSFER_CHILD=1", "XDG_CONFIG_HOME=" + filepath.Join(root, "client")}, PayloadDirectory: payload, PayloadSHA256: hash, Routes: map[string]OpenShellRoute{"codex": {Binary: "/sandbox/payload/codex", Spec: &pb.SandboxSpec{Command: []string{"hold"}}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,6 +275,147 @@ func TestOpenShellRecoveryRetainsUncertainDelivery(t *testing.T) {
 			}
 			if r.CapacityAvailable() {
 				t.Fatal("uncertain publication allowed another attempt")
+			}
+		})
+	}
+}
+
+func waitProgressFixture(t *testing.T, root, name string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(filepath.Join(root, name)); err == nil {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("progress fixture did not reach %s", name)
+}
+
+func TestOpenShellRuntimeStopPreservesProgressAfterBothNativeExits(t *testing.T) {
+	r, f, target := openShellRuntimeFixture(t)
+	managedMarker(t, f.root, "progress-await-stop")
+	h, err := r.Dispatch(t.Context(), DispatchRequest{Name: "interrupted", Provider: "codex", Model: "fixture", Prompt: "produce partial result", SystemPrompt: "test", Runtime: "openshell", WorktreePath: target, AllowPrimaryCheckout: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitProgressFixture(t, f.root, "progress-supervisor-started")
+	if err := h.Terminate(); err != nil {
+		t.Fatal(err)
+	}
+	waitProgressFixture(t, f.root, "progress-control-started")
+	session := h.(*openShellSession)
+	assertRetained := func() {
+		t.Helper()
+		select {
+		case <-h.Done():
+			t.Fatal("pending native execution released session")
+		default:
+		}
+		record := session.custody.Snapshot().Records[0]
+		if record.StopRequestID != "" || record.Stopped != nil {
+			t.Fatal("VM stopped before both native exits and artifact return")
+		}
+		if r.CapacityAvailable() {
+			t.Fatal("pending stop released runtime slot")
+		}
+	}
+	assertRetained()
+	managedMarker(t, f.root, "progress-control-release")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		record := session.custody.Snapshot().Records[0]
+		if record.ProgressStop != nil && record.ProgressStop.Result.ExitObserved {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("control completion missing")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	assertRetained()
+	managedMarker(t, f.root, "progress-supervisor-release")
+	select {
+	case <-h.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatalf("progress did not settle: %+v", h.Outcome())
+	}
+	if h.Outcome().Status != StatusCancelled || h.Outcome().ExitCode != 143 {
+		t.Fatalf("interruption was mislabeled: %+v", h.Outcome())
+	}
+	session.mu.Lock()
+	receipt := session.receipt
+	session.mu.Unlock()
+	if receipt.ProgressHead == "" || receipt.CandidateHead != "" || receipt.Progress == nil || receipt.Progress.ExitCode != 143 || receipt.Phase != "settled" || receipt.Worker.Boundary != OpenShellBoundaryStopped {
+		t.Fatal("saved progress promoted to candidate or missing stop boundary")
+	}
+	data, err := os.ReadFile(filepath.Join(target, "result.txt"))
+	if err != nil || string(data) != "accepted output\n" {
+		t.Fatal("guest progress not restored to original worktree")
+	}
+	sessionData, err := os.ReadFile(filepath.Join(session.dir, "guest-session", "native.jsonl"))
+	if err != nil || string(sessionData) != "native session evidence\n" {
+		t.Fatal("guest session not retained")
+	}
+	if _, err := f.owner.Release("a"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenShellRuntimeRetainsUnknownProgress(t *testing.T) {
+	for _, kind := range []string{"control", "archive"} {
+		t.Run(kind, func(t *testing.T) {
+			r, f, target := openShellRuntimeFixture(t)
+			if kind == "control" {
+				managedMarker(t, f.root, "progress-await-stop")
+				managedMarker(t, f.root, "progress-control-unknown")
+			} else {
+				r.config.Profile.Environment = append(r.config.Profile.Environment, "NOODLE_PROGRESS_FIXTURE_BAD_ARCHIVE=1")
+			}
+			h, err := r.Dispatch(t.Context(), DispatchRequest{Name: "unknown-progress", Provider: "codex", Model: "fixture", Prompt: "produce result", SystemPrompt: "test", Runtime: "openshell", WorktreePath: target, AllowPrimaryCheckout: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind == "control" {
+				waitProgressFixture(t, f.root, "progress-supervisor-started")
+				if err := h.Terminate(); err != nil {
+					t.Fatal(err)
+				}
+				waitProgressFixture(t, f.root, "progress-control-started")
+				managedMarker(t, f.root, "progress-control-release")
+				managedMarker(t, f.root, "progress-supervisor-release")
+			}
+			session := h.(*openShellSession)
+			deadline := time.Now().Add(10 * time.Second)
+			for {
+				session.mu.Lock()
+				phase := session.receipt.Phase
+				session.mu.Unlock()
+				if phase == "progress-unknown" {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("unknown evidence was not retained: %+v", h.Outcome())
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			select {
+			case <-h.Done():
+				t.Fatal("unknown progress released original session")
+			default:
+			}
+			if r.CapacityAvailable() {
+				t.Fatal("unknown progress released runtime slot")
+			}
+			record := session.custody.Snapshot().Records[0]
+			if record.StopRequestID != "" || record.Stopped != nil {
+				t.Fatal("unknown progress stopped VM")
+			}
+			if _, err := os.Stat(filepath.Join(target, "result.txt")); !os.IsNotExist(err) {
+				t.Fatal("unknown progress applied local results")
+			}
+			if _, err := f.owner.Release("a"); err == nil {
+				t.Fatal("unknown progress released gateway")
 			}
 		})
 	}

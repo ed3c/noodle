@@ -1,8 +1,10 @@
 # Guest progress preservation
 
 This helper is an implementation input for controlled OpenShell interruption.
-It does not yet replace the Runtime stop path. A helper-only test does not prove
-Host/Loop new-attempt behavior or that a live model's results were retained.
+The Runtime requires `progress_supervisor` in the frozen worker profile and
+uses independent original-supervisor and stop-purpose native executions.
+A helper-only test does not prove Host/Loop new-attempt behavior or that a live
+model's results were retained.
 
 ## Selected boundary
 
@@ -96,7 +98,23 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go test -c -o guestprogress.test ./interna
 ./guestprogress.test -test.run='Test(StopReapsEscapedWriterBeforeArchiving|PostLaunchFailureRetainsOwnerUntilReaped|SupervisorSignalDoesNotReportSavedProgress)' -test.v -test.timeout=40s
 ```
 
-Pending integration: separate original/stop-purpose custody receipts, frozen
-profile helper selection, interrupted archive download/hash validation before
-VM Stop, original-owner stopped readback, and the explicit new-attempt action.
-Neither baseline-only restart nor native session resume completes these items.
+The Runtime waits for both admitted native executions, downloads the bound
+receipt and hashes both archives while the VM remains Ready, then stops the
+original VM and applies the captured workspace. Interrupted or failed harness
+output is published as `ProgressHead`, with cancelled/failed outcome and no
+`CandidateHead`; it is saved progress, not an accepted candidate. Unknown
+native outcomes, archive mismatch or unknown delivery retain the owner and
+resources. Completion readback also binds the saved progress source.
+
+Still pending: the original Host stopped-inspect and explicitly authorized new
+attempt path. Native session resume is not provided.
+
+The v3 helper fixture was executed in a fresh provider-free native OpenShell
+VM on 2026-10-28: all three tests (including three post-launch fault cases)
+passed, then original VM Stopped and owned gateway exit were observed. Fixture
+SHA256: `ebbb8d3ecb56f9ff1b4ea42abb6a8d9bcaf74fd7f72ab659dd75939a56cfb0c7`;
+evidence receipt SHA256:
+`847c546cdbd3988967cc2065daa04c4bd4a18a6851f2218a10246273b9a722aa`.
+That native proof covers helper drain/archive behavior, not this later Runtime
+wiring or the added read-only endpoint-readiness wait. Runtime tests use a real
+mTLS protocol fixture with deterministic guest file transfer, not live models.

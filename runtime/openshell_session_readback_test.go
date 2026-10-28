@@ -58,7 +58,7 @@ func TestOpenShellSessionReadbackOriginalExecutionAndSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ProfileSHA256 == "" || result.NativeAttemptID == "" || result.CandidateHead == "" || result.NativePhase != "Stopped" || !result.StopAcknowledged || len(result.Sources) != 7 {
+	if result.ProfileSHA256 == "" || result.NativeAttemptID == "" || result.CandidateHead == "" || result.NativePhase != "Stopped" || !result.StopAcknowledged || len(result.Sources) != 8 {
 		t.Fatalf("incomplete observation: %+v", result)
 	}
 	eventsAfter, _ := os.ReadFile(filepath.Join(f.root, "events"))
@@ -80,7 +80,7 @@ func TestOpenShellSessionReadbackOriginalExecutionAndSources(t *testing.T) {
 func TestOpenShellSessionReadbackRejectsChangedBindingsAndEvidence(t *testing.T) {
 	r, b, _ := completedReadbackFixture(t)
 	dir := filepath.Join(r.config.RuntimeDir, "sessions", b.SessionID)
-	for _, variant := range []string{"order", "session", "model", "provider", "target", "stage", "attempt", "unknown-delivery", "profile-drift", "meta-alive", "candidate-drift", "source-drift", "runtime-busy"} {
+	for _, variant := range []string{"order", "session", "model", "provider", "target", "stage", "attempt", "unknown-delivery", "profile-drift", "progress-drift", "meta-alive", "candidate-drift", "source-drift", "runtime-busy"} {
 		t.Run(variant, func(t *testing.T) {
 			if variant == "runtime-busy" {
 				r.mu.Lock()
@@ -108,6 +108,12 @@ func TestOpenShellSessionReadbackRejectsChangedBindingsAndEvidence(t *testing.T)
 				file = filepath.Join(dir, "openshell-dispatch.json")
 			case "unknown-delivery":
 				file = filepath.Join(dir, "delivery/result.json")
+			case "progress-drift":
+				var receipt openShellDispatchReceipt
+				if _, err := ReadSessionReadbackFile(filepath.Join(dir, "openshell-dispatch.json"), &receipt); err != nil {
+					t.Fatal(err)
+				}
+				file = receipt.ProgressSource.Path
 			case "meta-alive":
 				file = filepath.Join(dir, "meta.json")
 			}
@@ -118,6 +124,8 @@ func TestOpenShellSessionReadbackRejectsChangedBindingsAndEvidence(t *testing.T)
 				_ = json.Unmarshal(original, &values)
 				if variant == "profile-drift" {
 					values["ProfileSHA256"] = "unadmitted-profile"
+				} else if variant == "progress-drift" {
+					values["exit_code"] = 143
 				} else if variant == "unknown-delivery" {
 					values["state"] = "unknown"
 				} else {

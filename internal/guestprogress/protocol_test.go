@@ -3,11 +3,13 @@ package guestprogress
 import (
 	"archive/tar"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func fixtureIdentity() (Identity, string) {
@@ -103,5 +105,36 @@ func TestArchiveExcludesDedicatedCredentialFile(t *testing.T) {
 	}
 	if _, err := archiveTree(root, output, "noodle-session.tar", nil); err == nil {
 		t.Fatal("archive was overwritten")
+	}
+}
+
+func TestControlReadinessDoesNotReplayOrInventCompletion(t *testing.T) {
+	dir := canonicalTemp(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	if err := waitControlReady(ctx, dir); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("missing original endpoint: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "stop.json")); !os.IsNotExist(err) {
+		t.Fatal("readiness check created a stop intent")
+	}
+	if err := writeJSON(dir, "failure.json", Receipt{Status: "unknown"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitControlReady(context.Background(), dir); err == nil {
+		t.Fatal("retained supervisor failure accepted")
+	}
+	if err := os.Remove(filepath.Join(dir, "failure.json")); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Second)
+	defer cancel2()
+	go func() { done <- waitControlReady(ctx2, dir) }()
+	if err := writeJSON(dir, "process.json", processBinding{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

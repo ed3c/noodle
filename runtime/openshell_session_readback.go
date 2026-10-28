@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -227,6 +228,11 @@ func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b Completed
 	if observed.CommandSHA256 != commandSHA256 {
 		return result, fmt.Errorf("OpenShell native command differs from original owner")
 	}
+	progressRef, err := readSavedProgress(dir, receipt, original.Exec.Command, "")
+	if err != nil || receipt.Progress.ExitCode != 0 {
+		return result, errors.Join(err, fmt.Errorf("OpenShell saved harness progress is not successful"))
+	}
+	sources["progress_receipt"] = progressRef
 	instructions, instructionSources, err := r.instructionReadback(ctx, dir, b, spawn.InstructionBundle, original.Exec.Command)
 	if err != nil {
 		return result, err

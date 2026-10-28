@@ -86,7 +86,11 @@ func TestOpenShellInstructionsUploadAndWrapOriginalExecution(t *testing.T) {
 	if len(state.Records) != 1 || state.Records[0].Exec == nil {
 		t.Fatal("native execution evidence missing")
 	}
-	argv := state.Records[0].Exec.Command.Argv
+	base, _, err := unwrapOpenShellProgress(state.Records[0].Exec.Command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	argv := base.Argv
 	if len(argv) < 9 || argv[0] != "/sandbox/payload/noodle-instructions" || argv[7] != "--" || argv[8] != "/sandbox/payload/codex" {
 		t.Fatalf("native execution did not retain verifier and original harness: %q", argv)
 	}

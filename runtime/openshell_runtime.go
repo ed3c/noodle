@@ -12,6 +12,7 @@ import (
 
 	"github.com/poteto/noodle/dispatcher"
 	"github.com/poteto/noodle/internal/filex"
+	"github.com/poteto/noodle/internal/guestprogress"
 	"github.com/poteto/noodle/internal/workspaceartifacts"
 	"github.com/poteto/noodle/skill"
 	"github.com/poteto/noodle/worktree"
@@ -36,7 +37,7 @@ func NewOpenShellRuntime(cfg OpenShellRuntimeConfig) (*OpenShellRuntime, error) 
 	if cfg.Gateway == nil || cfg.ContextID == "" || !filepath.IsAbs(cfg.RuntimeDir) || cfg.MaxConcurrent < 0 {
 		return nil, fmt.Errorf("openshell runtime owner/context/directory/concurrency invalid")
 	}
-	if cfg.Profile.CLI == "" || cfg.Profile.PayloadDirectory == "" || len(cfg.Profile.Routes) == 0 {
+	if cfg.Profile.ProgressSupervisor == "" || cfg.Profile.CLI == "" || cfg.Profile.PayloadDirectory == "" || len(cfg.Profile.Routes) == 0 {
 		return nil, fmt.Errorf("openshell execution profile incomplete")
 	}
 	if err := os.MkdirAll(cfg.RuntimeDir, 0700); err != nil {
@@ -132,6 +133,9 @@ func (r *OpenShellRuntime) Dispatch(ctx context.Context, req DispatchRequest) (S
 type openShellDispatchReceipt struct {
 	ProfileSHA256                                                  string
 	CandidateHead                                                  string
+	ProgressHead                                                   string
+	Progress                                                       *guestprogress.Receipt
+	ProgressSource                                                 *SessionReadbackFileRef
 	Version                                                        int
 	ContextID, OrderID, AttemptID, SessionID, Target, Phase, Error string
 	Baseline                                                       *workspaceartifacts.Baseline
@@ -141,26 +145,27 @@ type openShellDispatchReceipt struct {
 }
 
 type openShellSession struct {
-	owner         *OpenShellRuntime
-	id, dir       string
-	mu            sync.Mutex
-	receipt       openShellDispatchReceipt
-	custody       *OpenShellCustody
-	worker        *OpenShellWorker
-	model         dispatcher.Session
-	exec          *OpenShellOwnedExec
-	cancelExec    context.CancelFunc
-	stopRequested chan struct{}
-	stopOnce      sync.Once
-	boundaryOnce  sync.Once
-	boundaryDone  chan struct{}
-	boundaryError error
-	done          chan struct{}
-	doneOnce      sync.Once
+	owner                 *OpenShellRuntime
+	id, dir               string
+	mu                    sync.Mutex
+	receipt               openShellDispatchReceipt
+	custody               *OpenShellCustody
+	worker                *OpenShellWorker
+	model                 dispatcher.Session
+	stopRequested         chan struct{}
+	progressStopDone      chan struct{}
+	progressStopRequestID string
+	progressStopError     error
+	stopOnce              sync.Once
+	boundaryOnce          sync.Once
+	boundaryDone          chan struct{}
+	boundaryError         error
+	done                  chan struct{}
+	doneOnce              sync.Once
 }
 
 func newOpenShellSession(r *OpenShellRuntime, id, dir string) *openShellSession {
-	return &openShellSession{owner: r, id: id, dir: dir, stopRequested: make(chan struct{}), boundaryDone: make(chan struct{}), done: make(chan struct{})}
+	return &openShellSession{owner: r, id: id, dir: dir, stopRequested: make(chan struct{}), progressStopDone: make(chan struct{}), boundaryDone: make(chan struct{}), done: make(chan struct{})}
 }
 func (s *openShellSession) ID() string            { return s.id }
 func (s *openShellSession) Done() <-chan struct{} { return s.done }
@@ -289,13 +294,6 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 	s.mu.Lock()
 	s.worker = worker
 	s.mu.Unlock()
-	go func() {
-		select {
-		case <-s.stopRequested:
-			s.stopBoundary()
-		case <-s.done:
-		}
-	}()
 	if err = s.phase("provisioning"); err == nil {
 		err = s.waitReady()
 	}
@@ -334,27 +332,34 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 	env := map[string]string{"NOODLE_PROJECT_DIR": "/sandbox/repo", "NOODLE_ORDER_ID": s.receipt.OrderID, "NOODLE_STAGE_INDEX": req.EnvVars["NOODLE_STAGE_INDEX"], "NOODLE_SESSION_DIR": plan.GuestSessionDir}
 	execCtx, cancelExec := context.WithCancel(context.Background())
 	defer cancelExec()
-	s.mu.Lock()
-	s.cancelExec = cancelExec
-	s.mu.Unlock()
-	if s.interrupted() {
-		cancelExec()
-	}
-	owned, launchErr := custody.StartOwned(execCtx, identity.Sandbox, s.receipt.AttemptID, OpenShellCommand{RequestID: requestID, Argv: plan.Command(), Workdir: "/sandbox/repo", Env: env})
-	if owned == nil {
-		s.fail(launchErr)
+	token, err := progressToken()
+	if err != nil {
+		s.fail(err)
 		s.finishStopped()
 		return
 	}
-	s.mu.Lock()
-	s.exec = owned
-	s.mu.Unlock()
+	command, err := wrapOpenShellProgress(OpenShellCommand{RequestID: requestID, Argv: plan.Command(), Workdir: "/sandbox/repo", Env: env}, s.owner.config.Profile.ProgressSupervisor, s.id, token)
+	if err != nil {
+		s.fail(err)
+		s.finishStopped()
+		return
+	}
+	if s.interrupted() {
+		s.fail(fmt.Errorf("openshell stopped before supervisor launch"))
+		s.finishStopped()
+		return
+	}
+	owned, launchErr := custody.StartOwned(execCtx, identity.Sandbox, s.receipt.AttemptID, command)
+	if owned == nil {
+		s.fail(launchErr)
+		return
+	}
 	process := newOpenShellHarnessProcess(owned, s.Terminate)
+	go s.watchProgressStop(process.Done())
 	model, err := plan.Start(context.Background(), process, s.owner.config.EventSink)
 	if err != nil {
 		s.fail(err)
-		_ = owned.Close()
-		s.finishStopped()
+		_ = s.Terminate()
 		return
 	}
 	s.mu.Lock()
@@ -365,6 +370,11 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 		_ = s.Terminate()
 	}
 	<-model.Done()
+	<-s.progressStopDone
+	if s.progressStopError != nil {
+		s.retainProgress(s.progressStopError)
+		return
+	}
 	result := process.result()
 	worker.RecordExecResult(result)
 	outcome := model.Outcome()
@@ -373,35 +383,37 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 	s.receipt.Outcome = outcome
 	s.mu.Unlock()
 	if launchErr != nil || !result.ExitObserved || result.ExitCode != 0 || result.InputError != "" || result.StreamError != "" {
-		s.fail(fmt.Errorf("openshell native execution incomplete: %s; input=%s; stream=%s", result.Reason, result.InputError, result.StreamError))
+		s.retainProgress(fmt.Errorf("openshell native supervisor execution incomplete: %s; input=%s; stream=%s", result.Reason, result.InputError, result.StreamError))
+		return
 	}
 	if err = s.phase("returning"); err != nil {
 		s.fail(err)
-		s.finishStopped()
 		return
 	}
 	// Native SSH cannot connect after VM Stopped. Download into evidence first;
 	// apply only after the original VM is conclusively stopped.
-	if !s.interrupted() {
-		if err = s.downloadArchive("noodle-result.tar", filepath.Join(s.dir, "returned")); err != nil {
-			s.fail(err)
-		}
-		if err == nil {
-			err = s.downloadArchive("noodle-session.tar", filepath.Join(s.dir, "guest-session"))
-			if err != nil {
-				s.fail(err)
-			}
-		}
-	} else {
-		err = fmt.Errorf("openshell stopped before complete artifact return")
-		s.fail(err)
+	if err = s.receiveProgress(command); err != nil {
+		s.retainProgress(err)
+		return
 	}
+	s.mu.Lock()
+	outcome.ExitCode = s.receipt.Progress.ExitCode
+	if s.interrupted() {
+		outcome.Status = StatusCancelled
+		outcome.Reason = "OpenShell interrupted; guest progress saved"
+	} else if outcome.ExitCode != 0 {
+		outcome.Status = StatusFailed
+		outcome.Reason = "OpenShell harness exited unsuccessfully; guest progress saved"
+	}
+	s.receipt.Outcome = outcome
+	s.mu.Unlock()
+	worker.RecordModelOutcome(outcome)
 	s.stopBoundary()
 	if s.boundaryError != nil {
 		s.fail(s.boundaryError)
 		return
 	}
-	if err == nil && s.Outcome().Status == StatusCompleted && !s.interrupted() {
+	if err == nil {
 		if err = s.phase("delivery-in-progress"); err != nil {
 			s.fail(err)
 			return
@@ -423,17 +435,29 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 				return
 			}
 			message := fmt.Sprintf("feat: retain OpenShell worker output\n\nRecord the validated result for order %s from native session %s after its original VM stopped. The candidate remains subject to the existing review process.", s.receipt.OrderID, s.id)
+			if s.Outcome().Status != StatusCompleted || s.interrupted() {
+				message = fmt.Sprintf("chore: preserve interrupted OpenShell progress\n\nSave the validated workspace for order %s from native session %s after its original VM stopped. This progress version is not a completed or accepted candidate.", s.receipt.OrderID, s.id)
+			}
 			candidate, publishErr := workspaceartifacts.Publish(context.Background(), req.WorktreePath, s.receipt.Baseline, delivery, message)
 			if publishErr != nil {
 				s.fail(publishErr)
 				return
 			} else {
 				s.mu.Lock()
-				s.receipt.CandidateHead = candidate
+				if s.receipt.Outcome.Status == StatusCompleted && !s.interrupted() {
+					s.receipt.CandidateHead = candidate
+				} else {
+					s.receipt.ProgressHead = candidate
+					if s.interrupted() {
+						s.receipt.Outcome.Status = StatusCancelled
+						s.receipt.Outcome.Reason = "OpenShell interrupted; guest progress saved"
+					}
+				}
 				s.mu.Unlock()
 			}
 		}
 	}
+	worker.RecordModelOutcome(s.Outcome())
 	if err = s.phase("settled"); err != nil {
 		s.fail(err)
 		return
@@ -478,12 +502,6 @@ func (s *openShellSession) finishStopped() {
 func (s *openShellSession) stopBoundary() {
 	s.boundaryOnce.Do(func() {
 		defer close(s.boundaryDone)
-		s.mu.Lock()
-		cancelExec := s.cancelExec
-		s.mu.Unlock()
-		if s.interrupted() && cancelExec != nil {
-			cancelExec()
-		}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		err := s.worker.Stop(ctx, s.custody, s.custody)
@@ -496,12 +514,6 @@ func (s *openShellSession) stopBoundary() {
 			}
 		}
 		s.boundaryError = err
-		s.mu.Lock()
-		e := s.exec
-		s.mu.Unlock()
-		if e != nil && s.interrupted() {
-			_ = e.Close()
-		}
 		if p := s.persist(); p != nil {
 			s.boundaryError = errors.Join(err, p)
 		}
@@ -561,9 +573,9 @@ func (r *OpenShellRuntime) Recover(ctx context.Context) ([]RecoveredSession, err
 			w, readErr := custody.RecoverWorker(ctx, original.Worker.Identity.Sandbox)
 			s.worker = w
 			s.fail(errors.Join(fmt.Errorf("interrupted attempt retained at %s; inspect original VM and local delivery evidence before an explicit new attempt; no operation replayed", receipt.Phase), readErr))
-			if w != nil && readErr == nil && w.Record().Boundary == OpenShellBoundaryStopped && !openShellDeliveryPending(receipt.Phase) {
+			if w != nil && readErr == nil && original.Exec == nil && w.Record().Boundary == OpenShellBoundaryStopped && !openShellDeliveryPending(receipt.Phase) {
 				s.complete()
-			} else if w != nil && !openShellDeliveryPending(receipt.Phase) {
+			} else if w != nil && original.Exec == nil && !openShellDeliveryPending(receipt.Phase) {
 				go func() {
 					select {
 					case <-s.stopRequested:
@@ -581,5 +593,5 @@ func (r *OpenShellRuntime) Recover(ctx context.Context) ([]RecoveredSession, err
 }
 
 func openShellDeliveryPending(phase string) bool {
-	return phase == "delivery-in-progress" || phase == "delivery-unknown" || phase == "publishing"
+	return phase == "progress-unknown" || phase == "delivery-in-progress" || phase == "delivery-unknown" || phase == "publishing"
 }
