@@ -55,6 +55,13 @@ used. Upload checks payload content again. Changing a live
 profile cannot silently reconfigure a shared gateway. Stop and inspect the old
 contexts before attaching a new configuration.
 
+OpenShell v0.1.5 does not drain provider credential refreshes on normal gateway
+shutdown. The [pinned native repair](native-patches/refresh-drain/README.md)
+includes a reviewable patch and isolated build/test commands. A stopped VM alone
+does not prove that shutting down an unpatched gateway preserves a rotating
+subscription grant. Installing or switching a running gateway is a separate
+owner-controlled operation; the repair tools do not perform it.
+
 The guest repository is `/sandbox/repo`; session files live separately under
 `/sandbox/noodle-sessions`. Provider secrets remain gateway-managed. Codex uses
 its dedicated subscription login, while Pi selects the exact OpenRouter model

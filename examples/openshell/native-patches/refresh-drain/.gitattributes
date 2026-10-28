@@ -1,0 +1,2 @@
+# Empty context lines in a unified diff contain a literal space by format.
+refresh-drain.patch whitespace=-blank-at-eol

@@ -1,0 +1,10 @@
+{
+  "version": "5.1.0",
+  "platform": "darwin-arm64",
+  "archive_url": "https://github.com/Z3Prover/z3/releases/download/z3-5.1.0/z3-5.1.0-arm64-osx-13.3.zip",
+  "archive_name": "z3-5.1.0-arm64-osx-13.3.zip",
+  "archive_sha256": "81d29e934fd863079a74af35eecaeaef8047e0e12414d33ca322b358d68383db",
+  "library_member": "z3-5.1.0-arm64-osx-13.3/bin/libz3.a",
+  "library_sha256": "4866b1b378e5817432f0ac7365682e6d78e755e85a7b6e2b63db95083faf674d",
+  "license_member": "z3-5.1.0-arm64-osx-13.3/LICENSE.txt"
+}
