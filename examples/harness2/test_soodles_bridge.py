@@ -205,6 +205,17 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaises(UnknownEffect):
             gate.verify_result(result)
 
+    def test_warning_policy_stays_explicit_in_the_original_task_request(self):
+        output = self.root / 'warning-request'
+        output.mkdir()
+        selected = replace(self.template, resource_policy='openshell-single-warning')
+        request = decode(read_ref(selected.prepare(self.call, output)))
+        self.assertEqual(request['resource_policy'], selected.resource_policy)
+        self.assertEqual(request['model_reasoning_effort'], 'low')
+        invalid = replace(self.template, resource_policy='ignore-all-pressure')
+        with self.assertRaises(Refused):
+            invalid.prepare(self.call, self.root / 'invalid-warning')
+
     def test_solver_materializes_evaluated_skill_not_a_fixed_baseline(self):
         baseline = reference(self.skill)
         self.skill.write_text('Include every signed transaction; evaluated candidate.')

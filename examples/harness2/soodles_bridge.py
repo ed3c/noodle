@@ -235,8 +235,10 @@ class RequestTemplate:
     skill_bases: dict = field(default_factory=dict)
     composition: dict | None = None
     producer_handoff: dict | None = None
+    resource_policy: str | None = None
 
     def prepare(self, call, directory, *, cli=None):
+        require(self.resource_policy in (None, 'openshell-single-warning'), 'unknown task resource policy')
         require((self.group, self.role) == (call.group, call.role), "task template belongs to another call route")
         require(call.model == MODELS.get(call.provider) and call.inputs.get("effort") == "low",
                 "call differs from fixed model or reasoning selection")
@@ -283,6 +285,8 @@ class RequestTemplate:
             "provider": call.provider, "profile": self.profile["path"], "noodle": self.noodle["path"],
             "write_paths": list(self.write_paths), "acceptance": list(self.acceptance),
             "source_refs": list(dict.fromkeys(ref["path"] for ref in sources))}
+        if self.resource_policy is not None:
+            request['resource_policy'] = self.resource_policy
         save(directory / "binding.json", {"call_sha256": call.fingerprint(), "template": asdict(self),
                                          "inputs": sources})
         trees = [tree_ref(Path(ref["path"]).parent) for ref in (selected, *support)]
@@ -352,6 +356,7 @@ def validated_candidate(call, template, observation):
             and envelope.get("runtime") == "openshell" and envelope.get("model_reasoning_effort") == "low"
             and envelope.get("control_root") == template.repository and envelope.get("profile") == template.profile
             and envelope.get("noodle") == template.noodle and envelope.get("goal") == request["goal"]
+            and envelope.get('resource_policy') == request.get('resource_policy') == template.resource_policy
             and envelope.get("source_refs") == [reference(path) for path in request["source_refs"]],
             "captured task route or original request differs")
     if template.composition is not None:

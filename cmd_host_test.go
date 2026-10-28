@@ -433,7 +433,7 @@ func TestHostCapabilitiesPreservesProtocolContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantForce := float64(hostCapabilities(runtime.GOOS)["resident_force_after_grace"].(int))
-	if len(value) != 9 || value["schema"] != float64(1) || value["protocol"] != "noodle-host-v1" || value["resident_request_binding"] != float64(1) || value["completed_context_cleanup"] != float64(1) || value["resident_force_after_grace"] != wantForce || value["local_task_interrupt_custody"] != float64(1) || value["external_task_config"] != float64(1) || value["task_warning_grant"] != float64(1) || value["existing_instance_admission"] != float64(1) {
+	if len(value) != 10 || value["schema"] != float64(1) || value["protocol"] != "noodle-host-v1" || value["resident_request_binding"] != float64(1) || value["completed_context_cleanup"] != float64(1) || value["resident_force_after_grace"] != wantForce || value["local_task_interrupt_custody"] != float64(1) || value["external_task_config"] != float64(1) || value["task_warning_grant"] != float64(1) || value["existing_instance_admission"] != float64(1) || value["openshell_warning_grant"] != float64(1) {
 		t.Fatalf("host protocol changed: %v", value)
 	}
 }

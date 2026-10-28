@@ -11,3 +11,11 @@
 - Read `warning_grants` in `host resources` to distinguish available, consumed, expired and revoked permissions.
 - Controls: `internal/admission/warning_grant_test.go`, `cmd_host_warning_grant_test.go`, the warning variant of the admitted-order loop cycle, and the real process-group retention test.
 - Root Go tests require built UI assets. Run `pnpm build` first, or `pnpm check`; do not treat a missing `ui/dist/client` embed as a feature failure.
+
+## Explicit OpenShell gateway permission
+
+- Capability `openshell_warning_grant=1` is separate from the original process-only grant. `host attach --warning-order-id ORDER --require-existing-instance HOST` binds one manual admitted OpenShell order before gateway startup; native request bytes retain that selection.
+- Its two phases admit the exact resident scope, then one worker while that sole gateway allocation remains. `gateway_warning_grants` retains the pressure evidence and permission status. Another resident, active worker, critical pressure, swapout or unknown observation still refuses admission.
+- `host resources grant-warning --openshell-gateway --previous-revision REV` explicitly advances a terminal permission. Repeating the previous revision reads the existing permission; it does not authorize another launch. A normal worker launch also consumes the permission.
+- A pre-offer Soodles runtime successor is distinct from post-offer recovery: require the original known deferred receipt, no proposal/order/session/mailbox effect, unchanged task inputs and a held exact new context. Adoption itself offers no task and dispatches no model.
+- Same-card source migration uses `host contexts inspect --id ID` and `register --expected-version VERSION`; retain the original request and old source archive. The registration migration archive records intent, not proof of execution or acceptance.

@@ -203,7 +203,8 @@ func readContextHost(ctx context.Context, dir string) (contextOwnerIdentity, err
 }
 func newHostContextsCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "contexts", Short: "Register prepared composition controls on the existing Host"}
-	var file string
+	cmd.AddCommand(newHostContextsInspectCmd())
+	var file, expected string
 	register := &cobra.Command{Use: "register --file FILE", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		dir, err := hostDirectory()
 		if err != nil {
@@ -238,7 +239,11 @@ func newHostContextsCmd() *cobra.Command {
 			return err
 		}
 		if old, ok := entries[registration.ID]; ok && contextVersion(old) != choice.Version {
-			return fmt.Errorf("context registration already exists with different sources; use a new ID")
+			if err = archiveContextMigration(dir, old, registration, expected); err != nil {
+				return err
+			}
+		} else if _, ok := entries[registration.ID]; !ok && expected != "" {
+			return fmt.Errorf("previous context registration not found")
 		}
 		entries[registration.ID] = registration
 		if len(entries) > 64 {
@@ -261,6 +266,7 @@ func newHostContextsCmd() *cobra.Command {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(choice)
 	}}
 	register.Flags().StringVar(&file, "file", "", "Trusted fixed request, owner source and original Host registration")
+	register.Flags().StringVar(&expected, "expected-version", "", "Explicitly migrate only this unchanged registration while preserving its request and history")
 	_ = register.MarkFlagRequired("file")
 	cmd.AddCommand(register)
 	return cmd

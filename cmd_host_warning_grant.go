@@ -16,8 +16,13 @@ import (
 
 func newHostWarningGrantCmd(app *App) *cobra.Command {
 	var requestFile, orderID string
+	var gateway bool
+	var previous uint64
 	cmd := &cobra.Command{Use: "grant-warning", Short: "Allow one bound task launch under stable warning pressure for ten minutes", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !gateway && previous != 0 {
+				return errors.New("previous revision requires an OpenShell gateway warning grant")
+			}
 			original := callHost(cmd.Context(), hostRequest{Operation: "status", ProjectDir: app.projectDir, RequestFile: requestFile})
 			if original.Status != "ok" || original.ContextState != "active" || original.ContextID == "" || original.HostInstanceID == "" {
 				return errors.New("original active Host request unavailable for warning grant")
@@ -25,7 +30,7 @@ func newHostWarningGrantCmd(app *App) *cobra.Command {
 			req := hostRequest{Operation: "grant_warning", ProjectDir: original.ProjectDir, ContextID: original.ContextID,
 				InstanceID: original.HostInstanceID, RequestID: original.RequestID, ConfigPath: original.ConfigPath,
 				ConfigSHA256: original.ConfigSHA256, BinarySHA256: original.BinarySHA256, Mode: original.Mode,
-				CleanupCompleted: original.CleanupCompleted, WarningOrderID: orderID}
+				CleanupCompleted: original.CleanupCompleted, WarningOrderID: orderID, GatewayWarning: gateway, WarningRevision: previous}
 			conn, err := net.DialTimeout("unix", filepath.Join(original.HostDir, "host.sock"), time.Second)
 			if err != nil {
 				return fmt.Errorf("warning grant Host unavailable: %w", err)
@@ -53,6 +58,8 @@ func newHostWarningGrantCmd(app *App) *cobra.Command {
 		}}
 	cmd.Flags().StringVar(&requestFile, "request-file", "", "Original admitted Host request")
 	cmd.Flags().StringVar(&orderID, "order-id", "", "One explicitly admitted task order")
+	cmd.Flags().BoolVar(&gateway, "openshell-gateway", false, "Include the original OpenShell gateway resident in this task permission")
+	cmd.Flags().Uint64Var(&previous, "previous-revision", 0, "Exact terminal gateway permission revision for a new explicit launch")
 	_ = cmd.MarkFlagRequired("request-file")
 	_ = cmd.MarkFlagRequired("order-id")
 	return cmd
@@ -84,6 +91,21 @@ func (h *noodleHost) grantWarning(req hostRequest) any {
 	}
 	if !slices.Contains(cfg.Runtime.AdmittedOrders, req.WarningOrderID) {
 		return refuse(errors.New("warning grant order is outside the explicitly admitted task scope"))
+	}
+	if req.GatewayWarning {
+		if !owner.openShell || h.openShell == nil || owner.receipt.Mode != "manual" || len(cfg.Runtime.AdmittedOrders) != 1 {
+			return refuse(errors.New("gateway warning requires one admitted manual OpenShell task"))
+		}
+		grant, err := h.openShell.GrantWarning(req.ContextID, req.WarningOrderID, req.WarningRevision)
+		if err != nil {
+			return refuse(err)
+		}
+		result["status"], result["grant"] = grant.Status, grant
+		result["resources"] = h.budget.Snapshot()
+		return result
+	}
+	if req.WarningRevision != 0 {
+		return refuse(errors.New("previous revision requires an OpenShell gateway warning grant"))
 	}
 	grant, err := h.budget.GrantWarning(req.ContextID, req.WarningOrderID)
 	if err != nil {

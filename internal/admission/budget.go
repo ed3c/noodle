@@ -55,6 +55,8 @@ type Budget struct {
 	unresolvedResidents                    int
 	warningStable                          int
 	warningGrants                          map[warningTask]WarningGrant
+	gatewayWarnings                        map[warningTask]GatewayWarningGrant
+	residentScopes                         map[string]int
 	mu                                     sync.Mutex
 	maximum, active, limit, credit, stable int
 	residents                              int
@@ -82,6 +84,7 @@ type allocation struct {
 	budget   *Budget
 	refs     int
 	resident bool
+	scope    string
 }
 type Permit struct {
 	parent              *Permit
@@ -123,6 +126,12 @@ func (b *Budget) Unregister(id string) {
 		if task.context == id && grant.Status == "available" {
 			grant.Status = "revoked"
 			b.warningGrants[task] = grant
+		}
+	}
+	for task, grant := range b.gatewayWarnings {
+		if task.context == id && grant.Status == "available" {
+			grant.Status = "revoked"
+			b.gatewayWarnings[task] = grant
 		}
 	}
 	delete(b.waited, id)
@@ -243,6 +252,10 @@ func (b *Budget) TryAcquireTask(id, order string) (*Permit, error) {
 }
 
 func (b *Budget) tryAcquire(id, order string) (*Permit, error) {
+	return b.acquire(id, order, false, "")
+}
+
+func (b *Budget) acquire(id, order string, resident bool, scope string) (*Permit, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if !b.contexts[id] || b.unresolvedResidents != 0 {
@@ -261,17 +274,30 @@ func (b *Budget) tryAcquire(id, order string) (*Permit, error) {
 		delete(b.waited, first)
 	}
 	exception := b.warningAvailable(id, order)
+	gatewayAllowed := b.gatewayWarningAvailable(id, order, resident, scope)
+	exception = exception || gatewayAllowed
 	if !exception && (b.stale() || b.active >= b.limit || (!b.unsupported && b.credit == 0) || len(b.waiters) == 0 || b.waiters[0] != id) {
 		return nil, ErrDeferred
 	}
 	b.active++
 	b.consumeWarningGrant(id, order)
+	if resident {
+		b.residents++
+		if b.residentScopes == nil {
+			b.residentScopes = make(map[string]int)
+		}
+		b.residentScopes[scope]++
+		b.markGatewayStarted(id, scope)
+	} else if grant, ok := b.gatewayWarnings[warningTask{id, order}]; ok && b.gatewayWarningStatus(grant).Status == "available" {
+		grant.Status = "consumed"
+		b.gatewayWarnings[warningTask{id, order}] = grant
+	}
 	if !b.unsupported {
 		b.credit = 0
 	}
 	b.removeWaiter(id)
 	delete(b.waited, id)
-	return &Permit{allocation: &allocation{budget: b, refs: 1}}, nil
+	return &Permit{allocation: &allocation{budget: b, refs: 1, resident: resident, scope: scope}}, nil
 }
 
 func (p *Permit) Release() {
@@ -291,6 +317,7 @@ func (p *Permit) Release() {
 			b.active--
 			if p.allocation.resident {
 				b.residents--
+				b.residentScopes[p.allocation.scope]--
 			}
 		}
 	})
@@ -344,13 +371,9 @@ func (b *Budget) Snapshot() Snapshot {
 }
 
 func (b *Budget) TryAcquireResident(id string) (*Permit, error) {
-	p, err := b.TryAcquire(id)
-	if err != nil {
-		return nil, err
-	}
-	b.mu.Lock()
-	p.allocation.resident = true
-	b.residents++
-	b.mu.Unlock()
-	return p, nil
+	return b.acquire(id, "", true, "")
+}
+
+func (b *Budget) TryAcquireScopedResident(id, scope string) (*Permit, error) {
+	return b.acquire(id, "", true, scope)
 }

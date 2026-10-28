@@ -12,6 +12,7 @@ import (
 
 type hostRequestBinding struct {
 	RequiredHostInstanceID string `json:"required_host_instance_id"`
+	WarningOrderID         string `json:"warning_order_id"`
 	Schema                 int    `json:"schema"`
 	RequestID              string `json:"request_id"`
 	Operation              string `json:"operation"`
@@ -72,9 +73,10 @@ func bindHostRequest(req *hostRequest) (*hostRequestBinding, func(), error) {
 			req.ConfigPath = binding.ConfigPath
 			req.Mode = binding.Mode
 			req.CleanupCompleted = binding.CleanupCompleted
+			req.WarningOrderID = binding.WarningOrderID
 			return &binding, unlock, nil
 		}
-		if binding.Operation != req.Operation || binding.ConfigSHA256 != req.ConfigSHA256 || binding.ConfigPath != req.ConfigPath || binding.Mode != req.Mode || binding.CleanupCompleted != req.CleanupCompleted {
+		if binding.Operation != req.Operation || binding.ConfigSHA256 != req.ConfigSHA256 || binding.ConfigPath != req.ConfigPath || binding.Mode != req.Mode || binding.CleanupCompleted != req.CleanupCompleted || binding.WarningOrderID != req.WarningOrderID {
 			return fail(errors.New("original native request binding changed"))
 		}
 		if binding.Status != "busy" {
@@ -90,7 +92,7 @@ func bindHostRequest(req *hostRequest) (*hostRequestBinding, func(), error) {
 		if err != nil {
 			return fail(err)
 		}
-		binding = hostRequestBinding{RequiredHostInstanceID: req.RequiredHostInstanceID, Schema: 1, RequestID: id, Operation: req.Operation, ProjectDir: req.ProjectDir, ConfigPath: req.ConfigPath, ConfigSHA256: req.ConfigSHA256, Mode: req.Mode, BinarySHA256: req.BinarySHA256, HostDir: req.HostDir, CleanupCompleted: req.CleanupCompleted}
+		binding = hostRequestBinding{RequiredHostInstanceID: req.RequiredHostInstanceID, WarningOrderID: req.WarningOrderID, Schema: 1, RequestID: id, Operation: req.Operation, ProjectDir: req.ProjectDir, ConfigPath: req.ConfigPath, ConfigSHA256: req.ConfigSHA256, Mode: req.Mode, BinarySHA256: req.BinarySHA256, HostDir: req.HostDir, CleanupCompleted: req.CleanupCompleted}
 	}
 	binding.EnvironmentSHA256 = hostDigest([]byte(strings.Join(req.Environment, "\x00")))
 	binding.Status = "pending"

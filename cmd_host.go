@@ -67,6 +67,8 @@ type hostRequest struct {
 	ReadbackRequest        loopruntime.SessionReadbackFileRef `json:"readback_request"`
 	Operation              string                             `json:"operation"`
 	WarningOrderID         string                             `json:"warning_order_id"`
+	GatewayWarning         bool                               `json:"gateway_warning"`
+	WarningRevision        uint64                             `json:"warning_revision"`
 	ProjectDir             string                             `json:"project_dir"`
 	ContextID              string                             `json:"context_id"`
 	RequiredHostInstanceID string                             `json:"required_host_instance_id"`
@@ -156,13 +158,13 @@ func newHostCmd(app *App) *cobra.Command {
 		return serveHost(ctx)
 	}})
 	for _, operation := range []string{"attach", "once", "status", "detach"} {
-		var mode, contextID, instanceID, requiredInstanceID, configSHA, requestFile, configPath string
+		var mode, contextID, instanceID, requiredInstanceID, configSHA, requestFile, configPath, warningOrderID string
 		var cleanupCompleted bool
 		child := &cobra.Command{Use: operation, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			if cmd.Flags().Changed("require-existing-instance") && requiredInstanceID == "" {
 				return errors.New("required original Host instance is empty")
 			}
-			req := hostRequest{Operation: operation, ProjectDir: app.projectDir, Mode: mode, ContextID: contextID, InstanceID: instanceID, RequiredHostInstanceID: requiredInstanceID, ConfigPath: configPath, ConfigSHA256: configSHA, RequestFile: requestFile, CleanupCompleted: cleanupCompleted}
+			req := hostRequest{Operation: operation, ProjectDir: app.projectDir, Mode: mode, ContextID: contextID, InstanceID: instanceID, RequiredHostInstanceID: requiredInstanceID, ConfigPath: configPath, ConfigSHA256: configSHA, RequestFile: requestFile, CleanupCompleted: cleanupCompleted, WarningOrderID: warningOrderID}
 			response := callHost(cmd.Context(), req)
 			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(response); err != nil {
 				return err
@@ -178,6 +180,7 @@ func newHostCmd(app *App) *cobra.Command {
 			child.Flags().StringVar(&configPath, "config-file", "", "Exact absolute task config source (repository config remains unchanged)")
 		}
 		if operation == "attach" {
+			child.Flags().StringVar(&warningOrderID, "warning-order-id", "", "Authorize one selected OpenShell gateway and worker launch under stable warning pressure")
 			child.Flags().BoolVar(&cleanupCompleted, "cleanup-completed", false, "Release completed task runtime automatically; preserve manual migration holds")
 		}
 		if operation != "detach" {
@@ -200,7 +203,7 @@ func hostCapabilities(platform string) map[string]any {
 	if platform == "windows" {
 		force = 0
 	}
-	return map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1, "existing_instance_admission": 1, "completed_context_cleanup": 1, "external_task_config": 1, "task_warning_grant": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1}
+	return map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1, "existing_instance_admission": 1, "completed_context_cleanup": 1, "external_task_config": 1, "task_warning_grant": 1, "openshell_warning_grant": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1}
 }
 
 func hostDirectory() (string, error) {
@@ -674,6 +677,9 @@ func offlineHostStatus(dir string, req hostRequest, dialErr error) hostResponse 
 
 func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 	if req.RequiredHostInstanceID != "" && req.RequiredHostInstanceID != h.instanceID {
+		if response, ok := h.historicalHostDeferral(req); ok {
+			return response
+		}
 		return hostError("refused", errors.New("required original Host instance differs; no admission attempted"))
 	}
 	if req.Operation == "cleanup" && req.Apply && req.InstanceID != h.instanceID {
@@ -858,6 +864,9 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 	if err != nil {
 		return hostError("refused", err)
 	}
+	if req.WarningOrderID != "" && (req.Operation != "attach" || cfg.Mode != "manual" || req.RequiredHostInstanceID != h.instanceID || cfg.Runtime.OpenShell.Profile == "" || len(cfg.Runtime.AdmittedOrders) != 1 || cfg.Runtime.AdmittedOrders[0] != req.WarningOrderID) {
+		return hostError("refused", errors.New("gateway warning requires the existing Host and one explicitly admitted manual OpenShell order"))
+	}
 	if shouldStartServer(cfg.Server) {
 		return hostError("refused", errors.New("host contexts require server.enabled=false"))
 	}
@@ -914,7 +923,16 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 	}
 	keepLock = true
 	if c.openShell {
-		if _, err = h.openShell.Acquire(ctx, id); err != nil {
+		if req.WarningOrderID != "" {
+			_, err = h.openShell.GrantWarning(id, req.WarningOrderID, 0)
+			if err != nil {
+				err = fmt.Errorf("%w: %v", admission.ErrDeferred, err)
+			}
+		}
+		if err == nil {
+			_, err = h.openShell.Acquire(ctx, id)
+		}
+		if err != nil {
 			if response, settled := h.finishOpenShellDeferral(c, err); settled {
 				return response
 			}

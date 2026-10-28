@@ -297,7 +297,7 @@ func (r *Residents) acquire(spec ResidentSpec, contextID string, budget *Budget,
 	if budget == nil {
 		return Resident{}, errors.New("resident resource admission unavailable")
 	}
-	permit, err := budget.TryAcquireResident(contextID)
+	permit, err := budget.TryAcquireScopedResident(contextID, key)
 	if err != nil {
 		return Resident{}, err
 	}
