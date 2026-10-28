@@ -1,10 +1,8 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchLoopView } from "~/client/loop-views";
-import type { LoopViewResponse } from "~/client/loop-views";
 import { fetchLoopGraph, fetchArtifact, submitReviewSelection } from "~/client/loop-graph";
 import type { GraphResponse, GraphView, LoopGraph } from "~/client/loop-graph";
-import { LoopViews, LoopViewsContent } from "./LoopViews";
+import { LoopViews, LoopViewsContent, useLoopRun } from "./LoopViews";
 import { LoopGraphSourceIndex, noHighlight } from "./LoopGraphSourceIndex";
 import type { GraphHighlight } from "./LoopGraphSourceIndex";
 import { LoopGraphCanvas } from "./LoopGraphCanvas";
@@ -173,7 +171,7 @@ function Knowledge({
       `${item.title} ${item.body} ${item.id}`.toLowerCase().includes(search.toLowerCase()),
   );
   return (
-    <section aria-label={kind === "cards" ? "全部卡片" : "全部筆記"}>
+    <section aria-label={kind === "cards" ? "任務卡片" : "任務筆記"}>
       <div className="lg-filters">
         <label>
           搜尋內容
@@ -247,46 +245,47 @@ function FullProjectionTab({
   repository: string;
   runIds: string[] | null;
 }) {
-  const client = useQueryClient();
-  const query = useQuery({
-    queryKey: ["loop-views"],
-    queryFn: ({ signal }) =>
-      fetchLoopView(client.getQueryData<LoopViewResponse>(["loop-views"]), signal),
-    refetchInterval: 3000,
-    refetchIntervalInBackground: false,
-    retry: false,
-  });
+  const [selected, setSelected] = useState("");
+  const runs = view.runs.filter(
+    (r) =>
+      (!runIds || runIds.includes(r.id)) &&
+      (!repository ||
+        view.graph.repositories.find((repo) => repo.id === repository)?.root === r.repository ||
+        view.graph.nodes.some((n) => n.run_id === r.id && n.repository_id === repository)),
+  );
+  const summary = runs.find((r) => r.id === selected) ?? runs[0];
+  const query = useLoopRun(kind === "timeline" ? undefined : summary);
+  const run = summary?.detail ? query.data : summary;
+  if (kind === "timeline") {
+    return <LoopViewsContent view={{ ...view, runs }} />;
+  }
   return (
     <>
-      <p className="lg-small">此分頁另讀完整原投影。選取的圖比較仍固定於原版本。</p>
-      {!query.data && !query.isError && <p role="status">讀取完整投影…</p>}
-      {query.isError && (
-        <p role="alert">
-          {query.error.message}
-          {query.data ? "。保留上次成功讀回；目前狀態未知。" : "。完整內容目前未知。"}
-        </p>
+      <p className="lg-small">
+        按任務讀取完整內容；內容搜尋與統計限於目前選定任務。圖比較仍固定原版本。
+      </p>
+      <label>
+        任務範圍
+        <select value={summary?.id ?? ""} onChange={(e) => setSelected(e.target.value)}>
+          {runs.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.repository} · {r.id}
+            </option>
+          ))}
+        </select>
+      </label>
+      {query.isError && <p role="alert">{query.error.message}。完整內容目前未知。</p>}
+      {!run && !query.isError && (
+        <p role="status">{summary ? "讀取選定任務…" : "此範圍沒有任務。"}</p>
       )}
-      {query.data &&
-        (kind === "timeline" ? (
-          <LoopViewsContent
-            view={{
-              ...query.data.view,
-              runs: query.data.view.runs.filter((r) => !runIds || runIds.includes(r.id)),
-            }}
-          />
-        ) : (
-          <Knowledge
-            key={kind}
-            view={{
-              ...view,
-              ...query.data.view,
-              graph: view.graph,
-              runs: query.data.view.runs.filter((r) => !runIds || runIds.includes(r.id)),
-            }}
-            kind={kind}
-            repository={repository}
-          />
-        ))}
+      {run && (
+        <Knowledge
+          key={`${kind}:${run.id}`}
+          view={{ ...view, runs: [run] }}
+          kind={kind}
+          repository={repository}
+        />
+      )}
     </>
   );
 }
@@ -449,8 +448,8 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
         {[
           ["graph", "關係圖"],
           ["timeline", "v1 時間線"],
-          ["cards", "全部卡片"],
-          ["notes", "全部筆記"],
+          ["cards", "任務卡片"],
+          ["notes", "任務筆記"],
           ["requirements", "需求與斷點"],
           ["metrics", "量測"],
         ].map(([id, label]) => (

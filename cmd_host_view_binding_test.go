@@ -60,7 +60,7 @@ func TestHostViewsBindingAndAutomaticNativeReadback(t *testing.T) {
 	observation := hostViewObservation{Receipts: []hostReceipt{receipt}}
 	handler := server.LoopViewsHandler(dir, nil, func(_ context.Context, v *loopview.View) error { return enrichHostView(dir, v, observation) })
 	read := func(etag string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest("GET", "/api/loops", nil)
+		req := httptest.NewRequest("GET", "/api/loops/runs/run", nil)
 		req.Header.Set("If-None-Match", etag)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -84,7 +84,8 @@ func TestHostViewsBindingAndAutomaticNativeReadback(t *testing.T) {
 	if got.Runs[0].Status != "source_observed" || *got.Runs[0].Next != next || len(got.Runs[0].Stages) != 2 || got.Runs[0].Stages[1].ConsumerStatus != "input_recorded" {
 		t.Fatalf("view: %+v", got)
 	}
-	if _, err := loopview.Decode(second.Body.Bytes()); err != nil {
+	decoded, _ := json.Marshal(got)
+	if _, err := loopview.Decode(decoded); err != nil {
 		t.Fatal(err)
 	}
 	order := snapshot.State.Orders["order"]

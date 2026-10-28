@@ -69,7 +69,7 @@ func newHostViewBindCmd() *cobra.Command {
 			return err
 		}
 		defer lock.Close()
-		view, err := loopview.Load(dir)
+		view, err := loopview.LoadSummary(dir)
 		if err != nil {
 			return err
 		}

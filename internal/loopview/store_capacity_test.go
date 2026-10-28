@@ -52,6 +52,9 @@ func TestImportCapacityUsesBoundArtifactsAndRetainsExactHistory(t *testing.T) {
 	if err = os.WriteFile(Path(dir), prior, 0600); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := Migrate(dir); err != nil {
+		t.Fatal(err)
+	}
 	b := capacityView(t, "second", 17<<20)
 	changed, count, err := Import(dir, b)
 	if err != nil || !changed || count != 2 {
@@ -107,7 +110,7 @@ func TestImportArchiveFailureAndInvalidContentPreserveRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := capacityView(t, "second", 10)
-	if _, _, err := Import(dir, b); err == nil {
+	if _, err := Migrate(dir); err == nil {
 		t.Fatal("archive failure ignored")
 	}
 	after, _ := os.ReadFile(Path(dir))

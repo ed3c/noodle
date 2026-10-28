@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { fetchRepositoryFiles } from "~/client/loop-graph";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { LoopGraph } from "~/client/loop-graph";
 
@@ -29,12 +31,29 @@ export function LoopGraphSourceIndex({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const parent = useRef<HTMLDivElement>(null);
   const repo = graph.repositories.find((item) => item.id === repository) ?? graph.repositories[0];
+  const [page, setPage] = useState({ key: "", offset: 0 });
+  const pageKey = `${repo?.id}:${repo?.detail?.sha256}:${section}:${search}`;
+  const offset = page.key === pageKey ? page.offset : 0;
+  const indexQuery = useQuery({
+    queryKey: ["loop-index", pageKey, offset],
+    queryFn: ({ signal }) => {
+      if (!repo) {
+        throw new Error("Repository missing");
+      }
+      return fetchRepositoryFiles(repo, { section, search, offset }, signal);
+    },
+    enabled: Boolean(repo?.detail) && section !== "runtime",
+    retry: false,
+    staleTime: Infinity,
+  });
   const files = useMemo(() => {
     if (!repo) {
       return [];
     }
     if (section === "runtime") {
-      const registered = new Set(repo.selected_files.flatMap((entry) => entry.artifact_ids));
+      const registered = new Set(
+        repo.detail?.artifact_ids ?? repo.selected_files.flatMap((entry) => entry.artifact_ids),
+      );
       for (const node of graph.nodes) {
         if (node.repository_id !== repo.id) {
           continue;
@@ -69,8 +88,11 @@ export function LoopGraphSourceIndex({
           }),
         );
     }
+    if (repo.detail) {
+      return indexQuery.data?.files ?? [];
+    }
     return section === "selected" ? repo.selected_files : repo.tracked_files;
-  }, [graph, repo, section]);
+  }, [graph, repo, section, indexQuery.data]);
   const rows = useMemo(() => {
     const entries: (
       | { kind: "file"; entry: FileEntry; path: string }
@@ -116,9 +138,18 @@ export function LoopGraphSourceIndex({
       virtual.scrollToIndex(firstLinked, { align: "auto" });
     }
   }, [firstLinked, virtual]);
-  const repoWithMatch = graph.repositories.find((candidate) =>
-    [...candidate.tracked_files, ...candidate.selected_files].some((entry) => linked(entry)),
+  const repoWithMatch = graph.repositories.find(
+    (candidate) =>
+      graph.nodes.some(
+        (node) => node.repository_id === candidate.id && highlight.nodes.includes(node.id),
+      ) ||
+      graph.artifacts.some(
+        (artifact) =>
+          artifact.repository_id === candidate.id && highlight.artifacts.includes(artifact.id),
+      ) ||
+      [...candidate.tracked_files, ...candidate.selected_files].some((entry) => linked(entry)),
   );
+  const total = repo?.detail && section !== "runtime" ? indexQuery.data?.total : files.length;
   const items = virtual.getVirtualItems();
   const rendered =
     items.length > 0
@@ -142,7 +173,8 @@ export function LoopGraphSourceIndex({
           <p className="lg-small">
             版本 <code>{repo.revision ?? "unknown"}</code>
             <br />
-            索引 {repo.index_status} · {repo.tracked_files.length} tracked files
+            索引 {repo.index_status} · {repo.detail?.tracked ?? repo.tracked_files.length} tracked
+            files
           </p>
           {repo.gaps.map((gap) => (
             <p key={gap} className="lg-unknown">
@@ -168,7 +200,32 @@ export function LoopGraphSourceIndex({
         搜尋路徑
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="路徑包含…" />
       </label>
-      <p className="lg-small">{files.length} 個 metadata 項目；索引不授權讀取未註冊內容。</p>
+      <p className="lg-small">{total ?? "未知"} 個 metadata 項目；索引不授權讀取未註冊內容。</p>
+      {indexQuery.isError && <p role="alert">{indexQuery.error.message}。索引明細未知。</p>}
+      {indexQuery.isFetching && <p role="status">讀取固定版本索引…</p>}
+      {repo?.detail && section !== "runtime" && (
+        <nav aria-label="索引分頁">
+          <button
+            type="button"
+            disabled={offset === 0}
+            onClick={() => setPage({ key: pageKey, offset: Math.max(0, offset - 100) })}
+          >
+            上一頁
+          </button>
+          <span>
+            {files.length > 0 ? offset + 1 : 0}–{offset + files.length} / {total ?? "未知"}
+          </span>
+          <button
+            type="button"
+            disabled={
+              total === undefined || offset + files.length >= total || indexQuery.isFetching
+            }
+            onClick={() => setPage({ key: pageKey, offset: offset + 100 })}
+          >
+            下一頁
+          </button>
+        </nav>
+      )}
       <div
         ref={parent}
         className="lg-file-scroll"

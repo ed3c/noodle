@@ -29,12 +29,32 @@ func Read(path string) (View, error) {
 	return Decode(data)
 }
 
+// Load expands a committed projection for import validation only. HTTP callers use
+// LoadSummary and individual detail readers so unrelated bodies stay unloaded.
 func Load(dir string) (View, error) {
-	view, err := Read(Path(dir))
-	if os.IsNotExist(err) {
-		return Empty(), nil
+	view, err := LoadSummary(dir)
+	if err != nil {
+		return View{}, err
 	}
-	return view, err
+	for i, run := range view.Runs {
+		view.Runs[i], err = RunDetail(dir, run)
+		if err != nil {
+			return View{}, err
+		}
+	}
+	if view.Graph != nil {
+		for i, repo := range view.Graph.Repositories {
+			view.Graph.Repositories[i], err = RepositoryDetail(dir, repo)
+			if err != nil {
+				return View{}, err
+			}
+		}
+	}
+	raw, err := json.Marshal(view)
+	if err != nil {
+		return View{}, err
+	}
+	return decodeView(raw, false)
 }
 
 // Import serializes registry updates without acquiring the Host lifecycle lock.
@@ -58,8 +78,10 @@ func Import(dir string, incoming View) (bool, int, error) {
 	if err != nil {
 		return false, 0, err
 	}
-	hadInline := hasInlineArtifacts(current)
-	before, err := json.Marshal(current)
+	before, err := os.ReadFile(Path(dir))
+	if os.IsNotExist(err) {
+		err = nil
+	}
 	if err != nil {
 		return false, 0, err
 	}
@@ -82,15 +104,18 @@ func Import(dir string, incoming View) (bool, int, error) {
 		return false, 0, err
 	}
 	current = referencedArtifacts(current)
-	if err := validateImport(current); err != nil {
-		return false, 0, err
-	}
-	data, err := json.Marshal(current)
+	rawCurrent, err := json.Marshal(current)
 	if err != nil {
 		return false, 0, err
 	}
-	if len(data) > MaxBytes {
-		return false, 0, fmt.Errorf("merged loop registry exceeds %d bytes", MaxBytes)
+	if normalized, err := decodeView(rawCurrent, false); err != nil {
+		return false, 0, err
+	} else {
+		current = normalized
+	}
+	summary, data, err := storeProjection(dir, current)
+	if err != nil {
+		return false, 0, err
 	}
 	// Keep the exact previous registry and accepted incoming bodies before removing
 	// redundant inline copies. ArtifactContent still verifies the original source.
@@ -103,17 +128,11 @@ func Import(dir string, incoming View) (bool, int, error) {
 			return false, 0, err
 		}
 	}
-	if hadInline {
-		prior, err := os.ReadFile(Path(dir))
-		if err != nil {
-			return false, 0, err
-		}
-		if err := archiveView(dir, prior); err != nil {
-			return false, 0, err
-		}
-	}
 	if bytes.Equal(before, data) {
 		return false, len(current.Runs), nil
+	}
+	if err := retainVersion(dir, summary, data); err != nil {
+		return false, 0, err
 	}
 	if err := filex.WriteFileAtomicDurable(Path(dir), data); err != nil {
 		return false, 0, err

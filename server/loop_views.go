@@ -2,10 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"fmt"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -19,36 +15,54 @@ func LoopViewsHandler(dir string, ui fs.FS, observe func(context.Context, *loopv
 	registerLoopGraph(mux, dir)
 	registerReviewSelection(mux, dir)
 	mux.HandleFunc("GET /api/loops", func(w http.ResponseWriter, r *http.Request) {
-		view, err := loopview.Load(dir)
+		view, err := loopview.LoadSummary(dir)
 		if err != nil {
 			http.Error(w, "loop display registry unreadable: "+err.Error(), http.StatusServiceUnavailable)
 			return
 		}
 		if observe != nil {
-			err = observe(r.Context(), &view)
+			resources := loopview.Empty()
+			err = observe(r.Context(), &resources)
+			view.Resources = resources.Resources
 			if err != nil {
 				http.Error(w, "Host observation unavailable: "+err.Error(), http.StatusServiceUnavailable)
 				return
 			}
 		}
-		data, err := json.Marshal(view)
-		if err != nil {
-			http.Error(w, "loop display encoding failed", http.StatusInternalServerError)
+		loopJSON(w, r, 200, view)
+	})
+	mux.HandleFunc("GET /api/loops/runs/{id}", func(w http.ResponseWriter, r *http.Request) {
+		view, ok := graphView(w, dir)
+		if !ok {
 			return
 		}
-		digest := sha256.Sum256(data)
-		etag := `"` + hex.EncodeToString(digest[:]) + `"`
-		w.Header().Set("ETag", etag)
-		w.Header().Set("Cache-Control", "private, no-cache")
-		w.Header().Set("Content-Type", "application/json")
-		if r.Header.Get("If-None-Match") == etag {
-			w.WriteHeader(http.StatusNotModified)
+		for _, summary := range view.Runs {
+			if summary.ID != r.PathValue("id") {
+				continue
+			}
+			if requested := r.URL.Query().Get("ref"); requested != "" && requested != summary.Detail.SHA256 {
+				http.Error(w, "selected run version changed", 409)
+				return
+			}
+			run, err := loopview.RunDetail(dir, summary)
+			if err != nil {
+				http.Error(w, "run detail unavailable: "+err.Error(), 503)
+				return
+			}
+			detail := loopview.View{SchemaVersion: 1, Runs: []loopview.Run{run}}
+			if observe != nil {
+				if err = observe(r.Context(), &detail); err != nil {
+					http.Error(w, "Host observation unavailable: "+err.Error(), 503)
+					return
+				}
+			}
+			loopJSON(w, r, 200, struct {
+				loopview.View
+				Source *loopview.DetailRef `json:"projection_source"`
+			}{detail, summary.Detail})
 			return
 		}
-		w.Header().Set("Content-Length", fmt.Sprint(len(data)))
-		if r.Method != http.MethodHead {
-			_, _ = w.Write(data)
-		}
+		http.Error(w, "registered run not found", 404)
 	})
 	mux.Handle("GET /loops", uiOrPlaceholder(ui))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
