@@ -413,7 +413,7 @@ func TestHostCapabilitiesPreservesProtocolContract(t *testing.T) {
 	if err := json.Unmarshal([]byte(output.String()), &value); err != nil {
 		t.Fatal(err)
 	}
-	if len(value) != 3 || value["schema"] != float64(1) || value["protocol"] != "noodle-host-v1" || value["resident_request_binding"] != float64(1) {
+	if len(value) != 7 || value["schema"] != float64(1) || value["protocol"] != "noodle-host-v1" || value["resident_request_binding"] != float64(1) || value["native_consumer_leases"] != float64(1) || value["native_consumer_worktrees"] != float64(1) || value["stateless_fixture_recovery"] != float64(1) || value["shared_service_adapter"] != "stateless_fixtures_only" {
 		t.Fatalf("host protocol changed: %v", value)
 	}
 }

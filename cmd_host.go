@@ -24,6 +24,7 @@ import (
 	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/lockfile"
 	"github.com/poteto/noodle/internal/loopview"
+	"github.com/poteto/noodle/internal/procx"
 	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/internal/statever"
 	"github.com/poteto/noodle/loop"
@@ -55,19 +56,24 @@ type hostResponse struct {
 }
 
 type hostRequest struct {
-	Operation    string                  `json:"operation"`
-	ProjectDir   string                  `json:"project_dir"`
-	ContextID    string                  `json:"context_id"`
-	InstanceID   string                  `json:"instance_id"`
-	ConfigSHA256 string                  `json:"config_sha256"`
-	Mode         string                  `json:"mode"`
-	Environment  []string                `json:"environment,omitempty"`
-	BinarySHA256 string                  `json:"binary_sha256"`
-	RequestID    string                  `json:"request_id"`
-	ResidentSpec *admission.ResidentSpec `json:"resident_spec,omitempty"`
-	ResidentID   string                  `json:"resident_id,omitempty"`
-	RequestFile  string                  `json:"-"`
-	HostDir      string                  `json:"-"`
+	FixtureManifest *admission.FixtureManifest `json:"fixture_manifest,omitempty"`
+	NativeConsumer  bool                       `json:"native_consumer,omitempty"`
+	ConsumerLease   string                     `json:"consumer_lease,omitempty"`
+	peerPID         int
+	peerError       error
+	Operation       string                  `json:"operation"`
+	ProjectDir      string                  `json:"project_dir"`
+	ContextID       string                  `json:"context_id"`
+	InstanceID      string                  `json:"instance_id"`
+	ConfigSHA256    string                  `json:"config_sha256"`
+	Mode            string                  `json:"mode"`
+	Environment     []string                `json:"environment,omitempty"`
+	BinarySHA256    string                  `json:"binary_sha256"`
+	RequestID       string                  `json:"request_id"`
+	ResidentSpec    *admission.ResidentSpec `json:"resident_spec,omitempty"`
+	ResidentID      string                  `json:"resident_id,omitempty"`
+	RequestFile     string                  `json:"-"`
+	HostDir         string                  `json:"-"`
 }
 
 type hostRuntime interface {
@@ -119,7 +125,7 @@ func newHostCmd(app *App) *cobra.Command {
 	}})
 	cmd.AddCommand(task)
 	cmd.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1})
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1, "native_consumer_leases": 1, "native_consumer_worktrees": 1, "stateless_fixture_recovery": 1, "shared_service_adapter": "stateless_fixtures_only"})
 	}})
 	cmd.AddCommand(&cobra.Command{Use: "serve", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
@@ -465,6 +471,7 @@ func serveHost(ctx context.Context) error {
 				if err := json.NewDecoder(io.LimitReader(conn, 4<<20)).Decode(&req); err != nil {
 					return
 				}
+				req.peerPID, req.peerError = procx.PeerPID(conn)
 				c := call{req, make(chan any, 1)}
 				select {
 				case calls <- c:
@@ -479,8 +486,12 @@ func serveHost(ctx context.Context) error {
 			}()
 		}
 	}()
+	lifecycle := time.NewTicker(admission.PollInterval)
+	defer lifecycle.Stop()
 	for {
 		select {
+		case <-lifecycle.C:
+			h.reconcileFixtureLifecycle(ctx)
 		case <-ctx.Done():
 			for _, c := range h.contexts {
 				if h.residents != nil {
