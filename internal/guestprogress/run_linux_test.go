@@ -78,7 +78,11 @@ func TestGuestProgressProcess(t *testing.T) {
 		signal.Ignore(syscall.SIGTERM)
 		_ = os.WriteFile(filepath.Join(root, "escaped-pid"), []byte(strconv.Itoa(os.Getpid())), 0600)
 		for i := 0; ; i++ {
-			if err := os.WriteFile(filepath.Join(root, "repo", "progress.txt"), []byte(fmt.Sprintf("preserved %d", i)), 0600); err != nil {
+			temporary := filepath.Join(root, "repo", "progress.pending")
+			if err := os.WriteFile(temporary, []byte(fmt.Sprintf("preserved %d", i)), 0600); err != nil {
+				os.Exit(94)
+			}
+			if err := os.Rename(temporary, filepath.Join(root, "repo", "progress.txt")); err != nil {
 				os.Exit(94)
 			}
 			time.Sleep(time.Millisecond)
