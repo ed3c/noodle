@@ -110,7 +110,7 @@ for `locally_integrated`, and requires original integrated acceptance PASS. This
 local task's acceptance, not proof the optimized harness beats its baseline or permission
 to adopt it. Hidden paired evaluation remains a separate frozen owner.
 
-## Accounting boundary still requiring integration
+## Actual accounting and remaining acceptance
 
 The existing shared paid gate retains the US$5 total. The caller supplies already-spent
 usage; it is never defaulted to zero. A local reservation can hold the entire remaining
@@ -118,14 +118,19 @@ budget (for usage `0.084284887`, the remainder is `4.915715113`). This is accoun
 claim of a per-call provider-enforced maximum. The original OpenRouter key hard cap and
 its authority must be validated externally before paid execution.
 
-The capture currently reports provider billing unobserved. The bridge therefore returns
-`cost_usd=None` and `wall_s=None` and preserves all original billing/usage events. The gate
-retains the full reservation. A verified original billing settlement/reconciliation path
-is still needed to reclaim unused paid reservation and continue multiple paid calls.
-This increment deliberately does not claim that path works or invent a price from token
-counts. Codex subscription has no paid reservation requirement; nullable per-call USD does
-not prohibit it. Unknown native effects close both routes. Driver-local elapsed time is
-recorded by the shared gate; it is not substituted for unknown native/whole-round time.
+The original capture may report provider billing unobserved. The bridge now optionally
+uses `OpenRouterBilling` to query the original generation IDs and reconcile actual total_cost
+against the exclusive key usage delta. Only matching actual bills release the accounting
+hold. Bounded observations that remain unknown preserve cost_usd=null and the paid hold;
+Session can reconcile the same completed call later without dispatch. See
+[BILLING_AND_RUNNER.md](BILLING_AND_RUNNER.md) for the GET-only supplier, receipt checks and
+`run_experiment(config, review_callback)` entry. This implementation has offline controls;
+its live billing/runner acceptance remains a separate original-owner validation.
+
+A missing per-call reservation uses the current remaining authorized budget as a conservative
+accounting hold, not a new minimum or provider-enforced per-call limit. Codex subscription
+requires no paid reservation. Unknown native effects close both routes. Driver-local elapsed
+time is recorded separately; missing native or whole-workflow duration is never zero.
 
 ## Offline controls
 

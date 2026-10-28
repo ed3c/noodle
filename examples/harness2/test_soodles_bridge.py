@@ -54,6 +54,16 @@ class ScriptedCLI:
         return value, save(evidence / 'stdout.json', value)
 
 
+class UnknownBilling:
+    def begin(self, call, directory):
+        directory.mkdir()
+        return save(directory / 'before.json', {'fixture_only': True})
+
+    def settle(self, call, before, result, directory):
+        directory.mkdir()
+        return save(directory / 'settlement.json', {'status': 'unknown', 'cost_usd': None, 'fixture_only': True})
+
+
 class BridgeTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -150,7 +160,7 @@ class BridgeTests(unittest.TestCase):
             reviews.append((call, observation, ref))
             cli.accepted = True
 
-        bridge = SoodlesOwnerBridge(cli, self.root / 'bridge', [self.template], review=review)
+        bridge = SoodlesOwnerBridge(cli, self.root / 'bridge', [self.template], review=review, billing=UnknownBilling())
         gate = SharedGate(self.root / 'gate.json', bridge, initial_paid_spent_usd='0.084284887')
         with patch('soodles_bridge.time.sleep'):
             result = gate.execute(self.call)
@@ -254,7 +264,7 @@ class BridgeTests(unittest.TestCase):
         def review(*_):
             cli.accepted = True
 
-        bridge = SoodlesOwnerBridge(cli, self.root / 'bridge', [self.template], review=review)
+        bridge = SoodlesOwnerBridge(cli, self.root / 'bridge', [self.template], review=review, billing=UnknownBilling())
         gate = SharedGate(self.root / 'gate.json', bridge, initial_paid_spent_usd='0.084284887')
         with patch('soodles_bridge.time.sleep'):
             result = gate.execute(self.call)
@@ -282,7 +292,7 @@ class BridgeTests(unittest.TestCase):
         def review(*_):
             cli.accepted = True
 
-        bridge = SoodlesOwnerBridge(cli, self.root / 'bridge', [self.template], review=review)
+        bridge = SoodlesOwnerBridge(cli, self.root / 'bridge', [self.template], review=review, billing=UnknownBilling())
         with patch.object(cli, 'invoke', side_effect=invoke), patch('soodles_bridge.time.sleep'):
             result = bridge.execute(self.call)
         self.assertTrue(result.settled)
@@ -302,7 +312,7 @@ class BridgeTests(unittest.TestCase):
         def review(*_):
             cli.accepted = True
 
-        bridge = SoodlesOwnerBridge(cli, self.root / 'bridge', [self.template], review=review)
+        bridge = SoodlesOwnerBridge(cli, self.root / 'bridge', [self.template], review=review, billing=UnknownBilling())
         with patch.object(cli, 'invoke', side_effect=invoke), patch('soodles_bridge.time.sleep'):
             with self.assertRaises(UnknownEffect):
                 bridge.execute(self.call)

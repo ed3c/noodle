@@ -200,15 +200,17 @@ class NativeContractTests(unittest.TestCase):
         self.assertEqual(len(results), 2)
         self.assertEqual(len(self.owner.calls), 1)
 
-    def test_paid_unknown_cost_keeps_reservation_and_missing_amount_refuses(self):
+    def test_paid_unknown_cost_keeps_hold_and_missing_amount_uses_remainder(self):
         adapter = self.adapter("pi")
         actual = self.owner.execute
         self.owner.execute = lambda call: replace(actual(call), cost_usd=None)
         adapter.execute("records", None, "one")
         self.assertEqual(str(self.gate._spent()), "0.05")
-        with self.assertRaisesRegex(Refused, "explicit decimal"):
-            self.gate.execute(replace(self.owner.calls[0], run_id="missing", paid_reservation_usd=None))
-        self.assertEqual(len(self.owner.calls), 1)
+        self.gate.execute(replace(self.owner.calls[0], run_id="remaining", paid_reservation_usd=None))
+        self.assertEqual(str(self.gate._spent()), "5.00")
+        self.assertEqual(len(self.owner.calls), 2)
+        with self.assertRaisesRegex(Refused, "remaining authorized budget"):
+            self.gate.execute(replace(self.owner.calls[0], run_id="exhausted", paid_reservation_usd=None))
 
     def test_persisted_pending_never_replays_and_changed_output_closes_gate(self):
         adapter = self.adapter()

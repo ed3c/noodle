@@ -74,6 +74,7 @@ class OwnerResult:
     cost_usd: str | None
     wall_s: float | None
     cached: bool = False
+    billing_receipt: dict | None = None
 
 
 class OwnerBridge(Protocol):
@@ -145,10 +146,15 @@ class SharedGate:
             total += money(cost if cost is not None else row["reserved_usd"])
         return total
 
-    def verify_result(self, result):
+    def verify_result(self, result, call=None):
         with self.lock:
             try:
                 self._verify_result(result)
+                if result.billing_receipt is not None:
+                    from openrouter_billing import verify_settlement
+                    bill = verify_settlement(call, result, result.billing_receipt)
+                    if bill["cost_usd"] != result.cost_usd:
+                        raise UnknownEffect("original settled cost differs from billing receipt")
             except (Refused, UnknownEffect, OSError, ValueError) as exc:
                 self.state["blocked"] = "original owner completion evidence is unresolved"
                 self._save()
@@ -170,6 +176,45 @@ class SharedGate:
                 raise UnknownEffect("owner cost evidence is invalid") from exc
         if result.wall_s is not None and (result.wall_s < 0 or not math.isfinite(result.wall_s)):
             raise UnknownEffect("owner duration is invalid")
+
+    def _require_unique_bill(self, key, bill):
+        from openrouter_billing import verify_settlement
+        claimed = set(bill["generation_ids"])
+        for other_key, other in self.state["calls"].items():
+            other_result = other.get("result") or {}
+            if other_key == key or other_result.get("billing_receipt") is None:
+                continue
+            prior = verify_settlement(None, OwnerResult(**other_result), other_result["billing_receipt"])
+            if claimed.intersection(prior["generation_ids"]):
+                raise Refused("generation bill already belongs to another owner call")
+
+    def reconcile_billing(self, call: OwnerCall, receipt: dict) -> OwnerResult:
+        """Settle only an existing completed native call; never invoke its owner again."""
+        from openrouter_billing import verify_settlement
+        with self.lock:
+            key = json.dumps([call.group, call.run_id])
+            row = self.state["calls"].get(key)
+            if (self.state["blocked"] or row is None or row["state"] != "settled"
+                    or row["input_sha256"] != call.fingerprint() or call.provider != "pi"):
+                raise Refused("original paid native call has no settled reusable result")
+            result = OwnerResult(**row["result"])
+            self.verify_result(result, call)
+            bill = verify_settlement(call, result, receipt)
+            if result.billing_receipt is not None:
+                if result.billing_receipt != receipt:
+                    raise Refused("original paid call already has a different settlement")
+                return result
+            self._require_unique_bill(key, bill)
+            updated = replace(result, cost_usd=bill["cost_usd"], billing_receipt=receipt)
+            row["result"] = asdict(updated)
+            if money(updated.cost_usd) > money(row["reserved_usd"]) or self._spent() > Decimal("5"):
+                self.state["paid_blocked"] = "actual paid cost exceeded authorized accounting budget"
+            try:
+                self._save()
+            except OSError as exc:
+                self.state["blocked"] = "billing settlement persistence is unresolved"
+                raise UnknownEffect(self.state["blocked"]) from exc
+            return updated
 
     def execute(self, call: OwnerCall) -> OwnerResult:
         with self.lock:
@@ -196,7 +241,7 @@ class SharedGate:
                     raise Refused("original call has no settled reusable result")
                 result = OwnerResult(**prior["result"])
                 try:
-                    self.verify_result(result)
+                    self.verify_result(result, call)
                 except UnknownEffect:
                     self.state["blocked"] = "original settled owner evidence changed"
                     self._save()
@@ -206,7 +251,8 @@ class SharedGate:
             if call.provider == "pi":
                 if self.state["paid_blocked"]:
                     raise Refused(self.state["paid_blocked"])
-                reserve = money(call.paid_reservation_usd)
+                remaining = Decimal("5") - self._spent()
+                reserve = money(call.paid_reservation_usd) if call.paid_reservation_usd is not None else remaining
                 if reserve <= 0 or self._spent() + reserve > Decimal("5"):
                     raise Refused("OpenRouter reservation exceeds remaining authorized budget")
             elif call.paid_reservation_usd is not None:
@@ -219,7 +265,13 @@ class SharedGate:
             try:
                 self._save()  # intent before any owner effect
                 result = self.owner.execute(call)
-                self.verify_result(result)
+                self.verify_result(result, call)
+                if result.billing_receipt is not None:
+                    from openrouter_billing import verify_settlement
+                    try:
+                        self._require_unique_bill(key, verify_settlement(call, result, result.billing_receipt))
+                    except Refused as exc:
+                        raise UnknownEffect("new owner completion reuses another call's bill") from exc
                 if call.fingerprint() != digest:
                     raise UnknownEffect("owner changed the frozen call")
                 row.update(state="settled", result=asdict(result), elapsed_s=time.monotonic()-started)

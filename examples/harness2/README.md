@@ -43,7 +43,8 @@ upstream `_st` otherwise rejects every name except `codex` and `opencode`.
 ## Boundary for the production bridge
 
 `OwnerBridge.execute(call: OwnerCall) -> OwnerResult` is an explicit protocol. A caller must
-explicitly configure the Soodles bridge described in [OWNER_BRIDGE.md](OWNER_BRIDGE.md). `run_native_task` refuses a missing owner before core
+explicitly configure the Soodles bridge described in [OWNER_BRIDGE.md](OWNER_BRIDGE.md).
+`run_native_task` refuses a missing owner before core
 execution. The test-only `FakeOwner` is a deterministic artifact fixture, not a substitute
 optimizer and not proof of a real model invocation.
 
@@ -103,8 +104,10 @@ that is not evidence of improvement.
 
 Only Pi/OpenRouter calls use the paid reservation gate. The model is fixed to
 `openrouter/deepseek/deepseek-v4.1-flash-1017`; the shared limit remains US$5, with explicit
-already-spent cost supplied by the authorized owner. The paid reservation is a local accounting hold, not proof of a per-call provider limit.
-It may conservatively hold the whole remaining authorized budget; it is not a new user cap. Unknown billed cost keeps the full
+already-spent cost supplied by the authorized owner. The paid reservation is a local
+accounting hold, not proof of a per-call provider limit.
+It may conservatively hold the whole remaining authorized budget; it is not a new user cap.
+Unknown billed cost keeps the full
 reservation. A cost above its reservation blocks further paid calls and is recorded; this
 contract cannot retroactively enforce a provider cap or prove a caller-supplied bound.
 Production integration must validate the original provider hard limit and billing authority
@@ -133,7 +136,9 @@ failure, subscription null USD, paid budget/reservation behavior, off-surface na
 and fallback, missing owner/default transport refusal, symlinks, and source archive drift.
 All model behavior is explicitly simulated. The Soodles driver has additional offline
 request/transport/capture/review controls. Its real-owner acceptance, provider billing
-settlement, fixed hidden evaluation, efficiency claims and adoption remain unfinished.
+acceptance, fixed hidden evaluation, efficiency claims and adoption remain unfinished.
+The GET-only billing implementation and execution entry are described in
+[BILLING_AND_RUNNER.md](BILLING_AND_RUNNER.md).
 
 The first control attempt exposed the missing native prompt surface (retained failure, no
 model effects); the correction added the explicit surface above. A later negative fixture

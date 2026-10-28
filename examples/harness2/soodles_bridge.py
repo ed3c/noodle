@@ -10,7 +10,7 @@ import re
 import stat
 import subprocess
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
@@ -381,10 +381,10 @@ def snapshot_candidate(call, template, observation, directory):
 
 class SoodlesOwnerBridge:
     def __init__(self, cli: PinnedCLI, root: Path, templates: list[RequestTemplate], *,
-                 review: Callable[[OwnerCall, dict, dict], None], poll_s=1.0):
+                 review: Callable[[OwnerCall, dict, dict], None], billing=None, poll_s=1.0):
         self.cli, self.root, self.templates, self.review = cli, Path(root), list(templates), review
         require(poll_s > 0, "owner polling interval is invalid")
-        self.poll_s = poll_s
+        self.poll_s, self.billing = poll_s, billing
         self.root.mkdir(parents=True, exist_ok=False)
         require(len({t.repository for t in templates}) == len(templates), "control worktree pool contains duplicates")
 
@@ -401,6 +401,14 @@ class SoodlesOwnerBridge:
         result_dir = directory / "result"
         result_dir.mkdir()
         sequence, advanced, reviewed, frozen = 0, set(), set(), None
+        before = None
+        if call.provider == "pi":
+            require(self.billing is not None, "original paid key readback supplier is missing")
+            from openrouter_billing import BillingUnavailable
+            try:
+                before = self.billing.begin(call, directory / "billing-before")
+            except BillingUnavailable as exc:
+                raise Refused("paid key preflight unavailable; no owner call started") from exc
 
         def invoke(verb, capture=None):
             nonlocal sequence
@@ -448,8 +456,15 @@ class SoodlesOwnerBridge:
                             "request": request, "candidate": frozen[0], "original_review": observation_ref,
                             "result": tree_ref(result_dir), "cost_usd": None, "wall_s": None,
                             "billing_authority": "unresolved", "hidden_acceptance": "not evaluated"})
-                        return OwnerResult(str(result_dir), tree_ref(result_dir)["sha256"], frozen[1], frozen[2],
-                                           receipt["path"], receipt["sha256"], True, None, None)
+                        result = OwnerResult(str(result_dir), tree_ref(result_dir)["sha256"], frozen[1], frozen[2],
+                                             receipt["path"], receipt["sha256"], True, None, None)
+                        if before is not None:
+                            bill_ref = self.billing.settle(call, before, result, directory / "billing-after")
+                            bill = decode(read_ref(bill_ref))
+                            save(directory / "billing-status.json", {"before": before, "settlement": bill_ref})
+                            if bill.get("status") == "settled":
+                                result = replace(result, cost_usd=bill["cost_usd"], billing_receipt=bill_ref)
+                        return result
                     if frozen[0]["sha256"] not in reviewed:
                         reviewed.add(frozen[0]["sha256"])
                         self.review(call, observation, observation_ref)
