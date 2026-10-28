@@ -61,6 +61,7 @@ type hostResponse struct {
 }
 
 type hostRequest struct {
+	ExpectedVersion        string                             `json:"expected_version"`
 	ReadbackOrderID        string                             `json:"readback_order_id"`
 	ReadbackSessionID      string                             `json:"readback_session_id"`
 	ReadbackRequest        loopruntime.SessionReadbackFileRef `json:"readback_request"`
@@ -142,9 +143,9 @@ func newHostCmd(app *App) *cobra.Command {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 2, "runtime_admitted_orders": true, "config_key": "runtime.admitted_orders", "empty_unrestricted": true, "scope": "runtime_dispatch"})
 	}})
 	task.AddCommand(&cobra.Command{Use: "review-capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "local_task_review_recovery": true, "candidate_bound_merge": true, "local_task_merge_recovery": true, "local_task_completion_recovery": true, "local_task_completion_recovery_version": 2, "local_task_roles": 1, "local_task_directory_scope": 1, "openshell_local_task_review": 1, "openshell_instruction_materialization": 1})
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "local_task_review_recovery": true, "candidate_bound_merge": true, "local_task_merge_recovery": true, "local_task_completion_recovery": true, "local_task_completion_recovery_version": 2, "local_task_roles": 1, "local_task_directory_scope": 1, "openshell_local_task_review": 1, "openshell_instruction_materialization": 1, "openshell_saved_progress_attempt": 1})
 	}})
-	task.AddCommand(newHostSessionReadbackCmd(app))
+	task.AddCommand(newHostSessionReadbackCmd(app), newHostSavedProgressCmd(app, false), newHostSavedProgressCmd(app, true))
 	cmd.AddCommand(task)
 	cmd.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(hostCapabilities(runtime.GOOS))
@@ -587,6 +588,10 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 					receipts = append(receipts, context.receipt)
 				}
 				call.reply <- hostViewObservation{Resources: h.viewResources(), Receipts: receipts}
+				continue
+			}
+			if call.request.Operation == "task_interruption_inspect" || call.request.Operation == "task_new_attempt" {
+				call.reply <- h.savedProgress(ctx, call.request)
 				continue
 			}
 			if call.request.Operation == "task_session_readback" {

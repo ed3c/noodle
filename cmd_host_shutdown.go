@@ -123,6 +123,10 @@ func (h *noodleHost) handleShutdownCall(req hostRequest, reply chan any) bool {
 		c.finalizing = true
 		h.shutdown.pending++
 		h.shutdown.jobs <- hostShutdownJob{contextID: c.receipt.ContextID, request: req, reply: reply}
+	case "task_interruption_inspect", "task_new_attempt":
+		result := savedProgressResponse(h.instanceID, req)
+		result.Error = "Host shutdown is draining the original Loop"
+		reply <- result
 	case "task_session_readback":
 		reply <- hostSessionReadback{SchemaVersion: 1, Status: "refused", Error: "Host shutdown is draining the original Loop", HostInstanceID: h.instanceID, ContextID: req.ContextID, RequestID: req.RequestID, Effects: []string{}}
 	default:

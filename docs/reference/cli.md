@@ -95,6 +95,23 @@ noodle --project-dir /path/to/control host task session-readback \
 
 `status=observed` 表示這些完成證據一致；canonical 審查狀態另行回報，並不因此接受或合併候選。`effects=[]` 只描述此次讀回沒有任務操作；執行中的 Host 仍可獨立更新狀態，來源在讀回期間變更會被拒絕。候選檢查不執行 Git hooks／filters，不更新 index；正常 Publish 仍執行 hooks。
 
+### 原 Host 的已保存進度與明確新嘗試
+
+```sh
+noodle --project-dir /path/to/control host task interruption-inspect \
+  --request-file /path/to/original-attach.json \
+  --order-id EXACT_ORDER --session-id STOPPED_SESSION
+
+noodle --project-dir /path/to/control host task new-attempt \
+  --request-file /path/to/original-attach.json \
+  --order-id EXACT_ORDER --session-id STOPPED_SESSION \
+  --expected-version ORIGINAL_INSPECTION_VERSION
+```
+
+這兩個入口只接受仍持有原 context 的 Host、原 binary／attach request／config，以及最新 failed 或 cancelled attempt 的已保存進度。`interruption-inspect` 的外層 `status=observed` 與內層 `inspection.status=retryable` 表示原 Loop 已核對原生停止與進度證據；`inspection.version` 綁定此次明確授權的來源。原生 session resume 仍不支援。
+
+`new-attempt` 將該版本送入原 Loop control queue。`status=queued` 僅表示排隊，並不表示 worker 已開始、候選已接受或資源條件已允許派工；後續仍由原 Loop 重新驗證版本並經既有 admission。ACK 遺失、可能寫入後失敗或來源漂移會回報 `unknown` 並保留已有 command／effects，不可自行重送。缺失、變更或已關閉的 owner 不會被啟動或接替；舊 retained VM 也不能藉此遷移到新 Host。`host task review-capabilities` 的 `openshell_saved_progress_attempt=1` 表示此入口存在。
+
 ### 精確的 retained 初始化誤判恢復
 
 ```sh
