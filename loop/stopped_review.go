@@ -132,7 +132,7 @@ func recoverStoppedReview(project, binary, order, subject, digest string, barrie
 		if err != nil {
 			return refuse(err)
 		}
-		if !intent.RetainTaskData && slices.Contains(cfg.Runtime.Process.AdmittedOrders, order) {
+		if !intent.RetainTaskData && slices.Contains(cfg.Runtime.AdmittedOrders, order) {
 			return refuse(fmt.Errorf("rejection cleanup policy changed; retained task data cannot be removed"))
 		}
 	}

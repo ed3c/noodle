@@ -68,7 +68,7 @@ func captureStoppedReview(project, order, subject string, execCtx ...*execution.
 	if err != nil {
 		return i, err
 	}
-	i.RetainTaskData = slices.Contains(cfg.Runtime.Process.AdmittedOrders, order) || retainedTaskData(s.EffectLedger, order)
+	i.RetainTaskData = slices.Contains(cfg.Runtime.AdmittedOrders, order) || retainedTaskData(s.EffectLedger, order)
 	if !orderx.ValidOrderRevision(s.OrderRevision) || s.GeneratedAt.IsZero() || s.EffectLedger == nil {
 		return i, fmt.Errorf("canonical recovery evidence is incomplete")
 	}

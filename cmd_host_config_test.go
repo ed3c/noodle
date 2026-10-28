@@ -27,7 +27,7 @@ func TestHostExternalConfigSurvivesExitWithoutChangingProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := []byte("mode = 'manual'\n[server]\nenabled = false\n[routing.defaults]\nprovider = 'codex'\nmodel = 'selected-model'\n[runtime.process]\nadmitted_orders = ['selected-order']\n")
+	data := []byte("mode = 'manual'\n[server]\nenabled = false\n[routing.defaults]\nprovider = 'codex'\nmodel = 'selected-model'\n[runtime]\nadmitted_orders = ['selected-order']\n")
 	req.ConfigPath = filepath.Join(hostConfigDir(t), "task.toml")
 	if err := os.WriteFile(req.ConfigPath, data, 0600); err != nil {
 		t.Fatal(err)
@@ -37,7 +37,7 @@ func TestHostExternalConfigSurvivesExitWithoutChangingProject(t *testing.T) {
 	started := 0
 	h.newRuntime = func(_, _ string, cfg config.Config, _ loop.Dependencies) hostRuntime {
 		started++
-		if cfg.Routing.Defaults.Model != "selected-model" || len(cfg.Runtime.Process.AdmittedOrders) != 1 || cfg.Runtime.Process.AdmittedOrders[0] != "selected-order" {
+		if cfg.Routing.Defaults.Model != "selected-model" || len(cfg.Runtime.AdmittedOrders) != 1 || cfg.Runtime.AdmittedOrders[0] != "selected-order" {
 			t.Fatalf("runtime consumed repository config: %+v", cfg)
 		}
 		return &fakeHostRuntime{ready: make(chan struct{}), released: make(chan struct{})}
@@ -53,7 +53,7 @@ func TestHostExternalConfigSurvivesExitWithoutChangingProject(t *testing.T) {
 		t.Fatalf("detach: %+v", got)
 	}
 	cfg, _, err := config.LoadRuntime(root)
-	if err != nil || len(cfg.Runtime.Process.AdmittedOrders) != 1 || cfg.Runtime.Process.AdmittedOrders[0] != "selected-order" {
+	if err != nil || len(cfg.Runtime.AdmittedOrders) != 1 || cfg.Runtime.AdmittedOrders[0] != "selected-order" {
 		t.Fatalf("offline config: %+v %v", cfg, err)
 	}
 	after, err := os.ReadFile(filepath.Join(root, ".noodle.toml"))

@@ -201,7 +201,7 @@ func TestCleanupAutomaticRunEventReleasesCompletedAfterManualHold(t *testing.T) 
 	cfg := config.DefaultConfig()
 	cfg.Mode = "manual"
 	cfg.Skills.Paths = []string{t.TempDir()}
-	cfg.Runtime.Process.AdmittedOrders = []string{"done"}
+	cfg.Runtime.AdmittedOrders = []string{"done"}
 	rt := newMockRuntime()
 	l := New(dir, "noodle", cfg, Dependencies{
 		Runtimes: map[string]loopruntime.Runtime{"process": rt},

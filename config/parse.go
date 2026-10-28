@@ -52,6 +52,9 @@ func parseWithDiagnostics(data []byte) (Config, []ConfigDiagnostic, error) {
 	if err != nil {
 		return Config{}, nil, fmt.Errorf("parse .noodle.toml: %w", err)
 	}
+	if metadata.IsDefined("runtime", "process", "admitted_orders") {
+		return Config{}, nil, fmt.Errorf("runtime.process.admitted_orders was removed; use runtime.admitted_orders")
+	}
 
 	diagnostics := make([]ConfigDiagnostic, 0)
 	applyDefaultsFromMetadata(&config, metadata, &diagnostics)

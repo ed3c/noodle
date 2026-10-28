@@ -138,7 +138,7 @@ func TestLocalTaskCompletionRecoveryRejectsInvalidCustody(t *testing.T) {
 			case "event":
 				requestChangesWrite(t, filepath.Join(l.runtimeDir, "loop-events.ndjson"), []byte(""))
 			case "scope":
-				l.config.Runtime.Process.AdmittedOrders = nil
+				l.config.Runtime.AdmittedOrders = nil
 			case "packet":
 				cmd.Target = "bad"
 			case "attempt":

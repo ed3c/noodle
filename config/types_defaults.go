@@ -60,11 +60,12 @@ type AgentsConfig struct {
 
 // RuntimeConfig controls the default runtime for spawned cook sessions.
 type RuntimeConfig struct {
-	Default   string          `toml:"default"` // runtime kind, defaults to process
-	Process   ProcessConfig   `toml:"process"`
-	Sprites   SpritesConfig   `toml:"sprites"`
-	Cursor    CursorConfig    `toml:"cursor"`
-	OpenShell OpenShellConfig `toml:"openshell"`
+	AdmittedOrders []string        `toml:"admitted_orders"`
+	Default        string          `toml:"default"` // runtime kind, defaults to process
+	Process        ProcessConfig   `toml:"process"`
+	Sprites        SpritesConfig   `toml:"sprites"`
+	Cursor         CursorConfig    `toml:"cursor"`
+	OpenShell      OpenShellConfig `toml:"openshell"`
 
 	spritesDefined   bool
 	cursorDefined    bool
@@ -94,8 +95,7 @@ type OpenShellConfig struct {
 }
 
 type ProcessConfig struct {
-	MaxConcurrent  int      `toml:"max_concurrent"`
-	AdmittedOrders []string `toml:"admitted_orders"`
+	MaxConcurrent int `toml:"max_concurrent"`
 }
 
 type SpritesConfig struct {

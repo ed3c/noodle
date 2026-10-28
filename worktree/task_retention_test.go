@@ -33,13 +33,13 @@ func TestRetainedTaskPublicCleanupAndMergeRequireExplicitDeletion(t *testing.T) 
 		if err := os.WriteFile(filepath.Join(root, ".git/info/exclude"), []byte(".noodle/\n.noodle.toml\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
-		order := state.OrderNode{OrderID: "task", Stages: []state.StageNode{{Attempts: []state.AttemptNode{{WorktreeName: "retained"}}}}}
+		order := state.OrderNode{OrderID: "task", Stages: []state.StageNode{{Runtime: "openshell", Attempts: []state.AttemptNode{{WorktreeName: "retained"}}}}}
 		snapshot := reducer.BuildSnapshot(state.State{Orders: map[string]state.OrderNode{"task": order}}, nil, time.Time{})
 		if policy == "ledger" {
 			payload, _ := json.Marshal(map[string]string{"order_id": "task", "task_data_retention": "explicit_delete"})
 			effect := reducer.Effect{EffectID: reducer.InitialAdmissionEffectID("task"), Payload: payload}
 			snapshot.EffectLedger = []reducer.EffectLedgerRecord{{EffectID: effect.EffectID, Effect: effect}}
-		} else if err := os.WriteFile(filepath.Join(root, ".noodle.toml"), []byte("[runtime.process]\nadmitted_orders=['task']\n"), 0600); err != nil {
+		} else if err := os.WriteFile(filepath.Join(root, ".noodle.toml"), []byte("[runtime]\nadmitted_orders=['task']\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
 		if policy == "external" {

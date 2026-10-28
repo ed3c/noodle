@@ -698,12 +698,30 @@ func TestMaxConcurrentForLookup(t *testing.T) {
 	}
 }
 
-func TestProcessAdmittedOrdersParse(t *testing.T) {
-	cfg, err := Parse([]byte("[runtime.process]\nadmitted_orders = [\"original-task\"]\n"))
+func TestRuntimeAdmittedOrdersParse(t *testing.T) {
+	cfg, err := Parse([]byte("[runtime]\nadmitted_orders = [\"original-task\"]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Runtime.Process.AdmittedOrders) != 1 || cfg.Runtime.Process.AdmittedOrders[0] != "original-task" {
-		t.Fatalf("admission lost: %+v", cfg.Runtime.Process)
+	if len(cfg.Runtime.AdmittedOrders) != 1 || cfg.Runtime.AdmittedOrders[0] != "original-task" {
+		t.Fatalf("admission lost: %+v", cfg.Runtime)
+	}
+}
+
+func TestRuntimeAdmissionRejectsRemovedProcessScope(t *testing.T) {
+	for _, data := range []string{
+		"[runtime.process]\nadmitted_orders = ['original-task']\n",
+		"[runtime.process]\nadmitted_orders = []\n",
+		"[runtime]\nadmitted_orders = ['original-task']\n[runtime.process]\nadmitted_orders = ['other-task']\n",
+	} {
+		if _, err := Parse([]byte(data)); err == nil || !strings.Contains(err.Error(), "runtime.process.admitted_orders was removed") {
+			t.Fatalf("removed scope became unrestricted: %v", err)
+		}
+	}
+	for _, data := range []string{"", "[runtime]\nadmitted_orders = []\n"} {
+		cfg, err := Parse([]byte(data))
+		if err != nil || len(cfg.Runtime.AdmittedOrders) != 0 {
+			t.Fatalf("unrestricted scope changed: %+v %v", cfg.Runtime, err)
+		}
 	}
 }

@@ -82,7 +82,7 @@ func (h *noodleHost) grantWarning(req hostRequest) any {
 	if err != nil {
 		return refuse(err)
 	}
-	if !slices.Contains(cfg.Runtime.Process.AdmittedOrders, req.WarningOrderID) {
+	if !slices.Contains(cfg.Runtime.AdmittedOrders, req.WarningOrderID) {
 		return refuse(errors.New("warning grant order is outside the explicitly admitted task scope"))
 	}
 	grant, err := h.budget.GrantWarning(req.ContextID, req.WarningOrderID)

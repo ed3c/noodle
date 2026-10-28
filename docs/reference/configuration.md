@@ -122,12 +122,26 @@ Controls which runtime executes agent sessions and per-runtime settings.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `default` | string | `"process"` | Default runtime kind: `"process"` or `"sprites"` |
+| `default` | string | `"process"` | Default runtime kind: `"process"`, `"sprites"`, `"cursor"`, or `"openshell"` |
+| `admitted_orders` | string[] | `[]` | Exact order IDs allowed in this context across every runtime. Empty permits the ordinary unrestricted pipeline. |
 
 ```toml
 [runtime]
 default = "process"
+admitted_orders = ["selected-order"]
 ```
+
+A nonempty `admitted_orders` list rejects foreign or missing order IDs before
+worktree preparation or dispatch, including scheduler, bootstrap, and fallback
+paths. The same scope preserves admitted task data and binds candidate review
+and cleanup to the original order; it does not authorize a merge or bypass
+resource admission. Leave the list empty for normal scheduling.
+
+`runtime.process.admitted_orders` is removed and causes a configuration error.
+New task admissions can inspect `noodle host task capabilities`: schema version
+2 reports `runtime_admitted_orders: true`, `config_key: "runtime.admitted_orders"`,
+and `scope: "runtime_dispatch"`. Existing immutable task configurations remain
+historical inputs for their original owner; they are not rewritten automatically.
 
 #### `[runtime.process]`
 

@@ -274,7 +274,7 @@ func TestLocalTaskMergeRecoveryRejectsChangedSourcesBeforeRestoration(t *testing
 			case "source":
 				cmd.Target = "changed"
 			case "scope":
-				l.config.Runtime.Process.AdmittedOrders = nil
+				l.config.Runtime.AdmittedOrders = nil
 			case "active-effect":
 				if err := l.effectLedger.MarkRunning("old-merge"); err != nil {
 					t.Fatal(err)

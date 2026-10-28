@@ -28,7 +28,7 @@ func (l *Loop) mergeCookWorktree(ctx context.Context, cook *cookHandle) error {
 		}
 	} else {
 		opts := worktree.MergeOpts{RetainWorktree: cook.retainWorktree}
-		if cook.stage.TaskKey == "local-task" && slices.Contains(l.config.Runtime.Process.AdmittedOrders, cook.orderID) {
+		if cook.stage.TaskKey == "local-task" && slices.Contains(l.config.Runtime.AdmittedOrders, cook.orderID) {
 			var binding localTaskMergeBinding
 			if json.Unmarshal(cook.stage.Extra[localTaskMergeKey], &binding) != nil || binding.Head == "" || binding.Tree == "" {
 				return fmt.Errorf("local task merge candidate binding missing")

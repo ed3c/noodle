@@ -204,7 +204,7 @@ func TestFailedStopAllRetainsDispatchHoldAfterRestart(t *testing.T) {
 func TestSingleBoundStopHoldSurvivesRestartEvenWhenKillFails(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		l := newControlTestLoop(t, &fakeWorktree{}, newMockRuntime())
-		l.config.Runtime.Process.AdmittedOrders = []string{"bound-task"}
+		l.config.Runtime.AdmittedOrders = []string{"bound-task"}
 		session := &stopFailureSession{mockSession: &mockSession{id: "worker", done: make(chan struct{})}}
 		if fail {
 			session.err = errors.New("exit not confirmed")

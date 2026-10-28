@@ -132,7 +132,7 @@ func newHostCmd(app *App) *cobra.Command {
 	cmd.AddCommand(newHostViewsCmd())
 	task := &cobra.Command{Use: "task", Short: "Read native task dispatch capabilities"}
 	task.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "process_admitted_orders": true, "config_key": "runtime.process.admitted_orders", "empty_unrestricted": true, "scope": "process_dispatch"})
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 2, "runtime_admitted_orders": true, "config_key": "runtime.admitted_orders", "empty_unrestricted": true, "scope": "runtime_dispatch"})
 	}})
 	task.AddCommand(&cobra.Command{Use: "review-capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "local_task_review_recovery": true, "candidate_bound_merge": true, "local_task_merge_recovery": true, "local_task_completion_recovery": true, "local_task_completion_recovery_version": 2, "local_task_roles": 1, "local_task_directory_scope": 1})

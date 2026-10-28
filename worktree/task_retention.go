@@ -18,7 +18,7 @@ func (a *App) retainsTaskWorktree(name string) (bool, error) {
 	}
 	snapshot, err := reducer.ReadSnapshot(filepath.Join(a.Root, ".noodle", "state.snapshot.json"))
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) && len(cfg.Runtime.Process.AdmittedOrders) == 0 {
+		if errors.Is(err, os.ErrNotExist) && len(cfg.Runtime.AdmittedOrders) == 0 {
 			return false, nil
 		}
 		return false, fmt.Errorf("task retention readback required: %w", err)
@@ -26,7 +26,7 @@ func (a *App) retainsTaskWorktree(name string) (bool, error) {
 	target := canonicalPath(a.resolveWorktreePath(name))
 	matches := func(n string) bool { return n != "" && (n == name || canonicalPath(WorktreePath(a.Root, n)) == target) }
 	for id, order := range snapshot.State.Orders {
-		if !slices.Contains(cfg.Runtime.Process.AdmittedOrders, id) && !reducer.RetainedTaskData(snapshot.EffectLedger, id) {
+		if !slices.Contains(cfg.Runtime.AdmittedOrders, id) && !reducer.RetainedTaskData(snapshot.EffectLedger, id) {
 			continue
 		}
 		for _, stage := range order.Stages {

@@ -73,7 +73,7 @@ func defaultDependencies(projectDir, runtimeDir, noodleBin string, cfg config.Co
 	}
 
 	wtApp, wtErr := worktree.NewAppWithExecution(executionContext)
-	if wtErr == nil && len(cfg.Runtime.Process.AdmittedOrders) > 0 {
+	if wtErr == nil && len(cfg.Runtime.AdmittedOrders) > 0 {
 		wtErr = bindContextIntegration(wtApp, runtimeDir)
 		if wtErr != nil {
 			wtApp = nil

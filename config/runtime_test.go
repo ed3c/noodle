@@ -20,7 +20,7 @@ func TestRuntimeConfigUsesBoundSourceAndRefusesDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(project, "task.toml")
-	data := []byte("mode = 'manual'\n[runtime.process]\nadmitted_orders = ['original-order']\n")
+	data := []byte("mode = 'manual'\n[runtime]\nadmitted_orders = ['original-order']\n")
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestRuntimeConfigUsesBoundSourceAndRefusesDrift(t *testing.T) {
 		t.Fatalf("same source retry: %v", err)
 	}
 	cfg, _, err := LoadRuntime(project)
-	if err != nil || cfg.Mode != "manual" || len(cfg.Runtime.Process.AdmittedOrders) != 1 {
+	if err != nil || cfg.Mode != "manual" || len(cfg.Runtime.AdmittedOrders) != 1 {
 		t.Fatalf("selected config: %+v %v", cfg, err)
 	}
 	if _, err := SaveRuntimeSource(project, RuntimeSource{}); err == nil {

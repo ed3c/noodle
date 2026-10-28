@@ -13,7 +13,7 @@ func retainedTaskData(records []reducer.EffectLedgerRecord, orderID string) bool
 }
 
 func (l *Loop) retainTaskData(orderID string) bool {
-	if slices.Contains(l.config.Runtime.Process.AdmittedOrders, orderID) {
+	if slices.Contains(l.config.Runtime.AdmittedOrders, orderID) {
 		return true
 	}
 	return l.effectLedger != nil && retainedTaskData(l.effectLedger.All(), orderID)

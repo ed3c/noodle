@@ -21,7 +21,7 @@ func (l *Loop) isAdmittedLocalTask(order state.OrderNode, stage state.StageNode)
 		WritePaths []string      `json:"write_paths"`
 		Role       *taskRoleFile `json:"task_role"`
 	}
-	return slices.Contains(l.config.Runtime.Process.AdmittedOrders, order.OrderID) &&
+	return slices.Contains(l.config.Runtime.AdmittedOrders, order.OrderID) &&
 		len(order.Stages) == 1 && stage.StageIndex == 0 && stage.TaskKey == "local-task" && stage.Skill == "local-task" &&
 		stage.Provider == "codex" && stage.Runtime == "process" && !l.config.Agents.Codex.RequireTypedOutcome &&
 		json.Unmarshal([]byte(stage.Prompt), &prompt) == nil && prompt.Kind == "local_task" && prompt.Goal != "" && (len(prompt.WritePaths) > 0 || prompt.Role != nil)

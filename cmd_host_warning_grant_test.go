@@ -12,7 +12,7 @@ import (
 func warningHost(t *testing.T) (*noodleHost, hostRequest) {
 	t.Helper()
 	root := hostConfigDir(t)
-	data := []byte("[runtime.process]\nadmitted_orders = ['selected-task']\n")
+	data := []byte("[runtime]\nadmitted_orders = ['selected-task']\n")
 	if err := os.WriteFile(filepath.Join(root, ".noodle.toml"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestHostWarningGrantRefusesForeignOrChangedSource(t *testing.T) {
 			case "failed":
 				h.contexts[req.ContextID].failed = true
 			case "drift":
-				if err := os.WriteFile(filepath.Join(req.ProjectDir, ".noodle.toml"), []byte("[runtime.process]\nadmitted_orders = ['selected-task', 'other-task']\n"), 0600); err != nil {
+				if err := os.WriteFile(filepath.Join(req.ProjectDir, ".noodle.toml"), []byte("[runtime]\nadmitted_orders = ['selected-task', 'other-task']\n"), 0600); err != nil {
 					t.Fatal(err)
 				}
 			}

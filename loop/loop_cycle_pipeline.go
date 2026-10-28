@@ -289,7 +289,7 @@ func (l *Loop) emitPromotedOrders() {
 // bootstrapped or injected. Handles idle transition, empty-backlog bootstrap,
 // and mise-change injection.
 func (l *Loop) ensureScheduleIfNeeded(brief mise.Brief, orders *OrdersFile, miseChanged bool) (idle bool, err error) {
-	if l.requireProcessOrder(l.config.Runtime.Default, scheduleOrderID) != nil {
+	if l.requireAdmittedOrder(scheduleOrderID) != nil {
 		return false, nil
 	}
 	if len(l.cooks.activeCooksByOrder) == 0 && len(l.cooks.adoptedTargets) == 0 && !hasNonScheduleOrders(*orders) {
@@ -501,12 +501,8 @@ func (l *Loop) planCycleSpawns(orders OrdersFile, brief mise.Brief, capacity int
 	for _, order := range orders.Orders {
 		_, stage := activeStageForOrder(order)
 		if stage != nil {
-			runtimeName := nonEmpty(stage.Runtime, "process")
-			if isScheduleStage(*stage) {
-				runtimeName = l.config.Runtime.Default
-			}
-			if l.requireProcessOrder(runtimeName, order.ID) != nil {
-				blockedOrders[order.ID] = "outside_process_admission"
+			if l.requireAdmittedOrder(order.ID) != nil {
+				blockedOrders[order.ID] = "outside_order_admission"
 			}
 		}
 	}

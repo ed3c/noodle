@@ -18,7 +18,7 @@ func localTaskReviewFixturePaths(t *testing.T, scope, name string) (*Loop, *cook
 	t.Helper()
 	l, _, cook := newTypedOutcomeTestLoop(t)
 	l.config.Agents.Codex.RequireTypedOutcome = false
-	l.config.Runtime.Process.AdmittedOrders = []string{cook.orderID}
+	l.config.Runtime.AdmittedOrders = []string{cook.orderID}
 	prompt, err := json.Marshal(map[string]any{"kind": "local_task", "goal": "fix candidate", "write_paths": []string{scope}})
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +170,7 @@ func TestLocalTaskRecoveryRejectsForeignOrChangedEvidence(t *testing.T) {
 			case "meta":
 				recoveryWriteJSON(t, filepath.Join(l.runtimeDir, "sessions", cook.session.ID(), "meta.json"), map[string]any{"status": "running", "alive": true})
 			case "scope":
-				l.config.Runtime.Process.AdmittedOrders = nil
+				l.config.Runtime.AdmittedOrders = nil
 			case "typed":
 				l.config.Agents.Codex.RequireTypedOutcome = true
 			}

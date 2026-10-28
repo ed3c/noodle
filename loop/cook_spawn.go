@@ -49,7 +49,7 @@ func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Orde
 		runtimeName = l.config.Runtime.Default
 		admissionOrder = ""
 	}
-	if err := l.requireProcessOrder(runtimeName, cand.OrderID); err != nil {
+	if err := l.requireAdmittedOrder(cand.OrderID); err != nil {
 		return err
 	}
 	return l.withAdmission(ctx, runtimeName, admissionOrder, func(ctx context.Context) error { return l.spawnCookAdmitted(ctx, cand, order, opts) })
@@ -239,7 +239,7 @@ func (l *Loop) dispatchSession(ctx context.Context, req loopruntime.DispatchRequ
 		runtimeName = "process"
 	}
 
-	if err := l.requireProcessOrder(runtimeName, req.EnvVars["NOODLE_ORDER_ID"]); err != nil {
+	if err := l.requireAdmittedOrder(req.EnvVars["NOODLE_ORDER_ID"]); err != nil {
 		return nil, RuntimeFallbackOutcome{}, err
 	}
 	runtime := l.deps.Runtimes[runtimeName]
@@ -264,7 +264,7 @@ func (l *Loop) dispatchSession(ctx context.Context, req loopruntime.DispatchRequ
 			return nil, RuntimeFallbackOutcome{}, l.retainUnknownDispatch(ctx, err)
 		}
 		if fallback := l.deps.Runtimes["process"]; fallback != nil {
-			if err := l.requireProcessOrder("process", req.EnvVars["NOODLE_ORDER_ID"]); err != nil {
+			if err := l.requireAdmittedOrder(req.EnvVars["NOODLE_ORDER_ID"]); err != nil {
 				return nil, RuntimeFallbackOutcome{}, err
 			}
 			l.logger.Warn("runtime dispatch failed, falling back to process", "runtime", runtimeName, "error", err)

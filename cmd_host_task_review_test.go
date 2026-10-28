@@ -19,14 +19,11 @@ func TestHostTaskReviewCapabilitiesAreOfflineAndSeparate(t *testing.T) {
 		if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 			t.Fatal(err)
 		}
-		if result["schema_version"] != float64(1) {
-			t.Fatal(result)
-		}
 		if name == "capabilities" {
-			if len(result) != 5 || result["process_admitted_orders"] != true {
-				t.Fatal("original admission capability changed")
+			if len(result) != 5 || result["schema_version"] != float64(2) || result["runtime_admitted_orders"] != true || result["config_key"] != "runtime.admitted_orders" || result["scope"] != "runtime_dispatch" || result["empty_unrestricted"] != true {
+				t.Fatal("runtime admission capability differs")
 			}
-		} else if len(result) != 8 || result["candidate_bound_merge"] != true || result["local_task_review_recovery"] != true || result["local_task_merge_recovery"] != true || result["local_task_completion_recovery"] != true || result["local_task_completion_recovery_version"] != float64(2) || result["local_task_roles"] != float64(1) || result["local_task_directory_scope"] != float64(1) {
+		} else if len(result) != 8 || result["schema_version"] != float64(1) || result["candidate_bound_merge"] != true || result["local_task_review_recovery"] != true || result["local_task_merge_recovery"] != true || result["local_task_completion_recovery"] != true || result["local_task_completion_recovery_version"] != float64(2) || result["local_task_roles"] != float64(1) || result["local_task_directory_scope"] != float64(1) {
 			t.Fatal(result)
 		}
 	}

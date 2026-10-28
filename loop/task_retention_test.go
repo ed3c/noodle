@@ -14,7 +14,7 @@ func TestBoundTaskRejectRetainsWorktreeAndSession(t *testing.T) {
 	l, cook, _ := localTaskReviewFixture(t)
 	localTaskRealWorktree(t, l)
 	// The original admission keeps the policy even after config changes.
-	l.config.Runtime.Process.AdmittedOrders = nil
+	l.config.Runtime.AdmittedOrders = nil
 	path := filepath.Join(cook.worktreePath, "candidate.txt")
 	before := recoveryRead(t, path)
 	if err := l.controlReject(cook.orderID); err != nil {
@@ -33,9 +33,9 @@ func TestBoundTaskAutomaticCleanupRetainsOnlyBoundWorktrees(t *testing.T) {
 		t.Run(map[bool]string{false: "standalone", true: "bound"}[bound], func(t *testing.T) {
 			wt := &fakeWorktree{}
 			l := newControlTestLoop(t, wt, newMockRuntime())
-			cook := &cookHandle{cookIdentity: cookIdentity{orderID: "task"}, worktreeName: "task-worktree"}
+			cook := &cookHandle{cookIdentity: cookIdentity{orderID: "task", stage: Stage{Runtime: "openshell"}}, worktreeName: "task-worktree"}
 			if bound {
-				l.config.Runtime.Process.AdmittedOrders = []string{"task"}
+				l.config.Runtime.AdmittedOrders = []string{"task"}
 			}
 			l.cleanupCookWorktree(cook)
 			if got := len(wt.cleaned); (bound && got != 0) || (!bound && got != 1) {
@@ -49,7 +49,7 @@ func TestStoppedBoundTaskRejectRetainsWorktree(t *testing.T) {
 	for _, external := range []bool{false, true} {
 		t.Run(fmt.Sprintf("external=%v", external), func(t *testing.T) {
 			project, wt := stoppedReviewFixture(t)
-			data := []byte("[runtime.process]\nadmitted_orders = ['order-1']\n")
+			data := []byte("[runtime]\nadmitted_orders = ['order-1']\n")
 			if external {
 				dir, err := filepath.EvalSymlinks(t.TempDir())
 				if err != nil {
@@ -85,7 +85,7 @@ func TestStoppedBoundTaskRejectRetainsWorktree(t *testing.T) {
 func TestBoundTaskStopKeepsOriginalWatcherUntilExit(t *testing.T) {
 	wt := &fakeWorktree{}
 	l := newControlTestLoop(t, wt, newMockRuntime())
-	l.config.Runtime.Process.AdmittedOrders = []string{"task"}
+	l.config.Runtime.AdmittedOrders = []string{"task"}
 	session := &mockSession{id: "bound-worker", done: make(chan struct{})}
 	cook := &cookHandle{cookIdentity: cookIdentity{orderID: "task"}, session: session, worktreeName: "bound-worktree"}
 	l.cooks.activeCooksByOrder["task"] = cook
