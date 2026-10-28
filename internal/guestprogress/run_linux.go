@@ -233,7 +233,7 @@ func runWithOperations(cfg Config, ops supervisorOperations) (int, error) {
 	for _, reply := range waiters {
 		reply <- result
 	}
-	return result.ExitCode, nil
+	return 0, nil
 }
 
 func withoutControlToken(environment []string) []string {

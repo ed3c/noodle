@@ -32,7 +32,10 @@ certifies quiescence.
 
 The helper archives the repository and dedicated harness session after that
 barrier, excludes `codex/auth.json`, fsyncs both archives, then durably publishes
-a result containing exact hashes and sizes. The control token is omitted from
+a result containing exact hashes and sizes. Only that completed supervisor
+transport exits zero; the harness exit code stays in the receipt. A harness
+terminated by TERM (143) can therefore have safely saved progress, whereas a
+supervisor terminated by TERM cannot be mistaken for successful preservation. The control token is omitted from
 receipts and removed from the harness environment. A completed same-ID stop
 reads the existing receipt without signaling again. Natural completion may
 produce an archive with no stop UUID; it is reported as natural completion, not
@@ -90,7 +93,7 @@ inside an isolated OpenShell sandbox to exercise the real syscall broker.
 GOMAXPROCS=2 go test -race -p 1 ./internal/guestprogress ./cmd/noodle-progress
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go test -c -o guestprogress.test ./internal/guestprogress
 # Inside the isolated Linux/OpenShell environment:
-./guestprogress.test -test.run='Test(StopReapsEscapedWriterBeforeArchiving|PostLaunchFailureRetainsOwnerUntilReaped)' -test.v -test.timeout=40s
+./guestprogress.test -test.run='Test(StopReapsEscapedWriterBeforeArchiving|PostLaunchFailureRetainsOwnerUntilReaped|SupervisorSignalDoesNotReportSavedProgress)' -test.v -test.timeout=40s
 ```
 
 Pending integration: separate original/stop-purpose custody receipts, frozen

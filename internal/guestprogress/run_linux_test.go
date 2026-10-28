@@ -42,13 +42,19 @@ func TestGuestProgressProcess(t *testing.T) {
 		ops := supervisorOperations{writeJSON: writeJSON, signalChildren: signalOwnedChildren}
 		if fault != "" {
 			ops.writeJSON = func(directory, name string, value any) error {
+				if fault == "supervisor-signal" && name == "result.json" {
+					if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+						return err
+					}
+					select {}
+				}
 				if name == fault {
 					return fmt.Errorf("injected persistence failure: %s", name)
 				}
 				return writeJSON(directory, name, value)
 			}
 			ops.signalChildren = func(signal unix.Signal) error {
-				if _, err := os.Stat(filepath.Join(root, "release-signal")); err != nil {
+				if _, err := os.Stat(filepath.Join(root, "release-signal")); err != nil && fault != "supervisor-signal" {
 					return syscall.EPERM
 				}
 				return signalOwnedChildren(signal)
@@ -115,6 +121,14 @@ func waitFixtureFile(t *testing.T, path string) {
 }
 
 func TestStopReapsEscapedWriterBeforeArchiving(t *testing.T) {
+	testStopReapsEscapedWriter(t, false)
+}
+
+func TestSupervisorSignalDoesNotReportSavedProgress(t *testing.T) {
+	testStopReapsEscapedWriter(t, true)
+}
+
+func testStopReapsEscapedWriter(t *testing.T, signalSupervisor bool) {
 	root, err := os.MkdirTemp("", "ngp-")
 	if err != nil {
 		t.Fatal(err)
@@ -143,6 +157,9 @@ func TestStopReapsEscapedWriterBeforeArchiving(t *testing.T) {
 	defer output.Close()
 	command := exec.Command(os.Args[0], "-test.run=^TestGuestProgressProcess$")
 	command.Env = append(replaceTestMode(os.Environ(), "supervisor"), "NOODLE_PROGRESS_TEST_ROOT="+root, "NOODLE_PROGRESS_TOKEN="+token)
+	if signalSupervisor {
+		command.Env = append(command.Env, "NOODLE_PROGRESS_TEST_FAULT=supervisor-signal")
+	}
 	command.Stdout = output
 	command.Stderr = output
 	if err = command.Start(); err != nil {
@@ -173,12 +190,30 @@ func TestStopReapsEscapedWriterBeforeArchiving(t *testing.T) {
 		t.Fatal("rejected request created stop intent")
 	}
 	result, err := Stop(ctx, cfg.Directory, request)
+	if signalSupervisor {
+		if err == nil {
+			t.Fatal("killed supervisor reported saved progress")
+		}
+		waitErr := command.Wait()
+		joined = true
+		if waitErr == nil {
+			t.Fatal("killed supervisor reported transport success")
+		}
+		status, ok := command.ProcessState.Sys().(syscall.WaitStatus)
+		if !ok || !status.Signaled() || status.Signal() != syscall.SIGTERM {
+			t.Fatalf("supervisor signal evidence missing: %v", waitErr)
+		}
+		if _, err := os.Stat(filepath.Join(cfg.Directory, "result.json")); !os.IsNotExist(err) {
+			t.Fatal("killed supervisor published success")
+		}
+		return
+	}
 	if err != nil {
 		log, _ := os.ReadFile(filepath.Join(root, "supervisor.log"))
 		t.Fatalf("stop: %v; %s", err, log)
 	}
-	if err = command.Wait(); err == nil {
-		t.Fatal("interrupted harness was reported successful")
+	if err = command.Wait(); err != nil {
+		t.Fatalf("completed supervisor transport failed: %v", err)
 	}
 	joined = true
 	if result.ExitCode != 143 || !result.ChildrenReaped {
