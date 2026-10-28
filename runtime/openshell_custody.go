@@ -168,10 +168,19 @@ func reserveOpenShellCustody(binding OpenShellCustodyBinding, conn *grpc.ClientC
 			c.state.Binding.StateRoot = root
 			return c, c.block("openshell custody configuration/owner binding changed")
 		}
+		if err := verifyOpenShellRetainedRecovery(binding); err != nil {
+			return c, err
+		}
 		if len(retained) != 0 && !sameOpenShellRetained(c.state, retained) {
 			return c, c.block("retained sandbox receipt set changed")
 		}
 	} else if os.IsNotExist(err) {
+		for _, name := range []string{retainedRecoveryAuditFile, retainedRecoveryCompleteFile} {
+			if _, journalErr := os.Lstat(filepath.Join(root, name)); !os.IsNotExist(journalErr) {
+				_ = c.Close()
+				return nil, fmt.Errorf("retained recovery evidence exists but original custody ledger is missing")
+			}
+		}
 		c.state = OpenShellCustodyState{Version: openShellCustodyVersion, Binding: binding, PendingRetained: slices.Clone(retained)}
 		// Bind the owner before any inventory failure, including an empty inventory.
 		if err := c.save(); err != nil {

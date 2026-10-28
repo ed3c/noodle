@@ -25,3 +25,10 @@ See also [[codebase/owned-worker-exit-and-recovery-evidence]] and [[codebase/run
 - Persist a local delivery intent before applying or publishing. A stopped VM cannot settle a partially applied local patch or an uncertain Git commit.
 - OpenShell `stop`, `kill`, and `stop-all` must retain the original watcher and worktree until Session.Done. Returning from a stop request is not proof of stopping.
 - Active native Runtime readback is not the same as cross-Host recovery. The existing shared-admission original-owner guard still refuses unresolved sessions from a lost Host; do not describe that guard as a working UI resume path.
+
+## Reopening retained history after pre-start refusal
+
+- A fixed profile may repeat its complete retained set. Compare exact name/ID/workspace membership against pending or initialized retained history, ignoring ordering and rejecting duplicate/add/drop/replace changes. Reopening never replays native effects.
+- The earlier local error `retained initialization supplied for existing custody` can exist before any worker record. `noodle openshell recover-retained-init --profile <original-path> --expected-owner-sha256 <reviewed-hash>` only inspects; `--apply` additionally requires the exact binding, nonempty matching pending set and empty Records, preserving original bytes and before/after hashes before clearing that one reason.
+- Recovery uses the original owner lock and makes no native calls. A pending or invalid recovery journal prevents future custody reservation. Only a completed durable receipt permits normal native readback; retained entries remain pending until that readback succeeds.
+- Other block reasons, changed configuration, nonempty worker history, or existing recovery evidence refuse recovery. File-write failures stop immediately and retain evidence; this is not a general unblock, adoption or automatic retry facility.
