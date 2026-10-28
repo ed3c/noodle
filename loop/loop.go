@@ -408,6 +408,7 @@ func (l *Loop) Run(ctx context.Context) error {
 			}
 			request.reply <- err
 			if err == nil {
+				l.terminalCause = TerminalMigrationDetach
 				return nil
 			}
 		case <-ctx.Done():

@@ -49,5 +49,5 @@ func (h *noodleHost) resources() any {
 			residents = map[string]any{"records": rows, "error": err.Error()}
 		}
 	}
-	return map[string]any{"residents": residents, "schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot()}
+	return map[string]any{"binary_path": h.binaryPath, "binary_sha256": h.binarySHA, "rolling_host_version": h.rollingVersion(), "residents": residents, "schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot()}
 }

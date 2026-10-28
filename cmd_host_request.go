@@ -15,12 +15,14 @@ type hostRequestBinding struct {
 	RequestID         string `json:"request_id"`
 	Operation         string `json:"operation"`
 	ProjectDir        string `json:"project_dir"`
+	ConfigPath        string `json:"config_path"`
 	ConfigSHA256      string `json:"config_sha256"`
 	Mode              string `json:"mode"`
 	BinarySHA256      string `json:"binary_sha256"`
 	EnvironmentSHA256 string `json:"environment_sha256"`
 	Status            string `json:"status"`
 	HostDir           string `json:"host_dir"`
+	CleanupCompleted  bool   `json:"cleanup_completed,omitempty"`
 }
 
 func bindHostRequest(req *hostRequest) (*hostRequestBinding, func(), error) {
@@ -52,7 +54,7 @@ func bindHostRequest(req *hostRequest) (*hostRequestBinding, func(), error) {
 		if binding.Schema != 1 || binding.RequestID == "" || binding.HostDir == "" || (binding.Operation != "attach" && binding.Operation != "once") {
 			return fail(errors.New("invalid native request binding"))
 		}
-		if binding.ProjectDir != req.ProjectDir || binding.BinarySHA256 != req.BinarySHA256 {
+		if binding.ProjectDir != req.ProjectDir || (binding.BinarySHA256 != req.BinarySHA256 && !poolBindingCompatible(binding.HostDir, binding, req.BinarySHA256)) {
 			return fail(errors.New("request project or binary binding changed"))
 		}
 		req.HostDir = binding.HostDir
@@ -62,10 +64,12 @@ func bindHostRequest(req *hostRequest) (*hostRequestBinding, func(), error) {
 			}
 			req.RequestID = binding.RequestID
 			req.ConfigSHA256 = binding.ConfigSHA256
+			req.ConfigPath = binding.ConfigPath
 			req.Mode = binding.Mode
+			req.CleanupCompleted = binding.CleanupCompleted
 			return &binding, unlock, nil
 		}
-		if binding.Operation != req.Operation || binding.ConfigSHA256 != req.ConfigSHA256 || binding.Mode != req.Mode {
+		if binding.Operation != req.Operation || binding.ConfigSHA256 != req.ConfigSHA256 || binding.ConfigPath != req.ConfigPath || binding.Mode != req.Mode || binding.CleanupCompleted != req.CleanupCompleted {
 			return fail(errors.New("original native request binding changed"))
 		}
 		if binding.Status != "busy" {
@@ -74,6 +78,17 @@ func bindHostRequest(req *hostRequest) (*hostRequestBinding, func(), error) {
 			req.Environment = nil
 			return &binding, unlock, nil
 		}
+		if binding.BinarySHA256 != req.BinarySHA256 {
+			p, readErr := readHostPool(binding.HostDir)
+			if readErr != nil {
+				return fail(readErr)
+			}
+			path, ok := waitingPoolAdmission(binding.HostDir, binding, p)
+			if !ok {
+				return fail(errors.New("original waiting admission source is unavailable"))
+			}
+			req.AdmissionSHA, req.AdmissionPath = binding.BinarySHA256, path
+		}
 	} else if !os.IsNotExist(err) || req.Operation == "status" || req.Operation == "detach" {
 		return fail(err)
 	} else {
@@ -81,7 +96,7 @@ func bindHostRequest(req *hostRequest) (*hostRequestBinding, func(), error) {
 		if err != nil {
 			return fail(err)
 		}
-		binding = hostRequestBinding{Schema: 1, RequestID: id, Operation: req.Operation, ProjectDir: req.ProjectDir, ConfigSHA256: req.ConfigSHA256, Mode: req.Mode, BinarySHA256: req.BinarySHA256, HostDir: req.HostDir}
+		binding = hostRequestBinding{Schema: 1, RequestID: id, Operation: req.Operation, ProjectDir: req.ProjectDir, ConfigPath: req.ConfigPath, ConfigSHA256: req.ConfigSHA256, Mode: req.Mode, BinarySHA256: req.BinarySHA256, HostDir: req.HostDir, CleanupCompleted: req.CleanupCompleted}
 	}
 	binding.EnvironmentSHA256 = hostDigest([]byte(strings.Join(req.Environment, "\x00")))
 	binding.Status = "pending"
@@ -124,12 +139,12 @@ func hostReceiptMatches(req hostRequest, r hostReceipt) bool {
 		return false
 	}
 	if req.RequestID != "" {
-		return req.RequestID == r.RequestID && req.ConfigSHA256 == r.ConfigSHA256 && req.Mode == r.Mode
+		return req.RequestID == r.RequestID && req.ConfigSHA256 == r.ConfigSHA256 && req.ConfigPath == r.ConfigPath && req.Mode == r.Mode && req.CleanupCompleted == r.CleanupCompleted
 	}
 	if req.ContextID != "" {
 		return req.ContextID == r.ContextID && req.InstanceID == r.HostInstanceID
 	}
-	return req.ConfigSHA256 != "" && req.ConfigSHA256 == r.ConfigSHA256 && req.Mode == r.Mode
+	return req.ConfigSHA256 != "" && req.ConfigSHA256 == r.ConfigSHA256 && req.ConfigPath == r.ConfigPath && req.Mode == r.Mode
 }
 
 func ambiguousHostLookup(req hostRequest, receipts []hostReceipt) bool {

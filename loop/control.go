@@ -49,6 +49,22 @@ func (l *Loop) hydrateProcessedCommands() error {
 				continue
 			}
 			if strings.TrimSpace(ack.ID) != "" {
+				if _, seen := l.cmds.processedIDs[ack.ID]; !seen {
+					// Rebuild dispatch holds without replaying worker effects or old duplicate ACKs.
+					action := stringx.Normalize(ack.Action)
+					if ack.DispatchState == StatePaused || ack.DispatchState == StateDraining || ack.DispatchState == StateRunning {
+						l.setState(ack.DispatchState)
+					} else if ack.Status == "ok" {
+						switch action {
+						case "pause":
+							l.setState(StatePaused)
+						case "drain":
+							l.setState(StateDraining)
+						case "resume":
+							l.setState(StateRunning)
+						}
+					}
+				}
 				l.cmds.processedIDs[ack.ID] = struct{}{}
 			}
 		}
@@ -269,6 +285,7 @@ func (l *Loop) applyControlCommand(cmd ControlCommand) ControlAck {
 func (l *Loop) applyControlCommandOutcome(cmd ControlCommand) (ControlAck, error) {
 	ack := ControlAck{ID: cmd.ID, Action: cmd.Action, Status: "ok", At: l.deps.Now()}
 	err := l.dispatchControlCommand(cmd)
+	ack.DispatchState = l.state
 	if errors.Is(err, admission.ErrDeferred) {
 		ack.Status = "waiting"
 		ack.Message = err.Error()
