@@ -44,6 +44,12 @@ type contextNext struct {
 	Operation string `json:"operation"`
 	Tool      string `json:"tool"`
 }
+type contextActiveStage struct {
+	Request     contextFileRef            `json:"request"`
+	Composition contextRequestComposition `json:"composition"`
+	Handoffs    []contextFileRef          `json:"handoffs"`
+}
+
 type contextObservation struct {
 	Schema       int                        `json:"schema"`
 	Owner        string                     `json:"owner"`
@@ -53,6 +59,7 @@ type contextObservation struct {
 	OriginalHost contextOwnerIdentity       `json:"original_host"`
 	Request      contextFileRef             `json:"request"`
 	Composition  *contextRequestComposition `json:"composition"`
+	ActiveStage  *contextActiveStage        `json:"active_stage"`
 	Actions      contextActions             `json:"actions"`
 	Candidate    *contextFileRef            `json:"candidate"`
 	Acceptance   contextAcceptance          `json:"acceptance"`
@@ -200,6 +207,9 @@ func validateContextObservation(o contextObservation, r contextRegistration) err
 	ref, err := loopruntime.ReadSessionReadbackFile(r.Request.Path, &request)
 	if err != nil || ref != r.Request || request.Composition == nil || *request.Composition != *o.Composition {
 		return fmt.Errorf("original owner composition differs")
+	}
+	if err := validateContextActiveStage(o); err != nil {
+		return err
 	}
 	if o.Actions.NativeResume.Available {
 		return fmt.Errorf("native session resume is unsupported")

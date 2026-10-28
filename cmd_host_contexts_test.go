@@ -53,6 +53,7 @@ func contextTestRegistration(t *testing.T) (string, contextRegistration, context
 	r := contextRegistration{1, "drawing", "Drawing task", request, contextLauncher{python, entry, manifest, map[string]string{"HOME": dir, "PATH": "/usr/bin:/bin", "NOODLE_HOST_DIR": dir}}, identity}
 	contextTestJSON(t, contextRegistryPath(dir), map[string]contextRegistration{r.ID: r})
 	observation := contextObservation{Schema: 1, Owner: "soodles.loop-ui", Status: "prepared", Version: strings.Repeat("b", 64), Summary: "Prepared", OriginalHost: identity, Request: request, Composition: &composition, Effects: []string{}, Sources: map[string]contextFileRef{}, Acceptance: contextAcceptance{Status: "UNKNOWN", Scope: "candidate", Artifacts: []contextAcceptedArtifact{}}, Actions: contextActions{Start: contextActionAvailability{true, "prepared"}, NativeResume: contextActionAvailability{false, "unsupported"}}}
+	observation.ActiveStage = &contextActiveStage{request, composition, []contextFileRef{}}
 	return dir, r, observation
 }
 func contextTestHandler(dir string, r contextRegistration, call contextOwnerCall) http.Handler {

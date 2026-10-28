@@ -20,6 +20,16 @@ export interface ContextAvailability {
   available: boolean;
   reason: string;
 }
+export interface ContextComposition {
+  id: string;
+  stage_id: string;
+  definition: ContextFileRef;
+}
+export interface ContextActiveStage {
+  request: ContextFileRef;
+  composition: ContextComposition;
+  handoffs: ContextFileRef[];
+}
 export interface ContextObservation {
   schema: 1;
   owner: "soodles.loop-ui";
@@ -27,7 +37,8 @@ export interface ContextObservation {
   version: string;
   summary: string;
   request: ContextFileRef;
-  composition: { id: string; stage_id: string; definition: ContextFileRef };
+  composition: ContextComposition;
+  active_stage: ContextActiveStage;
   actions: Record<ContextAction | "native_resume", ContextAvailability>;
   identity: { order_id: string | null; context_id: string | null; session_id: string | null };
   candidate: ContextFileRef | null;
@@ -66,7 +77,11 @@ function nullableText(raw: unknown) {
 }
 function file(raw: unknown): ContextFileRef {
   const value = object(raw);
-  return { path: text(value.path), sha256: digest(value.sha256) };
+  const path = text(value.path);
+  if (!/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(path) || path.includes("\0")) {
+    throw new Error("控制來源路徑不符");
+  }
+  return { path, sha256: digest(value.sha256) };
 }
 function artifact(raw: unknown): ContextAcceptedArtifact {
   const value = object(raw);
@@ -76,6 +91,35 @@ function artifact(raw: unknown): ContextAcceptedArtifact {
     format: text(value.format),
     source: file(value.source),
   };
+}
+function activeStage(
+  raw: unknown,
+  root: ContextFileRef,
+  composition: ContextComposition,
+): ContextActiveStage {
+  const value = object(raw);
+  const current = object(value.composition);
+  const request = file(value.request);
+  const definition = file(current.definition);
+  const stage = text(current.stage_id);
+  if (
+    current.id !== composition.id ||
+    !sameFile(definition, composition.definition) ||
+    !/^[\p{L}\p{N}_-]+$/u.test(stage) ||
+    !Array.isArray(value.handoffs)
+  ) {
+    throw new Error("目前階段與固定組合不符");
+  }
+  const handoffs = value.handoffs.map(file);
+  if (
+    new Set(handoffs.map((ref) => ref.path)).size !== handoffs.length ||
+    (handoffs.length === 0
+      ? !sameFile(request, root) || stage !== composition.stage_id
+      : request.path === root.path || stage === composition.stage_id)
+  ) {
+    throw new Error("目前階段交接來源不符");
+  }
+  return { request, composition: { id: composition.id, stage_id: stage, definition }, handoffs };
 }
 function nullableFile(raw: unknown) {
   return raw === null ? null : file(raw);
@@ -118,6 +162,13 @@ export function parseContextObservation(raw: unknown, choice: ContextChoice): Co
   if (composition.id !== choice.composition_id || composition.stage_id !== choice.stage_id) {
     throw new Error("固定組合版本已改變");
   }
+  const request = file(value.request);
+  const rootComposition = {
+    id: text(composition.id),
+    stage_id: text(composition.stage_id),
+    definition: file(composition.definition),
+  };
+  const active = activeStage(value.active_stage, request, rootComposition);
   const actions = object(value.actions);
   const nativeResume = availability(actions.native_resume);
   if (nativeResume.available) {
@@ -138,12 +189,9 @@ export function parseContextObservation(raw: unknown, choice: ContextChoice): Co
     status: text(value.status),
     version: digest(value.version),
     summary: text(value.summary),
-    request: file(value.request),
-    composition: {
-      id: text(composition.id),
-      stage_id: text(composition.stage_id),
-      definition: file(composition.definition),
-    },
+    request,
+    composition: rootComposition,
+    active_stage: active,
     actions: {
       start: availability(actions.start),
       stop: availability(actions.stop),

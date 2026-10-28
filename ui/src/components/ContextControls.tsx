@@ -255,7 +255,13 @@ export function ContextControls() {
             <h2 className="text-lg font-semibold">
               原任務狀態：{statusLabels[observation.status] ?? "需要查明"}
             </h2>
-            <p>可用操作由原任務管理者判定，請依下方說明繼續。</p>
+            <p>目前階段：{observation.active_stage.composition.stage_id}</p>
+            <p>
+              {observation.active_stage.handoffs.length === 0
+                ? "目前仍在組合入口階段。"
+                : `已依原驗收完成 ${observation.active_stage.handoffs.length} 次階段交接。`}
+            </p>
+            <p>下方操作與成果屬於目前階段，由原任務管理者判定。</p>
           </section>
           <section aria-label="原任務操作" className="space-y-3">
             {(Object.keys(actionLabels) as ContextAction[]).map((action) => (
@@ -308,10 +314,19 @@ export function ContextControls() {
               {observation.identity.session_id ?? "尚無模型對話"}
             </p>
             <p>
-              組合：{choice?.composition_id} · 階段：{choice?.stage_id}
+              組合：{choice?.composition_id} · 入口階段：{choice?.stage_id}
             </p>
             <p className="break-all">成果版本：{observation.acceptance.head ?? "尚無已確認版本"}</p>
-            <Evidence label="原請求" source={observation.request} />
+            <Evidence label="組合入口請求" source={observation.request} />
+            <Evidence label="目前階段請求" source={observation.active_stage.request} />
+            {observation.active_stage.handoffs.length > 0 && (
+              <section aria-label="原驗收交接紀錄">
+                <h3>原驗收交接紀錄</h3>
+                {observation.active_stage.handoffs.map((source, index) => (
+                  <Evidence key={source.path} label={`交接 ${index + 1}`} source={source} />
+                ))}
+              </section>
+            )}
             <Evidence label="候選成果" source={observation.candidate} />
             <Evidence label="原驗收紀錄" source={observation.acceptance.record} />
             <ul>

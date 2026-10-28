@@ -22,6 +22,11 @@ function observation(): ContextObservation {
     summary: "Original task prepared",
     request: ref,
     composition: { id: choice.composition_id, stage_id: choice.stage_id, definition: ref },
+    active_stage: {
+      request: ref,
+      composition: { id: choice.composition_id, stage_id: choice.stage_id, definition: ref },
+      handoffs: [],
+    },
     actions: {
       start: { available: true, reason: "prepared" },
       stop: { available: false, reason: "not_started" },
@@ -154,4 +159,36 @@ it("does not let an optimistic reason override an unavailable original action", 
   expect(await screen.findByRole("button", { name: "執行已準備任務" })).toBeDisabled();
   expect(screen.getByText("目前無法執行，請查明狀態。")).toBeVisible();
   expect(screen.queryByText("任務已準備，可以執行。")).not.toBeInTheDocument();
+});
+
+it("shows the current stage and handoff sources while actions retain the registered entry", async () => {
+  const observed = observation();
+  observed.active_stage = {
+    request: { path: "/private/fixture/review-request.json", sha256: "c".repeat(64) },
+    composition: { ...observed.composition, stage_id: "review" },
+    handoffs: [{ path: "/private/fixture/handoff.json", sha256: "d".repeat(64) }],
+  };
+  observed.actions.stop = { available: true, reason: "original_task_active" };
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ schema: 1, choices: [choice] }))
+    .mockResolvedValueOnce(Response.json(observed))
+    .mockResolvedValueOnce(Response.json(observed));
+  vi.stubGlobal("fetch", fetch);
+  render(<ContextControls />);
+  await screen.findByRole("option", { name: /Codex diagram/ });
+  await userEvent.selectOptions(screen.getByLabelText("選擇組合與任務"), choice.id);
+  await userEvent.click(screen.getByRole("button", { name: "查明原任務狀態" }));
+  expect(await screen.findByText("目前階段：review")).toBeVisible();
+  expect(screen.getByText("已依原驗收完成 1 次階段交接。")).toBeVisible();
+  await userEvent.click(screen.getByText("診斷與固定來源"));
+  expect(screen.getByText("/private/fixture/handoff.json")).toBeVisible();
+  expect(screen.getByText(/入口階段：draw/)).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "停止原任務" }));
+  expect(JSON.parse(fetch.mock.calls[2]?.[1].body)).toEqual({
+    id: choice.id,
+    registry_version: choice.version,
+    expected_version: observed.version,
+    action: "stop",
+  });
 });
