@@ -7,11 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
-	"strings"
 
 	"github.com/poteto/noodle/internal/workspaceartifacts"
 )
@@ -74,12 +72,7 @@ func VerifySessionReadbackFiles(refs map[string]SessionReadbackFileRef) error {
 	return nil
 }
 func sessionReadbackHead(ctx context.Context, target string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "--no-optional-locks", "-C", target, "rev-parse", "--verify", "HEAD")
-	data, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("read candidate HEAD: %w", err)
-	}
-	return strings.TrimSpace(string(data)), nil
+	return workspaceartifacts.ReadCleanHead(ctx, target)
 }
 
 // ReadCompletedSession borrows the existing runtime and original gateway. It
@@ -170,9 +163,6 @@ func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b Completed
 	if publication.Phase != "published" || publication.Parent != receipt.Baseline.Head || publication.ObservedHead != receipt.CandidateHead || publication.Error != "" {
 		return result, fmt.Errorf("OpenShell candidate publication differs")
 	}
-	if err = workspaceartifacts.RequireClean(ctx, b.WorktreePath); err != nil {
-		return result, err
-	}
 	head, err := sessionReadbackHead(ctx, b.WorktreePath)
 	if err != nil {
 		return result, err
@@ -222,9 +212,6 @@ func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b Completed
 	}
 	after, err := sessionReadbackHead(ctx, b.WorktreePath)
 	if err != nil {
-		return result, err
-	}
-	if err = workspaceartifacts.RequireClean(ctx, b.WorktreePath); err != nil {
 		return result, err
 	}
 	if after != head {

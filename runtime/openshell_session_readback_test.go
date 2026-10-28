@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -148,5 +149,52 @@ func TestOpenShellSessionReadbackRejectsChangedBindingsAndEvidence(t *testing.T)
 				t.Fatal("changed binding/evidence accepted")
 			}
 		})
+	}
+}
+
+func TestOpenShellSessionReadbackDoesNotExecuteGitConfiguration(t *testing.T) {
+	r, b, f := completedReadbackFixture(t)
+	markerRoot := t.TempDir()
+	monitorMarker, filterMarker := filepath.Join(markerRoot, "monitor-ran"), filepath.Join(markerRoot, "filter-ran")
+	script := filepath.Join(markerRoot, "monitor")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf ran > "+strconv.Quote(monitorMarker)+"\nprintf '\\0'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", b.WorktreePath}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git config: %v %s", err, out)
+		}
+	}
+	run("config", "core.fsmonitor", script)
+	run("config", "filter.sideeffect.clean", "printf ran > "+strconv.Quote(filterMarker)+"; cat")
+	if err := os.MkdirAll(filepath.Join(b.WorktreePath, ".git", "info"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(b.WorktreePath, ".git", "info", "attributes"), []byte("*.txt filter=sideeffect\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Contaminated caller selection must not redirect the original target.
+	t.Setenv("GIT_DIR", filepath.Join(markerRoot, "nonexistent.git"))
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(markerRoot, "nonexistent.index"))
+	if _, err := r.ReadCompletedSession(t.Context(), b); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(b.WorktreePath, "result.txt"), []byte("changed raw output\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(filepath.Join(f.root, "events"))
+	if _, err := r.ReadCompletedSession(t.Context(), b); err == nil {
+		t.Fatal("dirty candidate accepted")
+	}
+	after, _ := os.ReadFile(filepath.Join(f.root, "events"))
+	if string(before) != string(after) {
+		t.Fatal("dirty candidate reached native readback")
+	}
+	for _, marker := range []string{monitorMarker, filterMarker} {
+		if _, err := os.Stat(marker); !os.IsNotExist(err) {
+			t.Fatalf("readback executed Git configuration: %s", marker)
+		}
 	}
 }
