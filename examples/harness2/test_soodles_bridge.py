@@ -300,11 +300,11 @@ class BridgeTests(unittest.TestCase):
         foreign['inner']['native_host']['context_id'] = 'different-context'
         foreign_ref = save(self.root / 'foreign-readback.json', foreign)
         with self.assertRaisesRegex(Refused, 'Host identity drifted'):
-            reopened.recover_initial_pending(self.call, foreign_ref)
-        self.assertFalse((directory / 'recovery-intent.json').exists())
+            reopened.reconcile_call(self.call, foreign_ref)
+        self.assertFalse((directory / 'reconciliation-intent.json').exists())
         self.assertEqual(gate.journal.read_bytes(), unknown_bytes)
         with patch('soodles_bridge.time.sleep'):
-            result, proof = reopened.recover_initial_pending(self.call, fresh_ref)
+            result, proof = reopened.reconcile_call(self.call, fresh_ref)
         self.assertEqual([verb for verb, _ in cli.calls].count('enter'), 1)
         self.assertTrue(gate.state['blocked'])
         proof_data = decode(read_ref(proof))
@@ -319,10 +319,10 @@ class BridgeTests(unittest.TestCase):
             changed = {**proof_data, 'completed_observation': save(self.root / (name + '-completion.json'), completed)}
             changed_ref = save(self.root / (name + '-recovery.json'), changed)
             with self.assertRaises(Refused):
-                gate.reconcile_initial_pending(self.call, result, changed_ref)
+                gate.reconcile_original_call(self.call, result, changed_ref)
             self.assertTrue(gate.state['blocked'])
             self.assertEqual(gate.journal.read_bytes(), unknown_bytes)
-        gate.reconcile_initial_pending(self.call, result, proof)
+        gate.reconcile_original_call(self.call, result, proof)
         row = next(iter(gate.state['calls'].values()))
         audit = row['reconciliations'][0]
         self.assertEqual(read_ref(audit['prior_journal']), unknown_bytes)
@@ -333,7 +333,7 @@ class BridgeTests(unittest.TestCase):
         self.assertTrue(gate.execute(self.call).cached)
         self.assertEqual(len(cli.calls), calls)
         with self.assertRaises(Refused):
-            reopened.recover_initial_pending(self.call, fresh_ref)
+            reopened.reconcile_call(self.call, fresh_ref)
         with self.assertRaises(Refused):
             gate.execute(replace(self.call, inputs={**self.call.inputs, 'prompt': 'different'}))
 
@@ -410,6 +410,188 @@ class BridgeTests(unittest.TestCase):
             with self.assertRaises(UnknownEffect):
                 gate.execute(replace(self.call, group='pi', provider='pi', model=MODELS['pi']))
             self.assertEqual(invoke.call_count, 1)
+
+    def test_completed_proposer_reconciliation_uses_snapshot_after_original_worktree_removed(
+        self,
+    ):
+        prior = BridgeTests()
+        prior.setUp()
+        self.addCleanup(prior.doCleanups)
+        prior_cli = ScriptedCLI(prior)
+
+        def accept_prior(*_):
+            prior_cli.accepted = True
+
+        prior_bridge = SoodlesOwnerBridge(
+            prior_cli, prior.root / "bridge", [prior.template], review=accept_prior
+        )
+        gate = SharedGate(
+            prior.root / "gate.json", prior_bridge, initial_paid_spent_usd="0.091620363"
+        )
+        with patch("soodles_bridge.time.sleep"):
+            baseline = gate.execute(prior.call)
+        context = self.root / "native-context"
+        shutil.copytree(self.harness, context / "harness")
+        self.call = replace(
+            self.call,
+            run_id="original/proposer",
+            role="proposer",
+            inputs={
+                "mission": "Improve original instructions.",
+                "system": "Use the original evidence.",
+                "context": tree_ref(context),
+                "harvest": "context/harness",
+                "effort": "low",
+            },
+        )
+        self.template = replace(
+            self.template,
+            role="proposer",
+            selected_skill=reference(self.skill),
+            harness_skills=(),
+            skill_bases={},
+            write_paths=("context/harness",),
+            deliverables=(),
+            harvest="context/harness",
+        )
+        cli = ScriptedCLI(self)
+        original_completion = self.completion
+
+        def completion(request):
+            if not hasattr(self, "proposer_completed"):
+                value = original_completion(request)
+                candidate = decode(read_ref(value["inner"]["candidate"]))
+                destination = Path(candidate["worktree"]) / "context/harness"
+                shutil.copytree(self.harness, destination)
+                (destination / "AGENTS.md").write_text("Improved frozen candidate.")
+                candidate["files"] = {
+                    str(path.relative_to(Path(candidate["worktree"]))): {
+                        "sha256": reference(path)["sha256"],
+                        "executable": False,
+                    }
+                    for path in destination.rglob("*")
+                    if path.is_file()
+                }
+                self.completed["inner"]["candidate"] = save(
+                    self.fixture / "proposer-candidate.json", candidate
+                )
+                self.proposer_completed = True
+            return copy.deepcopy(self.completed)
+
+        def review_transition(*_):
+            cli.accepted = True
+            raise UnknownEffect("fixture read-only canonical snapshot refusal")
+
+        bridge = SoodlesOwnerBridge(
+            cli, self.root / "bridge", [self.template], review=review_transition
+        )
+        gate.owner = bridge
+        with (
+            patch.object(self, "completion", side_effect=completion),
+            patch("soodles_bridge.time.sleep"),
+        ):
+            with self.assertRaises(UnknownEffect):
+                gate.execute(self.call)
+        unknown_bytes = gate.journal.read_bytes()
+        directory = bridge.root / self.call.fingerprint()
+        fresh, fresh_ref = cli.invoke(
+            "inspect", reference(directory / "request.json"), self.root / "fresh"
+        )
+        shutil.rmtree(self.root / "returned")
+        reopened = SoodlesOwnerBridge(
+            cli, bridge.root, [self.template], review=self.fail, reopen=True
+        )
+        artifact = directory / "result/workspace/context/harness/AGENTS.md"
+        original = artifact.read_bytes()
+        artifact.write_text("changed retained artifact")
+        with self.assertRaises(Refused):
+            reopened.reconcile_call(self.call, fresh_ref)
+        self.assertEqual(gate.journal.read_bytes(), unknown_bytes)
+        artifact.write_bytes(original)
+        before = len([verb for verb, _ in cli.calls if verb == "enter"])
+        result, proof = reopened.reconcile_call(self.call, fresh_ref)
+        gate.reconcile_original_call(self.call, result, proof)
+        self.assertEqual(
+            len([verb for verb, _ in cli.calls if verb == "enter"]), before
+        )
+        self.assertEqual((Path(result.workspace) / "AGENTS.md").read_bytes(), original)
+        self.assertEqual(len(gate.state["calls"]), 2)
+        self.assertTrue(gate.execute(prior.call).cached)
+        self.assertEqual(gate.execute(prior.call).output_sha256, baseline.output_sha256)
+        self.assertTrue(gate.execute(self.call).cached)
+        self.assertEqual(gate.state["initial_paid_spent_usd"], "0.091620363")
+
+    def test_only_effect_free_canonical_snapshot_inspect_has_three_bounded_reads(self):
+        script = self.root / "soodles.py"
+        script.write_text("# offline fixture")
+        cli = PinnedCLI(
+            reference(Path(sys.executable).resolve()),
+            reference(script),
+            (reference(script),),
+            "e" * 40,
+            {"PATH": "/usr/bin:/bin"},
+            30,
+        )
+        request = save(self.root / "request.json", {"fixture_only": True})
+        native = save(self.root / "native-drift.json", {"fixture_only": True})
+        refusal = {
+            "owner": "soodles.loop",
+            "status": "refused",
+            "effects": [],
+            "authorizes_landing": False,
+            "problem": {
+                "field": "task.session_readback.native",
+                "value": {
+                    "exit_code": 1,
+                    "error": "session readback source changed: canonical_snapshot",
+                    "receipt": native,
+                },
+            },
+        }
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append(argv)
+            value = (
+                refusal
+                if len(calls) < 3
+                else {"owner": "soodles.loop", "status": "pending", "request": request}
+            )
+            kwargs["stdout"].write(json.dumps(value).encode())
+            return subprocess.CompletedProcess(
+                argv, 2 if value["status"] == "refused" else 0
+            )
+
+        with patch("soodles_bridge.subprocess.run", side_effect=run):
+            value, ref = cli.invoke("inspect", request, self.root / "read")
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(value["status"], "pending")
+        self.assertEqual(Path(ref["path"]).parent.name, "read-read-3")
+        self.assertTrue((self.root / "read/receipt.json").is_file())
+        for kind in ("exhausted", "other-source", "enter", "capture", "effects", "identity"):
+            current = copy.deepcopy(refusal)
+            if kind == "other-source":
+                current["problem"]["value"]["error"] = (
+                    "session readback source changed: spawn_metadata"
+                )
+            if kind == "effects":
+                current["effects"] = ["unknown"]
+            if kind == "identity":
+                current["request"] = {**request, "sha256": "0" * 64}
+
+            def refuse(argv, **kwargs):
+                kwargs["stdout"].write(json.dumps(current).encode())
+                return subprocess.CompletedProcess(argv, 2)
+
+            with patch("soodles_bridge.subprocess.run", side_effect=refuse) as invoked:
+                with self.assertRaises(UnknownEffect):
+                    cli.invoke(
+                        "enter" if kind == "enter" else "inspect",
+                        request,
+                        self.root / kind,
+                        capture=self.root / "capture" if kind == "capture" else None,
+                    )
+                self.assertEqual(invoked.call_count, 3 if kind == "exhausted" else 1)
 
     def test_source_drift_and_fixed_route_refuse_before_owner(self):
         directory = self.root / 'prepared'

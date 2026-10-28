@@ -76,6 +76,20 @@ def save(path, value):
     return reference(path)
 
 
+class CanonicalSnapshotDrift(RuntimeError):
+    """An explicitly effect-free original inspect observed a changing projection."""
+
+
+def canonical_snapshot_drift(value):
+    problem = value.get("problem") or {}
+    detail = problem.get("value") or {}
+    return (value.get("owner") == "soodles.loop" and value.get("status") == "refused"
+            and value.get("effects") == [] and value.get("authorizes_landing") is False
+            and problem.get("field") == "task.session_readback.native"
+            and detail.get("exit_code") == 1
+            and detail.get("error") == "session readback source changed: canonical_snapshot")
+
+
 @dataclass(frozen=True)
 class PinnedCLI:
     python: dict
@@ -97,6 +111,20 @@ class PinnedCLI:
         require(self.timeout_s > 0, "CLI operation timeout is invalid")
 
     def invoke(self, verb, request, evidence, *, capture=None):
+        # At most three new reads of this same request. Never retry enter,
+        # capture, transport uncertainty, another source or another refusal.
+        for attempt in range(3):
+            destination = Path(evidence) if attempt == 0 else Path(str(evidence) + f"-read-{attempt + 1}")
+            try:
+                return self._invoke_once(verb, request, destination, capture=capture)
+            except CanonicalSnapshotDrift:
+                if attempt == 2:
+                    save(Path(evidence) / "readback-exhausted.json", {"request": request, "reads": 3,
+                         "reason": "canonical_snapshot remained unstable"})
+                    raise UnknownEffect("original canonical snapshot did not stabilize after three reads") from None
+        raise AssertionError("bounded read loop exhausted")
+
+    def _invoke_once(self, verb, request, evidence, *, capture=None):
         require(verb in {"enter", "inspect"}, "bridge operation is outside original owner scope")
         self.verify()
         read_ref(request)
@@ -123,12 +151,18 @@ class PinnedCLI:
             value = decode((evidence / "stdout.json").read_bytes())
             save(evidence / "receipt.json", {"exit_code": run.returncode,
                  "stdout": reference(evidence / "stdout.json"), "stderr": reference(evidence / "stderr.log")})
+            if isinstance(value, dict) and "request" in value:
+                require(value["request"] == request, "original request identity differs")
+            if (verb == "inspect" and capture is None and run.returncode == 2
+                    and isinstance(value, dict) and canonical_snapshot_drift(value)):
+                read_ref(value["problem"]["value"]["receipt"])
+                raise CanonicalSnapshotDrift()
             require(run.returncode == 0 and isinstance(value, dict) and value.get("owner") == "soodles.loop"
                     and value.get("status") not in {"refused", "unknown", "failed"},
                     "original Soodles operation is unresolved or refused")
-            if "request" in value:
-                require(value["request"] == request, "original request identity differs")
             return value, reference(evidence / "stdout.json")
+        except CanonicalSnapshotDrift:
+            raise
         except Exception as exc:
             try:
                 save(evidence / "unknown.json", {"status": "unknown", "error_type": type(exc).__name__,
@@ -293,7 +327,7 @@ def relative(name):
     return path
 
 
-def snapshot_candidate(call, template, observation, directory):
+def validated_candidate(call, template, observation):
     inner, capture = observation["inner"], observation["capture"]
     candidate_ref = inner["candidate"]
     candidate = decode(read_ref(candidate_ref))
@@ -332,11 +366,16 @@ def snapshot_candidate(call, template, observation, directory):
     require(descriptor["provider"] == call.provider and descriptor["native_completion"] == proof["observation"],
             "native thread completion differs")
     trace, reply = public_trace(descriptor)
-    retained = directory / "evidence"
-    retained.mkdir()
     refs = [capture["observation"], capture["snapshot"], candidate_ref]
     refs += [row["saved"] for row in capture["source_custody"]]
     refs += [ref for thread in threads for key, ref in thread.items() if key in {"raw", "descriptor", "review"}]
+    return candidate_ref, candidate, capture, proof, descriptor, trace, reply, refs
+
+
+def snapshot_candidate(call, template, observation, directory):
+    candidate_ref, candidate, capture, proof, descriptor, trace, reply, refs = validated_candidate(call, template, observation)
+    retained = directory / "evidence"
+    retained.mkdir()
     custody = []
     for ref in refs:
         data = read_ref(ref)
@@ -368,7 +407,7 @@ def snapshot_candidate(call, template, observation, directory):
     save(directory / "deliverables.json", deliverables)
     (directory / "trajectory.md").write_text(trace)
     save(directory / "native-evidence.json", {"candidate": candidate_ref, "capture": capture["observation"],
-         "descriptor": threads[0]["descriptor"], "native_completion": proof,
+         "descriptor": capture["attempts"][0]["capture"]["threads"][0]["descriptor"], "native_completion": proof,
          "billing": descriptor.get("cost"), "cost_usd": None, "wall_s": None})
     harvested = None
     if template.harvest is not None:
@@ -376,6 +415,51 @@ def snapshot_candidate(call, template, observation, directory):
         harvested = workspace / template.harvest
         require(harvested.is_dir() and call.inputs.get("harvest") == "context/harness",
                 "native requested harness is unavailable")
+    return candidate_ref, reply, str(harvested) if harvested else None
+
+
+def retained_snapshot(call, template, request, directory):
+    """Verify an already captured candidate after its original worktree was merged."""
+    saved = decode((directory / "native-evidence.json").read_bytes())
+    capture = decode(read_ref(saved["capture"]))
+    capture["observation"] = saved["capture"]
+    observation = {"request": request, "capture": capture, "inner": {
+        "candidate": saved["candidate"], "task_envelope": capture["task_envelope"]}}
+    candidate_ref, candidate, capture, proof, descriptor, trace, reply, refs = validated_candidate(call, template, observation)
+    expected_native = {"candidate": candidate_ref, "capture": capture["observation"],
+        "descriptor": capture["attempts"][0]["capture"]["threads"][0]["descriptor"], "native_completion": proof,
+        "billing": descriptor.get("cost"), "cost_usd": None, "wall_s": None}
+    require(saved == expected_native, "retained native completion differs")
+    index = decode((directory / "evidence/index.json").read_bytes())
+    require(sorted(canonical(row['original']) for row in index) == sorted(canonical(ref) for ref in refs),
+            "retained capture inventory differs")
+    expected_files = {"native-evidence.json", "trajectory.md", "deliverables.json", "evidence/index.json"}
+    for row in index:
+        require(Path(row['saved']['path']).parent == directory / 'evidence'
+                and row['saved']['sha256'] == row['original']['sha256'], "retained evidence binding differs")
+        read_ref(row['saved'])
+        expected_files.add('evidence/' + Path(row['saved']['path']).name)
+    workspace = directory / 'workspace'
+    for name, metadata in candidate['files'].items():
+        relative(name)
+        require(any(name == scope or name.startswith(scope.rstrip('/') + '/') for scope in template.write_paths),
+                'retained candidate includes an out-of-scope path')
+        if metadata is None:
+            require(not (workspace / name).exists(), 'retained deleted artifact reappeared')
+            continue
+        target = workspace / name
+        read_ref({'path': str(target), 'sha256': metadata['sha256']})
+        require(target.stat().st_mode & 0o777 == (0o755 if metadata['executable'] else 0o644), 'retained artifact mode differs')
+        expected_files.add('workspace/' + name)
+    deliverables = {name: (workspace / name).read_text() for name in template.deliverables}
+    require(decode((directory / 'deliverables.json').read_bytes()) == deliverables
+            and (directory / 'trajectory.md').read_text() == trace, 'retained public projection differs')
+    tree_ref(directory)  # Reject links and special files before enumerating.
+    require({str(p.relative_to(directory)) for p in directory.rglob('*') if p.is_file()} == expected_files,
+            'retained result has missing or unbound files')
+    harvested = workspace / template.harvest if template.harvest else None
+    require(harvested is None or (harvested.is_dir() and call.inputs.get('harvest') == 'context/harness'),
+            'retained native harness is missing')
     return candidate_ref, reply, str(harvested) if harvested else None
 
 
@@ -408,15 +492,18 @@ def host_identity(observation):
     return {key: host[key] for key in fields}
 
 
-def verify_initial_pending_recovery(call, proof):
-    require(proof.get("kind") == "initial-pending-readback" and proof.get("call_sha256") == call.fingerprint(),
+def verify_call_reconciliation(call, proof):
+    require(proof.get("kind") == "original-call-readback" and proof.get("call_sha256") == call.fingerprint(),
             "recovery does not bind the original call")
     binding = decode(read_ref(proof["binding"]))
     require(binding["call_sha256"] == call.fingerprint(), "recovery call binding differs")
     request = proof["request"]
     original = decode(read_ref(proof["original_observation"]))
     initial = original_inner(original, request)
-    require("owner" not in initial, "recovery is not the known initial-admission shape")
+    if proof.get("retained_result") is None:
+        require("owner" not in initial, "uncaptured recovery is not the known initial-admission shape")
+    else:
+        require(tree_ref(proof["retained_result"]["path"]) == proof["retained_result"], "retained result changed during reconciliation")
     intent = decode(read_ref(proof["original_intent"]))
     receipt = decode(read_ref(proof["original_receipt"]))
     require(intent["request"] == request and receipt["exit_code"] == 0
@@ -465,44 +552,53 @@ class SoodlesOwnerBridge:
 
         return self._follow(call, template, directory, request, binding_ref, instructions_ref, result_dir, before)
 
-    def recover_initial_pending(self, call: OwnerCall, fresh_observation: dict):
-        """Read back this exact interrupted call; never prepare, enter or redispatch."""
-        require(self.templates and call.provider == "codex" and call.role == "solver",
-                "initial recovery is limited to the original subscription baseline")
+    def reconcile_call(self, call: OwnerCall, fresh_observation: dict):
+        """Read only the same original call; never prepare, enter or redispatch."""
+        require(self.templates, "original call template is missing")
         directory = self.root / call.fingerprint()
         binding_ref = reference(directory / "binding.json")
         binding = decode(read_ref(binding_ref))
         template = self.templates[0]
         require(binding["template"] == json.loads(canonical(asdict(template))), "original template differs")
-        require(sorted(p.name for p in directory.glob("operation-*")) == ["operation-0000"],
-                "recovery has additional original operations")
-        require(not (directory / "recovery-intent.json").exists(), "original recovery already attempted; inspect retained evidence")
+        request = reference(directory / 'request.json')
         result_dir = directory / "result"
-        require(result_dir.is_dir() and not any(result_dir.iterdir()), "original result already has partial evidence")
-        proof = {"kind": "initial-pending-readback", "call_sha256": call.fingerprint(),
+        require(result_dir.is_dir(), 'original result directory is missing')
+        frozen = retained_snapshot(call, template, request, result_dir) if any(result_dir.iterdir()) else None
+        if frozen is None:
+            require(sorted(p.name for p in directory.glob("operation-*")) == ["operation-0000"],
+                    "uncaptured reconciliation has additional original operations")
+        proof = {"kind": "original-call-readback", "call_sha256": call.fingerprint(),
             "call": reference(directory / "call.json"), "binding": binding_ref,
-            "request": reference(directory / "request.json"), "fresh_observation": fresh_observation,
+            "request": request, "fresh_observation": fresh_observation,
+            "retained_result": tree_ref(result_dir) if frozen else None,
             "original_observation": reference(directory / "operation-0000/stdout.json"),
             "original_intent": reference(directory / "operation-0000/intent.json"),
             "original_receipt": reference(directory / "operation-0000/receipt.json")}
-        expected_host = verify_initial_pending_recovery(call, proof)
+        expected_host = verify_call_reconciliation(call, proof)
         original_cli = decode(read_ref(proof["original_intent"]))
         require(all(original_cli.get(key) == value for key, value in {
             "source_commit": self.cli.source_commit, "python": self.cli.python,
             "sources": list(self.cli.sources)}.items()), "original Soodles transport source differs")
         self.cli.verify()
-        save(directory / "recovery-intent.json", proof)
+        fresh = decode(read_ref(fresh_observation))
+        if frozen:
+            inner = original_inner(fresh, request)
+            selection = (inner.get('review_progress') or {}).get('review') or {}
+            require((inner.get('candidate') or selection.get('candidate')) == frozen[0], 'fresh original candidate differs from retained snapshot')
+        save(directory / "reconciliation-intent.json", proof)
         self.templates.pop(0)
-        result = self._follow(call, template, directory, proof["request"], binding_ref,
-            reference(directory / "instruction-trees.json"), result_dir, None,
-            read_only=True, expected_host=expected_host)
+        before = reference(directory / 'billing-before/before.json') if call.provider == 'pi' else None
+        result = self._follow(call, template, directory, request, binding_ref,
+            reference(directory / "instruction-trees.json"), result_dir, before,
+            read_only=True, expected_host=expected_host, frozen=frozen)
         proof["result_receipt"] = {"path": result.receipt_path, "sha256": result.receipt_sha256}
         proof["completed_observation"] = decode(read_ref(proof["result_receipt"]))["original_review"]
-        return result, save(directory / "recovery-settled.json", proof)
+        return result, save(directory / "reconciliation-settled.json", proof)
 
     def _follow(self, call, template, directory, request, binding_ref, instructions_ref, result_dir, before,
-                *, read_only=False, expected_host=None):
-        sequence, advanced, reviewed, frozen = 0, set(), set(), None
+                *, read_only=False, expected_host=None, frozen=None):
+        sequence, advanced, reviewed = 0, set(), set()
+        retained_result = tree_ref(result_dir) if frozen else None
 
         def invoke(verb, capture=None):
             nonlocal sequence
@@ -515,7 +611,9 @@ class SoodlesOwnerBridge:
                 read_ref(ref)
             for ref in decode(read_ref(instructions_ref)):
                 require(tree_ref(ref["path"]) == ref, "original instruction tree differs")
-            prefix = "recovery-operation" if read_only else "operation"
+            if retained_result is not None:
+                require(tree_ref(result_dir) == retained_result, "retained result changed during original readback")
+            prefix = "reconciliation-operation" if read_only else "operation"
             value, ref = self.cli.invoke(verb, request, directory / f"{prefix}-{sequence:04d}", capture=capture)
             if expected_host is not None:
                 require(host_identity(value) == expected_host, "original Host identity changed during readback")

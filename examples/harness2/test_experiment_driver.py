@@ -7,6 +7,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from experiment_driver import (
+    journal_elapsed,
+    ordered_calls,
     prepare_editable_harness,
     prepare_public_task_bundle,
     public_tree,
@@ -39,6 +41,21 @@ class PublicBundleTests(unittest.TestCase):
                 'provenance': (self.accepted,)}
         args.update(changes)
         return prepare_public_task_bundle(**args)
+
+    def test_elapsed_uses_original_journal_start_and_includes_reconciliation_wait(self):
+        state = {'calls': {'baseline': {'call': {'group': 'codex'}, 'state': 'settled',
+                 'started_unix_s': 100, 'settled_unix_s': 120},
+                 'proposer': {'call': {'group': 'codex'}, 'state': 'settled',
+                 'started_unix_s': 125, 'settled_unix_s': 300}}}
+        self.assertEqual(journal_elapsed(state), 200)
+        state['calls'] = dict(reversed(list(state['calls'].items())))
+        self.assertEqual(journal_elapsed(state), 200)
+        self.assertEqual(ordered_calls(state)[-1]['started_unix_s'], 125)
+        state['calls']['proposer']['state'] = 'unknown'
+        self.assertIsNone(journal_elapsed(state))
+        state['calls']['proposer']['state'] = 'settled'
+        del state['calls']['proposer']['settled_unix_s']
+        self.assertIsNone(journal_elapsed(state))
 
     def test_fixed_accepted_artifact_and_geometry_only_enter_model_source(self):
         with patch('subprocess.run', side_effect=AssertionError('no owner/model process')):

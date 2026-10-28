@@ -145,26 +145,37 @@ private/public trace separation, original review transition and acceptance, null
 billing with a full-remainder hold, and unknown closure across routes. The complete
 `reproduce.py test` also runs the actual pinned native core controls from the first increment.
 
-## Narrow initial-admission readback recovery
+## Same-call readback reconciliation
 
-The original successful first `loop enter` can return `inner.status=pending` with no
-`inner.owner`; authority is carried by matching original `inner.next` / top-level `next`,
-`original_initial_admission_readback`, exact request path and original Host admission receipt.
-The fixture under `fixtures/` preserves this real response shape. Other missing owners refuse.
+The original successful first `loop enter` can return `inner.status=pending` without
+`inner.owner`; authority comes from the matching original next owner/operation/request and
+Host receipt. Its sanitized real fixture is retained under `fixtures/`.
 
-`experiment_driver.resume_initial_pending(config, review_callback, fresh_observation_ref)`
-is an explicit recovery entry for the first Codex baseline only. It requires one unknown
-journal call, the exact original native namespace/input/template, successful operation-0000
-receipt and unchanged original Host identity. It snapshots the failed native summary before
-reentering the same pinned `run_task`. It never prepares another request or resets the budget.
-The recovery bridge only performs original inspect/capture and the Session callback; any
-necessary original next/enter is consumed separately by Session against the same request.
+`experiment_driver.resume_experiment(config, review_callback, call_ref, fresh_observation_ref)`
+reconciles the exact sole unresolved call. It verifies the retained call, template sequence,
+request, successful original admission receipt, source closure and unchanged original Host.
+All previously settled results and bills are verified before proceeding. No new request,
+enter, attempt, model call or owner is created by reconciliation. Session consumes any needed
+original next action and review itself. Only the same candidate's original integrated PASS
+allows the shared gate to settle the call.
 
-Only same-candidate original approve / locally_integrated / acceptance PASS allows
-`SharedGate.reconcile_initial_pending` to settle the cached baseline. Original unknown
-journal bytes and the prior unknown row remain retained in the reconciliation audit. The
-same native baseline then returns from that cache without another owner call; subsequent
-native proposer/solver calls consume the remaining original pool. This is not a generic
-resume of arbitrary partial operations, paid calls, multiple attempts or lost mutation ACKs.
-Drift or incomplete acceptance keeps the gate closed. A failed recovery attempt is not
-authorization to rerun it; retain its intent and resolve the original owner explicitly.
+A complete pre-review snapshot can be validated after its original worktree is merged away:
+original capture/attempt/Stop proof, every retained artifact byte and mode, public projection,
+full evidence inventory and returned harness remain checked. An uncaptured call can only
+follow the known initial-admission transition. Partial/changed snapshots refuse. The first
+baseline and later proposer use this same reconciliation path, not separate recovery owners.
+
+Original unknown journal bytes/rows, native summaries and failed outputs are archived before
+same-namespace continuation. Already settled solver/proposer calls return only their verified
+cache; the remaining original templates and accounting continue unchanged. Unknown history
+is never reset. An interrupted reconciliation retains its intent and does not authorize replay.
+
+Only a non-capture `inspect` with original exit 2, `effects=[]`, no landing authority and the
+exact `task.session_readback.native` / `session readback source changed: canonical_snapshot`
+refusal can perform at most three reads. Every read retains separate intent/stdout/receipt.
+Capture, enter, timeouts, other sources, changed identity and other refusals never retry.
+
+Native experiment elapsed time uses the earliest original journal call start through final
+settlement, including review/repair downtime. Driver-segment time is reported separately.
+Whole workflow timing still needs Stage A and independent evaluation; missing terminal clocks
+remain null. This entry does not turn subscription billing or unknown effects into zero.

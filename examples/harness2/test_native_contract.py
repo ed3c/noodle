@@ -163,6 +163,28 @@ class NativeContractTests(unittest.TestCase):
         self.assertEqual(len(self.gate.state["calls"]), 7)
         self.assertEqual(self.gate.state["initial_paid_spent_usd"], "0")
 
+    def test_native_same_namespace_reuses_reconciled_proposer_without_another_model_call(self):
+        adapter = self.adapter()
+        original = self.gate.execute
+        interrupted = []
+        def unavailable(call):
+            with self.gate.lock:
+                if interrupted:
+                    raise UnknownEffect("same original readback remains unresolved")
+                result = original(call)
+                if call.role == "proposer":
+                    interrupted.append(call.run_id)
+                    raise UnknownEffect("original proposer delivered; transition read unavailable")
+                return result
+        with patch.object(self.gate, "execute", side_effect=unavailable):
+            run_native_task(adapter, "records", experiment_id="same-proposer-experiment")
+        self.assertEqual(len(self.owner.calls), 2)
+        resumed = run_native_task(adapter, "records", experiment_id="same-proposer-experiment")
+        self.assertEqual(resumed["native_result"]["status"], "ok")
+        self.assertEqual(sum(call.run_id == interrupted[0] for call in self.owner.calls), 1)
+        self.assertEqual(len(self.owner.calls), 7)
+        self.assertEqual(len(self.gate.state["calls"]), 7)
+
     def test_same_run_reuses_owner_and_different_input_refuses(self):
         adapter = self.adapter()
         result = adapter.execute("records", None, "one")

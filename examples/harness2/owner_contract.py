@@ -216,24 +216,26 @@ class SharedGate:
                 raise UnknownEffect(self.state["blocked"]) from exc
             return updated
 
-    def reconcile_initial_pending(self, call: OwnerCall, result: OwnerResult, recovery_ref: dict) -> None:
+    def reconcile_original_call(self, call: OwnerCall, result: OwnerResult, recovery_ref: dict) -> None:
         """Explicit same-call settlement; retain the unknown journal and never invoke owner."""
         from soodles_bridge import (
             decode,
             host_identity,
             read_ref,
-            verify_initial_pending_recovery,
+            verify_call_reconciliation,
         )
         with self.lock:
             key = json.dumps([call.group, call.run_id])
             row = self.state["calls"].get(key)
-            if (len(self.state["calls"]) != 1 or row is None or row["state"] != "unknown"
-                    or row["input_sha256"] != call.fingerprint() or call.provider != "codex"
-                    or call.role != "solver" or row.get("error") != "UnknownEffect"
-                    or self.state["paid_blocked"]):
-                raise Refused("journal is not the single original initial-admission interruption")
+            unresolved = [value for value in self.state['calls'].values() if value['state'] in {'pending', 'unknown'}]
+            if (len(unresolved) != 1 or row is None or row['state'] != 'unknown'
+                    or row['input_sha256'] != call.fingerprint() or row.get('error') != 'UnknownEffect'):
+                raise Refused('journal does not bind this sole unresolved original call')
+            for other in self.state['calls'].values():
+                if other['state'] == 'settled':
+                    self.verify_result(OwnerResult(**other['result']), OwnerCall(**other['call']))
             proof = decode(read_ref(recovery_ref))
-            expected_host = verify_initial_pending_recovery(call, proof)
+            expected_host = verify_call_reconciliation(call, proof)
             self._verify_result(result)
             if proof["result_receipt"] != {"path": result.receipt_path, "sha256": result.receipt_sha256}:
                 raise Refused("recovered result receipt differs")
@@ -255,11 +257,18 @@ class SharedGate:
                 stream.write(original)
                 stream.flush()
                 os.fsync(stream.fileno())
+            if result.billing_receipt is not None:
+                from openrouter_billing import verify_settlement
+                bill = verify_settlement(call, result, result.billing_receipt)
+                self._require_unique_bill(key, bill)
             prior_row = json.loads(canonical(row))
-            row.update(state="settled", result=asdict(result), reconciliations=[{
-                "kind": "initial-pending-readback", "prior_row": prior_row,
-                "prior_journal": {"path": str(archive), "sha256": digest}, "recovery": recovery_ref}],
-                elapsed_s=time.time() - row["started_unix_s"])
+            history = list(row.get('reconciliations', []))
+            history.append({"kind": "original-call-readback", "prior_row": prior_row,
+                "prior_journal": {"path": str(archive), "sha256": digest}, "recovery": recovery_ref})
+            row.update(state="settled", result=asdict(result), reconciliations=history,
+                elapsed_s=time.time() - row["started_unix_s"], settled_unix_s=time.time())
+            if call.provider == 'pi' and result.cost_usd is not None and money(result.cost_usd) > money(row['reserved_usd']):
+                self.state['paid_blocked'] = 'actual paid cost exceeded original reservation'
             self.state["blocked"] = ""
             try:
                 self._save()
@@ -325,7 +334,7 @@ class SharedGate:
                         raise UnknownEffect("new owner completion reuses another call's bill") from exc
                 if call.fingerprint() != digest:
                     raise UnknownEffect("owner changed the frozen call")
-                row.update(state="settled", result=asdict(result), elapsed_s=time.monotonic()-started)
+                row.update(state="settled", result=asdict(result), elapsed_s=time.monotonic()-started, settled_unix_s=time.time())
                 if reserve is not None and result.cost_usd is not None and money(result.cost_usd) > reserve:
                     self.state["paid_blocked"] = "owner paid cost exceeded its reservation"
                 self._save()

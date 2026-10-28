@@ -14,3 +14,5 @@
 - Original local-task CLI environment must explicitly retain the authorized NOODLE_HOST_DIR; a reduced environment that omits it silently targets the shared default Host. External launch preparation now rejects missing/different original Host locators before any owner call.
 
 - The first original Soodles loop enter can be a successful pending Host admission with no inner.owner. Validate its exact next.owner/operation/request binding and original Host identity; fixtures that always include a full local-task inner envelope hide this transition. Narrow recovery preserves the unknown journal and reads the same request before reconciling its original accepted baseline.
+
+- A review-time canonical snapshot can drift during merge while the original candidate remains valid. Only the exact effect-free non-capture inspect refusal gets three bounded reads. General same-call reconciliation validates retained capture/artifact bytes after original worktree cleanup, preserves unknown history, and resumes native namespaces through verified solver/proposer caches. Whole native timing starts at the original journal, not the latest resume process.

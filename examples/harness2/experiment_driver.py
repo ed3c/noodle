@@ -2,16 +2,17 @@
 import shutil
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 
 from openrouter_billing import OpenRouterBilling, ReadOnlyOpenRouter
-from owner_contract import OwnerCall, SharedGate, tree_ref
+from owner_contract import OwnerCall, OwnerResult, SharedGate, money, tree_ref
 from soodles_bridge import (
     MODELS,
     PinnedCLI,
     RequestTemplate,
     SoodlesOwnerBridge,
+    canonical,
     decode,
     read_ref,
     reference,
@@ -123,16 +124,16 @@ def prepare_editable_harness(*, destination: Path, agents: dict, skill_bases: di
     return tree_ref(destination)
 
 
-def resume_initial_pending(config: dict, review_callback, fresh_observation: dict):
-    """Recover only the same original baseline, then resume its native namespace."""
-    return _run_experiment(config, review_callback, fresh_observation=fresh_observation)
+def resume_experiment(config: dict, review_callback, call_ref: dict, fresh_observation: dict):
+    """Reconcile this original call, then continue the same native namespaces."""
+    return _run_experiment(config, review_callback, call_ref=call_ref, fresh_observation=fresh_observation)
 
 
 def run_experiment(config: dict, review_callback):
     return _run_experiment(config, review_callback)
 
 
-def _run_experiment(config: dict, review_callback, *, fresh_observation=None):
+def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_observation=None):
     """Run actual pinned k=1/seq; Session supplies original Soodles semantic review.
 
     Calling this function authorizes its configured owner calls. Importing/preparing
@@ -191,43 +192,77 @@ def _run_experiment(config: dict, review_callback, *, fresh_observation=None):
             always_on_max=group['always_on_max'])
         adapters.append((route, bundle, adapter))
     cli.verify()
+    reconciliation_id = None
     if fresh_observation is not None:
-        require(len(gate.state['calls']) == 1, 'initial recovery has other native calls')
-        row = next(iter(gate.state['calls'].values()))
-        call = OwnerCall(**row['call'])
-        route, bundle, adapter = adapters[0]
-        namespace = schedule.Namespace(adapter.spec.name, adapter.substrate.name, 'agg', 1, None, '')
-        expected = OwnerCall(route.group, namespace.run_id(bundle.task_id, 'base1'), 'solver', route.provider,
-            route.model, {'task_id': bundle.task_id, 'prompt': bundle.prompt, 'source': bundle.source,
-                'harness': tree_ref(adapter.base_harness()), 'effort': route.effort, 'timeout_s': route.timeout_s},
-            route.paid_reservation_usd)
-        require(call == expected and row['state'] == 'unknown', 'resume differs from the original native baseline')
-        archive = output / 'initial-recovery-native-before'
+        call = OwnerCall(**decode(read_ref(call_ref)))
+        unresolved = [row for row in gate.state['calls'].values() if row['state'] in {'pending', 'unknown'}]
+        require(len(unresolved) == 1 and unresolved[0]['state'] == 'unknown'
+                and unresolved[0]['call'] == call.__dict__, 'resume differs from the sole unresolved original call')
+        rows = ordered_calls(gate.state)
+        require(rows[-1] is unresolved[0] and len(rows) <= len(templates), 'original call ordering or template pool differs')
+        for index, row in enumerate(rows):
+            previous = OwnerCall(**row['call'])
+            binding = decode(read_ref(reference(bridge.root / previous.fingerprint() / 'binding.json')))
+            require(binding['template'] == decode(canonical(asdict(templates[index]))), 'original template pool order differs')
+            if row['state'] == 'settled':
+                gate.verify_result(OwnerResult(**row['result']), previous)
+            elif row is not unresolved[0]:
+                require(row['state'] == 'refused', 'prior original owner is unresolved')
+        bridge.templates = templates[len(rows)-1:]
+        reconciliation_id = call.fingerprint()
+        archive = output / ('reconciliation-native-before-' + reconciliation_id)
         archive.mkdir()
-        native_root = output / route.group
-        require(native_root.is_dir(), 'original native namespace is missing')
-        shutil.copytree(native_root, archive / route.group)
-        original_result = output / (route.group + '-result.json')
-        require(original_result.is_file(), 'original failed native result is missing')
-        shutil.copy2(original_result, archive / original_result.name)
-        save(archive / 'source.json', {'original_native': tree_ref(native_root),
-            'saved_native': tree_ref(archive / route.group), 'original_result': reference(original_result),
-            'original_journal': reference(gate.journal), 'fresh_observation': fresh_observation})
-        result, proof = bridge.recover_initial_pending(call, fresh_observation)
-        gate.reconcile_initial_pending(call, result, proof)
+        archived = []
+        for route, bundle, adapter in adapters:
+            native_root = output / route.group
+            if native_root.is_dir():
+                shutil.copytree(native_root, archive / route.group)
+                archived.append({'original': tree_ref(native_root), 'saved': tree_ref(archive / route.group)})
+        for old_result in output.glob('*result.json'):
+            shutil.copy2(old_result, archive / old_result.name)
+        save(archive / 'source.json', {'native_trees': archived, 'original_journal': reference(gate.journal),
+            'original_call': call_ref, 'fresh_observation': fresh_observation})
+        if billing is not None:
+            known = [money(row['result']['cost_usd']) for row in rows if row['provider'] == 'pi'
+                     and row['state'] == 'settled' and row['result']['cost_usd'] is not None]
+            require(not any(row['provider'] == 'pi' and row['state'] == 'settled' and row['result']['cost_usd'] is None
+                            for row in rows), 'prior paid call still needs same-call billing settlement')
+            billing.expected_usage = money(config['initial_paid_spent_usd']) + sum(known)
+        result, proof = bridge.reconcile_call(call, fresh_observation)
+        gate.reconcile_original_call(call, result, proof)
     for route, bundle, adapter in adapters:
         group_started = time.monotonic()
         result = run_native_task(adapter, bundle.task_id,
                                  experiment_id=config['experiment_id'] + '/' + route.group)
         groups.append({'group': route.group, 'result': result, 'stage_a_source': bundle.provenance,
-                       'optimization_elapsed_s': time.monotonic() - group_started})
-        suffix = '-resumed-result.json' if fresh_observation is not None else '-result.json'
+                       'driver_segment_elapsed_s': time.monotonic() - group_started,
+                       'optimization_elapsed_s': journal_elapsed(gate.state, route.group)})
+        suffix = '-reconciled-' + reconciliation_id + '-result.json' if reconciliation_id else '-result.json'
         save(output / (route.group + suffix), groups[-1])
         require(not gate.state['blocked'] and not gate.state['paid_blocked'], 'original owner or paid gate is blocked')
         require(not any(row['provider'] == 'pi' and row.get('result') and row['result']['cost_usd'] is None
                         for row in gate.state['calls'].values()), 'original paid bill needs same-call reconciliation')
     return save(output / 'experiment.json', {'schema_version': 1, 'groups': groups,
-        'owner_journal': reference(gate.journal), 'optimization_elapsed_s': time.monotonic() - started,
+        'owner_journal': reference(gate.journal), 'optimization_elapsed_s': journal_elapsed(gate.state),
+        'driver_segment_elapsed_s': time.monotonic() - started,
         'whole_workflow_cost_usd': None, 'whole_workflow_wall_s': None,
         'stage_a_accounting': 'combine original Stage-A receipts; unknown remains null',
         'hidden_evaluation': 'not performed', 'adoption_authorized': False})
+
+
+def ordered_calls(state):
+    # Canonical JSON sorts object keys; persisted map order is not dispatch order.
+    rows = sorted(state['calls'].values(), key=lambda row: row['started_unix_s'])
+    require(len({row['started_unix_s'] for row in rows}) == len(rows), 'original call chronology is ambiguous')
+    return rows
+
+
+def journal_elapsed(state, group=None):
+    """Original call start through final settlement includes review/repair downtime."""
+    rows = [row for row in ordered_calls(state) if group is None or row['call']['group'] == group]
+    if not rows or any(row['state'] not in {'settled', 'refused'} for row in rows):
+        return None
+    # A retained old row may lack a terminal clock; never replace that with zero.
+    if rows[-1].get('settled_unix_s') is None:
+        return None
+    return rows[-1]['settled_unix_s'] - min(row['started_unix_s'] for row in rows)
