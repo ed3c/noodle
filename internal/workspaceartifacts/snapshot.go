@@ -118,6 +118,27 @@ func safeAncestors(root, name string) error {
 	return nil
 }
 
+func symlinkDestination(name, target string) (string, error) {
+	if path.IsAbs(target) || strings.ContainsAny(target, "\\:\x00\r\n") || target == "" {
+		return "", fmt.Errorf("unsafe symlink %q", name)
+	}
+	// Cleaning "ignored/../file" first would hide traversal through ignored.
+	seenName := false
+	for _, component := range strings.Split(target, "/") {
+		if component == ".." && seenName {
+			return "", fmt.Errorf("unsafe symlink traversal %q", name)
+		}
+		if component != "" && component != "." && component != ".." {
+			seenName = true
+		}
+	}
+	resolved := path.Clean(path.Join(path.Dir(name), target))
+	if err := validPath(resolved); err != nil {
+		return "", fmt.Errorf("unsafe symlink %q: %w", name, err)
+	}
+	return resolved, nil
+}
+
 func readEntry(root, name string) (Entry, []byte, error) {
 	if err := validPath(name); err != nil {
 		return Entry{}, nil, err
@@ -137,23 +158,9 @@ func readEntry(root, name string) (Entry, []byte, error) {
 		var target string
 		target, err = os.Readlink(full)
 		if err == nil {
-			if path.IsAbs(target) || strings.ContainsAny(target, "\\:\x00\r\n") || target == "" {
-				return Entry{}, nil, fmt.Errorf("unsafe symlink %q", name)
-			}
-			// Cleaning "ignored/../file" before checking would hide a
-			// symlink traversal through ignored. Allow leading ../ only.
-			seenName := false
-			for _, component := range strings.Split(target, "/") {
-				if component == ".." && seenName {
-					return Entry{}, nil, fmt.Errorf("unsafe symlink traversal %q", name)
-				}
-				if component != "" && component != "." && component != ".." {
-					seenName = true
-				}
-			}
-			resolved := path.Clean(path.Join(path.Dir(name), target))
-			if err := validPath(resolved); err != nil {
-				return Entry{}, nil, fmt.Errorf("unsafe symlink %q: %w", name, err)
+			resolved, resolveErr := symlinkDestination(name, target)
+			if resolveErr != nil {
+				return Entry{}, nil, resolveErr
 			}
 			if err := safeAncestors(root, resolved); err != nil {
 				return Entry{}, nil, fmt.Errorf("unsafe symlink %q: %w", name, err)
