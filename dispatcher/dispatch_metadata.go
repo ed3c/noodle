@@ -11,26 +11,28 @@ import (
 )
 
 type dispatchMetadata struct {
-	SessionID             string    `json:"session_id"`
-	Provider              string    `json:"provider"`
-	Model                 string    `json:"model"`
-	Runtime               string    `json:"runtime,omitempty"`
-	Skill                 string    `json:"skill,omitempty"`
-	WorktreePath          string    `json:"worktree_path,omitempty"`
-	CreatedAt             time.Time `json:"created_at"`
-	DispatchWarning       string    `json:"dispatch_warning,omitempty"`
-	DisplayName           string    `json:"display_name,omitempty"`
-	Title                 string    `json:"title,omitempty"`
-	RetryCount            int       `json:"retry_count,omitempty"`
-	TaskRole              string    `json:"task_role,omitempty"`
-	ResumeSessionID       string    `json:"resume_session_id,omitempty"`
-	ResumeThreadID        string    `json:"resume_thread_id,omitempty"`
-	ResumeSourceSHA       string    `json:"resume_source_sha256,omitempty"`
-	TaskKey               string    `json:"task_key,omitempty"`
-	OrderID               string    `json:"order_id,omitempty"`
-	StageIndex            string    `json:"stage_index,omitempty"`
-	DegradedFromSessionID string    `json:"degraded_from_session_id,omitempty"`
-	DegradationReason     string    `json:"degradation_reason,omitempty"`
+	SessionID             string                `json:"session_id"`
+	Provider              string                `json:"provider"`
+	Model                 string                `json:"model"`
+	ReasoningLevel        string                `json:"reasoning_level"`
+	InstructionBundle     *InstructionBundleRef `json:"instruction_bundle"`
+	Runtime               string                `json:"runtime,omitempty"`
+	Skill                 string                `json:"skill,omitempty"`
+	WorktreePath          string                `json:"worktree_path,omitempty"`
+	CreatedAt             time.Time             `json:"created_at"`
+	DispatchWarning       string                `json:"dispatch_warning,omitempty"`
+	DisplayName           string                `json:"display_name,omitempty"`
+	Title                 string                `json:"title,omitempty"`
+	RetryCount            int                   `json:"retry_count,omitempty"`
+	TaskRole              string                `json:"task_role,omitempty"`
+	ResumeSessionID       string                `json:"resume_session_id,omitempty"`
+	ResumeThreadID        string                `json:"resume_thread_id,omitempty"`
+	ResumeSourceSHA       string                `json:"resume_source_sha256,omitempty"`
+	TaskKey               string                `json:"task_key,omitempty"`
+	OrderID               string                `json:"order_id,omitempty"`
+	StageIndex            string                `json:"stage_index,omitempty"`
+	DegradedFromSessionID string                `json:"degraded_from_session_id,omitempty"`
+	DegradationReason     string                `json:"degradation_reason,omitempty"`
 }
 
 func writeDispatchMetadata(
@@ -54,6 +56,8 @@ func writeDispatchMetadata(
 		SessionID:             sessionID,
 		Provider:              strings.TrimSpace(req.Provider),
 		Model:                 strings.TrimSpace(req.Model),
+		ReasoningLevel:        req.ReasoningLevel,
+		InstructionBundle:     req.InstructionBundle,
 		Runtime:               strings.TrimSpace(req.Runtime),
 		Skill:                 strings.TrimSpace(req.Skill),
 		WorktreePath:          strings.TrimSpace(req.WorktreePath),

@@ -2,14 +2,18 @@ package dispatcher
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 
 	"github.com/poteto/noodle/event"
+	"github.com/poteto/noodle/internal/instructionbundle"
 	"github.com/poteto/noodle/skill"
 )
 
@@ -37,6 +41,7 @@ type RemoteHarness struct {
 	Directory                                      string
 	argv                                           []string
 	GuestSessionDir                                string
+	Instructions                                   *instructionbundle.Prepared
 	req                                            DispatchRequest
 	runtimeDir, prompt, stamped, canonical, stderr string
 	writer                                         *event.EventWriter
@@ -47,7 +52,7 @@ type RemoteHarness struct {
 	started                                        bool
 }
 
-func PrepareRemoteHarness(runtimeDir string, resolver skill.Resolver, req DispatchRequest, binary, guestSessionRoot string) (*RemoteHarness, error) {
+func PrepareRemoteHarness(runtimeDir string, resolver skill.Resolver, req DispatchRequest, binary, guestSessionRoot, instructionVerifier string) (*RemoteHarness, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
@@ -62,6 +67,9 @@ func PrepareRemoteHarness(runtimeDir string, resolver skill.Resolver, req Dispat
 	}
 	if !path.IsAbs(binary) || !path.IsAbs(guestSessionRoot) {
 		return nil, fmt.Errorf("remote harness binary/session directory not absolute")
+	}
+	if req.InstructionBundle != nil && (!path.IsAbs(instructionVerifier) || path.Clean(instructionVerifier) != instructionVerifier) {
+		return nil, fmt.Errorf("remote instruction verifier missing or invalid")
 	}
 	id, err := generateSessionID(req.Name)
 	if err != nil {
@@ -81,6 +89,28 @@ func PrepareRemoteHarness(runtimeDir string, resolver skill.Resolver, req Dispat
 		return nil, err
 	}
 	p := &RemoteHarness{ID: id, Directory: dir, GuestSessionDir: path.Join(guestSessionRoot, id), req: req, runtimeDir: runtimeDir, prompt: prompt, stamped: stamped, canonical: canonical, stderr: stderr, writer: writer, warnings: bundle.Warnings}
+	if req.InstructionBundle != nil {
+		p.Instructions, err = instructionbundle.Prepare(context.Background(), *req.InstructionBundle, req.EnvVars["NOODLE_ORDER_ID"], dir)
+		if err != nil {
+			return nil, err
+		}
+		prompt += "\n\n" + p.Instructions.PromptSection()
+		p.prompt = prompt
+		if err = os.WriteFile(inputPath(dir), []byte(prompt), 0600); err != nil {
+			return nil, err
+		}
+		mapping := struct {
+			OriginalManifest InstructionBundleRef        `json:"original_manifest"`
+			Prepared         *instructionbundle.Prepared `json:"prepared"`
+		}{*req.InstructionBundle, p.Instructions}
+		data, e := json.MarshalIndent(mapping, "", "  ")
+		if e != nil {
+			return nil, e
+		}
+		if err = os.WriteFile(filepath.Join(dir, "instruction-mapping.json"), data, 0600); err != nil {
+			return nil, err
+		}
+	}
 	if req.Provider == "codex" {
 		p.argv = append([]string{binary}, codexBaseArgs(req)...)
 		p.argv = append(p.argv, "--dangerously-bypass-approvals-and-sandbox")
@@ -107,6 +137,9 @@ func PrepareRemoteHarness(runtimeDir string, resolver skill.Resolver, req Dispat
 	}
 	if err != nil {
 		return nil, err
+	}
+	if p.Instructions != nil {
+		p.argv = append([]string{instructionVerifier, "--directory", p.Instructions.GuestDirectory, "--sha256", p.Instructions.ManifestSHA256, "--order-id", req.EnvVars["NOODLE_ORDER_ID"], "--"}, p.argv...)
 	}
 	if err = writeDispatchMetadata(runtimeDir, id, req, nowUTC()); err != nil {
 		return nil, err

@@ -29,6 +29,7 @@ type OpenShellProfile struct {
 	Environment                     []string
 	PayloadDirectory, PayloadSHA256 string
 	ClientSHA256                    string
+	InstructionVerifier             string
 	Routes                          map[string]OpenShellRoute
 }
 type OpenShellRoute struct {
@@ -37,12 +38,13 @@ type OpenShellRoute struct {
 }
 
 type openShellProfileFile struct {
-	SchemaVersion    int      `json:"schema_version"`
-	CLI              string   `json:"cli"`
-	GatewayName      string   `json:"gateway_name"`
-	Environment      []string `json:"environment"`
-	PayloadDirectory string   `json:"payload_directory"`
-	Routes           map[string]struct {
+	SchemaVersion       int      `json:"schema_version"`
+	CLI                 string   `json:"cli"`
+	GatewayName         string   `json:"gateway_name"`
+	Environment         []string `json:"environment"`
+	PayloadDirectory    string   `json:"payload_directory"`
+	InstructionVerifier string   `json:"instruction_verifier"`
+	Routes              map[string]struct {
 		Binary   string `json:"binary"`
 		SpecFile string `json:"spec_file"`
 	} `json:"routes"`
@@ -134,6 +136,17 @@ func LoadOpenShellProfile(filename string) (OpenShellProfile, error) {
 		return p, err
 	}
 	hash.Write([]byte(p.PayloadSHA256))
+	if f.InstructionVerifier != "" {
+		if !path.IsAbs(f.InstructionVerifier) || path.Clean(f.InstructionVerifier) != f.InstructionVerifier || strings.ContainsRune(f.InstructionVerifier, 0) || !strings.HasPrefix(f.InstructionVerifier, "/sandbox/payload/") {
+			return p, fmt.Errorf("OpenShell instruction verifier is outside the guest payload")
+		}
+		localVerifier := filepath.Join(p.PayloadDirectory, filepath.FromSlash(strings.TrimPrefix(f.InstructionVerifier, "/sandbox/payload/")))
+		info, e := os.Lstat(localVerifier)
+		if e != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+			return p, fmt.Errorf("OpenShell instruction verifier executable unavailable in payload")
+		}
+		p.InstructionVerifier = f.InstructionVerifier
+	}
 	p.Routes = make(map[string]OpenShellRoute, len(f.Routes))
 	// JSON map order is intentionally irrelevant; include routes in a fixed order.
 	for key := range f.Routes {

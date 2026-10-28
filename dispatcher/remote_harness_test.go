@@ -21,7 +21,7 @@ func TestRemoteHarnessPiKeepsGuestSessionIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			req := DispatchRequest{Name: "remote", Provider: "pi", Runtime: "openshell", Model: "openrouter/deepseek/deepseek-v4.1-flash-1017", Prompt: "unique remote task", SystemPrompt: "instructions", WorktreePath: root}
-			plan, err := PrepareRemoteHarness(filepath.Join(root, "local"), skill.Resolver{}, req, "/sandbox/payload/pi", guest)
+			plan, err := PrepareRemoteHarness(filepath.Join(root, "local"), skill.Resolver{}, req, "/sandbox/payload/pi", guest, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -70,7 +70,7 @@ func TestRemoteHarnessRejectsResumeBeforeEvidence(t *testing.T) {
 	root := t.TempDir()
 	runtimeDir := filepath.Join(root, "runtime")
 	req := DispatchRequest{Name: "resume", Runtime: "openshell", Provider: "codex", Model: "fixture", Prompt: "task", WorktreePath: root, ResumeSessionID: "previous"}
-	if _, err := PrepareRemoteHarness(runtimeDir, skill.Resolver{}, req, "/sandbox/codex", "/sandbox/sessions"); err == nil {
+	if _, err := PrepareRemoteHarness(runtimeDir, skill.Resolver{}, req, "/sandbox/codex", "/sandbox/sessions", ""); err == nil {
 		t.Fatal("resume accepted")
 	}
 	if _, err := os.Stat(runtimeDir); !os.IsNotExist(err) {

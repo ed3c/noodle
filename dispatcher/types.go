@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/poteto/noodle/event"
+	"github.com/poteto/noodle/internal/instructionbundle"
 )
 
 // ProviderConfig holds optional CLI binary directory and extra flags by provider.
@@ -22,6 +23,8 @@ type ProviderConfigs struct {
 	Pi     ProviderConfig
 }
 
+type InstructionBundleRef = instructionbundle.FileRef
+
 // DispatchRequest defines one session launch.
 type DispatchRequest struct {
 	Name                  string
@@ -30,6 +33,7 @@ type DispatchRequest struct {
 	Model                 string
 	Skill                 string
 	ReasoningLevel        string
+	InstructionBundle     *InstructionBundleRef
 	WorktreePath          string
 	MaxTurns              int
 	EnvVars               map[string]string
@@ -53,6 +57,9 @@ type DispatchRequest struct {
 
 // Validate ensures required request fields are set at the boundary.
 func (r DispatchRequest) Validate() error {
+	if r.InstructionBundle != nil && r.Runtime != "openshell" {
+		return fmt.Errorf("instruction materialization runtime unsupported")
+	}
 	if strings.TrimSpace(r.Name) == "" {
 		return fmt.Errorf("session name not set")
 	}

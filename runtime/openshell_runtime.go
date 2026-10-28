@@ -75,6 +75,9 @@ func (r *OpenShellRuntime) Dispatch(ctx context.Context, req DispatchRequest) (S
 	if req.Provider == "pi" && req.Model != "openrouter/deepseek/deepseek-v4.1-flash-1017" {
 		return nil, fmt.Errorf("openshell Pi model differs from selected DeepSeek route")
 	}
+	if req.InstructionBundle != nil && r.config.Profile.InstructionVerifier == "" {
+		return nil, fmt.Errorf("openshell instruction bundle has no configured guest verifier")
+	}
 	for key := range req.EnvVars {
 		switch key {
 		case "NOODLE_PROJECT_DIR", "NOODLE_ORDER_ID", "NOODLE_STAGE_INDEX":
@@ -95,7 +98,7 @@ func (r *OpenShellRuntime) Dispatch(ctx context.Context, req DispatchRequest) (S
 	if err := workspaceartifacts.RequireClean(ctx, req.WorktreePath); err != nil {
 		return nil, err
 	}
-	plan, err := dispatcher.PrepareRemoteHarness(r.config.RuntimeDir, r.config.SkillResolver, req, route.Binary, "/sandbox/noodle-sessions")
+	plan, err := dispatcher.PrepareRemoteHarness(r.config.RuntimeDir, r.config.SkillResolver, req, route.Binary, "/sandbox/noodle-sessions", r.config.Profile.InstructionVerifier)
 	if err != nil {
 		return nil, err
 	}
@@ -298,6 +301,9 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 	}
 	if err == nil && !s.interrupted() {
 		err = s.transfer("upload", s.owner.config.Profile.PayloadDirectory, "/sandbox")
+	}
+	if err == nil && !s.interrupted() {
+		err = s.uploadInstructions(plan)
 	}
 	if err == nil && !s.interrupted() {
 		err = s.waitProviders(route.Spec.GetProviders())

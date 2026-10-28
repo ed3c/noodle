@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,18 @@ func TestOpenShellTransferChild(t *testing.T) {
 		}
 	}
 	if direction == "upload" {
+		if filename := os.Getenv("NOODLE_TRANSFER_LOG"); filename != "" {
+			f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := fmt.Fprintln(f, args[len(args)-2]); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
 		return
 	}
 	source, dest := args[len(args)-2], args[len(args)-1]
