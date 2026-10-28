@@ -233,3 +233,24 @@ Refuses to run if Noodle is currently running (checks the lock file).
 ```
 noodle reset
 ```
+
+
+### Native fixture consumers
+
+`noodle host capabilities` reports `native_consumer_leases=1`,
+`native_consumer_worktrees=1` and `shared_service_adapter=stateless_fixtures_only`.
+The original bound Host request is required for acquire, release and recovery.
+
+```sh
+noodle --project-dir PROJECT host resources residents inspect --request-file REQUEST
+noodle --project-dir PROJECT host resources residents acquire --request-file REQUEST --native-consumer --spec-file SPEC
+noodle --project-dir PROJECT host resources residents release --request-file REQUEST --native-consumer --id RESIDENT --consumer-lease LEASE
+noodle --project-dir PROJECT host resources residents recover --request-file REQUEST --manifest-file MANIFEST
+```
+
+Native acquire/release must originate in the verified MCP carrier. Ordinary CLI
+calls cannot invent a consumer identity. Inspect is read-only. Recover registers
+only the selected historical fixture manifest; it does not adopt arbitrary PIDs.
+An unknown effect returns to the same original inspect path, without resending
+acquire, release or a recovery signal. This interface does not merge private
+stdio workers or certify service I/O isolation.

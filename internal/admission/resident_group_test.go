@@ -15,6 +15,7 @@ import (
 
 func TestResidentLauncherExitRetainsAllocationUntilGroupAbsent(t *testing.T) {
 	r, b, spec := residentFixture(t)
+	spec.Sharing = "context"
 	spec.Argv = []string{"/bin/sh", "-c", "sleep 60 & echo $! > child.pid"}
 	spec.Environment = []string{"PATH=/usr/bin:/bin"}
 	v, err := r.Acquire(spec, "a", b)
@@ -40,7 +41,7 @@ func TestResidentLauncherExitRetainsAllocationUntilGroupAbsent(t *testing.T) {
 	if err != nil || rows[0].State != "needs_owner_readback" || b.Snapshot().Allocations != 1 {
 		t.Fatalf("live descendant lost its quota: %+v %v", rows, err)
 	}
-	if _, err := r.Acquire(spec, "b", b); err == nil {
+	if _, err := r.Acquire(spec, "a", b); err == nil {
 		t.Fatal("unknown resident was reused")
 	}
 	reopened, err := OpenResidents(filepath.Dir(r.path))
@@ -87,6 +88,7 @@ func TestResidentLauncherExitRetainsAllocationUntilGroupAbsent(t *testing.T) {
 
 func TestResidentStopsOwnedProcessGroup(t *testing.T) {
 	r, b, spec := residentFixture(t)
+	spec.Sharing = "context"
 	spec.Argv = []string{"/bin/sh", "-c", "sleep 60 & echo $! > child.pid; wait"}
 	spec.Environment = []string{"PATH=/usr/bin:/bin"}
 	v, err := r.Acquire(spec, "a", b)

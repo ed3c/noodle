@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/poteto/noodle/internal/admission"
+	"github.com/poteto/noodle/internal/testutil/residentchild"
 	"net"
 	"os"
 	"path/filepath"
@@ -79,8 +80,8 @@ func TestHostResidentChildHelper(t *testing.T) {
 	if os.Getenv("NOODLE_HOST_RESIDENT_TEST") != "1" {
 		return
 	}
-	for {
-		time.Sleep(time.Second)
+	if err := residentchild.Wait(); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -8,14 +8,92 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/poteto/noodle/internal/testutil/residentchild"
 )
 
 func TestResidentChildHelper(t *testing.T) {
 	if os.Getenv("NOODLE_RESIDENT_TEST_CHILD") != "1" {
 		return
 	}
-	for {
-		time.Sleep(time.Second)
+	if waitLegacyRecoveryProbe(t) {
+		return
+	}
+	if err := residentchild.Wait(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResidentChildHelperCooperativeCleanup(t *testing.T) {
+	t.Setenv("NOODLE_RESIDENT_TEST_CHILD", "1")
+	t.Chdir(t.TempDir())
+	done := make(chan struct{})
+	go func() { TestResidentChildHelper(t); close(done) }()
+	if err := os.WriteFile("exit", nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("fixture helper ignored its cooperative exit marker")
+	}
+}
+
+func TestResidentFixtureCleanupPreservesUnknownIdentityGuard(t *testing.T) {
+	var child *residentChild
+	t.Run("unknown-original-identity", func(t *testing.T) {
+		r, budget, spec := residentFixture(t)
+		v, err := r.Acquire(spec, "a", budget)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.mu.Lock()
+		child = r.children[v.ID]
+		r.records[v.ID].State = "needs_owner_readback"
+		r.records[v.ID].Started = ""
+		r.records[v.ID].Error = "planted unavailable start identity"
+		r.mu.Unlock()
+		if _, err := r.Release(v.ID, "a"); err == nil {
+			t.Fatal("unknown original identity authorized a stop")
+		}
+		select {
+		case <-child.done:
+			t.Fatal("unknown identity stop ended the helper")
+		default:
+		}
+	})
+	select {
+	case <-child.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cooperative fixture cleanup left its original child alive")
+	}
+}
+
+func TestResidentRestartPreservesLegacyFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "residents.json")
+	before := []byte(`{"preview":{"id":"preview","state":"needs_owner_readback","error":"original stop outcome unknown"}}`)
+	if err := os.WriteFile(path, before, 0600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := OpenResidents(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := r.Snapshot()
+	if err != nil || len(rows) != 1 || len(rows[0].Errors) != 1 || rows[0].Errors[0] != "original stop outcome unknown" || rows[0].State != "needs_owner_readback" {
+		t.Fatalf("legacy failure was lost: %+v %v", rows, err)
+	}
+	if err := r.persist(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenResidents(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err = reopened.Snapshot()
+	if err != nil || len(rows[0].Errors) != 2 || rows[0].Errors[0] != "original stop outcome unknown" {
+		t.Fatalf("restart replaced prior errors: %+v %v", rows, err)
 	}
 }
 func residentFixture(t *testing.T) (*Residents, *Budget, ResidentSpec) {
@@ -37,23 +115,22 @@ func residentFixture(t *testing.T) (*Residents, *Budget, ResidentSpec) {
 	}
 	spec := ResidentSpec{Name: "preview", Argv: []string{exe, "-test.run=^TestResidentChildHelper$"}, Directory: t.TempDir(), Environment: []string{"NOODLE_RESIDENT_TEST_CHILD=1"}, Sharing: "shared", Transport: "network"}
 	t.Cleanup(func() {
-		_ = r.ReleaseContext("a")
-		_ = r.ReleaseContext("b")
-		deadline := time.Now().Add(3 * time.Second)
-		for time.Now().Before(deadline) {
-			rows, _ := r.Snapshot()
-			live := false
-			for _, v := range rows {
-				if v.State == "running" || v.State == "stopping" {
-					live = true
-				}
-			}
-			if !live {
-				return
-			}
-			time.Sleep(10 * time.Millisecond)
+		r.mu.Lock()
+		children := make([]*residentChild, 0, len(r.children))
+		for _, child := range r.children {
+			children = append(children, child)
 		}
-		t.Error("resident child did not exit")
+		r.mu.Unlock()
+		if err := os.WriteFile(filepath.Join(spec.Directory, "exit"), nil, 0600); err != nil {
+			t.Error(err)
+		}
+		for _, child := range children {
+			select {
+			case <-child.done:
+			case <-time.After(3 * time.Second):
+				t.Error("fixture helper completion not observed")
+			}
+		}
 	})
 	return r, b, spec
 }
@@ -177,7 +254,7 @@ func TestResidentsPriorHostNeedsReadbackNotPIDAdoption(t *testing.T) {
 	}
 }
 func TestResidentInventoryIsDiagnosticNotKillAuthority(t *testing.T) {
-	data := "101 10 Thu Oct 15 12:00:00 2026 1200 /some path/server\n102 10 Thu Oct 15 12:00:01 2026 1400 /some path/server\n103 11 Thu Oct 15 12:00:02 2026 500 /some path/server\n"
+	data := "101 10 101 Thu Oct 15 12:00:00 2026 1200 /some path/server\n102 10 101 Thu Oct 15 12:00:01 2026 1400 /some path/server\n103 11 103 Thu Oct 15 12:00:02 2026 500 /some path/server\n"
 	rows, err := parseResidents(data)
 	if err != nil || len(rows) != 3 {
 		t.Fatal(rows, err)
@@ -192,6 +269,18 @@ func TestResidentInventoryIsDiagnosticNotKillAuthority(t *testing.T) {
 		live, err := ObserveResidents(context.Background())
 		if err != nil || len(live) == 0 {
 			t.Fatal(live, err)
+		}
+		found := false
+		for _, row := range live {
+			if row.PID == os.Getpid() {
+				found = true
+				if row.ParentPID != os.Getppid() || row.ProcessGroup <= 0 || len(row.AncestorPIDs) == 0 || row.AncestorPIDs[0] != row.ParentPID {
+					t.Fatalf("live self lineage differs from runtime: %+v", row)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("live inventory omitted current process")
 		}
 	}
 }
