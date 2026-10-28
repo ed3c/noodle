@@ -40,4 +40,6 @@ Use dasherized names (`order-stage-task`, e.g. `todo-4-0-execute`) for both bran
 
 The observed Go 1.26.1 VCS discovery skipped a linked checkout's `.git` file and found an ancestor repository instead. A successful `pnpm build` then lacked the intended revision. For that build only, bind `GIT_DIR` to the verified linked metadata directory and `GIT_WORK_TREE` to its checkout. Require `go version -m` to report the exact source commit and `vcs.modified=false` before freezing the binary. Do not carry these Git selectors into Host, worker or task environments.
 
+Scope these selectors to `pnpm build`, never `pnpm check`: the latter also starts tests that create independent Git fixtures. Explicitly unset the selectors for the full check. Freeze the correctly stamped build separately before that check rebuilds its own binary. An interrupted check is not validation; retain its log, verify checkout state, then run the complete check without repository selectors.
+
 See also [[principles/fix-root-causes]], [[principles/encode-lessons-in-structure]], [[principles/serialize-shared-state-mutations]], [[codebase/adopted-session-reconciliation]]
