@@ -378,6 +378,9 @@ func (l *Loop) localTaskRevisionForDispatch(cand dispatchCandidate, attempt int)
 	if err := decodeStoppedReview(raw, &receipt); err != nil {
 		return false, err
 	}
+	if attempt > receipt.Binding.Attempt+1 {
+		return l.localTaskSavedRevisionForDispatch(cand, attempt, order, receipt)
+	}
 	if stage.Status != state.StagePending || attempt != len(stage.Attempts) || attempt != receipt.Binding.Attempt+1 || cand.Stage.Prompt != stage.Prompt || cand.StageIndex != 0 {
 		return false, fmt.Errorf("local task revision dispatch custody differs")
 	}
@@ -386,6 +389,41 @@ func (l *Loop) localTaskRevisionForDispatch(cand dispatchCandidate, attempt int)
 	}
 	if err := l.validateRecovery(order, receipt.Review, receipt.Binding); err != nil {
 		return false, err
+	}
+	return true, nil
+}
+
+// A consumed review grant remains history when a later revision is stopped.
+// Only the new, durable saved-progress offer can authorize its successor.
+func (l *Loop) localTaskSavedRevisionForDispatch(cand dispatchCandidate, attempt int, order state.OrderNode, receipt requestChangesRequeued) (bool, error) {
+	stage := order.Stages[0]
+	refuse := fmt.Errorf("local task saved revision dispatch custody differs")
+	if order.Status != state.OrderActive || stage.Status != state.StageReview || stage.Runtime != "openshell" || cand.StageIndex != 0 || cand.Stage.Prompt != stage.Prompt || attempt != len(stage.Attempts) || attempt < 2 || receipt.Binding.Attempt < 0 || receipt.Binding.Attempt >= attempt-1 {
+		return false, refuse
+	}
+	prior := stage.Attempts[receipt.Binding.Attempt]
+	if prior.AttemptID != receipt.Binding.AttemptID || prior.SessionID != receipt.Binding.SessionID || prior.AttemptID != dispatchAttemptID(order.OrderID, 0, receipt.Binding.Attempt) {
+		return false, refuse
+	}
+	var grants []savedProgressAttempt
+	if err := json.Unmarshal(stage.Extra[savedProgressAttemptsKey], &grants); err != nil || len(grants) == 0 {
+		return false, refuse
+	}
+	grant := grants[len(grants)-1]
+	predecessor := stage.Attempts[attempt-1]
+	review, ok := l.canonical.PendingReviews[order.OrderID]
+	if !ok || review.OrderID != order.OrderID || review.StageIndex != 0 || review.SessionID != predecessor.SessionID || review.WorktreeName != predecessor.WorktreeName || review.WorktreePath != l.worktreePath(predecessor.WorktreeName) || review.Prompt != stage.Prompt || review.Runtime != stage.Runtime || review.Provider != stage.Provider || review.Model != stage.Model || review.Skill != stage.Skill || review.TaskKey != stage.TaskKey || !slices.Equal(review.Plan, order.Plan) {
+		return false, refuse
+	}
+	if (predecessor.Status != state.AttemptCancelled && predecessor.Status != state.AttemptFailed) || predecessor.AttemptID != dispatchAttemptID(order.OrderID, 0, attempt-1) || predecessor.WorktreeName != cookBaseName(order.OrderID, 0, stage.TaskKey) || grant.SessionID != predecessor.SessionID || grant.NextAttemptID != dispatchAttemptID(order.OrderID, 0, attempt) || len(grant.Version) != 64 || strings.Trim(grant.Version, "0123456789abcdef") != "" || grant.CommandID != "saved-progress-"+grant.Version || grant.ProgressHead == "" {
+		return false, refuse
+	}
+	head, err := recoveryGitWithExecution(l.deps.Execution, review.WorktreePath, "rev-parse", "HEAD")
+	if err != nil {
+		return false, err
+	}
+	if head != grant.ProgressHead {
+		return false, refuse
 	}
 	return true, nil
 }
