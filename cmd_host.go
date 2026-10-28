@@ -61,23 +61,26 @@ type hostResponse struct {
 }
 
 type hostRequest struct {
-	Operation        string                  `json:"operation"`
-	WarningOrderID   string                  `json:"warning_order_id"`
-	ProjectDir       string                  `json:"project_dir"`
-	ContextID        string                  `json:"context_id"`
-	InstanceID       string                  `json:"instance_id"`
-	ConfigPath       string                  `json:"config_path"`
-	ConfigSHA256     string                  `json:"config_sha256"`
-	Mode             string                  `json:"mode"`
-	Environment      []string                `json:"environment,omitempty"`
-	BinarySHA256     string                  `json:"binary_sha256"`
-	RequestID        string                  `json:"request_id"`
-	ResidentSpec     *admission.ResidentSpec `json:"resident_spec,omitempty"`
-	ResidentID       string                  `json:"resident_id,omitempty"`
-	Apply            bool                    `json:"apply,omitempty"`
-	CleanupCompleted bool                    `json:"cleanup_completed,omitempty"`
-	RequestFile      string                  `json:"-"`
-	HostDir          string                  `json:"-"`
+	ReadbackOrderID   string                             `json:"readback_order_id"`
+	ReadbackSessionID string                             `json:"readback_session_id"`
+	ReadbackRequest   loopruntime.SessionReadbackFileRef `json:"readback_request"`
+	Operation         string                             `json:"operation"`
+	WarningOrderID    string                             `json:"warning_order_id"`
+	ProjectDir        string                             `json:"project_dir"`
+	ContextID         string                             `json:"context_id"`
+	InstanceID        string                             `json:"instance_id"`
+	ConfigPath        string                             `json:"config_path"`
+	ConfigSHA256      string                             `json:"config_sha256"`
+	Mode              string                             `json:"mode"`
+	Environment       []string                           `json:"environment,omitempty"`
+	BinarySHA256      string                             `json:"binary_sha256"`
+	RequestID         string                             `json:"request_id"`
+	ResidentSpec      *admission.ResidentSpec            `json:"resident_spec,omitempty"`
+	ResidentID        string                             `json:"resident_id,omitempty"`
+	Apply             bool                               `json:"apply,omitempty"`
+	CleanupCompleted  bool                               `json:"cleanup_completed,omitempty"`
+	RequestFile       string                             `json:"-"`
+	HostDir           string                             `json:"-"`
 }
 
 type hostRuntime interface {
@@ -134,6 +137,7 @@ func newHostCmd(app *App) *cobra.Command {
 	task.AddCommand(&cobra.Command{Use: "review-capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "local_task_review_recovery": true, "candidate_bound_merge": true, "local_task_merge_recovery": true, "local_task_completion_recovery": true, "local_task_completion_recovery_version": 2, "local_task_roles": 1, "local_task_directory_scope": 1})
 	}})
+	task.AddCommand(newHostSessionReadbackCmd(app))
 	cmd.AddCommand(task)
 	cmd.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(hostCapabilities(runtime.GOOS))
@@ -574,6 +578,10 @@ func serveHost(ctx context.Context) error {
 					receipts = append(receipts, context.receipt)
 				}
 				call.reply <- hostViewObservation{Resources: h.viewResources(), Receipts: receipts}
+				continue
+			}
+			if call.request.Operation == "task_session_readback" {
+				call.reply <- h.sessionReadback(ctx, call.request)
 				continue
 			}
 			for _, c := range h.contexts {
