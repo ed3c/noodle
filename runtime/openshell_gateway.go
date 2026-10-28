@@ -23,7 +23,8 @@ import (
 )
 
 // OpenShellGatewaySpec is an original owner's foreground command contract.
-// ConfigFingerprint binds all configuration, including the loaded TLS trust.
+// ConfigFingerprint binds the shared deployment and loaded TLS trust. Worker
+// routes and payloads are bound by each context's dispatch profile digest.
 // This API does not discover or certify private OpenShell installations.
 type OpenShellGatewaySpec struct {
 	Resident         admission.ResidentSpec

@@ -39,6 +39,10 @@ The profile JSON has `schema_version: 1` and these fields:
 - `gateway.tls`: `ca_file`, `certificate_file`, `key_file`, `server_name`.
 - `gateway.version`, `gateway.compute_driver` and
   `gateway.readiness_timeout_seconds` (1–30).
+- `gateway.identity_source`: explicit shared native configuration locator. It must
+  resolve to one of `gateway.config_files`; every task profile for the deployment
+  uses the same canonical source. This replaces the task profile path as the
+  gateway custody locator. It is required; missing identity is refused.
 - `gateway.config_files`: all static native gateway configuration files consumed
   by the foreground command. Include its gateway TOML and imported static files.
   Do not include refreshed provider credential stores; those belong to the
@@ -51,9 +55,32 @@ snapshot binds native policy bytes, static configuration, client TLS material,
 and payload content/modes. The selected native client metadata must identify
 the same endpoint and mTLS certificate/CA as custody; file transfer checks its
 fingerprint and the CLI executable bytes/mode again. Mutable `active_gateway` and `last_sandbox` markers are not
-used. Upload checks payload content again. Changing a live
-profile cannot silently reconfigure a shared gateway. Stop and inspect the old
-contexts before attaching a new configuration.
+used. Upload checks payload content again.
+
+The gateway fingerprint binds only the common deployment: the explicit identity
+source, all native static configuration, foreground Resident contract, TLS,
+client selection, CLI executable, gateway name/environment and retained-history
+contract. Task profile paths, worker route specifications and payloads do not
+reconfigure that owner. Each attached context receives its own frozen profile;
+its complete dispatch digest includes the exact source/dependency snapshot,
+route protobuf bytes, payload and client binding. Native custody continues to
+persist each Create intent and exact VM specification and rejects later drift.
+
+Before dispatch and around completion readback, file-backed profiles verify the
+original admitted files, payload and client selection. Verification does not
+follow new dependency paths from an edited profile. Source changes refuse;
+changing a profile is not an in-flight policy update. The completion proof also
+binds the original dispatch profile digest. Explicit programmatic Runtime
+profiles are copied at construction, including each route protobuf, and their
+complete snapshot is bound to the same dispatch/completion evidence.
+
+Different contexts may therefore select different necessary network domains
+in their native `spec_file` while sharing one deployment. Common deployment
+changes still conflict with active custody. This change does not migrate old
+custody ledgers: the prior combined fingerprint and task-file ConfigSource are
+not silently relabeled. Existing live profiles/services remain untouched; a
+version rollout requires a separate original-owner shutdown and reviewed
+configuration/custody transition.
 
 OpenShell v0.1.5 does not drain provider credential refreshes on normal gateway
 shutdown. The [pinned native repair](native-patches/refresh-drain/README.md)

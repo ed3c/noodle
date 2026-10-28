@@ -25,6 +25,7 @@ type CompletedSessionBinding struct {
 	StageIndex, RetryCount                            int
 }
 type CompletedSessionReadback struct {
+	ProfileSHA256         string                            `json:"profile_sha256"`
 	CommandSHA256         string                            `json:"command_sha256"`
 	Instructions          *CompletedInstructionEvidence     `json:"instructions"`
 	NativeAttemptID       string                            `json:"native_attempt_id"`
@@ -98,6 +99,13 @@ func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b Completed
 	if active {
 		return result, fmt.Errorf("original session has not settled")
 	}
+	if err = VerifyOpenShellProfile(r.config.Profile); err != nil {
+		return result, err
+	}
+	profileSHA, err := OpenShellDispatchSHA256(r.config.Profile)
+	if err != nil {
+		return result, err
+	}
 	dir := filepath.Join(r.config.RuntimeDir, "sessions", b.SessionID)
 	sources := map[string]SessionReadbackFileRef{}
 	read := func(name string, value any) error {
@@ -111,7 +119,7 @@ func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b Completed
 	if err = read("openshell-dispatch.json", &receipt); err != nil {
 		return result, err
 	}
-	if receipt.Version != 1 || receipt.ContextID != r.config.ContextID || receipt.OrderID != b.OrderID || receipt.SessionID != b.SessionID || receipt.Target != b.WorktreePath || receipt.AttemptID == "" || receipt.Phase != "settled" || receipt.Error != "" || receipt.Outcome.Status != StatusCompleted || receipt.Outcome.ExitCode != 0 || receipt.Worker == nil || receipt.CandidateHead == "" || receipt.Baseline == nil {
+	if receipt.ProfileSHA256 != profileSHA || receipt.Version != 1 || receipt.ContextID != r.config.ContextID || receipt.OrderID != b.OrderID || receipt.SessionID != b.SessionID || receipt.Target != b.WorktreePath || receipt.AttemptID == "" || receipt.Phase != "settled" || receipt.Error != "" || receipt.Outcome.Status != StatusCompleted || receipt.Outcome.ExitCode != 0 || receipt.Worker == nil || receipt.CandidateHead == "" || receipt.Baseline == nil {
 		return result, fmt.Errorf("original OpenShell dispatch is not a bound successful settled result")
 	}
 	var spawn struct {
@@ -243,5 +251,8 @@ func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b Completed
 			return result, fmt.Errorf("OpenShell instruction evidence changed during readback")
 		}
 	}
-	return CompletedSessionReadback{CommandSHA256: commandSHA256, Instructions: instructions, NativeAttemptID: receipt.AttemptID, CandidateHead: head, NativeExecExitCode: observed.ExecExitCode, NativePhase: observed.Phase, StopAcknowledged: observed.StopAcknowledged, MainProcessInstanceID: observed.MainProcessInstanceID, Sources: sources}, nil
+	if err = VerifyOpenShellProfile(r.config.Profile); err != nil {
+		return result, err
+	}
+	return CompletedSessionReadback{ProfileSHA256: profileSHA, CommandSHA256: commandSHA256, Instructions: instructions, NativeAttemptID: receipt.AttemptID, CandidateHead: head, NativeExecExitCode: observed.ExecExitCode, NativePhase: observed.Phase, StopAcknowledged: observed.StopAcknowledged, MainProcessInstanceID: observed.MainProcessInstanceID, Sources: sources}, nil
 }

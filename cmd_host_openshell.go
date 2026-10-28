@@ -31,33 +31,39 @@ func (h *noodleHost) closeIdleOpenShell() error {
 	h.openShellProfile = nil
 	return nil
 }
-func (h *noodleHost) prepareOpenShell(filename string) error {
+func (h *noodleHost) prepareOpenShell(filename string) (*loopruntime.OpenShellProfile, error) {
 	if h.residents == nil || h.budget == nil {
-		return fmt.Errorf("OpenShell Host admission/resident owner unavailable")
+		return nil, fmt.Errorf("OpenShell Host admission/resident owner unavailable")
 	}
 	p, err := loopruntime.LoadOpenShellProfile(filename)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	return h.bindOpenShellProfile(p)
+}
+func (h *noodleHost) bindOpenShellProfile(p loopruntime.OpenShellProfile) (*loopruntime.OpenShellProfile, error) {
 	if h.openShell != nil && !h.openShellContextsActive() {
-		if err = h.openShell.Close(); err != nil {
-			return fmt.Errorf("original OpenShell gateway cleanup unresolved: %w", err)
+		if err := h.openShell.Close(); err != nil {
+			return nil, fmt.Errorf("original OpenShell gateway cleanup unresolved: %w", err)
 		}
 		h.openShell = nil
 		h.openShellProfile = nil
 	}
 	if h.openShell != nil {
 		if h.openShellProfile == nil || h.openShellProfile.Gateway.Binding != p.Gateway.Binding {
-			return fmt.Errorf("OpenShell profile conflicts with the Host's active gateway binding")
+			return nil, fmt.Errorf("OpenShell profile conflicts with the Host's active gateway binding")
 		}
-		return nil
+		return &p, nil
 	}
 	owner, err := loopruntime.NewOpenShellGateway(h.residents, h.budget, p.Gateway)
 	if owner != nil {
 		h.openShell = owner
 		h.openShellProfile = &p
 	}
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
 }
 func (h *noodleHost) releaseOpenShell(contextID string) error {
 	// A pre-spawn refusal has no resident lease. Do not invent a generation just

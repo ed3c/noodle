@@ -860,8 +860,10 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 	if remote {
 		return hostError("refused", errors.New("shared host does not support remote runtimes without confirmed remote completion"))
 	}
+	var selectedOpenShell *loopruntime.OpenShellProfile
 	if cfg.Runtime.OpenShell.Profile != "" {
-		if err := h.prepareOpenShell(cfg.Runtime.OpenShell.Profile); err != nil {
+		selectedOpenShell, err = h.prepareOpenShell(cfg.Runtime.OpenShell.Profile)
+		if err != nil {
 			return hostError("refused", err)
 		}
 	}
@@ -892,7 +894,7 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 	runCtx, cancel := context.WithCancel(ctx)
 	deps := loop.Dependencies{ModeOverride: state.RunMode(req.Mode), Execution: e, Admission: h.budget, AdmissionContext: id, CleanupCompleted: req.CleanupCompleted}
 	if cfg.Runtime.OpenShell.Profile != "" {
-		deps.OpenShellGateway, deps.OpenShellProfile = h.openShell, h.openShellProfile
+		deps.OpenShellGateway, deps.OpenShellProfile = h.openShell, selectedOpenShell
 	}
 	rt := h.newRuntime(req.ProjectDir, h.binaryPath, cfg, deps)
 	environmentSHA := hostDigest([]byte(strings.Join(req.Environment, "\x00")))

@@ -55,3 +55,9 @@ See also [[codebase/owned-worker-exit-and-recovery-evidence]] and [[codebase/run
 - The monitor previously rewrote terminal `meta.json` every poll solely for `updated_at` and `idle_seconds`. A source-bound completion readback could correctly refuse even after VM shutdown and clean publication, because this display churn raced its evidence hashes.
 - Keep terminal metadata bytes unchanged when every substantive observation/claim field is unchanged. Continue observing and publish late cost/log/claim changes or renewed liveness; never freeze a still-alive or exit-pending session merely because a completion event exists.
 - A diagnostic direct readback is not a substitute for the outer owner accepting its own full packet. Retain transient refusals; any bounded read-only re-observation must preserve all owner, command, source and native-stop checks and must not dispatch another model attempt.
+
+## Shared deployment and per-context worker policy
+
+- `gateway.identity_source` explicitly names the canonical native configuration file in `gateway.config_files`. Gateway custody binds all shared configuration/TLS/client/Resident fields, not the task profile path, payload or route policy. Existing combined custody bindings are not migrated automatically.
+- Host must pass each attached context its selected profile, even when the gateway owner is reused. Reusing the first owner's profile silently dispatches the wrong network policy. Native Create still persists and audits the complete per-worker specification.
+- File profiles retain the original dependency paths and byte digests; verification must not re-decode an edited profile and follow newly introduced paths. Runtime clones route protobufs at construction and binds the complete dispatch digest into completion readback.

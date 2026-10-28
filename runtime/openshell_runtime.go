@@ -47,6 +47,7 @@ func NewOpenShellRuntime(cfg OpenShellRuntimeConfig) (*OpenShellRuntime, error) 
 		return nil, err
 	}
 	cfg.RuntimeDir = canonical
+	cfg.Profile = freezeOpenShellProfile(cfg.Profile)
 	return &OpenShellRuntime{config: cfg, active: make(map[string]*openShellSession)}, nil
 }
 func (r *OpenShellRuntime) CapacityAvailable() bool {
@@ -92,7 +93,7 @@ func (r *OpenShellRuntime) Dispatch(ctx context.Context, req DispatchRequest) (S
 		}
 		req.WorktreePath = canonical
 	}
-	if err := VerifyOpenShellPayload(r.config.Profile); err != nil {
+	if err := VerifyOpenShellProfile(r.config.Profile); err != nil {
 		return nil, err
 	}
 	if err := workspaceartifacts.RequireClean(ctx, req.WorktreePath); err != nil {
@@ -114,8 +115,12 @@ func (r *OpenShellRuntime) Dispatch(ctx context.Context, req DispatchRequest) (S
 	if err != nil {
 		return nil, err
 	}
+	profileSHA, err := OpenShellDispatchSHA256(r.config.Profile)
+	if err != nil {
+		return nil, err
+	}
 	s := newOpenShellSession(r, plan.ID, plan.Directory)
-	s.receipt = openShellDispatchReceipt{Version: 1, ContextID: r.config.ContextID, OrderID: order, AttemptID: attempt, SessionID: plan.ID, Target: req.WorktreePath, Baseline: baseline, Phase: "prepared", Outcome: SessionOutcome{Status: StatusFailed, Reason: "OpenShell attempt has not completed", ExitCode: -1}}
+	s.receipt = openShellDispatchReceipt{Version: 1, ProfileSHA256: profileSHA, ContextID: r.config.ContextID, OrderID: order, AttemptID: attempt, SessionID: plan.ID, Target: req.WorktreePath, Baseline: baseline, Phase: "prepared", Outcome: SessionOutcome{Status: StatusFailed, Reason: "OpenShell attempt has not completed", ExitCode: -1}}
 	if err := s.persist(); err != nil {
 		return nil, err
 	}
@@ -125,6 +130,7 @@ func (r *OpenShellRuntime) Dispatch(ctx context.Context, req DispatchRequest) (S
 }
 
 type openShellDispatchReceipt struct {
+	ProfileSHA256                                                  string
 	CandidateHead                                                  string
 	Version                                                        int
 	ContextID, OrderID, AttemptID, SessionID, Target, Phase, Error string
@@ -297,7 +303,7 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 		err = s.transfer("upload", plan.Directory+string(filepath.Separator)+"repo", "/sandbox")
 	}
 	if err == nil && !s.interrupted() {
-		err = VerifyOpenShellPayload(s.owner.config.Profile)
+		err = VerifyOpenShellProfile(s.owner.config.Profile)
 	}
 	if err == nil && !s.interrupted() {
 		err = s.transfer("upload", s.owner.config.Profile.PayloadDirectory, "/sandbox")

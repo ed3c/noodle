@@ -19,11 +19,14 @@ import (
 	pb "github.com/NVIDIA/OpenShell/sdk/go/proto/openshellv1"
 	"github.com/poteto/noodle/internal/admission"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 // OpenShellProfile snapshots dispatch policy and client TLS identity. Model
 // credentials remain in the gateway; the JSON source contains only paths and policy.
 type OpenShellProfile struct {
+	sourceFiles                     map[string]string
+	SourcePath, SourceSHA256        string
 	Gateway                         OpenShellGatewaySpec
 	CLI, GatewayName                string
 	Environment                     []string
@@ -49,8 +52,9 @@ type openShellProfileFile struct {
 		SpecFile string `json:"spec_file"`
 	} `json:"routes"`
 	Gateway struct {
-		Resident admission.ResidentSpec `json:"resident"`
-		Binding  struct {
+		IdentitySource string                 `json:"identity_source"`
+		Resident       admission.ResidentSpec `json:"resident"`
+		Binding        struct {
 			StateRoot string `json:"state_root"`
 			Gateway   string `json:"gateway"`
 			Workspace string `json:"workspace"`
@@ -101,6 +105,9 @@ func LoadOpenShellProfile(filename string) (OpenShellProfile, error) {
 		return filepath.Clean(value), nil
 	}
 	hash := sha256.New()
+	gatewayHash := sha256.New()
+	profileBytes := sha256.Sum256(data)
+	p.sourceFiles = map[string]string{filename: hex.EncodeToString(profileBytes[:])}
 	hash.Write(data)
 	read := func(value string) ([]byte, error) {
 		name, e := resolve(value)
@@ -111,8 +118,27 @@ func LoadOpenShellProfile(filename string) (OpenShellProfile, error) {
 		if e != nil {
 			return nil, fmt.Errorf("read OpenShell profile dependency %s: %w", name, e)
 		}
+		digest := sha256.Sum256(b)
+		sourceSHA := hex.EncodeToString(digest[:])
+		if old, ok := p.sourceFiles[name]; ok && old != sourceSHA {
+			return nil, fmt.Errorf("OpenShell dependency changed during profile admission")
+		}
+		p.sourceFiles[name] = sourceSHA
 		fmt.Fprintf(hash, "\x00%s\x00%d\x00", name, len(b))
 		hash.Write(b)
+		return b, nil
+	}
+	readGateway := func(value string) ([]byte, error) {
+		b, e := read(value)
+		if e != nil {
+			return nil, e
+		}
+		name, e := resolve(value)
+		if e != nil {
+			return nil, e
+		}
+		fmt.Fprintf(gatewayHash, "\x00%s\x00%d\x00", name, len(b))
+		gatewayHash.Write(b)
 		return b, nil
 	}
 	if p.CLI, err = resolve(f.CLI); err != nil {
@@ -121,7 +147,7 @@ func LoadOpenShellProfile(filename string) (OpenShellProfile, error) {
 	if info, e := os.Stat(p.CLI); e != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
 		return p, fmt.Errorf("OpenShell CLI executable unavailable")
 	}
-	if _, err = read(f.CLI); err != nil {
+	if _, err = readGateway(f.CLI); err != nil {
 		return p, err
 	}
 	p.GatewayName = f.GatewayName
@@ -179,15 +205,15 @@ func LoadOpenShellProfile(filename string) (OpenShellProfile, error) {
 		}
 		p.Routes[key] = OpenShellRoute{Binary: r.Binary, Spec: spec}
 	}
-	ca, err := read(f.Gateway.TLS.CAFile)
+	ca, err := readGateway(f.Gateway.TLS.CAFile)
 	if err != nil {
 		return p, err
 	}
-	cert, err := read(f.Gateway.TLS.CertificateFile)
+	cert, err := readGateway(f.Gateway.TLS.CertificateFile)
 	if err != nil {
 		return p, err
 	}
-	key, err := read(f.Gateway.TLS.KeyFile)
+	key, err := readGateway(f.Gateway.TLS.KeyFile)
 	if err != nil {
 		return p, err
 	}
@@ -199,15 +225,59 @@ func LoadOpenShellProfile(filename string) (OpenShellProfile, error) {
 	if err != nil {
 		return p, fmt.Errorf("OpenShell client certificate/key invalid: %w", err)
 	}
-	for _, name := range f.Gateway.ConfigFiles {
-		if _, err = read(name); err != nil {
+	identitySource, err := resolve(f.Gateway.IdentitySource)
+	if err != nil {
+		return p, fmt.Errorf("OpenShell gateway identity source missing: %w", err)
+	}
+	identitySource, err = filepath.EvalSymlinks(identitySource)
+	if err != nil {
+		return p, fmt.Errorf("OpenShell gateway identity source unavailable: %w", err)
+	}
+	foundIdentity := false
+	for i, name := range f.Gateway.ConfigFiles {
+		resolved, e := resolve(name)
+		if e != nil {
+			return p, e
+		}
+		if _, e = read(resolved); e != nil {
+			return p, e
+		}
+		resolved, e = filepath.EvalSymlinks(resolved)
+		if e != nil {
+			return p, e
+		}
+		f.Gateway.ConfigFiles[i] = resolved
+		if resolved == identitySource {
+			foundIdentity = true
+		}
+		if _, err = readGateway(resolved); err != nil {
 			return p, err
 		}
+	}
+	if !foundIdentity {
+		return p, fmt.Errorf("OpenShell gateway identity source is absent from static configuration files")
 	}
 	stateRoot, err := resolve(f.Gateway.Binding.StateRoot)
 	if err != nil {
 		return p, err
 	}
+	f.Gateway.IdentitySource = identitySource
+	f.Gateway.Binding.StateRoot = stateRoot
+	for _, value := range []*string{&f.Gateway.TLS.CAFile, &f.Gateway.TLS.CertificateFile, &f.Gateway.TLS.KeyFile} {
+		*value, err = resolve(*value)
+		if err != nil {
+			return p, err
+		}
+	}
+	deployment, err := json.Marshal(struct {
+		Gateway     any
+		CLI, Name   string
+		Environment []string
+	}{f.Gateway, p.CLI, p.GatewayName, p.Environment})
+	if err != nil {
+		return p, err
+	}
+	gatewayHash.Write(deployment)
 	resident := f.Gateway.Resident
 	if err = admission.ValidateResidentSpec(resident); err != nil {
 		return p, err
@@ -218,12 +288,15 @@ func LoadOpenShellProfile(filename string) (OpenShellProfile, error) {
 	if f.Gateway.ReadinessTimeoutSeconds <= 0 || f.Gateway.ReadinessTimeoutSeconds > 30 {
 		return p, fmt.Errorf("OpenShell gateway readiness timeout outside 1..30 seconds")
 	}
-	p.Gateway = OpenShellGatewaySpec{Resident: resident, Binding: OpenShellCustodyBinding{StateRoot: stateRoot, Gateway: f.Gateway.Binding.Gateway, Workspace: f.Gateway.Binding.Workspace, Owner: f.Gateway.Binding.Owner, ConfigSource: filename, ConfigFingerprint: hex.EncodeToString(hash.Sum(nil))}, TLS: OpenShellTLS{RootCAs: roots, Certificate: pair, ServerName: f.Gateway.TLS.ServerName}, Version: f.Gateway.Version, ComputeDriver: f.Gateway.ComputeDriver, ReadinessTimeout: time.Duration(f.Gateway.ReadinessTimeoutSeconds) * time.Second, Retained: append([]OpenShellRetainedSandbox(nil), f.Gateway.Retained...)}
+	p.Gateway = OpenShellGatewaySpec{Resident: resident, Binding: OpenShellCustodyBinding{StateRoot: stateRoot, Gateway: f.Gateway.Binding.Gateway, Workspace: f.Gateway.Binding.Workspace, Owner: f.Gateway.Binding.Owner, ConfigSource: identitySource, ConfigFingerprint: hex.EncodeToString(gatewayHash.Sum(nil))}, TLS: OpenShellTLS{RootCAs: roots, Certificate: pair, ServerName: f.Gateway.TLS.ServerName}, Version: f.Gateway.Version, ComputeDriver: f.Gateway.ComputeDriver, ReadinessTimeout: time.Duration(f.Gateway.ReadinessTimeoutSeconds) * time.Second, Retained: append([]OpenShellRetainedSandbox(nil), f.Gateway.Retained...)}
 	if p.ClientSHA256, err = openShellClientHash(p); err != nil {
 		return p, err
 	}
 	hash.Write([]byte(p.ClientSHA256))
-	p.Gateway.Binding.ConfigFingerprint = hex.EncodeToString(hash.Sum(nil))
+	gatewayHash.Write([]byte(p.ClientSHA256))
+	p.Gateway.Binding.ConfigFingerprint = hex.EncodeToString(gatewayHash.Sum(nil))
+	p.SourcePath = filename
+	p.SourceSHA256 = hex.EncodeToString(hash.Sum(nil))
 	return p, nil
 }
 
@@ -293,4 +366,92 @@ func openShellPayloadHash(root string) (string, error) {
 		return "", fmt.Errorf("fingerprint OpenShell payload: %w", err)
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// File profiles retain their entire original dependency hash independently of
+// the shared gateway's identity. A changed task policy never rebinds custody.
+func VerifyOpenShellProfile(p OpenShellProfile) error {
+	if p.SourcePath == "" {
+		return VerifyOpenShellPayload(p)
+	}
+	if p.SourceSHA256 == "" || p.sourceFiles[p.SourcePath] == "" {
+		return fmt.Errorf("OpenShell task profile source binding missing")
+	}
+	// Check only admitted paths. Re-decoding a changed profile would follow new,
+	// unadmitted dependency paths before it could detect the source change.
+	for name, expected := range p.sourceFiles {
+		info, err := os.Stat(name)
+		if err != nil || !info.Mode().IsRegular() {
+			return fmt.Errorf("OpenShell task profile source unavailable: %s", name)
+		}
+		file, err := os.Open(name)
+		if err != nil {
+			return err
+		}
+		hash := sha256.New()
+		_, readErr := io.Copy(hash, file)
+		closeErr := file.Close()
+		if readErr != nil {
+			return readErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if hex.EncodeToString(hash.Sum(nil)) != expected {
+			return fmt.Errorf("OpenShell task profile changed after admission: %s", name)
+		}
+	}
+	if err := VerifyOpenShellPayload(p); err != nil {
+		return err
+	}
+	return VerifyOpenShellClient(p)
+}
+func freezeOpenShellProfile(p OpenShellProfile) OpenShellProfile {
+	p.Environment = append([]string(nil), p.Environment...)
+	files := make(map[string]string, len(p.sourceFiles))
+	for name, hash := range p.sourceFiles {
+		files[name] = hash
+	}
+	p.sourceFiles = files
+	routes := make(map[string]OpenShellRoute, len(p.Routes))
+	for name, route := range p.Routes {
+		if route.Spec != nil {
+			route.Spec = proto.Clone(route.Spec).(*pb.SandboxSpec)
+		}
+		routes[name] = route
+	}
+	p.Routes = routes
+	return p
+}
+
+// OpenShellDispatchSHA256 binds the complete frozen worker profile, including
+// its original file dependency digest when it was loaded from disk.
+func OpenShellDispatchSHA256(p OpenShellProfile) (string, error) {
+	type routeBinding struct {
+		Binary string
+		Spec   []byte
+	}
+	routes := make(map[string]routeBinding, len(p.Routes))
+	for name, route := range p.Routes {
+		if route.Spec == nil {
+			return "", fmt.Errorf("OpenShell route specification missing")
+		}
+		spec, err := openShellBytes(route.Spec)
+		if err != nil {
+			return "", err
+		}
+		routes[name] = routeBinding{route.Binary, spec}
+	}
+	data, err := json.Marshal(struct {
+		SourcePath, SourceSHA256                                                             string
+		Gateway                                                                              OpenShellCustodyBinding
+		CLI, GatewayName, PayloadDirectory, PayloadSHA256, ClientSHA256, InstructionVerifier string
+		Environment                                                                          []string
+		Routes                                                                               map[string]routeBinding
+	}{p.SourcePath, p.SourceSHA256, p.Gateway.Binding, p.CLI, p.GatewayName, p.PayloadDirectory, p.PayloadSHA256, p.ClientSHA256, p.InstructionVerifier, p.Environment, routes})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
 }
