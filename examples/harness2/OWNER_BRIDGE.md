@@ -144,3 +144,27 @@ intent, canonical/native identity mismatch, artifact/symlink drift, binary/mode/
 private/public trace separation, original review transition and acceptance, nullable paid
 billing with a full-remainder hold, and unknown closure across routes. The complete
 `reproduce.py test` also runs the actual pinned native core controls from the first increment.
+
+## Narrow initial-admission readback recovery
+
+The original successful first `loop enter` can return `inner.status=pending` with no
+`inner.owner`; authority is carried by matching original `inner.next` / top-level `next`,
+`original_initial_admission_readback`, exact request path and original Host admission receipt.
+The fixture under `fixtures/` preserves this real response shape. Other missing owners refuse.
+
+`experiment_driver.resume_initial_pending(config, review_callback, fresh_observation_ref)`
+is an explicit recovery entry for the first Codex baseline only. It requires one unknown
+journal call, the exact original native namespace/input/template, successful operation-0000
+receipt and unchanged original Host identity. It snapshots the failed native summary before
+reentering the same pinned `run_task`. It never prepares another request or resets the budget.
+The recovery bridge only performs original inspect/capture and the Session callback; any
+necessary original next/enter is consumed separately by Session against the same request.
+
+Only same-candidate original approve / locally_integrated / acceptance PASS allows
+`SharedGate.reconcile_initial_pending` to settle the cached baseline. Original unknown
+journal bytes and the prior unknown row remain retained in the reconciliation audit. The
+same native baseline then returns from that cache without another owner call; subsequent
+native proposer/solver calls consume the remaining original pool. This is not a generic
+resume of arbitrary partial operations, paid calls, multiple attempts or lost mutation ACKs.
+Drift or incomplete acceptance keeps the gate closed. A failed recovery attempt is not
+authorization to rerun it; retain its intent and resolve the original owner explicitly.

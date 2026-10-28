@@ -1,0 +1,63 @@
+{
+  "owner": "soodles.loop",
+  "mode": "inner-only",
+  "outer": null,
+  "inner": {
+    "status": "pending",
+    "native_host": {
+      "schema": 1,
+      "protocol": "noodle-host-v1",
+      "host_pid": 123,
+      "host_instance_id": "fixture-host",
+      "context_id": "fixture-original",
+      "project_dir": "CONTROL_ROOT",
+      "context_state": "active",
+      "mode": "manual",
+      "config_path": "/fixture/noodle.toml",
+      "config_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "binary_path": "NOODLE_BINARY",
+      "binary_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "request_id": "fixture-request",
+      "host_dir": "/fixture/original-host",
+      "cleanup_completed": true,
+      "admission_refusal": "",
+      "status": "ok"
+    },
+    "next": {
+      "owner": "issue-execution.local-task",
+      "operation": "original_initial_admission_readback",
+      "kind": "executable",
+      "argv": [
+        "/fixture/soodles",
+        "loop",
+        "enter",
+        "--request-file",
+        "REQUEST_FILE"
+      ],
+      "tool": "soodles_loop_enter",
+      "arguments": {
+        "request_file": "REQUEST_FILE"
+      },
+      "wait_for": "original_native_state_change"
+    }
+  },
+  "status": "pending",
+  "next": {
+    "owner": "issue-execution.local-task",
+    "operation": "original_initial_admission_readback",
+    "kind": "executable",
+    "argv": [
+      "/fixture/soodles",
+      "loop",
+      "enter",
+      "--request-file",
+      "REQUEST_FILE"
+    ],
+    "tool": "soodles_loop_enter",
+    "arguments": {
+      "request_file": "REQUEST_FILE"
+    },
+    "wait_for": "original_native_state_change"
+  },
+  "authorizes_landing": false
+}

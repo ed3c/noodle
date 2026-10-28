@@ -146,6 +146,23 @@ class NativeContractTests(unittest.TestCase):
         self.assertEqual((Path(run) / "trajectory.md").read_bytes(), original)
         self.assertEqual(adapter.deliverable_files(run), {"answer.txt": "positive total"})
 
+    def test_native_same_namespace_continues_from_reconciled_baseline_cache(self):
+        from harness2.core.schedule import Namespace
+        adapter = self.adapter()
+        baseline_id = Namespace(adapter.spec.name, adapter.substrate.name, "agg", 1, None, "").run_id("records", "base1")
+        # A reconciled original baseline is already settled in the gate. The first
+        # native summary still records its earlier unavailable result.
+        adapter.execute("records", None, baseline_id)
+        with patch.object(self.gate, "execute", side_effect=UnknownEffect("earlier observation unavailable")):
+            failed = run_native_task(adapter, "records", experiment_id="same-experiment")
+        self.assertEqual(failed["native_result"]["status"], "base-failed")
+        resumed = run_native_task(adapter, "records", experiment_id="same-experiment")
+        self.assertEqual(resumed["native_result"]["status"], "ok")
+        self.assertEqual(sum(call.run_id == baseline_id for call in self.owner.calls), 1)
+        self.assertEqual(len(self.owner.calls), 7)
+        self.assertEqual(len(self.gate.state["calls"]), 7)
+        self.assertEqual(self.gate.state["initial_paid_spent_usd"], "0")
+
     def test_same_run_reuses_owner_and_different_input_refuses(self):
         adapter = self.adapter()
         result = adapter.execute("records", None, "one")

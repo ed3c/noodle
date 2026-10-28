@@ -95,7 +95,9 @@ def controls(root):
                "exit_code": result.returncode, "elapsed_seconds": time.monotonic() - started,
                "command": command, "log": str(log), "log_sha256": digest(log),
                "model_calls": 0, "vm_started": False, "formal_owner_bridge": "offline contract only; real-owner acceptance not performed",
-               "integration_sources": {p.name: digest(p) for p in sorted(HERE.glob("*.py"))}}
+               "integration_sources": {p.name: digest(p) for p in sorted(HERE.glob("*.py"))},
+               "integration_fixtures": {str(p.relative_to(HERE)): digest(p)
+                   for p in sorted((HERE / "fixtures").glob("*")) if p.is_file()}}
     destination = root / f"controls-{stamp}.json"
     save(destination, receipt)
     print(destination)

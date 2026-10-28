@@ -12,3 +12,5 @@
 
 - Native context truncates each observation, never the entire trajectory. The bridge projection is public-event JSONL: retain all events/fields and clip individual long text values, so later errors and task completion remain visible.
 - Original local-task CLI environment must explicitly retain the authorized NOODLE_HOST_DIR; a reduced environment that omits it silently targets the shared default Host. External launch preparation now rejects missing/different original Host locators before any owner call.
+
+- The first original Soodles loop enter can be a successful pending Host admission with no inner.owner. Validate its exact next.owner/operation/request binding and original Host identity; fixtures that always include a full local-task inner envelope hide this transition. Narrow recovery preserves the unknown journal and reads the same request before reconciling its original accepted baseline.

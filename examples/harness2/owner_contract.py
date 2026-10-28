@@ -216,6 +216,57 @@ class SharedGate:
                 raise UnknownEffect(self.state["blocked"]) from exc
             return updated
 
+    def reconcile_initial_pending(self, call: OwnerCall, result: OwnerResult, recovery_ref: dict) -> None:
+        """Explicit same-call settlement; retain the unknown journal and never invoke owner."""
+        from soodles_bridge import (
+            decode,
+            host_identity,
+            read_ref,
+            verify_initial_pending_recovery,
+        )
+        with self.lock:
+            key = json.dumps([call.group, call.run_id])
+            row = self.state["calls"].get(key)
+            if (len(self.state["calls"]) != 1 or row is None or row["state"] != "unknown"
+                    or row["input_sha256"] != call.fingerprint() or call.provider != "codex"
+                    or call.role != "solver" or row.get("error") != "UnknownEffect"
+                    or self.state["paid_blocked"]):
+                raise Refused("journal is not the single original initial-admission interruption")
+            proof = decode(read_ref(recovery_ref))
+            expected_host = verify_initial_pending_recovery(call, proof)
+            self._verify_result(result)
+            if proof["result_receipt"] != {"path": result.receipt_path, "sha256": result.receipt_sha256}:
+                raise Refused("recovered result receipt differs")
+            completed = decode(read_ref(proof["completed_observation"]))
+            settled = decode(read_ref(proof["result_receipt"]))
+            inner = completed.get("inner") or {}
+            progress = inner.get("review_progress") or {}
+            selection = progress.get("review") or {}
+            if (host_identity(completed) != expected_host or inner.get("owner") != "issue-execution.local-task"
+                    or progress.get("status") != "locally_integrated" or inner.get("acceptance") != "PASS"
+                    or selection.get("decision") != "approve" or selection.get("candidate") != settled["candidate"]
+                    or settled["request"] != proof["request"] or settled["call_sha256"] != call.fingerprint()
+                    or settled["original_review"] != proof["completed_observation"]):
+                raise Refused("original recovered candidate has no bound integrated acceptance")
+            original = self.journal.read_bytes()
+            digest = hashlib.sha256(original).hexdigest()
+            archive = self.journal.with_name(self.journal.name + ".unknown-" + digest + ".json")
+            with archive.open("xb") as stream:
+                stream.write(original)
+                stream.flush()
+                os.fsync(stream.fileno())
+            prior_row = json.loads(canonical(row))
+            row.update(state="settled", result=asdict(result), reconciliations=[{
+                "kind": "initial-pending-readback", "prior_row": prior_row,
+                "prior_journal": {"path": str(archive), "sha256": digest}, "recovery": recovery_ref}],
+                elapsed_s=time.time() - row["started_unix_s"])
+            self.state["blocked"] = ""
+            try:
+                self._save()
+            except OSError as exc:
+                self.state["blocked"] = "original recovery persistence is unresolved"
+                raise UnknownEffect(self.state["blocked"]) from exc
+
     def execute(self, call: OwnerCall) -> OwnerResult:
         with self.lock:
             if self.owner is None:

@@ -379,13 +379,67 @@ def snapshot_candidate(call, template, observation, directory):
     return candidate_ref, reply, str(harvested) if harvested else None
 
 
+def original_inner(observation, request):
+    require(observation.get("owner") == "soodles.loop", "original loop owner differs")
+    inner = observation.get("inner") or {}
+    if inner.get("owner") == "issue-execution.local-task":
+        return inner
+    # Original initial Host admission has no local-task inner envelope yet.
+    action = inner.get("next") or {}
+    host = inner.get("native_host") or {}
+    body = decode(read_ref(request))
+    require("owner" not in inner and observation.get("status") == inner.get("status") == "pending"
+            and action == observation.get("next")
+            and action.get("owner") == "issue-execution.local-task"
+            and action.get("operation") == "original_initial_admission_readback"
+            and action.get("arguments") == {"request_file": request["path"]}
+            and host.get("protocol") == "noodle-host-v1" and host.get("status") == "ok"
+            and all(host.get(k) for k in ("host_instance_id", "context_id", "request_id", "config_sha256", "host_dir"))
+            and host.get("project_dir") == body["repository"] and host.get("binary_path") == body["noodle"],
+            "original local-task owner or bound initial admission is missing")
+    return inner
+
+
+def host_identity(observation):
+    host = (observation.get("inner") or {}).get("native_host") or {}
+    fields = ("host_instance_id", "context_id", "request_id", "project_dir", "config_path",
+              "config_sha256", "binary_path", "binary_sha256", "host_dir")
+    require(all(host.get(key) for key in fields), "original Host admission identity is incomplete")
+    return {key: host[key] for key in fields}
+
+
+def verify_initial_pending_recovery(call, proof):
+    require(proof.get("kind") == "initial-pending-readback" and proof.get("call_sha256") == call.fingerprint(),
+            "recovery does not bind the original call")
+    binding = decode(read_ref(proof["binding"]))
+    require(binding["call_sha256"] == call.fingerprint(), "recovery call binding differs")
+    request = proof["request"]
+    original = decode(read_ref(proof["original_observation"]))
+    initial = original_inner(original, request)
+    require("owner" not in initial, "recovery is not the known initial-admission shape")
+    intent = decode(read_ref(proof["original_intent"]))
+    receipt = decode(read_ref(proof["original_receipt"]))
+    require(intent["request"] == request and receipt["exit_code"] == 0
+            and receipt["stdout"] == proof["original_observation"], "original admission has no successful bound receipt")
+    fresh = decode(read_ref(proof["fresh_observation"]))
+    original_inner(fresh, request)
+    require(host_identity(fresh) == host_identity(original), "original Host identity drifted during recovery")
+    require(decode(read_ref(proof["call"])) == asdict(call), "retained original call differs")
+    for ref in binding["inputs"]:
+        read_ref(ref)
+    return host_identity(original)
+
+
 class SoodlesOwnerBridge:
     def __init__(self, cli: PinnedCLI, root: Path, templates: list[RequestTemplate], *,
-                 review: Callable[[OwnerCall, dict, dict], None], billing=None, poll_s=1.0):
+                 review: Callable[[OwnerCall, dict, dict], None], billing=None, poll_s=1.0, reopen=False):
         self.cli, self.root, self.templates, self.review = cli, Path(root), list(templates), review
         require(poll_s > 0, "owner polling interval is invalid")
         self.poll_s, self.billing = poll_s, billing
-        self.root.mkdir(parents=True, exist_ok=False)
+        if reopen:
+            require(self.root.is_dir(), "original bridge directory is missing")
+        else:
+            self.root.mkdir(parents=True, exist_ok=False)
         require(len({t.repository for t in templates}) == len(templates), "control worktree pool contains duplicates")
 
     def execute(self, call: OwnerCall) -> OwnerResult:
@@ -400,7 +454,6 @@ class SoodlesOwnerBridge:
         self.templates.pop(0)
         result_dir = directory / "result"
         result_dir.mkdir()
-        sequence, advanced, reviewed, frozen = 0, set(), set(), None
         before = None
         if call.provider == "pi":
             require(self.billing is not None, "original paid key readback supplier is missing")
@@ -409,6 +462,47 @@ class SoodlesOwnerBridge:
                 before = self.billing.begin(call, directory / "billing-before")
             except BillingUnavailable as exc:
                 raise Refused("paid key preflight unavailable; no owner call started") from exc
+
+        return self._follow(call, template, directory, request, binding_ref, instructions_ref, result_dir, before)
+
+    def recover_initial_pending(self, call: OwnerCall, fresh_observation: dict):
+        """Read back this exact interrupted call; never prepare, enter or redispatch."""
+        require(self.templates and call.provider == "codex" and call.role == "solver",
+                "initial recovery is limited to the original subscription baseline")
+        directory = self.root / call.fingerprint()
+        binding_ref = reference(directory / "binding.json")
+        binding = decode(read_ref(binding_ref))
+        template = self.templates[0]
+        require(binding["template"] == json.loads(canonical(asdict(template))), "original template differs")
+        require(sorted(p.name for p in directory.glob("operation-*")) == ["operation-0000"],
+                "recovery has additional original operations")
+        require(not (directory / "recovery-intent.json").exists(), "original recovery already attempted; inspect retained evidence")
+        result_dir = directory / "result"
+        require(result_dir.is_dir() and not any(result_dir.iterdir()), "original result already has partial evidence")
+        proof = {"kind": "initial-pending-readback", "call_sha256": call.fingerprint(),
+            "call": reference(directory / "call.json"), "binding": binding_ref,
+            "request": reference(directory / "request.json"), "fresh_observation": fresh_observation,
+            "original_observation": reference(directory / "operation-0000/stdout.json"),
+            "original_intent": reference(directory / "operation-0000/intent.json"),
+            "original_receipt": reference(directory / "operation-0000/receipt.json")}
+        expected_host = verify_initial_pending_recovery(call, proof)
+        original_cli = decode(read_ref(proof["original_intent"]))
+        require(all(original_cli.get(key) == value for key, value in {
+            "source_commit": self.cli.source_commit, "python": self.cli.python,
+            "sources": list(self.cli.sources)}.items()), "original Soodles transport source differs")
+        self.cli.verify()
+        save(directory / "recovery-intent.json", proof)
+        self.templates.pop(0)
+        result = self._follow(call, template, directory, proof["request"], binding_ref,
+            reference(directory / "instruction-trees.json"), result_dir, None,
+            read_only=True, expected_host=expected_host)
+        proof["result_receipt"] = {"path": result.receipt_path, "sha256": result.receipt_sha256}
+        proof["completed_observation"] = decode(read_ref(proof["result_receipt"]))["original_review"]
+        return result, save(directory / "recovery-settled.json", proof)
+
+    def _follow(self, call, template, directory, request, binding_ref, instructions_ref, result_dir, before,
+                *, read_only=False, expected_host=None):
+        sequence, advanced, reviewed, frozen = 0, set(), set(), None
 
         def invoke(verb, capture=None):
             nonlocal sequence
@@ -421,17 +515,19 @@ class SoodlesOwnerBridge:
                 read_ref(ref)
             for ref in decode(read_ref(instructions_ref)):
                 require(tree_ref(ref["path"]) == ref, "original instruction tree differs")
-            value, ref = self.cli.invoke(verb, request, directory / f"operation-{sequence:04d}", capture=capture)
+            prefix = "recovery-operation" if read_only else "operation"
+            value, ref = self.cli.invoke(verb, request, directory / f"{prefix}-{sequence:04d}", capture=capture)
+            if expected_host is not None:
+                require(host_identity(value) == expected_host, "original Host identity changed during readback")
             sequence += 1
             for source in binding["inputs"]:
                 read_ref(source)
             return value, ref
 
         try:
-            observation, observation_ref = invoke("enter")
+            observation, observation_ref = invoke("inspect" if read_only else "enter")
             while True:
-                inner = observation.get("inner", {})
-                require(inner.get("owner") == "issue-execution.local-task", "original local-task owner is missing")
+                inner = original_inner(observation, request)
                 require(inner.get("status") not in {"failed", "cancelled", "unknown", "refused"},
                         "original task is unresolved")
                 candidate = inner.get("candidate")
@@ -477,7 +573,7 @@ class SoodlesOwnerBridge:
                         "host": {key: (inner.get("native_host") or {}).get(key) for key in
                             ("host_instance_id", "context_id", "request_id", "context_state")},
                         "runtime_mode": inner.get("runtime_mode")})).hexdigest()
-                    if operation in ADVANCE and checkpoint not in advanced:
+                    if not read_only and operation in ADVANCE and checkpoint not in advanced:
                         advanced.add(checkpoint)
                         observation, observation_ref = invoke("enter")
                         continue

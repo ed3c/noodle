@@ -1,11 +1,12 @@
 """Explicit entry for a bounded native experiment over an accepted frozen source."""
+import shutil
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from openrouter_billing import OpenRouterBilling, ReadOnlyOpenRouter
-from owner_contract import SharedGate, tree_ref
+from owner_contract import OwnerCall, SharedGate, tree_ref
 from soodles_bridge import (
     MODELS,
     PinnedCLI,
@@ -122,7 +123,16 @@ def prepare_editable_harness(*, destination: Path, agents: dict, skill_bases: di
     return tree_ref(destination)
 
 
+def resume_initial_pending(config: dict, review_callback, fresh_observation: dict):
+    """Recover only the same original baseline, then resume its native namespace."""
+    return _run_experiment(config, review_callback, fresh_observation=fresh_observation)
+
+
 def run_experiment(config: dict, review_callback):
+    return _run_experiment(config, review_callback)
+
+
+def _run_experiment(config: dict, review_callback, *, fresh_observation=None):
     """Run actual pinned k=1/seq; Session supplies original Soodles semantic review.
 
     Calling this function authorizes its configured owner calls. Importing/preparing
@@ -141,7 +151,10 @@ def run_experiment(config: dict, review_callback):
             'imported native core differs from the pinned source')
 
     output = Path(config['output_root'])
-    output.mkdir(parents=True, exist_ok=False)
+    if fresh_observation is None:
+        output.mkdir(parents=True, exist_ok=False)
+    else:
+        require(output.is_dir() and (output / 'owner-journal.json').is_file(), 'original experiment is missing')
     billing_config = config.get('billing')
     require(billing_config is not None, 'two-group execution has no original paid-key supplier')
     billing = None
@@ -154,7 +167,7 @@ def run_experiment(config: dict, review_callback):
     cli = PinnedCLI(**config['cli'])
     templates = [RequestTemplate(**value) for value in config['templates']]
     bridge = SoodlesOwnerBridge(cli, output / 'owner', templates, review=review_callback, billing=billing,
-                                poll_s=config['poll_s'])
+                                poll_s=config['poll_s'], reopen=fresh_observation is not None)
     gate = SharedGate(output / 'owner-journal.json', bridge,
                       initial_paid_spent_usd=config['initial_paid_spent_usd'])
     groups, adapters, started = [], [], time.monotonic()
@@ -178,13 +191,38 @@ def run_experiment(config: dict, review_callback):
             always_on_max=group['always_on_max'])
         adapters.append((route, bundle, adapter))
     cli.verify()
+    if fresh_observation is not None:
+        require(len(gate.state['calls']) == 1, 'initial recovery has other native calls')
+        row = next(iter(gate.state['calls'].values()))
+        call = OwnerCall(**row['call'])
+        route, bundle, adapter = adapters[0]
+        namespace = schedule.Namespace(adapter.spec.name, adapter.substrate.name, 'agg', 1, None, '')
+        expected = OwnerCall(route.group, namespace.run_id(bundle.task_id, 'base1'), 'solver', route.provider,
+            route.model, {'task_id': bundle.task_id, 'prompt': bundle.prompt, 'source': bundle.source,
+                'harness': tree_ref(adapter.base_harness()), 'effort': route.effort, 'timeout_s': route.timeout_s},
+            route.paid_reservation_usd)
+        require(call == expected and row['state'] == 'unknown', 'resume differs from the original native baseline')
+        archive = output / 'initial-recovery-native-before'
+        archive.mkdir()
+        native_root = output / route.group
+        require(native_root.is_dir(), 'original native namespace is missing')
+        shutil.copytree(native_root, archive / route.group)
+        original_result = output / (route.group + '-result.json')
+        require(original_result.is_file(), 'original failed native result is missing')
+        shutil.copy2(original_result, archive / original_result.name)
+        save(archive / 'source.json', {'original_native': tree_ref(native_root),
+            'saved_native': tree_ref(archive / route.group), 'original_result': reference(original_result),
+            'original_journal': reference(gate.journal), 'fresh_observation': fresh_observation})
+        result, proof = bridge.recover_initial_pending(call, fresh_observation)
+        gate.reconcile_initial_pending(call, result, proof)
     for route, bundle, adapter in adapters:
         group_started = time.monotonic()
         result = run_native_task(adapter, bundle.task_id,
                                  experiment_id=config['experiment_id'] + '/' + route.group)
         groups.append({'group': route.group, 'result': result, 'stage_a_source': bundle.provenance,
                        'optimization_elapsed_s': time.monotonic() - group_started})
-        save(output / (route.group + '-result.json'), groups[-1])
+        suffix = '-resumed-result.json' if fresh_observation is not None else '-result.json'
+        save(output / (route.group + suffix), groups[-1])
         require(not gate.state['blocked'] and not gate.state['paid_blocked'], 'original owner or paid gate is blocked')
         require(not any(row['provider'] == 'pi' and row.get('result') and row['result']['cost_usd'] is None
                         for row in gate.state['calls'].values()), 'original paid bill needs same-call reconciliation')

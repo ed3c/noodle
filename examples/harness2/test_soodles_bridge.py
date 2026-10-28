@@ -18,7 +18,9 @@ from soodles_bridge import (
     RequestTemplate,
     SoodlesOwnerBridge,
     decode,
+    original_inner,
     public_trace,
+    read_ref,
     reference,
     save,
     snapshot_candidate,
@@ -29,6 +31,9 @@ class ScriptedCLI:
     """Explicit fake Soodles responses; the real transport is tested separately."""
     def __init__(self, test):
         self.test, self.calls, self.accepted = test, [], False
+        self.source_commit = 'f' * 40
+        self.python = reference(test.noodle)
+        self.sources = [reference(test.skill)]
 
     def verify(self):
         pass
@@ -47,11 +52,13 @@ class ScriptedCLI:
             value = self.test.completion(request)
             value.pop('capture')
         else:
-            value = {'owner': 'soodles.loop', 'request': request, 'status': 'pending',
-                     'inner': {'owner': 'issue-execution.local-task', 'status': 'not_observed',
-                               'order': None, 'native_host': {'context_id': 'fixture-original'}},
-                     'next': {'operation': 'original_initial_admission_readback'}}
-        return value, save(evidence / 'stdout.json', value)
+            value = self.test.initial_pending(request)
+        value['inner']['native_host'] = self.test.initial_pending(request)['inner']['native_host']
+        ref = save(evidence / 'stdout.json', value)
+        save(evidence / 'intent.json', {'request': request, 'argv': ['fixture', 'loop', verb],
+            'source_commit': self.source_commit, 'python': self.python, 'sources': self.sources})
+        save(evidence / 'receipt.json', {'exit_code': 0, 'stdout': ref})
+        return value, ref
 
 
 class UnknownBilling:
@@ -92,6 +99,14 @@ class BridgeTests(unittest.TestCase):
                 {'prompt': 'Reconcile all records.', 'source': tree_ref(self.source), 'harness': tree_ref(self.harness), 'effort': 'low'})
         self.fixture = self.root / 'capture-fixture'
         self.fixture.mkdir()
+
+    def initial_pending(self, request):
+        data = decode(read_ref(request))
+        raw = (Path(__file__).parent / 'fixtures/initial-admission-pending.json').read_text()
+        for key, value in {'CONTROL_ROOT': data['repository'], 'NOODLE_BINARY': data['noodle'],
+                           'REQUEST_FILE': request['path']}.items():
+            raw = raw.replace(key, value)
+        return decode(raw)
 
     def request(self):
         directory = self.root / 'original-request'
@@ -254,6 +269,73 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual((Path(harvest) / 'AGENTS.md').read_text(), 'Improved original candidate instructions.')
         self.assertTrue((Path(harvest) / 'skills/main/SKILL.md').is_file())
         self.assertEqual(decode((result / 'deliverables.json').read_bytes()), {})
+
+    def test_real_initial_admission_shape_requires_original_next_and_request(self):
+        request = self.request()
+        observed = self.initial_pending(request)
+        self.assertNotIn('owner', original_inner(observed, request))
+        for field, value in [('owner', 'foreign'), ('operation', 'original_task_dispatch'),
+                             ('arguments', {'request_file': '/different'})]:
+            changed = copy.deepcopy(observed)
+            changed['next'][field] = changed['inner']['next'][field] = value
+            with self.assertRaises(Refused):
+                original_inner(changed, request)
+
+    def test_initial_pending_recovery_only_reads_same_call_and_preserves_unknown_history(self):
+        cli = ScriptedCLI(self)
+        def review(*_):
+            cli.accepted = True
+        bridge = SoodlesOwnerBridge(cli, self.root / 'bridge', [self.template], review=review)
+        gate = SharedGate(self.root / 'gate.json', bridge, initial_paid_spent_usd='0.091620363')
+        with patch('soodles_bridge.original_inner', side_effect=Refused('old initial shape rejection')):
+            with self.assertRaises(UnknownEffect):
+                gate.execute(self.call)
+        unknown_bytes = gate.journal.read_bytes()
+        directory = bridge.root / self.call.fingerprint()
+        request = reference(directory / 'request.json')
+        fresh, fresh_ref = cli.invoke('inspect', request, self.root / 'fresh-readback')
+        self.assertEqual(cli.calls[0][0], 'enter')
+        reopened = SoodlesOwnerBridge(cli, bridge.root, [self.template], review=review, reopen=True)
+        foreign = copy.deepcopy(fresh)
+        foreign['inner']['native_host']['context_id'] = 'different-context'
+        foreign_ref = save(self.root / 'foreign-readback.json', foreign)
+        with self.assertRaisesRegex(Refused, 'Host identity drifted'):
+            reopened.recover_initial_pending(self.call, foreign_ref)
+        self.assertFalse((directory / 'recovery-intent.json').exists())
+        self.assertEqual(gate.journal.read_bytes(), unknown_bytes)
+        with patch('soodles_bridge.time.sleep'):
+            result, proof = reopened.recover_initial_pending(self.call, fresh_ref)
+        self.assertEqual([verb for verb, _ in cli.calls].count('enter'), 1)
+        self.assertTrue(gate.state['blocked'])
+        proof_data = decode(read_ref(proof))
+        for name in ('acceptance', 'candidate', 'host'):
+            completed = decode(read_ref(proof_data['completed_observation']))
+            if name == 'acceptance':
+                completed['inner']['acceptance'] = 'UNKNOWN'
+            elif name == 'candidate':
+                completed['inner']['review_progress']['review']['candidate'] = {'path': '/other', 'sha256': 'c' * 64}
+            else:
+                completed['inner']['native_host']['host_instance_id'] = 'replacement-host'
+            changed = {**proof_data, 'completed_observation': save(self.root / (name + '-completion.json'), completed)}
+            changed_ref = save(self.root / (name + '-recovery.json'), changed)
+            with self.assertRaises(Refused):
+                gate.reconcile_initial_pending(self.call, result, changed_ref)
+            self.assertTrue(gate.state['blocked'])
+            self.assertEqual(gate.journal.read_bytes(), unknown_bytes)
+        gate.reconcile_initial_pending(self.call, result, proof)
+        row = next(iter(gate.state['calls'].values()))
+        audit = row['reconciliations'][0]
+        self.assertEqual(read_ref(audit['prior_journal']), unknown_bytes)
+        self.assertEqual(audit['prior_row']['state'], 'unknown')
+        self.assertEqual(gate.state['initial_paid_spent_usd'], '0.091620363')
+        self.assertFalse(gate.state['blocked'])
+        calls = len(cli.calls)
+        self.assertTrue(gate.execute(self.call).cached)
+        self.assertEqual(len(cli.calls), calls)
+        with self.assertRaises(Refused):
+            reopened.recover_initial_pending(self.call, fresh_ref)
+        with self.assertRaises(Refused):
+            gate.execute(replace(self.call, inputs={**self.call.inputs, 'prompt': 'different'}))
 
     def test_paid_route_preserves_unknown_billing_and_entire_remaining_hold(self):
         self.call = replace(self.call, group='pi', provider='pi', model=MODELS['pi'],
