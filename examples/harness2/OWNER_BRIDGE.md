@@ -1,0 +1,134 @@
+# Original Soodles owner driver
+
+`SoodlesOwnerBridge.execute(OwnerCall) -> OwnerResult` implements the existing owner protocol.
+It invokes the actual Soodles CLI and follows original owner `next` operations. It does not
+implement admission, scheduling, review, artifact application, model transport or native
+resource recovery. The driver was checked against Soodles
+`e2e7a0474e0fca055b512b139273d9b4b33ec97d`; original owner validation remains authoritative.
+
+This increment has offline protocol controls only. No model, Host or VM was started for
+its tests. Passing these controls is not real-owner acceptance or an optimization result.
+
+## Driver inputs
+
+Construct one driver and one `SharedGate` for both model groups. All native solver and
+proposer calls use that same gate. The driver constructor is:
+
+```python
+SoodlesOwnerBridge(cli, evidence_root, templates, review=session_review, poll_s=1.0)
+```
+
+- `cli` is `PinnedCLI(python, entrypoint, sources, source_commit, environment, timeout_s)`.
+  `python`, `entrypoint`, and every `sources` member are exact `{path, sha256}` FileRefs.
+  Supply the reviewed public Soodles source closure, including its imported local modules
+  and referenced policy/contract files, not merely `soodles.py`. `source_commit` records the
+  reviewed provenance; byte hashes, rechecked around calls, bind what actually executes.
+  The driver does not discover or copy private state. Supply the existing owner environment
+  explicitly (PATH/HOME/XDG paths as applicable); Python/Git injection variables and direct
+  credential variables are rejected. `timeout_s` is the operator's existing local CLI timeout,
+  not a remote model deadline. Timeout is unknown and never triggers a replacement call.
+- `evidence_root` is a new external directory. Every native call gets a directory named by
+  its full input fingerprint. It retains request, source bindings, CLI intent, stdout/stderr,
+  capture, immutable candidate projection and final receipt. A previous directory is never
+  overwritten. Restart recovery belongs to the original owner; this driver does not replay.
+- `templates` is a finite ordered list of `RequestTemplate`. Each binds `group`, `role`, an
+  unused App-created named control worktree `repository`, instruction selection,
+  Noodle binary/profile FileRefs, original `write_paths`/`acceptance`, explicit text
+  `deliverables`, and optional relative `harvest` path. Give a distinct worktree per call,
+  with the correct committed starting content. The Soodles owner checks linked-worktree
+  isolation, clean HEAD, origin, named branch, no prior owner and the binary capability.
+  The driver never creates a standard worktree, changes main, resets a repository, or
+  recycles a previously integrated task. App allocation remains the caller's responsibility.
+  For solver templates set `selected_skill=None`, `support_skills=()`, and explicit
+  `harness_skills=(selected_alias, support_alias, ...)`. The driver selects those skills
+  from each call's actual hash-bound `inputs.harness/skills/<alias>/SKILL.md`; it cannot keep
+  executing a stale baseline Skill after native optimization changes it. For proposer
+  templates supply fixed selected/support Skill FileRefs and `harness_skills=()`.
+- `review(call, observation, observation_ref)` is the Session's semantic review callback.
+  It receives the exact original Soodles candidate/readback after complete trace capture
+  and snapshot. Use original Soodles `review`/candidate APIs and original acceptance inputs;
+  do not manufacture an approval record. This callback owns the original review continuation
+  until it has submitted approval, or raises on refusal/unknown. The driver then reads the
+  original owner until that same candidate is locally integrated with acceptance PASS.
+  It does not turn a candidate into automatic approval or interpret hidden test answers.
+
+For native `k=1, seq`, normal calls alternate solver/proposer and finish with the fourth
+solver: seven templates per group. Native known-invalid repair can request an additional
+proposer; provision only the explicitly authorized finite repair slots. Pool exhaustion or
+a mismatched next role refuses before starting an owner. Do not silently substitute a root.
+
+The model bindings are exact: Codex `gpt-5.6-sol`/`low`, Pi
+`openrouter/deepseek/deepseek-v4.1-flash-1017`/`low`. Each generated request is `inner-only`,
+`runtime=openshell`, and carries the explicit profile and Noodle binary. The native prompt or system-plus-mission is retained in the original goal. A fixed derived
+solver section tells the worker to apply the evaluated AGENTS.md through the existing
+materialization mapping; it does not alter frozen task or instruction bytes. Complete source/context/harness files and the
+full `call.json` become original `source_refs`; selected/supporting skill subtrees are bound
+separately. Soodles performs its existing frozen instruction materialization. No host path
+is assumed readable by the guest. A proposer template must direct the original task to
+return the requested harness at its declared `harvest` path (usually `context/harness`),
+inside the configured write scope. The returned immutable directory becomes native
+`Reply.workspace`; no second optimizer is involved.
+
+## Advancing and observing
+
+The actual transport is exactly:
+
+```text
+PYTHON -B SOODLES/soodles.py loop enter --request-file ORIGINAL
+PYTHON -B SOODLES/soodles.py loop inspect --request-file ORIGINAL --include-result
+PYTHON -B SOODLES/soodles.py loop inspect --request-file ORIGINAL --include-result --capture-output NEW
+```
+
+`enter` is used initially and only for original `original_task_dispatch`,
+`original_checkpoint_readback`, or `original_initial_admission_readback`. An identical
+original checkpoint is not advanced again; waiting calls `inspect`. The checkpoint excludes
+receipt path and heartbeat noise. Unknown effects, unsupported recovery/retry operations,
+changed request/source identity, multiple attempts or revision selection close the shared
+gate. There is no new advance-token protocol and no automatically accepted retry/recovery.
+
+The snapshot requires a single original canonical attempt, matching candidate/trace task
+and route, successful native exit, Stop ACK and original Stopped main instance. Canonical
+and native attempt IDs remain separate. Captured bytes and candidate bytes are checked;
+symlinks, path traversal, out-of-scope outputs and changed executable modes refuse. Binary
+files and deletion state are retained. Text deliverables must be explicitly named; binary
+outputs remain in the snapshot instead of being guessed as text. Raw trace, descriptor,
+source custody, native completion and raw billing fields are copied under the result tree,
+so `SharedGate` reuse verifies those bytes too. Only capture-classified public events enter
+`trajectory.md`; private reasoning is not fed to the optimizer. The original raw capture
+is retained for audit, not printed by this driver.
+
+The Session may approve while the current candidate field temporarily disappears during
+merge. The driver retains the candidate and verifies the original review selection, waits
+for `locally_integrated`, and requires original integrated acceptance PASS. This is the
+local task's acceptance, not proof the optimized harness beats its baseline or permission
+to adopt it. Hidden paired evaluation remains a separate frozen owner.
+
+## Accounting boundary still requiring integration
+
+The existing shared paid gate retains the US$5 total. The caller supplies already-spent
+usage; it is never defaulted to zero. A local reservation can hold the entire remaining
+budget (for usage `0.084284887`, the remainder is `4.915715113`). This is accounting, not a
+claim of a per-call provider-enforced maximum. The original OpenRouter key hard cap and
+its authority must be validated externally before paid execution.
+
+The capture currently reports provider billing unobserved. The bridge therefore returns
+`cost_usd=None` and `wall_s=None` and preserves all original billing/usage events. The gate
+retains the full reservation. A verified original billing settlement/reconciliation path
+is still needed to reclaim unused paid reservation and continue multiple paid calls.
+This increment deliberately does not claim that path works or invent a price from token
+counts. Codex subscription has no paid reservation requirement; nullable per-call USD does
+not prohibit it. Unknown native effects close both routes. Driver-local elapsed time is
+recorded by the shared gate; it is not substituted for unknown native/whole-round time.
+
+## Offline controls
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3.13 -m unittest discover -s examples/harness2 -p test_soodles_bridge.py -v
+```
+
+Fixtures explicitly simulate original owner responses. Controls cover generated requests,
+fixed route/refusal, stable pending checkpoints, exact CLI argv and retained lost-response
+intent, canonical/native identity mismatch, artifact/symlink drift, binary/mode/deletion,
+private/public trace separation, original review transition and acceptance, nullable paid
+billing with a full-remainder hold, and unknown closure across routes. The complete
+`reproduce.py test` also runs the actual pinned native core controls from the first increment.

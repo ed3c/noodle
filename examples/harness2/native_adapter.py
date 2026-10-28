@@ -1,4 +1,4 @@
-"""Thin native Harness² seams. A real Soodles owner bridge is deliberately not supplied."""
+"""Thin native Harness² seams; owner selection remains explicit at the driver boundary."""
 import json
 import re
 from dataclasses import dataclass

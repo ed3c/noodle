@@ -1,8 +1,9 @@
 # Harness² native owner contract
 
 This example executes the real pinned Harness² `core.schedule.run_task` through explicit
-owner-delegation seams. It does **not** implement the production Soodles bridge, run a model,
-start a service/VM, certify improvement, or authorize adopting a candidate.
+owner-delegation seams. `soodles_bridge.py` supplies an explicit Soodles CLI driver with
+original-request and completion verification. Offline controls do not run models, start
+services/VMs, certify improvement, or authorize adopting an optimized candidate.
 
 The first increment supports the existing `AGENTS.md` and `skills/<name>/SKILL.md` paths in
 a frozen baseline. New/deleted files, scripts, plugins, hooks, subagents and execution/model
@@ -41,8 +42,8 @@ upstream `_st` otherwise rejects every name except `codex` and `opencode`.
 
 ## Boundary for the production bridge
 
-`OwnerBridge.execute(call: OwnerCall) -> OwnerResult` is an explicit protocol, with **no
-production default implementation**. `run_native_task` refuses a missing owner before core
+`OwnerBridge.execute(call: OwnerCall) -> OwnerResult` is an explicit protocol. A caller must
+explicitly configure the Soodles bridge described in [OWNER_BRIDGE.md](OWNER_BRIDGE.md). `run_native_task` refuses a missing owner before core
 execution. The test-only `FakeOwner` is a deterministic artifact fixture, not a substitute
 optimizer and not proof of a real model invocation.
 
@@ -52,7 +53,7 @@ native attempt bindings, published candidate/artifact evidence, and same-origina
 proof. These identities are mapped, never assumed equal. It must preserve the original owner
 receipt and produce a dedicated, immutable result projection directory containing:
 
-- `trajectory.md`: captured native events rendered as `[ACTION]/[OBSERVATION]/[ERROR]`;
+- `trajectory.md`: original capture-classified public native events;
 - `deliverables.json`: explicit agent-authored filename-to-text values, excluding acceptance
   criteria, hidden answers, private values and owner metadata;
 - a returned harness directory for proposer `harvest="context/harness"`;
@@ -102,11 +103,12 @@ that is not evidence of improvement.
 
 Only Pi/OpenRouter calls use the paid reservation gate. The model is fixed to
 `openrouter/deepseek/deepseek-v4.1-flash-1017`; the shared limit remains US$5, with explicit
-already-spent cost supplied by the authorized owner. Each paid reservation must come from
-that owner’s enforceable bound, not an adapter estimate. Unknown billed cost keeps the full
+already-spent cost supplied by the authorized owner. The paid reservation is a local accounting hold, not proof of a per-call provider limit.
+It may conservatively hold the whole remaining authorized budget; it is not a new user cap. Unknown billed cost keeps the full
 reservation. A cost above its reservation blocks further paid calls and is recorded; this
 contract cannot retroactively enforce a provider cap or prove a caller-supplied bound.
-Production integration must validate that authority before any paid start.
+Production integration must validate the original provider hard limit and billing authority
+before paid execution. Unknown billing cannot release an accounting hold.
 
 Codex subscription calls do not need a paid reservation. Their per-call USD may remain
 `None`/JSON `null`; no per-call bill does not block an already authorized subscription route
@@ -129,8 +131,9 @@ input refusal, concurrent same-ID calls, lost-response closure across subsequent
 fallbacks and both routes, restart with pending effects, completion-output drift, intent I/O
 failure, subscription null USD, paid budget/reservation behavior, off-surface native repair
 and fallback, missing owner/default transport refusal, symlinks, and source archive drift.
-All model behavior is explicitly simulated. Formal Soodles bridge, fixed hidden evaluation,
-real native execution, efficiency claims and adoption are intentionally unfinished.
+All model behavior is explicitly simulated. The Soodles driver has additional offline
+request/transport/capture/review controls. Its real-owner acceptance, provider billing
+settlement, fixed hidden evaluation, efficiency claims and adoption remain unfinished.
 
 The first control attempt exposed the missing native prompt surface (retained failure, no
 model effects); the correction added the explicit surface above. A later negative fixture

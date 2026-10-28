@@ -54,7 +54,7 @@ class OwnerCall:
     provider: str
     model: str
     inputs: dict
-    # A bound supplied by the authorized paid owner, never an invented cost estimate.
+    # An authorized accounting hold, possibly the full remainder; not a provider cap.
     paid_reservation_usd: str | None = None
 
     def fingerprint(self):

@@ -1,0 +1,10 @@
+# Harness² original owner bridge
+
+- `examples/harness2` pins the actual upstream core. Solver and proposer share one `SharedGate`; native fallback after an unknown owner effect cannot dispatch another route. A completed fallback is not proof of improvement.
+- `SoodlesOwnerBridge` uses original `loop enter` / `loop inspect`, request FileRefs and capture. Same original pending checkpoint only reads back. Lost responses retain intent and close the gate; no automatic retry, recovery, replacement Host or VM.
+- Soodles local tasks require a fresh linked, named, clean control worktree with no previous `.noodle` owner. Supply a finite pool of App-created roots. Do not substitute `git init` or reuse the prior integrated control root.
+- Solver Skill selection must come from each evaluated harness, including changed selected/support `SKILL.md` bytes. A fixed baseline FileRef would silently defeat optimization. Fixed improver instructions remain separate from editable candidate instructions.
+- Snapshot original candidate bytes and capture before semantic review can merge/remove the worktree. During approval, `inner.candidate` may disappear; the original `review_progress.review.candidate` retains identity. Only matching approve / locally_integrated / acceptance PASS settles the local task.
+- Original canonical attempt and native attempt IDs are separate. Raw capture, completion and billing evidence belong in the immutable output tree so cached native results detect evidence drift.
+- A local paid reservation is an accounting hold, not a per-call provider cap. It can conservatively retain the whole remaining authorized budget; unknown billing cannot release it. Codex subscription USD may remain null without blocking an authorized subscription call.
+- Offline bridge fixtures prove protocol behavior, not real Soodles/VM/model acceptance. Billing reconciliation, whole-round measurement and paired hidden evaluation require their original authorities; native zero defaults cannot substitute for unknown evidence.
