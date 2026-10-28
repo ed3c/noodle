@@ -513,15 +513,20 @@ def verify_call_reconciliation(call, proof):
     require(binding["call_sha256"] == call.fingerprint(), "recovery call binding differs")
     request = proof["request"]
     original = decode(read_ref(proof["original_observation"]))
+    intent = decode(read_ref(proof["original_intent"]))
+    receipt = decode(read_ref(proof["original_receipt"]))
+    require(intent["request"] == request and receipt["stdout"] == proof["original_observation"],
+            "original admission transport does not bind its observation")
+    if proof.get('admission_continuation') is not None:
+        from admission_continuation import verify_admission_continuation
+        original = verify_admission_continuation(call, proof, original, intent, receipt)
+    else:
+        require(receipt["exit_code"] == 0, "original admission has no successful bound receipt")
     initial = original_inner(original, request)
     if proof.get("retained_result") is None:
         require("owner" not in initial, "uncaptured recovery is not the known initial-admission shape")
     else:
         require(tree_ref(proof["retained_result"]["path"]) == proof["retained_result"], "retained result changed during reconciliation")
-    intent = decode(read_ref(proof["original_intent"]))
-    receipt = decode(read_ref(proof["original_receipt"]))
-    require(intent["request"] == request and receipt["exit_code"] == 0
-            and receipt["stdout"] == proof["original_observation"], "original admission has no successful bound receipt")
     fresh = decode(read_ref(proof["fresh_observation"]))
     original_inner(fresh, request)
     require(host_identity(fresh) == host_identity(original), "original Host identity drifted during recovery")
@@ -601,7 +606,7 @@ class SoodlesOwnerBridge:
 
         return self._follow(call, template, directory, request, binding_ref, instructions_ref, result_dir, before)
 
-    def reconcile_call(self, call: OwnerCall, fresh_observation: dict):
+    def reconcile_call(self, call: OwnerCall, fresh_observation: dict, *, admission_continuation=None):
         """Read only the same original call; never prepare, enter or redispatch."""
         require(self.templates, "original call template is missing")
         directory = self.root / call.fingerprint()
@@ -625,6 +630,8 @@ class SoodlesOwnerBridge:
             "original_observation": reference(directory / "operation-0000/stdout.json"),
             "original_intent": reference(directory / "operation-0000/intent.json"),
             "original_receipt": reference(directory / "operation-0000/receipt.json")}
+        if admission_continuation is not None:
+            proof["admission_continuation"] = admission_continuation
         expected_host = verify_call_reconciliation(call, proof)
         original_cli = decode(read_ref(proof["original_intent"]))
         require(all(original_cli.get(key) == value for key, value in {

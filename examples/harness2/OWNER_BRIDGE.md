@@ -235,3 +235,47 @@ model, effort, timeout, task input, output scope and acceptance. A new/deleted/c
 asset refuses. New heldout inputs contain the case input and accepted A/geometry;
 no evaluator rubric or oracle is a worker source. Use a new frozen CLI/config for
 this seam; do not rewrite original training requests, bindings or journals.
+
+### Explicit continuation of an original capacity refusal
+
+`resume_experiment(..., admission_continuation=FileRef)` is an optional, narrow
+readback proof. It does not retry an attach, enter Soodles, dispatch a model, or
+repair another refusal. The original operation must have exit code 2 and exactly
+`task.host.attach: host context limit reached (16)`, `effects=[]`, and no inner
+execution owner. Its original intent, response and receipt remain unchanged.
+
+An operator may separately complete the original native busy attach and original
+Soodles initial admission. Supply a new immutable JSON proof with:
+
+- `schema: 1`, `kind: "original-capacity-admission-continuation"`, the exact
+  `call_sha256`, original task `request` FileRef and `original_observation` FileRef.
+- `native_request_path` equal to the original task output's
+  `admission/host-request.json`; `request_before` and `request_after` FileRefs.
+  Their entire objects must match except `status: busy` becoming `accepted`.
+  Request ID, config, binary, environment digest, Host directory, manual mode
+  and cleanup setting cannot change. The current original native request must
+  still equal the accepted snapshot; the original call template's binary and
+  profile FileRefs must also remain unchanged.
+- `resources_before_intent`, `resources_before_receipt`,
+  `resources_before_stdout`, `resources_before_stderr` FileRefs for the original
+  `noodle host resources` observation. Its instance/PID must match the later
+  native response; available context capacity must be below 16.
+- `native_attach_intent`, `native_attach_receipt`, `native_attach_stdout`,
+  `native_attach_stderr` FileRefs. The intent binds the exact original binary,
+  project, request, manual mode, config and cleanup argv. The native receipt
+  records `exit_code`, `stdout_sha256` and `stderr_sha256`; all raw bytes remain
+  referenced. Successful native identity must preserve the original request.
+- `admission_intent`, `admission_receipt`, `admission_observation` FileRefs for
+  successful original Soodles initial admission. The intent must equal the
+  original failed Soodles intent, including source closure, Python and argv.
+  The receipt binds exit 0 and its stdout/stderr FileRefs. The observation must
+  be the existing pre-dispatch pending shape, with the same exact native Host
+  and context. A different successful task cannot substitute for it.
+
+The later `fresh_observation` still has to bind that same original owner. The
+reconciler follows only inspect/capture/readback and the existing Session review;
+any required first dispatch remains a separate explicit original-owner action.
+Unchanged original call inputs and result/accounting checks still apply. The
+failed journal is archived through the existing reconciliation mechanism only
+once the original result actually settles. An optional proof does not make a
+pending task completed or authorize another attempt.
