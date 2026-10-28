@@ -38,6 +38,7 @@ func (c *OpenShellCustody) Create(ctx context.Context, task OpenShellTask, spec 
 			continue
 		}
 		pendingExec := r.Exec != nil && !r.Exec.Result.ExitObserved
+		pendingExec = pendingExec || (r.ProgressStop != nil && !r.ProgressStop.Result.ExitObserved)
 		if !r.CreateAcknowledged || r.Stopped == nil || r.Worker.StopPending || (r.StopRequestID != "" && !r.StopAcknowledged) || pendingExec {
 			return r.Name, fmt.Errorf("openshell order %s previous attempt %s not settled; explicit new attempt rejected", task.OrderID, r.Task.AttemptID)
 		}
@@ -203,8 +204,9 @@ func (c *OpenShellCustody) RecoverWorker(ctx context.Context, ref OpenShellSandb
 // Closing a stream without Wait leaves the saved exec unresolved, safely.
 type OpenShellOwnedExec struct {
 	*OpenShellExec
-	owner *OpenShellCustody
-	name  string
+	owner        *OpenShellCustody
+	name         string
+	progressStop bool
 }
 
 func (e *OpenShellOwnedExec) Wait() (OpenShellExecResult, error) {
@@ -218,8 +220,17 @@ func (e *OpenShellOwnedExec) Wait() (OpenShellExecResult, error) {
 	for i := range c.state.Records {
 		r := &c.state.Records[i]
 		if r.Name == e.name {
-			r.Exec.Result = result
-			r.Worker.ExecResult = result
+			saved := r.Exec
+			if e.progressStop {
+				saved = r.ProgressStop
+			}
+			if saved == nil || saved.Command.RequestID != result.RequestID {
+				return result, errors.Join(err, fmt.Errorf("owned exec purpose or request binding differs"))
+			}
+			saved.Result = result
+			if !e.progressStop {
+				r.Worker.ExecResult = result
+			}
 			return result, errors.Join(err, c.save())
 		}
 	}
@@ -229,12 +240,16 @@ func (e *OpenShellOwnedExec) Wait() (OpenShellExecResult, error) {
 // StartOwned persists the UUID/attempt/command before calling the existing
 // non-TTY transport. Every saved attempt is one-shot, including failed starts.
 func (c *OpenShellCustody) StartOwned(ctx context.Context, ref OpenShellSandboxRef, attempt string, command OpenShellCommand) (*OpenShellOwnedExec, error) {
-	if err := command.validate(); err != nil {
-		return nil, err
-	}
-	if attempt == "" {
-		return nil, fmt.Errorf("openshell exec attempt missing")
-	}
+	return c.startOwned(ctx, ref, attempt, command, false)
+}
+
+// StartProgressStop records a separate, one-shot native exec for the original
+// supervisor's stop-and-export protocol. It cannot replace the model's receipt.
+func (c *OpenShellCustody) StartProgressStop(ctx context.Context, ref OpenShellSandboxRef, requestID string) (*OpenShellOwnedExec, error) {
+	return c.startOwned(ctx, ref, "", OpenShellCommand{RequestID: requestID}, true)
+}
+
+func (c *OpenShellCustody) startOwned(ctx context.Context, ref OpenShellSandboxRef, attempt string, command OpenShellCommand, progressStop bool) (*OpenShellOwnedExec, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := c.mutable(); err != nil {
@@ -244,7 +259,25 @@ func (c *OpenShellCustody) StartOwned(ctx context.Context, ref OpenShellSandboxR
 	if err != nil {
 		return nil, err
 	}
-	if r.Exec != nil || r.StopRequestID != "" {
+	if progressStop {
+		if r.Exec == nil || r.ProgressStop != nil {
+			return nil, fmt.Errorf("original model exec missing or progress stop already reserved")
+		}
+		command, err = progressStopCommand(r.Exec.Command, command.RequestID)
+		if err != nil {
+			return nil, err
+		}
+		attempt = r.Exec.AttemptID + "/progress-stop"
+	} else if r.Exec != nil {
+		return nil, fmt.Errorf("openshell exec attempt already reserved; replay prohibited")
+	}
+	if err := command.validate(); err != nil {
+		return nil, err
+	}
+	if attempt == "" {
+		return nil, fmt.Errorf("openshell exec attempt missing")
+	}
+	if r.StopRequestID != "" {
 		return nil, fmt.Errorf("openshell exec attempt already reserved or stop submitted; replay prohibited")
 	}
 	for _, old := range c.state.Records {
@@ -253,6 +286,9 @@ func (c *OpenShellCustody) StartOwned(ctx context.Context, ref OpenShellSandboxR
 		}
 		if old.Exec != nil && (old.Exec.AttemptID == attempt || strings.EqualFold(old.Exec.Command.RequestID, command.RequestID)) {
 			return nil, fmt.Errorf("openshell exec UUID/attempt already reserved")
+		}
+		if old.ProgressStop != nil && (old.ProgressStop.AttemptID == attempt || strings.EqualFold(old.ProgressStop.Command.RequestID, command.RequestID)) {
+			return nil, fmt.Errorf("openshell progress-stop UUID/attempt already reserved")
 		}
 	}
 	if err := c.audit(ctx); err != nil {
@@ -269,8 +305,13 @@ func (c *OpenShellCustody) StartOwned(ctx context.Context, ref OpenShellSandboxR
 	saved := command
 	saved.Argv = slices.Clone(command.Argv)
 	saved.Env = maps.Clone(command.Env)
-	r.Exec = &OpenShellCustodyExec{AttemptID: attempt, Command: saved, Result: OpenShellExecResult{RequestID: command.RequestID, StartAttempted: true, Reason: "exec acknowledgement unresolved; replay prohibited"}}
-	r.Worker.ExecResult = r.Exec.Result
+	record := &OpenShellCustodyExec{AttemptID: attempt, Command: saved, Result: OpenShellExecResult{RequestID: command.RequestID, StartAttempted: true, Reason: "exec acknowledgement unresolved; replay prohibited"}}
+	if progressStop {
+		r.ProgressStop = record
+	} else {
+		r.Exec = record
+		r.Worker.ExecResult = record.Result
+	}
 	if err := c.save(); err != nil {
 		return nil, err
 	}
@@ -280,5 +321,5 @@ func (c *OpenShellCustody) StartOwned(ctx context.Context, ref OpenShellSandboxR
 	if handle == nil {
 		return nil, errors.Join(err, c.block(fmt.Sprintf("owned exec preflight/stream unresolved: %v", err)))
 	}
-	return &OpenShellOwnedExec{OpenShellExec: handle, owner: c, name: r.Name}, err
+	return &OpenShellOwnedExec{OpenShellExec: handle, owner: c, name: r.Name, progressStop: progressStop}, err
 }

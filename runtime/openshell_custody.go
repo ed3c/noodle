@@ -69,6 +69,7 @@ type OpenShellCustodyRecord struct {
 	MainProcessInstanceID string // gateway-owned nonempty generation; preserved across driver snapshots
 	Worker                OpenShellWorkerRecord
 	Exec                  *OpenShellCustodyExec
+	ProgressStop          *OpenShellCustodyExec
 	StopRequestID         string
 	StopAcknowledged      bool
 	Stopped               *OpenShellStoppedObservation
@@ -403,6 +404,12 @@ func (c *OpenShellCustody) Snapshot() OpenShellCustodyState {
 			saved.Command.Argv = slices.Clone(saved.Command.Argv)
 			saved.Command.Env = maps.Clone(saved.Command.Env)
 			r.Exec = &saved
+		}
+		if r.ProgressStop != nil {
+			saved := *r.ProgressStop
+			saved.Command.Argv = slices.Clone(saved.Command.Argv)
+			saved.Command.Env = maps.Clone(saved.Command.Env)
+			r.ProgressStop = &saved
 		}
 	}
 	return state

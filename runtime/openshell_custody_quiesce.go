@@ -37,7 +37,7 @@ func (c *OpenShellCustody) Quiesce(ctx context.Context) error {
 		if s.GetStatus().GetPhase() != pb.SandboxPhase_SANDBOX_PHASE_STOPPED {
 			unsettled = errors.Join(unsettled, fmt.Errorf("sandbox %s native phase %s; gateway release refused", r.Name, s.GetStatus().GetPhase()))
 		}
-		if (!r.Retained && !r.CreateAcknowledged) || r.Worker.StopPending || (r.StopRequestID != "" && !r.StopAcknowledged) || (r.Exec != nil && !r.Exec.Result.ExitObserved) {
+		if (!r.Retained && !r.CreateAcknowledged) || r.Worker.StopPending || (r.StopRequestID != "" && !r.StopAcknowledged) || (r.Exec != nil && !r.Exec.Result.ExitObserved) || (r.ProgressStop != nil && !r.ProgressStop.Result.ExitObserved) {
 			unsettled = errors.Join(unsettled, fmt.Errorf("sandbox %s operation acknowledgement unresolved; gateway release refused", r.Name))
 		}
 	}

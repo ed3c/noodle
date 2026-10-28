@@ -137,6 +137,9 @@ func validateCompletedRecord(record OpenShellCustodyRecord, expected OpenShellId
 	if record.Exec == nil || record.Exec.AttemptID == "" || record.Exec.Command.RequestID == "" {
 		return fmt.Errorf("openshell completion original exec evidence is unavailable")
 	}
+	if record.ProgressStop != nil {
+		return fmt.Errorf("openshell completion has a progress-stop operation; interruption readback required")
+	}
 	exec := record.Exec.Result
 	if !exec.StartAttempted || !exec.ExitObserved || exec.ExitCode != 0 || exec.RequestID != record.Exec.Command.RequestID || exec.InputError != "" || exec.StreamError != "" {
 		return fmt.Errorf("openshell completion native exec result is unresolved or unsuccessful")
