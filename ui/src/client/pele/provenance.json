@@ -1,0 +1,55 @@
+{
+  "repository": "https://github.com/obsidianmd/pele",
+  "commit": "4eff76f98c73b6817800a05773517f35832e4e92",
+  "version": "1.10.0",
+  "registry_integrity": "sha512-hDMEM+GQ01pZin8tst3PRXGeB/xFATvXBreHHtjx2glSNAQ7nHFq7EbMuNJGTbqkYgueWPboLjyUBsAudsb1qQ==",
+  "attestation_url": "https://registry.npmjs.org/-/npm/v1/attestations/pele@1.10.0",
+  "verification_scope": "Registry-provided provenance source and subject digest compared to lockfile integrity; no independent signature verification performed.",
+  "statement": {
+    "_type": "https://in-toto.io/Statement/v1",
+    "subject": [
+      {
+        "name": "pkg:npm/pele@1.10.0",
+        "digest": {
+          "sha512": "84330433e190d35a598a7f2db2ddcf45719e07fc45013bd706b7871ed8f1da095234043b9c716aec46ccb8d2464dbaa4620b9e58f6e82e3c9406c02e76c6f5a9"
+        }
+      }
+    ],
+    "predicateType": "https://slsa.dev/provenance/v1",
+    "predicate": {
+      "buildDefinition": {
+        "buildType": "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
+        "externalParameters": {
+          "workflow": {
+            "ref": "refs/tags/1.10.0",
+            "repository": "https://github.com/obsidianmd/pele",
+            "path": ".github/workflows/release.yml"
+          }
+        },
+        "internalParameters": {
+          "github": {
+            "event_name": "push",
+            "repository_id": "1406482535",
+            "repository_owner_id": "65011256"
+          }
+        },
+        "resolvedDependencies": [
+          {
+            "uri": "git+https://github.com/obsidianmd/pele@refs/tags/1.10.0",
+            "digest": {
+              "gitCommit": "4eff76f98c73b6817800a05773517f35832e4e92"
+            }
+          }
+        ]
+      },
+      "runDetails": {
+        "builder": {
+          "id": "https://github.com/actions/runner/github-hosted"
+        },
+        "metadata": {
+          "invocationId": "https://github.com/obsidianmd/pele/actions/runs/40122620199/attempts/1"
+        }
+      }
+    }
+  }
+}

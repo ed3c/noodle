@@ -6,6 +6,7 @@ import type { LoopGraph } from "~/client/loop-graph";
 import type { GraphSelection } from "./LoopGraphCanvas";
 import { findingSymbol } from "~/client/loop-graph-presentation";
 import { LoopGraphComparison } from "./LoopGraphComparison";
+import { LoopArtifactPreview } from "./LoopArtifactPreview";
 
 function FileContent({
   selection,
@@ -101,11 +102,13 @@ function StructuredField({ graph, node }: { graph: LoopGraph; node: LoopGraph["n
 
 export function LoopGraphDetail({
   graph,
+  version,
   selection,
   onSelect,
   onClose,
 }: {
   graph: LoopGraph;
+  version: string | null;
   selection: GraphSelection;
   onSelect: (value: GraphSelection) => void;
   onClose: () => void;
@@ -192,6 +195,17 @@ export function LoopGraphDetail({
           <pre>{JSON.stringify(detail, null, 2)}</pre>
         </details>
       )}
+      {version &&
+        selection.kind === "artifact" &&
+        graph.artifacts
+          .filter((a) => a.id === selection.id && a.format === "text/html")
+          .map((artifact) => (
+            <LoopArtifactPreview
+              key={`${artifact.id}:${artifact.source?.sha256}:${version}`}
+              artifact={artifact}
+              version={version}
+            />
+          ))}
       {selection.kind === "node" &&
         graph.nodes
           .filter((n) => n.id === selection.id)

@@ -46,6 +46,7 @@ func graphView(w http.ResponseWriter, dir string) (loopview.View, bool) {
 	return view, true
 }
 func registerLoopGraph(mux *http.ServeMux, dir string) {
+	registerLoopPreview(mux, dir)
 	mux.HandleFunc("GET /api/loops/graph", func(w http.ResponseWriter, r *http.Request) {
 		view, ok := graphView(w, dir)
 		if !ok {

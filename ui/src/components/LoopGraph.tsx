@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchLoopGraph, fetchArtifact, submitReviewSelection } from "~/client/loop-graph";
 import type { GraphResponse, GraphView, LoopGraph } from "~/client/loop-graph";
@@ -13,6 +13,10 @@ import "./loop-graph.css";
 import { LoopPanorama } from "./LoopPanorama";
 import { projectPanorama } from "~/client/loop-panorama.mjs";
 import type { WorkspaceScope, PanoramaFocus } from "~/client/loop-panorama.mjs";
+
+const LoopPeleGraph = lazy(() =>
+  import("./LoopPeleGraph").then((module) => ({ default: module.LoopPeleGraph })),
+);
 
 function selectionHighlight(graph: LoopGraph, selection: GraphSelection | null): GraphHighlight {
   if (!selection) {
@@ -291,6 +295,7 @@ function FullProjectionTab({
 }
 
 export function LoopGraphContent({ view }: { view: GraphView }) {
+  const [showPele, setShowPele] = useState(false);
   const [workspace, setWorkspace] = useState<WorkspaceScope>({ goal: "", runIds: null });
   const [focus, setFocus] = useState<PanoramaFocus | null>(null);
   const [pinned, setPinned] = useState<GraphView | null>(null),
@@ -669,6 +674,14 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
               onHighlight={setHover}
               onSelect={choose}
             />
+            <details onToggle={(event) => setShowPele(event.currentTarget.open)}>
+              <summary>Pele 關係圖（選定任務）</summary>
+              {showPele && (
+                <Suspense fallback={<p>載入關係圖…</p>}>
+                  <LoopPeleGraph graph={graph} runID={run} />
+                </Suspense>
+              )}
+            </details>
             <section aria-label="已觀察斷點">
               <h2>斷點與缺口</h2>
               <p className="lg-small">
@@ -694,6 +707,7 @@ export function LoopGraphContent({ view }: { view: GraphView }) {
         <LoopGraphDetail
           key={`${selection.kind}:${selection.id}`}
           graph={graph}
+          version={current.review_version}
           selection={selection}
           onSelect={choose}
           onClose={() => {
