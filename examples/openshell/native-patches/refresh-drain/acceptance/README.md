@@ -1,7 +1,8 @@
 # Real gateway SIGTERM acceptance
 
 This command starts the **already built, patched OpenShell gateway executable**.
-The issuer and compute/credential drivers are synthetic protocol peers. There is
+The issuer and external compute/credential drivers are synthetic protocol peers.
+One scenario instead uses the native built-in database credential store. There is
 no substitute gateway, VM, model, real grant, or connection to an existing Host.
 
 This Unix-only fixture requires SIGTERM, process groups, and Unix sockets. Run
@@ -38,13 +39,22 @@ configure refresh, then request rotation.
    this write before persistence/acknowledgement. SIGTERM must not exit until the
    gate is released and persistence finishes.
 
-In both cases, manual rotation and configuration of the real fixture provider
+3. **Built-in database, issuer pending, group TERM:** omit external credential
+   driver configuration and use native `gateway.credential_storage` with an
+   explicit private encryption-key path. No credential-driver fixture server is
+   started. Verify the retained child is its original process-group leader, then
+   send SIGTERM to the negative original PGID. After persistence and child Wait,
+   require the original group to be absent. Restart the same isolated database
+   and encryption-key path without reading or changing either, and rotate again.
+   The second process also exits via original-group TERM.
+
+In all three cases, manual rotation and configuration of the real fixture provider
 must return `Unavailable: gateway refresh admission closed`. The process remains
 alive for a measured interval with the gate held. After release, refresh must
 acknowledge success and the process must exit successfully.
 
-The credential driver syncs its isolated file and directory before acknowledging
-storage. After gateway exit, the fixture reloads that file, restarts the same
+In the first two scenarios, the credential driver syncs its isolated file and
+directory before acknowledging storage. After gateway exit, the fixture reloads that file, restarts the same
 gateway with the same isolated database, checks committed refresh status, and
 rotates again. The issuer privately checks that this new request uses the
 persisted replacement token, rather than the old token. It accepts exactly two
@@ -58,10 +68,11 @@ admitted refresh. No refresh is retried after an unknown result.
 ## Evidence and limitations
 
 The printed evidence directory is retained on success and failure. It contains
-`evidence.json` (source pin, binary/build-receipt hashes, PIDs and observed exit
-codes), per-scenario gateway logs, fixture configuration, generated PKI,
+`evidence.json` (source pin, binary/build-receipt hashes, backend, signal scope,
+PIDs/PGIDs, observed exit codes and verified absent groups), per-scenario gateway
+logs, fixture configuration, generated PKI,
 synthetic credential storage, and the gateway databases. `passed=true` is written
-only after both complete scenarios. Neither logs nor the summary print token
+only after all three complete scenarios. Neither logs nor the summary print token
 values. All tokens on disk are hard-coded fake test values; no real auth source
 is read. Errors retain evidence, and cleanup kills only the fixture process that
 this command started.
@@ -69,9 +80,11 @@ this command started.
 The driver services run in the verifier process, outside the gateway process
 group. This proves the gateway drain ordering while a driver remains available;
 it does **not** prove that an independently launched credential-driver child will
-survive a process-group SIGTERM. The production profile's built-in db-credstore
-has a different process topology. Do not generalize this result to external
-drivers that receive the same group signal.
+survive a process-group SIGTERM. The third scenario separately verifies built-in
+db-credstore with group TERM.
+The fake compute peer remains outside that group and performs no VM operations.
+Do not generalize this result to external drivers that receive the same group
+signal, or to an active VM shutdown.
 
 The held interval is a bounded observation, not a proof of an unbounded wait.
 The later disk reload, second process, and issuer check establish the persistence
@@ -95,5 +108,6 @@ protoc --proto_path=/absolute/path/to/verified/OpenShell/proto --include_imports
   credential_driver.proto compute_driver.proto
 ```
 
-The focused unit tests verify the fixture's pre-persistence gate and environment
-isolation. They are not a substitute for running the real gateway acceptance.
+The focused unit tests verify the fixture's pre-persistence gate, environment
+isolation, and refusal to signal a child whose recorded group identity changed.
+They are not a substitute for running the real gateway acceptance.

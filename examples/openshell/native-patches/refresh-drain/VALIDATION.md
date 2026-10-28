@@ -35,6 +35,28 @@ observations. The fake issuer and credential/compute drivers use the pinned
 native protocols. They are separate fixture services, not gateway process-group
 children. No live gateway, real grant, model request or VM was used.
 
+## Built-in database and process-group extension
+
+The subsequent real-process run on 2026-10-28 passed all three scenarios,
+including `builtin-db-issuer-pending-group-term`, without rebuilding or changing
+the gateway binary. The new scenario used the native database credential store
+and a private encryption-key path, with no external credential-driver server.
+Its original groups 60784 and 60798 received group SIGTERM; both children exited
+zero and both original groups were absent afterward. Admission was closed while
+the first issuer response remained gated for 1002 ms. After release, the admitted
+refresh completed; a second process opening the same database/key used the
+persisted replacement in a new rotation. No compute mutation was attempted.
+
+All six gateway child exits in this run were observed with code zero. Evidence
+SHA256: `5d6c6f33e8ec7342880d3eec1f3b1e0db01913e5e6ae6377b15fa32f83f32520`.
+The retained fixture directory is
+`/tmp/ndr-1662591414`; a durable copy is under
+`work/native-refresh-drain-v015/builtin-group-acceptance-20261028/` in the task's
+evidence workspace. Its `validation-receipt.json` also binds the fixture source
+hashes and records the separately passing focused Go race tests. Those source
+tests exercise fixture behavior; the native process evidence establishes the
+actual gateway behavior. No Rust unit test execution is implied.
+
 ## Limits and preserved failures
 
 The Rust library unit tests were **not executed**. Their initial executable build
@@ -55,4 +77,6 @@ The existing unpatched live gateway was not stopped or migrated. It has no nativ
 refresh admission-close/drain API that can establish a race-free transition from
 an observed idle status to TERM. A successful patched build and isolated test do
 not authorize treating that old running process as patched or adopting its
-ownership. Live migration remains a separate original-owner operation.
+ownership. Live migration remains a separate original-owner operation. See
+[the rollout boundary report](ROLLOUT.md) for the native API evidence and
+reviewable deployment conditions.

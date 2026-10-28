@@ -59,6 +59,10 @@ type evidence struct {
 }
 type scenarioEvidence struct {
 	Name                   string        `json:"name"`
+	CredentialBackend      string        `json:"credential_backend"`
+	SignalScope            string        `json:"signal_scope"`
+	GatewayPGIDs           []int         `json:"gateway_pgids"`
+	ExitedGroups           []int         `json:"exited_groups"`
 	Events                 []string      `json:"events"`
 	GatewayPIDs            []int         `json:"gateway_pids"`
 	GatewayExits           []processExit `json:"gateway_exits"`
@@ -191,7 +195,7 @@ func run(binary, buildPath, dir string, e *evidence) error {
 	if !strings.Contains(e.GatewayVersion, "0.1.5+noodle.refresh-drain.1") {
 		return fmt.Errorf("gateway version is not the reviewed refresh-drain build: %s", e.GatewayVersion)
 	}
-	for _, name := range []string{"issuer-pending", "replacement-store-pending"} {
+	for _, name := range []string{"issuer-pending", "replacement-store-pending", "builtin-db-issuer-pending-group-term"} {
 		e.Scenarios = append(e.Scenarios, scenarioEvidence{Name: name})
 		if err := scenario(binary, filepath.Join(dir, name), &e.Scenarios[len(e.Scenarios)-1]); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
@@ -260,6 +264,7 @@ type gatewayProcess struct {
 	cmd  *exec.Cmd
 	done chan struct{}
 	err  error
+	pgid int
 }
 
 func (p *gatewayProcess) stopCleanup() {
@@ -288,7 +293,7 @@ func startGateway(binary, dir string, port int, tlsConfig *tls.Config) (*gateway
 		_ = log.Close()
 		return nil, nil, nil, err
 	}
-	p := &gatewayProcess{cmd: cmd, done: make(chan struct{})}
+	p := &gatewayProcess{cmd: cmd, done: make(chan struct{}), pgid: cmd.Process.Pid}
 	go func() { p.err = cmd.Wait(); _ = log.Close(); close(p.done) }()
 	conn, err := grpc.NewClient(fmt.Sprintf("127.0.0.1:%d", port), grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	if err != nil {
@@ -317,6 +322,41 @@ func startGateway(binary, dir string, port int, tlsConfig *tls.Config) (*gateway
 	return nil, nil, nil, fmt.Errorf("gateway readiness timed out; see gateway.log: %w", err)
 }
 
+// The child is still retained until Wait; no discovered or adopted PID is signalled.
+func (p *gatewayProcess) terminate(group bool) error {
+	select {
+	case <-p.done:
+		return errors.New("original gateway already exited")
+	default:
+	}
+	if !group {
+		return p.cmd.Process.Signal(syscall.SIGTERM)
+	}
+	pgid, err := syscall.Getpgid(p.cmd.Process.Pid)
+	if err != nil {
+		return err
+	}
+	if p.pgid <= 1 || p.pgid != p.cmd.Process.Pid || pgid != p.pgid {
+		return errors.New("original gateway process group identity changed")
+	}
+	return syscall.Kill(-p.pgid, syscall.SIGTERM)
+}
+
+func (p *gatewayProcess) verifyGroupExited(e *scenarioEvidence) error {
+	if err := syscall.Kill(-p.pgid, 0); !errors.Is(err, syscall.ESRCH) {
+		return fmt.Errorf("original gateway group remains after child exit: %v", err)
+	}
+	e.ExitedGroups = append(e.ExitedGroups, p.pgid)
+	return nil
+}
+
+func gatewayConfig(dir string, builtin bool) string {
+	if builtin {
+		return "[openshell]\nversion = 2\n[openshell.gateway.credential_storage]\nkey_encryption_key_path = " + fmt.Sprintf("%q", filepath.Join(dir, "credential-encryption-key.bin")) + "\n"
+	}
+	return "[openshell]\nversion = 2\n[openshell.gateway]\ncredential_drivers = [\"fixture\"]\n[openshell.credential_drivers.fixture]\ntransport = \"uds\"\nsocket_path = " + fmt.Sprintf("%q", filepath.Join(dir, "credentials.sock")) + "\n"
+}
+
 func scope() *dm.WorkspaceSelector {
 	return &dm.WorkspaceSelector{Selection: &dm.WorkspaceSelector_Workspace{Workspace: "default"}}
 }
@@ -335,6 +375,11 @@ func rotate(ctx context.Context, c pb.OpenShellClient) error {
 }
 
 func scenario(binary, dir string, e *scenarioEvidence) error {
+	builtin := e.Name == "builtin-db-issuer-pending-group-term"
+	e.CredentialBackend, e.SignalScope = "external-fixture", "original-process"
+	if builtin {
+		e.CredentialBackend, e.SignalScope = "builtin-db-credstore", "original-process-group"
+	}
 	if err := os.Mkdir(dir, 0700); err != nil {
 		return err
 	}
@@ -347,11 +392,13 @@ func scenario(binary, dir string, e *scenarioEvidence) error {
 		return err
 	}
 	defer stop()
-	stop, err = fixture.serve(filepath.Join(dir, "credentials.sock"), "openshell.credentials.v1.CredentialDriver")
-	if err != nil {
-		return err
+	if !builtin {
+		stop, err = fixture.serve(filepath.Join(dir, "credentials.sock"), "openshell.credentials.v1.CredentialDriver")
+		if err != nil {
+			return err
+		}
+		defer stop()
 	}
-	defer stop()
 	i := &issuer{gate: newGate()}
 	defer i.gate.open()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -361,12 +408,12 @@ func scenario(binary, dir string, e *scenarioEvidence) error {
 	server := &http.Server{Handler: http.HandlerFunc(i.serve), ReadHeaderTimeout: 5 * time.Second}
 	go server.Serve(listener)
 	defer server.Close()
-	if e.Name == "issuer-pending" {
+	if e.Name != "replacement-store-pending" {
 		fixture.storeGate.open()
 	} else {
 		i.gate.open()
 	}
-	config := "[openshell]\nversion = 2\n[openshell.gateway]\ncredential_drivers = [\"fixture\"]\n[openshell.credential_drivers.fixture]\ntransport = \"uds\"\nsocket_path = " + fmt.Sprintf("%q", filepath.Join(dir, "credentials.sock")) + "\n"
+	config := gatewayConfig(dir, builtin)
 	if err := os.WriteFile(filepath.Join(dir, "gateway.toml"), []byte(config), 0600); err != nil {
 		return err
 	}
@@ -387,6 +434,7 @@ func scenario(binary, dir string, e *scenarioEvidence) error {
 	defer p.stopCleanup()
 	defer conn.Close()
 	e.GatewayPIDs = append(e.GatewayPIDs, p.cmd.Process.Pid)
+	e.GatewayPGIDs = append(e.GatewayPGIDs, p.pgid)
 	profile := &pb.ProviderProfile{Id: "shutdown-fixture", DisplayName: "Shutdown fixture", Credentials: []*pb.ProviderProfileCredential{{Name: "access_token", EnvVars: []string{credentialKey}, Required: true, AuthStyle: "bearer", HeaderName: "authorization", Refresh: &pb.ProviderCredentialRefresh{Strategy: pb.ProviderCredentialRefreshStrategy_PROVIDER_CREDENTIAL_REFRESH_STRATEGY_OAUTH2_REFRESH_TOKEN, TokenUrl: "http://" + listener.Addr().String() + "/token", RefreshBefore: durationpb.New(30 * time.Second), MaxLifetime: durationpb.New(time.Hour), Material: []*pb.ProviderCredentialRefreshMaterial{{Name: "client_id", Required: true}, {Name: "refresh_token", Required: true, Secret: true}}}}}}
 	imported, err := c.ImportProviderProfiles(ctx, &pb.ImportProviderProfilesRequest{WorkspaceScope: scope(), Profiles: []*pb.ProviderProfileImportItem{{Profile: profile, Source: "synthetic acceptance"}}})
 	if err != nil {
@@ -416,7 +464,7 @@ func scenario(binary, dir string, e *scenarioEvidence) error {
 		return errors.New("gate was not reached")
 	}
 	e.Events = append(e.Events, "native_refresh_reached_gate")
-	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+	if err := p.terminate(builtin); err != nil {
 		return err
 	}
 	e.Events = append(e.Events, "sigterm_sent")
@@ -480,10 +528,17 @@ func scenario(binary, dir string, e *scenarioEvidence) error {
 	e.Events = append(e.Events, "gateway_exited_successfully")
 	e.GatewayExits = append(e.GatewayExits, processExit{PID: p.cmd.Process.Pid, ExitCode: p.cmd.ProcessState.ExitCode(), ObservedAt: time.Now().UTC().Format(time.RFC3339Nano)})
 	_ = conn.Close()
-	if err := fixture.reloadPersisted(); err != nil {
-		return err
+	if builtin {
+		if err := p.verifyGroupExited(e); err != nil {
+			return err
+		}
+		e.Events = append(e.Events, "original_gateway_group_exited")
+	} else {
+		if err := fixture.reloadPersisted(); err != nil {
+			return err
+		}
+		e.Events = append(e.Events, "driver_reloaded_replacement_from_synced_storage")
 	}
-	e.Events = append(e.Events, "driver_reloaded_replacement_from_synced_storage")
 	// Restart only this fixture DB. A second native rotation must resolve the
 	// persisted replacement through the driver; the issuer checks it privately.
 	p2, conn2, c2, err := startGateway(binary, dir, port, tlsConfig)
@@ -493,6 +548,7 @@ func scenario(binary, dir string, e *scenarioEvidence) error {
 	defer p2.stopCleanup()
 	defer conn2.Close()
 	e.GatewayPIDs = append(e.GatewayPIDs, p2.cmd.Process.Pid)
+	e.GatewayPGIDs = append(e.GatewayPGIDs, p2.pgid)
 	statusResponse, err := c2.GetProviderRefreshStatus(ctx, &pb.GetProviderRefreshStatusRequest{WorkspaceScope: scope(), Provider: provider, CredentialKey: credentialKey})
 	if err != nil {
 		return err
@@ -516,7 +572,7 @@ func scenario(binary, dir string, e *scenarioEvidence) error {
 		return errors.New("unexpected compute operation attempted")
 	}
 	e.Events = append(e.Events, "restart_resolved_persisted_replacement_without_compute")
-	if err := p2.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+	if err := p2.terminate(builtin); err != nil {
 		return err
 	}
 	select {
@@ -527,6 +583,11 @@ func scenario(binary, dir string, e *scenarioEvidence) error {
 		e.GatewayExits = append(e.GatewayExits, processExit{PID: p2.cmd.Process.Pid, ExitCode: p2.cmd.ProcessState.ExitCode(), ObservedAt: time.Now().UTC().Format(time.RFC3339Nano)})
 	case <-ctx.Done():
 		return errors.New("verification gateway failed to exit")
+	}
+	if builtin {
+		if err := p2.verifyGroupExited(e); err != nil {
+			return err
+		}
 	}
 	e.Passed = true
 	return nil

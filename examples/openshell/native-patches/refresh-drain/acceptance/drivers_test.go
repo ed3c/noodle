@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -104,5 +106,45 @@ func TestFailedBuildReceiptRefusesBeforeExecutingGateway(t *testing.T) {
 				t.Fatalf("failed/incomplete build not refused before executable access: %v", err)
 			}
 		})
+	}
+}
+
+func TestGroupTermRefusesChangedIdentityThenSignalsOriginalGroup(t *testing.T) {
+	cmd := exec.Command("/bin/sleep", "30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	p := &gatewayProcess{cmd: cmd, done: make(chan struct{}), pgid: cmd.Process.Pid}
+	go func() { p.err = cmd.Wait(); close(p.done) }()
+	defer p.stopCleanup()
+	p.pgid++
+	if err := p.terminate(true); err == nil {
+		t.Fatal("changed original group accepted")
+	}
+	select {
+	case <-p.done:
+		t.Fatal("identity refusal signalled child")
+	default:
+	}
+	p.pgid = cmd.Process.Pid
+	if err := p.terminate(true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-p.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("group TERM did not reach child")
+	}
+	status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+	if !ok || !status.Signaled() || status.Signal() != syscall.SIGTERM {
+		t.Fatalf("unexpected exit: %v", p.err)
+	}
+	var e scenarioEvidence
+	if err := p.verifyGroupExited(&e); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.terminate(true); err == nil {
+		t.Fatal("exited original child accepted")
 	}
 }
