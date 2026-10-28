@@ -31,7 +31,7 @@ SoodlesOwnerBridge(cli, evidence_root, templates, review=session_review, poll_s=
   its full input fingerprint. It retains request, source bindings, CLI intent, stdout/stderr,
   capture, immutable candidate projection and final receipt. A previous directory is never
   overwritten. Restart recovery belongs to the original owner; this driver does not replay.
-- `templates` is a finite ordered list of `RequestTemplate`. Each binds `group`, `role`, an
+- `templates` is a finite list of `RequestTemplate`, selected by exact group and role. Each binds `group`, `role`, an
   unused App-created named control worktree `repository`, instruction selection,
   Noodle binary/profile FileRefs, original `write_paths`/`acceptance`, explicit text
   `deliverables`, and optional relative `harvest` path. Give a distinct worktree per call,
@@ -59,10 +59,15 @@ SoodlesOwnerBridge(cli, evidence_root, templates, review=session_review, poll_s=
   original owner until that same candidate is locally integrated with acceptance PASS.
   It does not turn a candidate into automatic approval or interpret hidden test answers.
 
-For native `k=1, seq`, normal calls alternate solver/proposer and finish with the fourth
-solver: seven templates per group. Native known-invalid repair can request an additional
-proposer; provision only the explicitly authorized finite repair slots. Pool exhaustion or
-a mismatched next role refuses before starting an owner. Do not silently substitute a root.
+For native `k=1, seq`, the baseline solver is followed by INV/DOM proposers, then their
+two solvers, then COMPOSE proposer and the fourth solver: seven templates per group.
+INV/DOM lock acquisition order is not fixed. The bridge selects the first unused template
+matching the call's group/role, never a different role's slot. Native known-invalid repair
+can request an additional proposer; provision only explicitly authorized finite repair
+slots. Exhausting one role refuses before creating a call directory or starting an owner.
+Do not silently substitute a root. On reopen, exact original binding/template records remove
+used controls; an effect-free route refusal with no binding or owner intent consumes none.
+This restores pool availability, never reopens the refused call or changes its journal.
 
 The model bindings are exact: Codex `gpt-5.6-sol`/`low`, Pi
 `openrouter/deepseek/deepseek-v4.1-flash-1017`/`low`. Each generated request is `inner-only`,

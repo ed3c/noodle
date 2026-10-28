@@ -2,7 +2,7 @@
 import shutil
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from openrouter_billing import OpenRouterBilling, ReadOnlyOpenRouter
@@ -12,7 +12,6 @@ from soodles_bridge import (
     PinnedCLI,
     RequestTemplate,
     SoodlesOwnerBridge,
-    canonical,
     decode,
     read_ref,
     reference,
@@ -199,16 +198,14 @@ def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_obser
         require(len(unresolved) == 1 and unresolved[0]['state'] == 'unknown'
                 and unresolved[0]['call'] == call.__dict__, 'resume differs from the sole unresolved original call')
         rows = ordered_calls(gate.state)
-        require(rows[-1] is unresolved[0] and len(rows) <= len(templates), 'original call ordering or template pool differs')
-        for index, row in enumerate(rows):
+        require(rows[-1] is unresolved[0], 'original call ordering differs')
+        for row in rows:
             previous = OwnerCall(**row['call'])
-            binding = decode(read_ref(reference(bridge.root / previous.fingerprint() / 'binding.json')))
-            require(binding['template'] == decode(canonical(asdict(templates[index]))), 'original template pool order differs')
             if row['state'] == 'settled':
                 gate.verify_result(OwnerResult(**row['result']), previous)
             elif row is not unresolved[0]:
                 require(row['state'] == 'refused', 'prior original owner is unresolved')
-        bridge.templates = templates[len(rows)-1:]
+        bridge.restore_templates(rows, call)
         reconciliation_id = call.fingerprint()
         archive = output / ('reconciliation-native-before-' + reconciliation_id)
         archive.mkdir()

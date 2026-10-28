@@ -529,16 +529,51 @@ class SoodlesOwnerBridge:
             self.root.mkdir(parents=True, exist_ok=False)
         require(len({t.repository for t in templates}) == len(templates), "control worktree pool contains duplicates")
 
+    def template_for(self, call):
+        # Native seq proposes INV/DOM before their rollouts; lock order is not role order.
+        matches = [template for template in self.templates
+                   if (template.group, template.role) == (call.group, call.role)]
+        require(matches, "preallocated original control worktrees for this route are exhausted")
+        return matches[0]
+
+    def restore_templates(self, rows, unresolved_call=None):
+        """Remove exact previously bound controls; refused calls need not consume one."""
+        remaining = list(self.templates)
+        for row in rows:
+            call = OwnerCall(**row['call'])
+            directory = self.root / call.fingerprint()
+            path = directory / 'binding.json'
+            if not path.exists():
+                require(row['state'] == 'refused' and row.get('error') in {
+                    'task template belongs to another call route',
+                    'preallocated original control worktrees for this route are exhausted'}
+                    and (not directory.exists() or not any(directory.iterdir())),
+                    'original call has no verifiable unused control binding')
+                continue
+            binding = decode(read_ref(reference(path)))
+            require(binding['call_sha256'] == call.fingerprint(), 'original control binding belongs to another call')
+            matches = [template for template in remaining
+                       if decode(canonical(asdict(template))) == binding['template']]
+            require(len(matches) == 1 and (matches[0].group, matches[0].role) == (call.group, call.role),
+                    'original control template changed or was reused')
+            remaining.remove(matches[0])
+        if unresolved_call is not None:
+            binding = decode(read_ref(reference(self.root / unresolved_call.fingerprint() / 'binding.json')))
+            matches = [template for template in self.templates
+                       if decode(canonical(asdict(template))) == binding['template']]
+            require(len(matches) == 1, 'original unresolved control template differs')
+            remaining.insert(0, matches[0])
+        self.templates = remaining
+
     def execute(self, call: OwnerCall) -> OwnerResult:
-        require(self.templates, "preallocated original control worktrees are exhausted")
-        template = self.templates[0]
+        template = self.template_for(call)
         self.cli.verify()
         directory = self.root / call.fingerprint()
         directory.mkdir()  # a prior interrupted call cannot be replayed
         request = template.prepare(call, directory)
         binding_ref = reference(directory / "binding.json")
         instructions_ref = reference(directory / "instruction-trees.json")
-        self.templates.pop(0)
+        self.templates.remove(template)
         result_dir = directory / "result"
         result_dir.mkdir()
         before = None
@@ -558,8 +593,10 @@ class SoodlesOwnerBridge:
         directory = self.root / call.fingerprint()
         binding_ref = reference(directory / "binding.json")
         binding = decode(read_ref(binding_ref))
-        template = self.templates[0]
-        require(binding["template"] == json.loads(canonical(asdict(template))), "original template differs")
+        matches = [template for template in self.templates
+                   if binding["template"] == decode(canonical(asdict(template)))]
+        require(len(matches) == 1, "original template differs")
+        template = matches[0]
         request = reference(directory / 'request.json')
         result_dir = directory / "result"
         require(result_dir.is_dir(), 'original result directory is missing')
@@ -586,7 +623,7 @@ class SoodlesOwnerBridge:
             selection = (inner.get('review_progress') or {}).get('review') or {}
             require((inner.get('candidate') or selection.get('candidate')) == frozen[0], 'fresh original candidate differs from retained snapshot')
         save(directory / "reconciliation-intent.json", proof)
-        self.templates.pop(0)
+        self.templates.remove(template)
         before = reference(directory / 'billing-before/before.json') if call.provider == 'pi' else None
         result = self._follow(call, template, directory, request, binding_ref,
             reference(directory / "instruction-trees.json"), result_dir, before,
