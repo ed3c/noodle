@@ -103,6 +103,10 @@ type hostContext struct {
 	cancel         context.CancelFunc
 	lock           *lockfile.Lock
 	failed         bool
+	finalizing     bool
+	finalized      bool
+	releaseErr     error
+	receiptSaved   bool
 	openShell      bool
 	environmentSHA string
 }
@@ -121,6 +125,7 @@ type noodleHost struct {
 	openShell        *loopruntime.OpenShellGateway
 	openShellProfile *loopruntime.OpenShellProfile
 	blocked          bool
+	shutdown         *hostShutdown
 	newRuntime       func(string, string, config.Config, loop.Dependencies) hostRuntime
 }
 
@@ -400,8 +405,12 @@ func startHostProcess(ctx context.Context, path, dir string) error {
 	}
 }
 
-func serveHost(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
+func serveHost(shutdownRequested context.Context) error {
+	return serveHostWithSampler(shutdownRequested, admission.NewSampler())
+}
+
+func serveHostWithSampler(shutdownRequested context.Context, sampler admission.Sampler) error {
+	ctx, cancel := context.WithCancel(context.WithoutCancel(shutdownRequested))
 	defer cancel()
 	dir, err := hostDirectory()
 	if err != nil {
@@ -425,7 +434,7 @@ func serveHost(ctx context.Context) error {
 		return err
 	}
 	budget := admission.NewBudget(0)
-	go budget.Run(ctx, admission.NewSampler())
+	go budget.Run(ctx, sampler)
 	h := &noodleHost{budget: budget, contexts: make(map[string]*hostContext), completed: make(chan string, 16), dir: dir, instanceID: id, binaryPath: path, binarySHA: hostDigest(data), newRuntime: func(dir, bin string, cfg config.Config, deps loop.Dependencies) hostRuntime {
 		return loop.New(dir, bin, cfg, deps)
 	}}
@@ -522,36 +531,24 @@ func serveHost(ctx context.Context) error {
 			}()
 		}
 	}()
+	shutdownSignal := shutdownRequested.Done()
+	var finalized <-chan hostShutdownResult
 	for {
+		if h.shutdown != nil {
+			if err := h.shutdownReady(); err == nil {
+				h.releaseShutdownLocks()
+				return nil
+			} else {
+				h.shutdown.diagnostic = err.Error()
+			}
+		}
 		select {
-		case <-ctx.Done():
-			for _, c := range h.contexts {
-				if c.openShell && h.openShell != nil {
-					if err := h.releaseOpenShell(c.receipt.ContextID); err != nil {
-						fmt.Fprintln(os.Stderr, "OpenShell shutdown release failed:", err)
-					}
-				}
-				if h.residents != nil {
-					if err := h.residents.ReleaseContext(c.receipt.ContextID); err != nil {
-						fmt.Fprintln(os.Stderr, "resident shutdown failed:", err)
-					}
-				}
-				c.cancel()
-			}
-			for _, c := range h.contexts {
-				if c.done != nil {
-					h.finish(c, <-c.done)
-				}
-			}
-			if h.residents != nil {
-				waitCtx, waitCancel := context.WithTimeout(context.Background(), 3*time.Second)
-				err := h.residents.WaitClosed(waitCtx)
-				waitCancel()
-				if err != nil {
-					return err
-				}
-			}
-			return nil
+		case <-shutdownSignal:
+			h.beginShutdown(ctx)
+			shutdownSignal = nil
+			finalized = h.shutdown.results
+		case result := <-finalized:
+			h.applyShutdownResult(result)
 		case err := <-webDone:
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Host readonly web stopped: %v\n", err)
@@ -559,6 +556,9 @@ func serveHost(ctx context.Context) error {
 			h.webURL = ""
 			webDone = nil
 		case <-h.residents.Released():
+			if h.shutdown != nil {
+				continue
+			}
 			if err := h.closeIdleOpenShell(); err != nil {
 				fmt.Fprintln(os.Stderr, "OpenShell gateway custody retained:", err)
 			}
@@ -567,11 +567,14 @@ func serveHost(ctx context.Context) error {
 			if c := h.contexts[id]; c != nil && c.done != nil {
 				select {
 				case err := <-c.done:
-					h.finish(c, err)
+					h.completeContext(c, err)
 				default:
 				}
 			}
 		case call := <-calls:
+			if h.shutdown != nil && h.handleShutdownCall(call.request, call.reply) {
+				continue
+			}
 			if call.request.Operation == "view_resources" {
 				receipts := make([]hostReceipt, 0, len(h.contexts))
 				for _, context := range h.contexts {
@@ -590,7 +593,7 @@ func serveHost(ctx context.Context) error {
 				}
 				select {
 				case err := <-c.done:
-					h.finish(c, err)
+					h.completeContext(c, err)
 				default:
 				}
 			}

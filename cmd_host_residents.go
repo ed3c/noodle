@@ -43,7 +43,7 @@ func newHostResidentsCmd(app *App) *cobra.Command {
 			}
 			if requestFile != "" {
 				original := callHost(cmd.Context(), hostRequest{Operation: "status", ProjectDir: app.projectDir, RequestFile: requestFile})
-				if (original.Status != "ok" && !(operation == "inspect" && original.Status == "unknown_effect")) || (operation != "inspect" && original.ContextState != "active") || original.HostInstanceID == "" || original.ContextID == "" {
+				if !hostResidentRequestAvailable(operation, original) {
 					_ = json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"owner": "noodle.swap-manager", "status": "refused", "original": original, "error": "original Host request unavailable for resident operation"})
 					return errors.New("original Host request unavailable for resident operation")
 				}
@@ -104,6 +104,21 @@ func newHostResidentsCmd(app *App) *cobra.Command {
 	}
 	return parent
 }
+func hostResidentRequestAvailable(operation string, original hostResponse) bool {
+	if original.HostInstanceID == "" || original.ContextID == "" {
+		return false
+	}
+	// Only the original server can admit this release while draining. The
+	// client preserves unknown task status and never retries through acquire.
+	if operation == "release" && original.Status == "unknown_effect" && original.ContextState == "failed" {
+		return true
+	}
+	if original.Status != "ok" && !(operation == "inspect" && original.Status == "unknown_effect") {
+		return false
+	}
+	return operation == "inspect" || original.ContextState == "active"
+}
+
 func (h *noodleHost) residentOperation(ctx context.Context, req hostRequest) any {
 	result := map[string]any{"schema": 1, "owner": "noodle.swap-manager", "host_instance_id": h.instanceID, "status": "observed", "resources": h.budget.Snapshot(), "next": nil}
 	refuse := func(err error) any { result["status"] = "refused"; result["error"] = err.Error(); return result }

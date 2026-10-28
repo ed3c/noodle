@@ -50,5 +50,10 @@ func (h *noodleHost) resources() any {
 			residents = map[string]any{"records": rows, "error": err.Error()}
 		}
 	}
-	return map[string]any{"residents": residents, "schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot(), "warning_grants": h.budget.WarningGrants()}
+	shutdown := map[string]any{"requested": h.shutdown != nil}
+	if h.shutdown != nil {
+		shutdown["pending_finalizations"] = h.shutdown.pending
+		shutdown["diagnostic"] = h.shutdown.diagnostic
+	}
+	return map[string]any{"shutdown": shutdown, "residents": residents, "schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot(), "warning_grants": h.budget.WarningGrants()}
 }

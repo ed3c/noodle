@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 )
@@ -8,19 +9,31 @@ import (
 func (h *noodleHost) finish(c *hostContext, runErr error) {
 	c.done = nil
 	c.runtime.Shutdown()
-	if c.openShell && h.openShell != nil {
-		if err := h.releaseOpenShell(c.receipt.ContextID); err != nil {
-			h.blocked = true
-			c.failed = true
-			fmt.Fprintln(os.Stderr, "OpenShell context release failed:", err)
+	h.applyHostFinish(c, runErr, h.releaseContextResources(c.receipt.ContextID, c.openShell))
+}
+
+// Called with stable original owner handles; draining runs this outside the actor.
+func (h *noodleHost) releaseContextResources(contextID string, openShell bool) (releaseErr error) {
+	if openShell && h.openShell != nil {
+		if err := h.releaseOpenShell(contextID); err != nil {
+			releaseErr = errors.Join(releaseErr, fmt.Errorf("OpenShell context release failed: %w", err))
 		}
 	}
 	if h.residents != nil {
-		if err := h.residents.ReleaseContext(c.receipt.ContextID); err != nil {
-			h.blocked = true
-			c.failed = true
-			fmt.Fprintln(os.Stderr, "resident context release failed:", err)
+		if err := h.residents.ReleaseContext(contextID); err != nil {
+			releaseErr = errors.Join(releaseErr, fmt.Errorf("resident context release failed: %w", err))
 		}
+	}
+	return releaseErr
+}
+
+func (h *noodleHost) applyHostFinish(c *hostContext, runErr, releaseErr error) {
+	c.finalized, c.finalizing = true, false
+	c.releaseErr = releaseErr
+	c.receiptSaved = false
+	if releaseErr != nil {
+		h.blocked, c.failed = true, true
+		fmt.Fprintln(os.Stderr, releaseErr)
 	}
 	c.cancel()
 	if c.failed || runErr != nil || (h.blocked && c.receipt.AdmissionRefusal != "") {
@@ -50,8 +63,10 @@ func (h *noodleHost) finish(c *hostContext, runErr error) {
 			}
 		}
 		fmt.Fprintln(os.Stderr, "host receipt persistence failed:", err)
+	} else {
+		c.receiptSaved = true
 	}
-	if !c.failed {
+	if !c.failed && h.shutdown == nil {
 		c.lock.Close()
 		delete(h.contexts, c.receipt.ContextID)
 		if h.budget != nil {
