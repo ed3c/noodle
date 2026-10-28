@@ -77,20 +77,21 @@ type piReceipt struct {
 // session, including during writes and after rejection. The receipt is evidence,
 // never a substitute for the original process/group exit observation.
 type piRPC struct {
-	failed     chan struct{}
-	failOnce   sync.Once
-	mu         sync.Mutex
-	receipt    piReceipt
-	dir        string
-	process    *ProcessHandle
-	stateReady chan struct{}
-	ackReady   chan struct{}
-	prompt     string
-	timeout    time.Duration
+	failed           chan struct{}
+	failOnce         sync.Once
+	mu               sync.Mutex
+	receipt          piReceipt
+	dir              string
+	nativeSessionDir string
+	process          HarnessProcess
+	stateReady       chan struct{}
+	ackReady         chan struct{}
+	prompt           string
+	timeout          time.Duration
 }
 
 func newPiRPC(dir, model, prompt string) (*piRPC, error) {
-	p := &piRPC{failed: make(chan struct{}), dir: dir, prompt: prompt, timeout: piControlTimeout, stateReady: make(chan struct{}), ackReady: make(chan struct{})}
+	p := &piRPC{failed: make(chan struct{}), dir: dir, nativeSessionDir: filepath.Join(dir, "pi"), prompt: prompt, timeout: piControlTimeout, stateReady: make(chan struct{}), ackReady: make(chan struct{})}
 	p.receipt.ExpectedModel = model
 	if err := os.MkdirAll(filepath.Join(dir, "pi"), 0700); err != nil {
 		return nil, fmt.Errorf("create Pi session directory: %w", err)
@@ -131,16 +132,16 @@ func (p *piRPC) fail(err error) {
 	}
 }
 
-func (p *piRPC) start(ctx context.Context, process *ProcessHandle) {
-	process.ioWG.Add(1)
+func (p *piRPC) start(ctx context.Context, process HarnessProcess) {
+	process.IOWaitGroup().Add(1)
 	go func() {
-		defer process.ioWG.Done()
+		defer process.IOWaitGroup().Done()
 		// This writer may encounter kernel backpressure. The watchdog closes stdin
 		// and kills the original group, so neither pipe can trap cancellation.
 		finished := make(chan error, 1)
-		process.ioWG.Add(1)
+		process.IOWaitGroup().Add(1)
 		go func() {
-			defer process.ioWG.Done()
+			defer process.IOWaitGroup().Done()
 			finished <- json.NewEncoder(process.Stdin()).Encode(map[string]string{"id": "noodle-state", "type": "get_state"})
 		}()
 		if !p.wait(ctx, finished, nil) || !p.wait(ctx, nil, p.stateReady) {
@@ -163,9 +164,9 @@ func (p *piRPC) start(ctx context.Context, process *ProcessHandle) {
 			p.fail(fmt.Errorf("persist Pi prompt evidence: %w", err))
 			return
 		}
-		process.ioWG.Add(1)
+		process.IOWaitGroup().Add(1)
 		go func() {
-			defer process.ioWG.Done()
+			defer process.IOWaitGroup().Done()
 			finished <- json.NewEncoder(process.Stdin()).Encode(map[string]string{"id": "noodle-prompt", "type": "prompt", "message": p.prompt})
 		}()
 		if !p.wait(ctx, finished, nil) {
@@ -237,7 +238,7 @@ func (p *piRPC) observe(line []byte, processor *stamp.Processor) ([]byte, []pars
 			if strings.TrimSpace(state.SessionID) == "" || !filepath.IsAbs(state.SessionFile) {
 				return nil, nil, fmt.Errorf("Pi native session identity missing")
 			}
-			relative, err := filepath.Rel(filepath.Join(p.dir, "pi"), state.SessionFile)
+			relative, err := filepath.Rel(p.nativeSessionDir, state.SessionFile)
 			if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 				return nil, nil, fmt.Errorf("Pi native session file outside owned session directory")
 			}

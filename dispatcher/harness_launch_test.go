@@ -47,7 +47,7 @@ func waitHarnessSession(t *testing.T, session Session) {
 			t.Logf("%s: %s (%v)", path, data, err)
 		}
 		select {
-		case err := <-s.process.waitProblem:
+		case err := <-s.process.WaitProblems():
 			t.Logf("wait: %v", err)
 		default:
 		}

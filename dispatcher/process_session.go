@@ -18,7 +18,7 @@ import (
 // as a shell pipeline stage.
 type processSession struct {
 	sessionBase
-	process          *ProcessHandle
+	process          HarnessProcess
 	controller       *claudeController // nil for non-steerable sessions
 	warnings         []string
 	provider         string
@@ -36,7 +36,7 @@ type processSession struct {
 
 type processSessionConfig struct {
 	id               string
-	process          *ProcessHandle
+	process          HarnessProcess
 	eventWriter      *event.EventWriter
 	canonicalPath    string
 	stampedPath      string
@@ -177,7 +177,7 @@ wait:
 		select {
 		case <-s.process.Done():
 			break wait
-		case err := <-s.process.waitProblem:
+		case err := <-s.process.WaitProblems():
 			s.publish(SessionEvent{Type: "warning", Message: fmt.Sprintf("original worker exit requires owner readback: %v", err), Timestamp: nowUTC()})
 		case <-cancellation:
 			if err := s.process.ForceKill(); err != nil {
@@ -197,7 +197,7 @@ wait:
 		s.closeProcessPipes()
 	}
 	ioDone := make(chan struct{})
-	go func() { s.process.ioWG.Wait(); close(ioDone) }()
+	go func() { s.process.IOWaitGroup().Wait(); close(ioDone) }()
 	select {
 	case <-ioDone:
 	case <-ctx.Done():
