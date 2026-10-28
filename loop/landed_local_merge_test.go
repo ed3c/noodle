@@ -64,10 +64,21 @@ func landedMergeFixture(t *testing.T) (*Loop, LandedLocalMergeProof, loopruntime
 		t.Fatal(e)
 	}
 	sources := map[string]loopruntime.SessionReadbackFileRef{}
-	for _, name := range []string{"spawn.json", "openshell-dispatch.json", "delivery/result.json", "delivery/publish.json"} {
+	for _, name := range []string{"spawn.json", "openshell-dispatch.json", "delivery/result.json", "delivery/changes.patch", "delivery/publish.json"} {
 		sources[name] = ref(filepath.Join(l.runtimeDir, "sessions", attempt.SessionID, name))
 	}
-	native := landedMergeResponse{Schema: 1, Status: "observed", HostInstanceID: "original-host", ContextID: "original-context", RequestID: "original-request", Effects: []string{}, Sources: map[string]loopruntime.SessionReadbackFileRef{"client_binary": binary, "original_request": request, "config": configRef}, Observation: SessionReadback{SchemaVersion: 1, Status: "observed", OrderID: order.OrderID, StageIndex: 0, AttemptID: attempt.AttemptID, SessionID: attempt.SessionID, OrderStatus: "active", StageStatus: "review", AttemptStatus: "completed", Runtime: stage.Runtime, Provider: stage.Provider, Model: stage.Model, WorktreePath: cook.worktreePath, Effects: []string{}, Execution: loopruntime.CompletedSessionReadback{CandidateHead: head, CommandSHA256: strings.Repeat("c", 64), NativeAttemptID: "native-attempt", NativePhase: "Stopped", StopAcknowledged: true, MainProcessInstanceID: "original-main", Sources: sources}}}
+	for _, name := range []string{"instruction_mapping", "instruction_manifest", "instruction_input"} {
+		sources[name] = put(name+".json", map[string]string{"fixture": name})
+	}
+	instructions := &loopruntime.CompletedInstructionEvidence{Directory: filepath.Join(root, "instructions"), GuestDirectory: "/sandbox/instructions-fixture", Manifest: sources["instruction_manifest"]}
+	nativeSources := make(map[string]loopruntime.SessionReadbackFileRef, len(sources)+3)
+	for name, source := range sources {
+		nativeSources[name] = source
+	}
+	for _, name := range []string{"meta.json", "native_custody", "canonical_snapshot"} {
+		nativeSources[name] = loopruntime.SessionReadbackFileRef{Path: filepath.Join(root, name), SHA256: strings.Repeat("e", 64)}
+	}
+	native := landedMergeResponse{Schema: 1, Status: "observed", HostInstanceID: "original-host", ContextID: "original-context", RequestID: "original-request", Effects: []string{}, Sources: map[string]loopruntime.SessionReadbackFileRef{"client_binary": binary, "original_request": request, "config": configRef}, Observation: SessionReadback{SchemaVersion: 1, Status: "observed", OrderID: order.OrderID, StageIndex: 0, AttemptID: attempt.AttemptID, SessionID: attempt.SessionID, OrderStatus: "active", StageStatus: "review", AttemptStatus: "completed", Runtime: stage.Runtime, Provider: stage.Provider, Model: stage.Model, WorktreePath: cook.worktreePath, Effects: []string{}, Execution: loopruntime.CompletedSessionReadback{CandidateHead: head, CommandSHA256: strings.Repeat("c", 64), NativeAttemptID: "native-attempt", NativePhase: "Stopped", StopAcknowledged: true, MainProcessInstanceID: "original-main", Sources: nativeSources, Instructions: instructions}}}
 	response := put("response.json", native)
 	observation := put("observation.json", map[string]any{"schema": 1, "kind": "local_task_session_readback_observation", "validation": "verified", "exit_code": 0, "noodle": binary, "request": request, "task_envelope": envelope, "requested": map[string]string{"order_id": order.OrderID, "session_id": attempt.SessionID}, "native_response": native})
 	var candidate map[string]any
@@ -75,7 +86,11 @@ func landedMergeFixture(t *testing.T) (*Loop, LandedLocalMergeProof, loopruntime
 		t.Fatal("candidate fixture")
 	}
 	candidate["task_envelope"] = envelope
-	candidate["native_execution"] = map[string]any{"observation": response}
+	candidate["native_execution"] = map[string]any{
+		"native_attempt_id": "native-attempt", "command_sha256": strings.Repeat("c", 64),
+		"candidate_head": head, "native_exec_exit_code": 0, "native_phase": "Stopped",
+		"stop_acknowledged": true, "main_process_instance_id": "original-main", "sources": sources, "instructions": instructions,
+	}
 	candidateRef := put("candidate.json", candidate)
 	binding := localTaskMergeBinding{Candidate: localTaskFileRef{Path: candidateRef.Path, SHA256: candidateRef.SHA256}, Head: head, Tree: tree}
 	stage.Status = state.StageMerging
@@ -111,7 +126,12 @@ func landedMergeFixture(t *testing.T) (*Loop, LandedLocalMergeProof, loopruntime
 	python := put("python", map[string]string{"fixture": "not executable"})
 	taskRequest := put("task-request.json", map[string]string{"fixture": "same original request"})
 	intent := put("observer-intent.json", map[string]any{"source_commit": strings.Repeat("a", 40), "python": python, "sources": []loopruntime.SessionReadbackFileRef{script, observer}, "request": taskRequest, "argv": []string{python.Path, "-B", script.Path, "loop", "inspect", "--request-file", taskRequest.Path, "--capture-dir", root}})
-	stdout := put("observer-stdout.json", map[string]any{"owner": "soodles.loop", "request": taskRequest, "inner": map[string]any{"candidate": candidateRef}, "capture": map[string]any{"owner": "issue-execution.local-task.capture", "status": "observed", "task_envelope": envelope, "gaps": []string{}, "attempts": []any{map[string]any{"native_completion": map[string]any{"observation": response}}}}})
+	captureExecution := map[string]any{}
+	for key, value := range candidate["native_execution"].(map[string]any) {
+		captureExecution[key] = value
+	}
+	captureExecution["observation"] = response
+	stdout := put("observer-stdout.json", map[string]any{"owner": "soodles.loop", "request": taskRequest, "inner": map[string]any{"candidate": candidateRef}, "capture": map[string]any{"owner": "issue-execution.local-task.capture", "status": "observed", "task_envelope": envelope, "gaps": []string{}, "attempts": []any{map[string]any{"native_completion": captureExecution}}}})
 	stderr := put("observer-stderr.json", map[string]any{"fixture": true})
 	receipt := put("observer-receipt.json", map[string]any{"exit_code": 0, "stdout": stdout, "stderr": stderr})
 	proof := LandedLocalMergeProof{1, observation, response, intent, receipt}
@@ -285,5 +305,79 @@ func TestLandedLocalMergeObservationRunsNoGitHooksAndIgnoresSelectionEnvironment
 	}
 	if _, err = os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatal("read-only observation ran project hook")
+	}
+}
+
+func TestLandedLocalMergeRejectsChangedCandidateExecutionProjection(t *testing.T) {
+	for _, condition := range []string{"command", "instruction", "stable-source", "capture-only-reference"} {
+		t.Run(condition, func(t *testing.T) {
+			l, _, proof := landedMergeFixture(t)
+			var snapshot reducer.DurableSnapshot
+			if err := json.Unmarshal(recoveryRead(t, filepath.Join(l.runtimeDir, "state.snapshot.json")), &snapshot); err != nil {
+				t.Fatal(err)
+			}
+			for id, order := range snapshot.State.Orders {
+				stage := order.Stages[0]
+				var binding localTaskMergeBinding
+				if err := json.Unmarshal(stage.Extra[localTaskMergeKey], &binding); err != nil {
+					t.Fatal(err)
+				}
+				var candidate map[string]any
+				if err := json.Unmarshal(recoveryRead(t, binding.Candidate.Path), &candidate); err != nil {
+					t.Fatal(err)
+				}
+				execution := candidate["native_execution"].(map[string]any)
+				switch condition {
+				case "command":
+					execution["command_sha256"] = strings.Repeat("f", 64)
+				case "instruction":
+					execution["instructions"].(map[string]any)["guest_directory"] = "/sandbox/foreign"
+				case "stable-source":
+					execution["sources"].(map[string]any)["delivery/changes.patch"].(map[string]any)["sha256"] = strings.Repeat("f", 64)
+				case "capture-only-reference":
+					execution["observation"] = proof
+				}
+				recoveryWriteJSON(t, binding.Candidate.Path, candidate)
+				binding.Candidate.SHA256 = recoveryDigest(recoveryRead(t, binding.Candidate.Path))
+				stage.Extra[localTaskMergeKey], _ = json.Marshal(binding)
+				order.Stages[0] = stage
+				snapshot.State.Orders[id] = order
+			}
+			recoveryWriteJSON(t, filepath.Join(l.runtimeDir, "state.snapshot.json"), snapshot)
+			before := recoveryRead(t, filepath.Join(l.runtimeDir, "state.snapshot.json"))
+			_, err := InspectLandedLocalMerge(l.projectDir, proof.Path, proof.SHA256)
+			if err == nil || !strings.Contains(err.Error(), "candidate differs from original native execution projection") {
+				t.Fatalf("changed projection: %v", err)
+			}
+			if !reflect.DeepEqual(before, recoveryRead(t, filepath.Join(l.runtimeDir, "state.snapshot.json"))) {
+				t.Fatal("inspection mutated canonical")
+			}
+		})
+	}
+}
+
+func TestLandedLocalMergeRejectsCaptureExecutionDifferentFromRawObservation(t *testing.T) {
+	l, proof, _ := landedMergeFixture(t)
+	var receipt map[string]any
+	if err := json.Unmarshal(recoveryRead(t, proof.ObserverReceipt.Path), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	stdout := receipt["stdout"].(map[string]any)
+	var packet map[string]any
+	path := stdout["path"].(string)
+	if err := json.Unmarshal(recoveryRead(t, path), &packet); err != nil {
+		t.Fatal(err)
+	}
+	captured := packet["capture"].(map[string]any)["attempts"].([]any)[0].(map[string]any)["native_completion"].(map[string]any)
+	captured["native_attempt_id"] = "foreign-attempt"
+	recoveryWriteJSON(t, path, packet)
+	stdout["sha256"] = recoveryDigest(recoveryRead(t, path))
+	recoveryWriteJSON(t, proof.ObserverReceipt.Path, receipt)
+	proof.ObserverReceipt.SHA256 = recoveryDigest(recoveryRead(t, proof.ObserverReceipt.Path))
+	path = filepath.Join(filepath.Dir(path), "changed-proof.json")
+	recoveryWriteJSON(t, path, proof)
+	_, err := InspectLandedLocalMerge(l.projectDir, path, recoveryDigest(recoveryRead(t, path)))
+	if err == nil || !strings.Contains(err.Error(), "capture completion differs from native execution projection") {
+		t.Fatalf("changed capture: %v", err)
 	}
 }

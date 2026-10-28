@@ -93,15 +93,18 @@ func validateLandedLocalMerge(project string, s reducer.DurableSnapshot, p Lande
 	}
 	var extended struct {
 		TaskEnvelope    loopruntime.SessionReadbackFileRef `json:"task_envelope"`
-		NativeExecution struct {
-			Observation loopruntime.SessionReadbackFileRef `json:"observation"`
-		} `json:"native_execution"`
+		NativeExecution json.RawMessage                    `json:"native_execution"`
 	}
 	if err = landedMergeReadRef(loopruntime.SessionReadbackFileRef{Path: binding.Candidate.Path, SHA256: binding.Candidate.SHA256}, &extended); err != nil {
 		return r, err
 	}
-	if extended.TaskEnvelope != observation.TaskEnvelope || extended.NativeExecution.Observation != p.Response {
-		return r, fmt.Errorf("candidate has no exact retained original native proof")
+	projectedExecution, err := landedCandidateExecution(execution)
+	if err != nil {
+		return r, err
+	}
+	var candidateExecution any
+	if extended.TaskEnvelope != observation.TaskEnvelope || json.Unmarshal(extended.NativeExecution, &candidateExecution) != nil || !recoveryJSONEqual(candidateExecution, projectedExecution) {
+		return r, fmt.Errorf("candidate differs from original native execution projection")
 	}
 	if observation.Noodle != native.Sources["client_binary"] || observation.Request != native.Sources["original_request"] {
 		return r, fmt.Errorf("original native input references differ")
@@ -138,7 +141,7 @@ func validateLandedLocalMerge(project string, s reducer.DurableSnapshot, p Lande
 	if !l.isAdmittedLocalTask(order, stage) {
 		return r, fmt.Errorf("original local task admission differs")
 	}
-	if err = validateLandedObserver(p, binding.Candidate, observation.TaskEnvelope); err != nil {
+	if err = validateLandedObserver(p, binding.Candidate, observation.TaskEnvelope, projectedExecution); err != nil {
 		return r, err
 	}
 	// Only stable, non-secret execution artifacts are reread. The historical
@@ -218,7 +221,7 @@ func validateLandedLocalMerge(project string, s reducer.DurableSnapshot, p Lande
 	return r, nil
 }
 
-func validateLandedObserver(p LandedLocalMergeProof, candidate localTaskFileRef, envelope loopruntime.SessionReadbackFileRef) error {
+func validateLandedObserver(p LandedLocalMergeProof, candidate localTaskFileRef, envelope loopruntime.SessionReadbackFileRef, execution map[string]any) error {
 	var intent struct {
 		SourceCommit string                               `json:"source_commit"`
 		Python       loopruntime.SessionReadbackFileRef   `json:"python"`
@@ -280,20 +283,55 @@ func validateLandedObserver(p LandedLocalMergeProof, candidate localTaskFileRef,
 			TaskEnvelope loopruntime.SessionReadbackFileRef `json:"task_envelope"`
 			Gaps         []json.RawMessage                  `json:"gaps"`
 			Attempts     []struct {
-				NativeCompletion struct {
-					Observation loopruntime.SessionReadbackFileRef `json:"observation"`
-				} `json:"native_completion"`
+				NativeCompletion json.RawMessage `json:"native_completion"`
 			} `json:"attempts"`
 		} `json:"capture"`
 	}
 	if err := landedMergeReadRef(receipt.Stdout, &packet); err != nil {
 		return err
 	}
-	if packet.Owner != "soodles.loop" || packet.Request != intent.Request || packet.Inner.Candidate != candidate || packet.Capture.Owner != "issue-execution.local-task.capture" || packet.Capture.Status != "observed" || packet.Capture.TaskEnvelope != envelope || len(packet.Capture.Gaps) != 0 || len(packet.Capture.Attempts) != 1 || packet.Capture.Attempts[0].NativeCompletion.Observation != p.Response {
+	if packet.Owner != "soodles.loop" || packet.Request != intent.Request || packet.Inner.Candidate != candidate || packet.Capture.Owner != "issue-execution.local-task.capture" || packet.Capture.Status != "observed" || packet.Capture.TaskEnvelope != envelope || len(packet.Capture.Gaps) != 0 || len(packet.Capture.Attempts) != 1 {
 		return fmt.Errorf("original captured native completion differs")
+	}
+	expectedCapture := make(map[string]any, len(execution)+1)
+	for key, value := range execution {
+		expectedCapture[key] = value
+	}
+	expectedCapture["observation"] = p.Response
+	var captured any
+	if json.Unmarshal(packet.Capture.Attempts[0].NativeCompletion, &captured) != nil || !recoveryJSONEqual(captured, expectedCapture) {
+		return fmt.Errorf("original capture completion differs from native execution projection")
 	}
 	if !strings.HasSuffix(intent.Argv[2], "soodles.py") {
 		return fmt.Errorf("original observer entrypoint differs")
 	}
 	return nil
+}
+
+// Match the original Soodles completed() result: the candidate stores stable
+// execution fields, while capture_completion alone adds the raw observation ref.
+// Mutable metadata/canonical/custody refs stay in the verified raw packet.
+func landedCandidateExecution(execution loopruntime.CompletedSessionReadback) (map[string]any, error) {
+	names := []string{"openshell-dispatch.json", "spawn.json", "delivery/result.json", "delivery/changes.patch", "delivery/publish.json"}
+	if execution.Instructions != nil {
+		names = append(names, "instruction_mapping", "instruction_manifest", "instruction_input")
+	}
+	sources := make(map[string]loopruntime.SessionReadbackFileRef, len(names))
+	for _, name := range names {
+		ref, ok := execution.Sources[name]
+		if !ok || !filepath.IsAbs(ref.Path) || len(ref.SHA256) != 64 {
+			return nil, fmt.Errorf("original stable execution source missing: %s", name)
+		}
+		sources[name] = ref
+	}
+	result := map[string]any{
+		"native_attempt_id": execution.NativeAttemptID, "command_sha256": execution.CommandSHA256,
+		"candidate_head": execution.CandidateHead, "native_exec_exit_code": execution.NativeExecExitCode,
+		"native_phase": execution.NativePhase, "stop_acknowledged": execution.StopAcknowledged,
+		"main_process_instance_id": execution.MainProcessInstanceID, "sources": sources,
+	}
+	if execution.Instructions != nil {
+		result["instructions"] = execution.Instructions
+	}
+	return result, nil
 }

@@ -63,3 +63,5 @@ refuse. This is not a resume or provider authorization.
 Downstream acceptance must consume both the original execution proof and the
 completed stopped reconciliation receipt. It must not ask a new Host to attest
 the old owner, treat Git HEAD alone as acceptance, or repeat the model call.
+
+The original Soodles a82a candidate stores the `completed()` stable execution projection without an `observation` field. Its capture result adds the raw observation FileRef; the raw native packet additionally retains metadata, canonical and custody refs. Reconciliation compares all original projected execution fields and stable/instruction refs exactly, then separately requires capture to equal that projection plus the raw response reference. It never rewrites the historical candidate to add a missing capture-only field.
