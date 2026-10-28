@@ -44,8 +44,15 @@ class IndependentTests(unittest.TestCase):
         )
         self.rows = {}
         self.reports = {}
+        self.templates = {}
+        self.profile = save(self.root / "profile.json", {"fixture_only": True})
+        self.noodle = save(self.root / "noodle.json", {"fixture_only": True})
+        self.skill_base = self.root / "fixed-assets"
+        self.skill_base.mkdir()
+        (self.skill_base / "example.html").write_text("fixed fixture asset")
         for label in ("baseline", "candidate"):
-            run = self.root / label
+            call_root = self.root / label
+            run = call_root / "result"
             (run / "workspace").mkdir(parents=True)
             (run / "workspace/drawing.html").write_text("<svg>fixture drawing " + label + "</svg>")
             harness = self.root / (label + "-harness")
@@ -59,11 +66,51 @@ class IndependentTests(unittest.TestCase):
                 "gpt-5.6-sol",
                 {
                     "task_id": "public-case",
+                    "effort": "low",
+                    "timeout_s": 60,
                     "source": tree_ref(self.source),
                     "harness": tree_ref(harness),
                 },
             )
-            candidate = save(self.root / (label + "-candidate.json"), {"fixture_only": True})
+            template = {
+                "noodle": self.noodle,
+                "profile": self.profile,
+                "repository": str(call_root / "control"),
+                "harness_skills": ["main"],
+                "skill_bases": {"main": tree_ref(self.skill_base)},
+                "write_paths": ["drawing.html"],
+                "acceptance": ["Deliver exact bytes."],
+                "deliverables": ["drawing.html"],
+            }
+            self.templates[label] = template
+            save(call_root / "binding.json", {"call_sha256": call.fingerprint(), "template": template})
+            request = save(
+                call_root / "request.json",
+                {"noodle": self.noodle["path"], "profile": self.profile["path"], "repository": template["repository"]},
+            )
+            (call_root / "operation-0000").mkdir()
+            save(
+                call_root / "operation-0000/intent.json",
+                {
+                    "request": request,
+                    "source_commit": "f" * 40,
+                    "python": self.noodle,
+                    "sources": [self.noodle],
+                    "argv": [self.noodle["path"], "-B", self.noodle["path"], "loop", "enter"],
+                },
+            )
+            envelope = save(
+                call_root / "envelope.json",
+                {
+                    "runtime": "openshell",
+                    "provider": call.provider,
+                    "model": call.model,
+                    "model_reasoning_effort": "low",
+                    "profile": self.profile,
+                    "noodle": self.noodle,
+                },
+            )
+            candidate = save(self.root / (label + "-candidate.json"), {"task_envelope": envelope})
             accepted = save(
                 self.root / (label + "-accepted.json"),
                 {
@@ -79,11 +126,12 @@ class IndependentTests(unittest.TestCase):
                 },
             )
             receipt = save(
-                self.root / (label + "-receipt.json"),
+                call_root / "settled.json",
                 {
                     "call_sha256": call.fingerprint(),
                     "original_review": accepted,
                     "candidate": candidate,
+                    "request": request,
                 },
             )
             result = OwnerResult(
@@ -172,6 +220,62 @@ class IndependentTests(unittest.TestCase):
             selection=self.selection,
             native_judge=judge,
         )
+
+    def change_candidate_environment(self, kind):
+        root = self.root / "candidate"
+        row = self.rows["candidate"]
+        binding = json.loads((root / "binding.json").read_text())
+        request = json.loads((root / "request.json").read_text())
+        envelope = json.loads((root / "envelope.json").read_text())
+        intent = json.loads((root / "operation-0000/intent.json").read_text())
+        receipt_path = Path(row["result"]["receipt_path"])
+        receipt = json.loads(receipt_path.read_text())
+        candidate_path = Path(receipt["candidate"]["path"])
+        candidate = json.loads(candidate_path.read_text())
+        accepted_path = Path(receipt["original_review"]["path"])
+        accepted = json.loads(accepted_path.read_text())
+        if kind in {"profile", "noodle"}:
+            changed = save(self.root / ("different-" + kind + ".json"), {"different_fixture": kind})
+            binding["template"][kind] = changed
+            request[kind] = changed["path"]
+            envelope[kind] = changed
+        elif kind == "timeout":
+            row["call"]["inputs"]["timeout_s"] = 120
+            fingerprint = OwnerCall(**row["call"]).fingerprint()
+            row["input_sha256"] = binding["call_sha256"] = receipt["call_sha256"] = fingerprint
+        elif kind == "fixed_assets":
+            changed = self.root / "different-assets"
+            changed.mkdir()
+            (changed / "example.html").write_text("different immutable fixture")
+            binding["template"]["skill_bases"]["main"] = tree_ref(changed)
+        else:
+            intent["source_commit"] = "a" * 40
+        (root / "binding.json").write_text(json.dumps(binding))
+        (root / "request.json").write_text(json.dumps(request))
+        (root / "envelope.json").write_text(json.dumps(envelope))
+        intent["request"] = receipt["request"] = reference(root / "request.json")
+        (root / "operation-0000/intent.json").write_text(json.dumps(intent))
+        candidate["task_envelope"] = reference(root / "envelope.json")
+        candidate_path.write_text(json.dumps(candidate))
+        receipt["candidate"] = reference(candidate_path)
+        accepted["inner"]["review_progress"]["review"]["candidate"] = receipt["candidate"]
+        accepted_path.write_text(json.dumps(accepted))
+        receipt["original_review"] = reference(accepted_path)
+        receipt_path.write_text(json.dumps(receipt))
+        row["result"]["receipt_sha256"] = reference(receipt_path)["sha256"]
+        self.journal = save(self.root / ("journal-" + kind + ".json"), {"paid_limit_usd": "5", "calls": self.rows})
+        self.selection["journal"] = self.journal
+
+    def test_pair_requires_same_original_execution_environment(self):
+        self.assertEqual(self.compare("normal")["quality_non_regression"], "PASS")
+        for kind in ("profile", "noodle", "timeout", "fixed_assets", "cli_source"):
+            with self.subTest(kind=kind):
+                fixture = IndependentTests()
+                fixture.setUp()
+                self.addCleanup(fixture.doCleanups)
+                fixture.change_candidate_environment(kind)
+                with self.assertRaisesRegex(Refused, "paired execution environment differs"):
+                    fixture.compare("changed-environment")
 
     def test_native_judge_loader_requires_the_original_prepared_source(self):
         import reproduce

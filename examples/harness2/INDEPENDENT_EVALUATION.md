@@ -35,6 +35,12 @@ All references are exact `{path, sha256}` FileRefs; tree references use the exis
 settled solver. Safe delivery must have original `approve`, `locally_integrated`, acceptance
 PASS, and the exact retained output/receipt hashes. That acceptance is not benchmark quality.
 
+Pairing also requires identical original timeout, Noodle/profile FileRefs, immutable skill
+bases, skill aliases, output scope and acceptance criteria, plus the original CLI source
+commit/closure, Python binary and entrypoint. These bindings are rechecked against the
+original request and captured execution envelope. Different control roots, request paths,
+and session identities are expected and are not compared as execution configuration.
+
 Evaluator report v1:
 
 ```json

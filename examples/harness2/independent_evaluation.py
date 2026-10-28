@@ -19,7 +19,7 @@ from openrouter_billing import (
     verify_settlement,
 )
 from owner_contract import OwnerCall, OwnerResult, money, tree_ref
-from soodles_bridge import decode, read_ref, require
+from soodles_bridge import decode, read_ref, reference, require
 
 
 def load_native_judge(upstream):
@@ -223,6 +223,69 @@ def selected_harnesses(selection):
     return result
 
 
+def execution_binding(call, result):
+    """Compare immutable execution inputs while allowing distinct owner control roots."""
+    root = Path(result.run_dir).parent
+    binding_ref = reference(root / "binding.json")
+    binding = decode(read_ref(binding_ref))
+    require(binding["call_sha256"] == call.fingerprint(), "execution binding belongs to another call")
+    template = binding["template"]
+    receipt = decode(read_ref({"path": result.receipt_path, "sha256": result.receipt_sha256}))
+    request = decode(read_ref(receipt["request"]))
+    intent_ref = reference(root / "operation-0000/intent.json")
+    intent = decode(read_ref(intent_ref))
+    require(intent["request"] == receipt["request"], "original CLI request binding differs")
+    candidate = decode(read_ref(receipt["candidate"]))
+    envelope = decode(read_ref(candidate["task_envelope"]))
+    require(
+        envelope["runtime"] == "openshell"
+        and envelope["provider"] == call.provider
+        and envelope["model"] == call.model
+        and envelope["model_reasoning_effort"] == call.inputs["effort"],
+        "original execution route differs from paired call",
+    )
+    for key in ("noodle", "profile"):
+        read_ref(template[key])
+        require(
+            envelope[key] == template[key] and request[key] == template[key]["path"],
+            "original execution source differs from template",
+        )
+    for base in template["skill_bases"].values():
+        require(tree_ref(base["path"]) == base, "fixed skill assets changed")
+    read_ref(intent["python"])
+    for source in intent["sources"]:
+        read_ref(source)
+    command = intent["argv"]
+    require(
+        len(command) >= 5
+        and command[0] == intent["python"]["path"]
+        and command[1] == "-B"
+        and command[2] in {source["path"] for source in intent["sources"]}
+        and command[3:5] == ["loop", "enter"],
+        "original CLI entrypoint differs from source closure",
+    )
+    timeout = call.inputs["timeout_s"]
+    require(
+        type(timeout) in (int, float) and math.isfinite(timeout) and timeout > 0, "paired call timeout is unavailable"
+    )
+    environment = {
+        key: template[key]
+        for key in ("noodle", "profile", "skill_bases", "harness_skills", "write_paths", "acceptance", "deliverables")
+    }
+    environment.update(
+        timeout_s=timeout,
+        cli_source_commit=intent["source_commit"],
+        cli_python=intent["python"],
+        cli_command=command[:3],
+        cli_sources=sorted(intent["sources"], key=lambda ref: ref["path"]),
+    )
+    return environment, {
+        "binding": binding_ref,
+        "original_cli_intent": intent_ref,
+        "envelope": candidate["task_envelope"],
+    }
+
+
 def judge_pair(*, rubric, baseline, candidate, selection, native_judge):
     """Invoke pinned core.judge.judge_one after selection; return no adoption authority."""
     chosen = selected_harnesses(selection)  # Freeze native selection before reading any evaluator report.
@@ -244,6 +307,9 @@ def judge_pair(*, rubric, baseline, candidate, selection, native_judge):
         and new_call.inputs["harness"]["sha256"] == chosen["candidate"]["sha256"],
         "evaluated harness differs from native baseline or final selection",
     )
+    old_environment, old_evidence = execution_binding(old_call, old_result)
+    new_environment, new_evidence = execution_binding(new_call, new_result)
+    require(old_environment == new_environment, "paired execution environment differs")
     adapter = IndependentReviewAdapter(rubric, [baseline, candidate])
     rows = [
         native_judge.judge_one(
@@ -277,6 +343,8 @@ def judge_pair(*, rubric, baseline, candidate, selection, native_judge):
         "group": old_call.group,
         "task_id": old_call.inputs["task_id"],
         "native_judgments": [row.__dict__ for row in rows],
+        "paired_environment": old_environment,
+        "environment_evidence": {"baseline": old_evidence, "candidate": new_evidence},
         "selection": selection,
         "sample_pairs": 1,
         "generalization": "one fixed case; no statistical population claim",
