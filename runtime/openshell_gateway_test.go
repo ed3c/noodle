@@ -122,6 +122,13 @@ func TestManagedOpenShellGatewayChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	g, native := custodyServer(t)
+	if _, err := os.Stat(filepath.Join(root, "completion-observation")); err == nil {
+		g.afterCreate = func() {
+			for _, sandbox := range g.sandboxes {
+				sandbox.Status.MainProcessInstanceId = "original-main"
+			}
+		}
+	}
 	nativeList, nativeGet := native.list, native.get
 	native.list = func(ctx context.Context, req *pb.ListSandboxesRequest) (*pb.ListSandboxesResponse, error) {
 		server.event("list")
