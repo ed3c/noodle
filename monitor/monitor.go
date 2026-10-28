@@ -69,7 +69,13 @@ func (m *Monitor) RunOnce(ctx context.Context) ([]SessionMeta, error) {
 		}
 
 		meta := DeriveSessionMeta(sessionID, observation, claims, previous, now)
-		if err := writeSessionMeta(sessionMetaPath(m.runtimeDir, sessionID), meta); err != nil {
+		stable := meta
+		stable.UpdatedAt, stable.IdleSeconds = previous.UpdatedAt, previous.IdleSeconds
+		if !meta.Alive && !meta.ExitPending && stable == previous {
+			// A finished session's ticking display fields are not new evidence.
+			// Keep observing it so late claims or changed liveness still publish.
+			meta = previous
+		} else if err := writeSessionMeta(sessionMetaPath(m.runtimeDir, sessionID), meta); err != nil {
 			return nil, fmt.Errorf("write meta for %s: %w", sessionID, err)
 		}
 		metas = append(metas, meta)

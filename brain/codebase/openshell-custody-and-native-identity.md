@@ -49,3 +49,9 @@ See also [[codebase/owned-worker-exit-and-recovery-evidence]] and [[codebase/run
 - A completion reader must compare the persisted command against a SHA-256 of the original custody owner's in-memory command. Matching only native request/attempt IDs would let edited disk argv invent verifier execution. Return the digest, never command environment values.
 - Missing manifest/mapping cannot downgrade a verified execution into a bare harness execution. The original command must either bind the exact verifier/order/manifest or directly select the configured bare harness. Recheck transported manifest/files/modes and bounded mapping/input refs around completion readback.
 - Test mock Terminate only requests termination; it does not close Done. Watcher cleanup tests must use the existing mock completion signal before waiting, just as real cleanup must wait for original native completion.
+
+## Terminal projection stability
+
+- The monitor previously rewrote terminal `meta.json` every poll solely for `updated_at` and `idle_seconds`. A source-bound completion readback could correctly refuse even after VM shutdown and clean publication, because this display churn raced its evidence hashes.
+- Keep terminal metadata bytes unchanged when every substantive observation/claim field is unchanged. Continue observing and publish late cost/log/claim changes or renewed liveness; never freeze a still-alive or exit-pending session merely because a completion event exists.
+- A diagnostic direct readback is not a substitute for the outer owner accepting its own full packet. Retain transient refusals; any bounded read-only re-observation must preserve all owner, command, source and native-stop checks and must not dispatch another model attempt.
