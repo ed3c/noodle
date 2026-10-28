@@ -36,4 +36,8 @@ Use `setupTestRepo()` which includes robust cleanup (`git worktree prune`, remov
 
 Use dasherized names (`order-stage-task`, e.g. `todo-4-0-execute`) for both branch and `.worktrees/` directory safety.
 
+## Verify Go build metadata in an App linked checkout
+
+The observed Go 1.26.1 VCS discovery skipped a linked checkout's `.git` file and found an ancestor repository instead. A successful `pnpm build` then lacked the intended revision. For that build only, bind `GIT_DIR` to the verified linked metadata directory and `GIT_WORK_TREE` to its checkout. Require `go version -m` to report the exact source commit and `vcs.modified=false` before freezing the binary. Do not carry these Git selectors into Host, worker or task environments.
+
 See also [[principles/fix-root-causes]], [[principles/encode-lessons-in-structure]], [[principles/serialize-shared-state-mutations]], [[codebase/adopted-session-reconciliation]]
