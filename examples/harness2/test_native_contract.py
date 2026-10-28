@@ -124,6 +124,83 @@ class NativeContractTests(unittest.TestCase):
         self.assertTrue(all(r["result"]["cost_usd"] is None for r in subscription))
         self.assertEqual(str(self.gate._spent()), "0.07")
 
+    def test_unstarted_paid_group_keeps_refusal_and_reuses_original_native_namespace(self):
+        import types
+
+        from group_continuation import prepare_group_continuation
+        from harness2.core import schedule
+        from soodles_bridge import decode, read_ref
+
+        output = self.root / 'continuation-layout'
+        output.mkdir()
+        codex = self.adapter('codex')
+        codex.spec = replace(codex.spec, runs_root=output / 'codex')
+        run_native_task(codex, 'records', experiment_id='original/codex')
+        preserved = tree_ref(output / 'codex')
+        pi = self.adapter('pi')
+        pi.spec = replace(pi.spec, runs_root=output / 'pi')
+        empty_root = self.root / 'bridge'
+        empty_root.mkdir()
+        calls = []
+
+        class BeforeOwnerRefusal:
+            def execute(_, call):
+                calls.append(call)
+                (empty_root / call.fingerprint()).mkdir()
+                raise Refused('task template belongs to another call route')
+
+        self.gate.owner = BeforeOwnerRefusal()
+        failed = run_native_task(pi, 'records', experiment_id='original/pi')
+        self.assertEqual(failed['native_result']['status'], 'base-failed')
+        self.assertEqual(len(calls), 1)
+        expected = calls[0]
+        old_row = next(row for row in self.gate.state['calls'].values() if row['call']['group'] == 'pi')
+        frozen_row = json.loads(json.dumps(old_row))
+        adapters = []
+        for adapter in (codex, pi):
+            bundle = types.SimpleNamespace(task_id='records', prompt=adapter.task_prompt('records'),
+                source=tree_ref(adapter.task_files('records')))
+            adapters.append((adapter.route, bundle, adapter))
+        bridge = types.SimpleNamespace(root=empty_root, restore_templates=lambda rows: None,
+                                       template_for=lambda call: None)
+        config = {'output_root': str(output)}
+        empty_call = empty_root / expected.fingerprint()
+        (empty_call / 'request.json').write_text('{}')
+        with self.assertRaises(Refused):
+            prepare_group_continuation(config, adapters, bridge, self.gate, 'pi', schedule)
+        (empty_call / 'request.json').unlink()
+        old_row['state'] = 'unknown'
+        with self.assertRaises(Refused):
+            prepare_group_continuation(config, adapters, bridge, self.gate, 'pi', schedule)
+        old_row['state'] = 'refused'
+        self.gate.state['calls']['extra-fixture-dependency'] = {**old_row, 'call': {**old_row['call'], 'run_id': 'dependent'}}
+        with self.assertRaises(Refused):
+            prepare_group_continuation(config, adapters, bridge, self.gate, 'pi', schedule)
+        del self.gate.state['calls']['extra-fixture-dependency']
+        selected, proof_ref, protected = prepare_group_continuation(config, adapters, bridge, self.gate, 'pi', schedule)
+        self.assertEqual([row[0].group for row in selected], ['pi'])
+        proof = decode(read_ref(proof_ref))
+        self.assertEqual(decode(read_ref(proof['prior_journal']))['calls'], self.gate.state['calls'])
+        self.assertEqual(list(Path(proof['saved_empty_call']['path']).iterdir()), [])
+        self.assertEqual(old_row, frozen_row)  # permission alone never rewrites the refusal
+        self.gate.owner = self.owner
+        with self.assertRaises(Refused):
+            self.gate.execute(replace(expected, inputs={**expected.inputs, 'prompt': 'different'}))
+        resumed = run_native_task(pi, 'records', experiment_id='original/pi')
+        self.assertEqual(resumed['native_result']['status'], 'ok', resumed)
+        self.assertEqual(resumed['native_result']['modes']['seq']['fell_back'], [])
+        paid_calls = [call for call in self.owner.calls if call.provider == 'pi']
+        self.assertEqual(len(paid_calls), 7)
+        self.assertEqual(sum(call.run_id == expected.run_id for call in paid_calls), 1)
+        row = next(row for row in self.gate.state['calls'].values() if row['call']['run_id'] == expected.run_id)
+        self.assertEqual(row['first_dispatch_reconciliation']['prior_row'], frozen_row)
+        self.assertEqual(row['started_unix_s'], frozen_row['started_unix_s'])
+        self.assertEqual(tree_ref(output / 'codex'), preserved)
+        for original in protected:
+            self.assertEqual(tree_ref(original['path']), original)
+        with self.assertRaises(Refused):
+            self.gate.authorize_first_dispatch(expected, proof_ref)
+
     def test_trajectory_bounds_each_text_but_retains_late_events_and_fields(self):
         adapter = self.adapter()
         self.owner.trace_events = [

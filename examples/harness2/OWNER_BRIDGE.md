@@ -184,3 +184,28 @@ Native experiment elapsed time uses the earliest original journal call start thr
 settlement, including review/repair downtime. Driver-segment time is reported separately.
 Whole workflow timing still needs Stage A and independent evaluation; missing terminal clocks
 remain null. This entry does not turn subscription billing or unknown effects into zero.
+
+## Continuing the unstarted paid group
+
+`experiment_driver.continue_unstarted_group(config, review_callback, "pi")` is an explicit
+entry after the previous driver has exited. It requires all existing calls settled or
+effect-free refused, no unknown/native or paid block, and a completed original selection
+for the other group. It never invokes the other group's native scheduler. Its native tree
+is hash-bound before and after; the report keeps its actual solver/proposer counts and
+refused calls, so an INV fallback cannot be reported as all requested model proposals done.
+
+The Pi group must either have no journal/native evidence, or exactly its original baseline
+refused by the old `task template belongs to another call route` preflight. In that narrow
+case, the original call directory must be empty, with no request, binding, operation, or
+billing evidence; native state must be only a failed first baseline. Any downstream call,
+changed input, partial owner intent, unknown effect or different refusal blocks this entry.
+The original journal and failed native tree are archived; the empty directory is preserved.
+An explicit in-process permission allows the original native core to dispatch that exact
+baseline fingerprint once. The row retains its prior refusal and original clock, and a
+pending intent is persisted before the first actual owner call. No new native namespace,
+owner attempt identity, or paid allowance is created. A lost response still closes the gate.
+
+The driver then runs only the original Pi namespace with unused matching templates and the
+same shared journal/budget. It writes a separate continuation report; existing final reports
+are not overwritten. This is not a way to rerun a refused INV after its fallback was already
+used downstream. Such Codex history remains unchanged and visible.

@@ -109,6 +109,7 @@ class SharedGate:
         self.journal = Path(journal)
         self.owner = owner
         self.lock = threading.RLock()
+        self._first_dispatch = None
         initial = str(money(initial_paid_spent_usd))
         self.state = {"version": 1, "paid_limit_usd": "5", "initial_paid_spent_usd": initial,
                       "blocked": "", "paid_blocked": "", "calls": {}}
@@ -276,6 +277,28 @@ class SharedGate:
                 self.state["blocked"] = "original recovery persistence is unresolved"
                 raise UnknownEffect(self.state["blocked"]) from exc
 
+    def authorize_first_dispatch(self, call, proof_ref):
+        """One explicit in-process permission for a proven effect-free baseline refusal."""
+        from soodles_bridge import decode, read_ref
+        with self.lock:
+            proof = decode(read_ref(proof_ref))
+            rows = [row for row in self.state['calls'].values() if row['call']['group'] == call.group]
+            if (self._first_dispatch is not None or self.state['blocked'] or self.state['paid_blocked']
+                    or any(row['state'] not in {'settled', 'refused'} for row in self.state['calls'].values())
+                    or len(rows) != 1 or rows[0]['state'] != 'refused'
+                    or rows[0].get('error') != 'task template belongs to another call route'
+                    or rows[0]['input_sha256'] != call.fingerprint() or call.role != 'solver'
+                    or proof.get('kind') != 'unstarted-group-first-dispatch'
+                    or proof.get('call_sha256') != call.fingerprint()
+                    or read_ref(proof['prior_journal']) != self.journal.read_bytes()
+                    or tree_ref(proof['saved_native']['path']) != proof['saved_native']
+                    or tree_ref(proof['original_native']['path']) != proof['original_native']
+                    or proof['saved_native']['sha256'] != proof['original_native']['sha256']
+                    or tree_ref(proof['saved_empty_call']['path']) != proof['saved_empty_call']
+                    or any(Path(proof['saved_empty_call']['path']).iterdir())):
+                raise Refused('original group has no proven effect-free first dispatch')
+            self._first_dispatch = (call.fingerprint(), proof_ref)
+
     def execute(self, call: OwnerCall) -> OwnerResult:
         with self.lock:
             if self.owner is None:
@@ -294,19 +317,27 @@ class SharedGate:
             key = json.dumps([call.group, call.run_id])
             digest = call.fingerprint()
             prior = self.state["calls"].get(key)
+            first_dispatch = None
             if prior is not None:
                 if prior["input_sha256"] != digest:
                     raise Refused("run id already binds different input")
-                if prior["state"] != "settled":
+                if prior['state'] == 'settled':
+                    result = OwnerResult(**prior['result'])
+                    try:
+                        self.verify_result(result, call)
+                    except UnknownEffect:
+                        self.state['blocked'] = 'original settled owner evidence changed'
+                        self._save()
+                        raise
+                    return replace(result, cached=True)
+                if self._first_dispatch is None or self._first_dispatch[0] != digest:
                     raise Refused("original call has no settled reusable result")
-                result = OwnerResult(**prior["result"])
-                try:
-                    self.verify_result(result, call)
-                except UnknownEffect:
-                    self.state["blocked"] = "original settled owner evidence changed"
-                    self._save()
-                    raise
-                return replace(result, cached=True)
+                from soodles_bridge import decode, read_ref
+                first_dispatch = self._first_dispatch[1]
+                proof = decode(read_ref(first_dispatch))
+                if read_ref(proof['prior_journal']) != self.journal.read_bytes():
+                    raise Refused('original journal changed before first dispatch')
+                self._first_dispatch = None
             reserve = None
             if call.provider == "pi":
                 if self.state["paid_blocked"]:
@@ -320,6 +351,10 @@ class SharedGate:
             row = {"input_sha256": digest, "call": asdict(call), "provider": call.provider, "role": call.role,
                    "state": "pending", "reserved_usd": str(reserve) if reserve is not None else None,
                    "started_unix_s": time.time(), "elapsed_s": None, "result": None}
+            if first_dispatch is not None:
+                row['started_unix_s'] = prior['started_unix_s']
+                row['first_dispatch_reconciliation'] = {'prior_row': prior, 'evidence': first_dispatch,
+                    'dispatch_started_unix_s': time.time()}
             self.state["calls"][key] = row
             started = time.monotonic()
             try:

@@ -128,11 +128,16 @@ def resume_experiment(config: dict, review_callback, call_ref: dict, fresh_obser
     return _run_experiment(config, review_callback, call_ref=call_ref, fresh_observation=fresh_observation)
 
 
+def continue_unstarted_group(config: dict, review_callback, group: str):
+    """After the prior driver exits, run only an original group with no owner effects."""
+    return _run_experiment(config, review_callback, continue_group=group)
+
+
 def run_experiment(config: dict, review_callback):
     return _run_experiment(config, review_callback)
 
 
-def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_observation=None):
+def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_observation=None, continue_group=None):
     """Run actual pinned k=1/seq; Session supplies original Soodles semantic review.
 
     Calling this function authorizes its configured owner calls. Importing/preparing
@@ -151,7 +156,8 @@ def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_obser
             'imported native core differs from the pinned source')
 
     output = Path(config['output_root'])
-    if fresh_observation is None:
+    reopening = fresh_observation is not None or continue_group is not None
+    if not reopening:
         output.mkdir(parents=True, exist_ok=False)
     else:
         require(output.is_dir() and (output / 'owner-journal.json').is_file(), 'original experiment is missing')
@@ -167,7 +173,7 @@ def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_obser
     cli = PinnedCLI(**config['cli'])
     templates = [RequestTemplate(**value) for value in config['templates']]
     bridge = SoodlesOwnerBridge(cli, output / 'owner', templates, review=review_callback, billing=billing,
-                                poll_s=config['poll_s'], reopen=fresh_observation is not None)
+                                poll_s=config['poll_s'], reopen=reopening)
     gate = SharedGate(output / 'owner-journal.json', bridge,
                       initial_paid_spent_usd=config['initial_paid_spent_usd'])
     groups, adapters, started = [], [], time.monotonic()
@@ -192,6 +198,12 @@ def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_obser
         adapters.append((route, bundle, adapter))
     cli.verify()
     reconciliation_id = None
+    continuation_ref, protected = None, []
+    if continue_group is not None:
+        from group_continuation import prepare_group_continuation
+        adapters, continuation_ref, protected = prepare_group_continuation(
+            config, adapters, bridge, gate, continue_group, schedule)
+        reconciliation_id = 'first-dispatch-' + continue_group
     if fresh_observation is not None:
         call = OwnerCall(**decode(read_ref(call_ref)))
         unresolved = [row for row in gate.state['calls'].values() if row['state'] in {'pending', 'unknown'}]
@@ -239,7 +251,11 @@ def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_obser
         require(not gate.state['blocked'] and not gate.state['paid_blocked'], 'original owner or paid gate is blocked')
         require(not any(row['provider'] == 'pi' and row.get('result') and row['result']['cost_usd'] is None
                         for row in gate.state['calls'].values()), 'original paid bill needs same-call reconciliation')
-    return save(output / 'experiment.json', {'schema_version': 1, 'groups': groups,
+    for original in protected:
+        require(tree_ref(original['path']) == original, 'prior native group changed during continuation')
+    report_name = 'experiment-continuation-' + continue_group + '.json' if continue_group else 'experiment.json'
+    return save(output / report_name, {'schema_version': 1, 'groups': groups,
+        'continuation': continuation_ref,
         'owner_journal': reference(gate.journal), 'optimization_elapsed_s': journal_elapsed(gate.state),
         'driver_segment_elapsed_s': time.monotonic() - started,
         'whole_workflow_cost_usd': None, 'whole_workflow_wall_s': None,
