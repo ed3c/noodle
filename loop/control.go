@@ -426,10 +426,10 @@ func (l *Loop) controlStop(name string) error {
 	return fmt.Errorf("session not found")
 }
 
-// controlStopKill is the fallback for non-steerable sessions: kill the process
-// and clean up the cook.
+// controlStopKill requests termination of a non-steerable session. OpenShell
+// retains its watcher and worktree until native VM termination is confirmed.
 func (l *Loop) controlStopKill(cook *cookHandle) error {
-	if l.retainTaskData(cook.orderID) {
+	if l.retainTaskData(cook.orderID) || cook.dispatchedRuntime == "openshell" {
 		if err := l.controlPause(); err != nil {
 			return err
 		}
