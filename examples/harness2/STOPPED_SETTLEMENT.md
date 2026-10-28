@@ -19,9 +19,11 @@ The migration is the Soodles `stopped-original-task-integration` schema. It
 binds the original request/candidate, actual Noodle stopped reconciliation,
 original capture, verified closure, native offline reader and new Soodles
 reader sources. New evidence is saved under
-`CALL/stopped-settlement-<migration-sha>/`; original operations, result tree,
+`CALL/stopped-settlement-<migration-sha>-<unique>/`; original operations, result tree,
 failed native cache and unknown journal remain untouched. Reconciliation
 archives the previous journal and adds its full prior row to history.
+Each explicit read gets a new evidence directory; an earlier refused read or
+timeout is retained. This does not automatically retry the reader or model.
 
 Without a verified original billing receipt, cost/time remain null and the
 paid hold remains reserved. A receipt may settle the original bill through the

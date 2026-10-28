@@ -6,6 +6,7 @@ constructs RequestTemplate or adds defaults to an original serialized binding.
 import json
 import os
 import subprocess
+import tempfile
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -110,8 +111,7 @@ reader. This function only rechecks it and settles the existing unknown row.
     row = gate.state['calls'].get(key)
     require(row and row['state'] == 'unknown' and row['input_sha256'] == call.fingerprint(),
             'original call is not awaiting explicit reconciliation')
-    evidence = directory / ('stopped-settlement-' + migration_ref['sha256'])
-    evidence.mkdir()
+    evidence = Path(tempfile.mkdtemp(prefix='stopped-settlement-' + migration_ref['sha256'] + '-', dir=directory))
     output = evidence / 'readback.json'
     command = reader_command(migration, migration_ref, request, output)
     intent = save(evidence / 'intent.json', {'argv': command, 'migration': migration_ref,

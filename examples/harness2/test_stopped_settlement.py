@@ -105,6 +105,25 @@ class StoppedSettlementTests(unittest.TestCase):
         self.assertEqual(next(iter(self.gate.state['calls'].values()))['reserved_usd'], reserved)
         self.assertEqual(self.cli.calls, self.calls)
 
+    def test_explicit_read_after_refusal_preserves_both_observations(self):
+        def refused(command, **kwargs):
+            kwargs['stderr'].write(b'fixture terminal reader refused; no owner effect\n')
+            return subprocess.CompletedProcess(command, 2)
+
+        with patch('stopped_settlement.subprocess.run', side_effect=refused):
+            with self.assertRaisesRegex(Refused, 'validated integration observation'):
+                settle_stopped_call(self.bridge, self.gate, self.fixture.call, self.migration_ref)
+        first = list(self.directory.glob('stopped-settlement-*'))
+        self.assertEqual(len(first), 1)
+        first_receipt = reference(first[0] / 'receipt.json')
+        self.assertEqual(decode(read_ref(first_receipt))['exit_code'], 2)
+        self.assertEqual(self.gate.journal.read_bytes(), self.before)
+        with patch('stopped_settlement.subprocess.run', side_effect=self.reader):
+            settle_stopped_call(self.bridge, self.gate, self.fixture.call, self.migration_ref)
+        self.assertEqual(len(list(self.directory.glob('stopped-settlement-*'))), 2)
+        self.assertEqual(reference(first[0] / 'receipt.json'), first_receipt)
+        self.assertEqual(self.cli.calls, self.calls)
+
     def test_incomplete_acceptance_keeps_unknown_and_never_reenters_owner(self):
         self.observation['inner']['acceptance'] = 'UNKNOWN'
         with patch('stopped_settlement.subprocess.run', side_effect=self.reader):
