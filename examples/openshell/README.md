@@ -87,3 +87,14 @@ shutdown needs to stop admitting refreshes and drain admitted transactions to
 provide a complete guarantee. See the pinned native
 [shutdown path](https://github.com/NVIDIA/OpenShell/blob/v0.1.5/crates/openshell-server/src/lib.rs#L1013)
 and [refresh worker](https://github.com/NVIDIA/OpenShell/blob/v0.1.5/crates/openshell-server/src/provider_refresh.rs#L2229).
+
+## Local task candidate review
+
+`host task review-capabilities` advertises `openshell_local_task_review: 1`
+for admitted single-stage `local-task` Codex/Pi candidates. Bound merge and
+request-changes require the original runtime's published clean candidate, native
+exit success, stop acknowledgement and fresh matching stopped VM evidence.
+A missing original owner or changed candidate refuses review. Explicit requeue
+starts a new session and retains prior attempt evidence; native session resume
+and damaged-candidate merge restoration are not supported for this runtime.
+This capability does not establish Soodles input materialization or capture.

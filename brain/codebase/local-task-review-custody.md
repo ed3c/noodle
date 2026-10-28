@@ -1,9 +1,10 @@
 # Local task review custody
 
-Local tasks use terminal native process evidence. They do not produce the Issue
+Local tasks use terminal evidence from their original runtime. They do not produce the Issue
 `stage_message` contract. `loop/local_task_review.go` accepts this path only for
-an admitted order with one `local-task` Codex process stage and a matching original
-initial-admission record. Other tasks retain the typed outcome check.
+an admitted order with one `local-task` stage and a matching original
+initial-admission record. Supported routes are Codex/process and Codex or Pi/OpenShell.
+Other tasks retain the typed outcome check.
 
 Request-changes retains the original attempt, worktree bytes, index and native
 session files. `recover-local-task-review` repairs the older failed-order path
@@ -88,3 +89,13 @@ readback of sealed custody must not reopen dispatch or erase initialization.
 The managed-child TLS fixture transfers the issuing CA, not the client leaf,
 to its trust pool. Installed macOS VM-driver probes also require a short Unix
 socket path; validate the prepared path before starting the original child.
+
+OpenShell review requires the original runtime completion reader: published clean
+candidate HEAD, successful native execution, original VM/main identity, stop ACK,
+fresh Stopped observation and unchanged evidence sources. A missing gateway is
+unknown; host process absence is not a substitute. Damaged-candidate merge
+restoration remains unsupported for OpenShell and refuses before effects.
+Explicit request-changes/requeue preserves prior attempts and starts a new
+OpenShell session; process-only native continuation must not be inferred for it.
+Tests in `loop/local_task_openshell_test.go` exercise both harnesses and refusal
+without process.json. They do not prove Soodles outer-loop integration.

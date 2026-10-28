@@ -10,7 +10,7 @@ import (
 
 // Canonical attempts select the predecessor; shared worktree names do not.
 func (l *Loop) resumeTaskSessionID(cand dispatchCandidate, attempt int) (string, error) {
-	if !l.retainTaskData(cand.OrderID) || cand.Stage.Provider != "codex" || attempt == 0 {
+	if !l.retainTaskData(cand.OrderID) || cand.Stage.Provider != "codex" || nonEmpty(cand.Stage.Runtime, "process") != "process" || attempt == 0 {
 		return "", nil
 	}
 	order, ok := l.canonical.Orders[cand.OrderID]
@@ -21,7 +21,7 @@ func (l *Loop) resumeTaskSessionID(cand dispatchCandidate, attempt int) (string,
 }
 
 func (l *Loop) resumeTaskPredecessor(cand dispatchCandidate, attempt int) (string, error) {
-	if !l.retainTaskData(cand.OrderID) || cand.Stage.Provider != "codex" || attempt == 0 {
+	if !l.retainTaskData(cand.OrderID) || cand.Stage.Provider != "codex" || nonEmpty(cand.Stage.Runtime, "process") != "process" || attempt == 0 {
 		return "", nil
 	}
 	order, ok := l.canonical.Orders[cand.OrderID]

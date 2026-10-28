@@ -15,6 +15,10 @@ func localTaskReviewFixture(t *testing.T) (*Loop, *cookHandle, ControlCommand) {
 }
 
 func localTaskReviewFixturePaths(t *testing.T, scope, name string) (*Loop, *cookHandle, ControlCommand) {
+	return localTaskReviewFixtureRoute(t, scope, name, "process", "codex")
+}
+
+func localTaskReviewFixtureRoute(t *testing.T, scope, name, runtimeName, provider string) (*Loop, *cookHandle, ControlCommand) {
 	t.Helper()
 	l, _, cook := newTypedOutcomeTestLoop(t)
 	l.config.Agents.Codex.RequireTypedOutcome = false
@@ -23,7 +27,10 @@ func localTaskReviewFixturePaths(t *testing.T, scope, name string) (*Loop, *cook
 	if err != nil {
 		t.Fatal(err)
 	}
-	cook.stage = Stage{TaskKey: "local-task", Skill: "local-task", Provider: "codex", Model: "gpt-5.4", Runtime: "process", Prompt: string(prompt)}
+	cook.stage = Stage{TaskKey: "local-task", Skill: "local-task", Provider: provider, Model: "selected-model", Runtime: runtimeName, Prompt: string(prompt)}
+	if runtimeName == "process" {
+		cook.stage.Model = "gpt-5.4"
+	}
 	cook.worktreeName = cookBaseName(cook.orderID, 0, "local-task")
 	cook.worktreePath = l.worktreePath(cook.worktreeName)
 	if err := writeOrdersAtomic(l.deps.OrdersFile, OrdersFile{Orders: []Order{{ID: cook.orderID, Status: OrderStatusActive, Stages: []Stage{cook.stage}}}}); err != nil {
@@ -40,6 +47,10 @@ func localTaskReviewFixturePaths(t *testing.T, scope, name string) (*Loop, *cook
 		t.Fatal(err)
 	}
 	requestChangesWrite(t, filepath.Join(cook.worktreePath, name), []byte("reviewed candidate\n"))
+	if runtimeName == "openshell" {
+		runGitInRepo(t, cook.worktreePath, "add", "--", name)
+		runGitInRepo(t, cook.worktreePath, "commit", "-m", "Publish returned candidate")
+	}
 	dir := filepath.Join(l.runtimeDir, "sessions", cook.session.ID())
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -47,9 +58,18 @@ func localTaskReviewFixturePaths(t *testing.T, scope, name string) (*Loop, *cook
 	for name, data := range map[string]string{"events.ndjson": "", "prompt.txt": cook.stage.Prompt} {
 		requestChangesWrite(t, filepath.Join(dir, name), []byte(data))
 	}
-	recoveryWriteJSON(t, filepath.Join(dir, "spawn.json"), map[string]any{"session_id": cook.session.ID(), "worktree_path": cook.worktreePath, "retry_count": 0, "skill": "local-task", "provider": "codex", "model": "gpt-5.4", "runtime": "process"})
-	recoveryWriteJSON(t, filepath.Join(dir, "meta.json"), map[string]any{"session_id": cook.session.ID(), "status": "exited", "alive": false, "provider": "codex", "model": "gpt-5.4", "runtime": "process"})
-	recoveryWriteJSON(t, filepath.Join(dir, "process.json"), map[string]any{"session_id": cook.session.ID(), "pid": 99999999})
+	recoveryWriteJSON(t, filepath.Join(dir, "spawn.json"), map[string]any{"session_id": cook.session.ID(), "worktree_path": cook.worktreePath, "retry_count": 0, "skill": "local-task", "provider": provider, "model": cook.stage.Model, "runtime": runtimeName})
+	recoveryWriteJSON(t, filepath.Join(dir, "meta.json"), map[string]any{"session_id": cook.session.ID(), "status": "exited", "alive": false, "provider": provider, "model": cook.stage.Model, "runtime": runtimeName})
+	if runtimeName == "openshell" {
+		if err := os.MkdirAll(filepath.Join(dir, "delivery"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range recoveryFiles(runtimeName)[4:] {
+			recoveryWriteJSON(t, filepath.Join(dir, name), map[string]any{"fixture": "runtime reader supplies original completion"})
+		}
+	} else {
+		recoveryWriteJSON(t, filepath.Join(dir, "process.json"), map[string]any{"session_id": cook.session.ID(), "pid": 99999999})
+	}
 	if err := l.parkPendingReview(cook, "supervised mode requires merge approval"); err != nil {
 		t.Fatal(err)
 	}

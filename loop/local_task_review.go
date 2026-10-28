@@ -13,7 +13,7 @@ import (
 	"github.com/poteto/noodle/internal/state"
 )
 
-// Local tasks use native process completion, not an Issue stage_message.
+// Local tasks use the selected runtime's completion evidence, not an Issue stage_message.
 func (l *Loop) isAdmittedLocalTask(order state.OrderNode, stage state.StageNode) bool {
 	var prompt struct {
 		Kind       string        `json:"kind"`
@@ -23,8 +23,16 @@ func (l *Loop) isAdmittedLocalTask(order state.OrderNode, stage state.StageNode)
 	}
 	return slices.Contains(l.config.Runtime.AdmittedOrders, order.OrderID) &&
 		len(order.Stages) == 1 && stage.StageIndex == 0 && stage.TaskKey == "local-task" && stage.Skill == "local-task" &&
-		stage.Provider == "codex" && stage.Runtime == "process" && !l.config.Agents.Codex.RequireTypedOutcome &&
+		l.localTaskRoute(stage) &&
 		json.Unmarshal([]byte(stage.Prompt), &prompt) == nil && prompt.Kind == "local_task" && prompt.Goal != "" && (len(prompt.WritePaths) > 0 || prompt.Role != nil)
+}
+
+func (l *Loop) localTaskRoute(stage state.StageNode) bool {
+	if stage.Provider == "codex" && l.config.Agents.Codex.RequireTypedOutcome {
+		return false
+	}
+	return (stage.Runtime == "process" && stage.Provider == "codex") ||
+		(stage.Runtime == "openshell" && (stage.Provider == "codex" || stage.Provider == "pi"))
 }
 
 func (l *Loop) validateLocalTaskSession(order state.OrderNode, stage state.StageNode, b requestChangesBinding) error {

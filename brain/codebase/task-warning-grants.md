@@ -2,7 +2,7 @@
 
 - `host resources grant-warning --request-file PATH --order-id ID` allows one explicitly admitted task launch during stable memory warning; capability `task_warning_grant=1`.
 - This is permission to launch, not additional RAM or a memory limit. The ordinary pressure snapshot stays truthful: warning and effective limit zero.
-- Bind the original Host instance, context, request, binary, configuration path and digest. Read exact config bytes and require the selected order in `runtime.process.admitted_orders`.
+- Bind the original Host instance, context, request, binary, configuration path and digest. Read exact config bytes and require the selected order in `runtime.admitted_orders`.
 - Grant requires three fresh warning samples with zero swapout, no active allocation, and no unresolved resident ownership. Critical, stale, failed, gap and reset samples still block.
 - The grant expires after ten minutes, is consumed once, and never renews on duplicate requests. Detach revokes an unused grant; Host exit discards all grants. A normal launch also consumes a pending grant so a later retry cannot reuse it.
 - Scheduler, bootstrap and resident admission have no task identity and cannot consume grants. Automatic replacement retains the normal pressure gate.

@@ -15,7 +15,6 @@ import (
 	"github.com/poteto/noodle/event"
 	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/orderx"
-	"github.com/poteto/noodle/internal/procx"
 	"github.com/poteto/noodle/internal/reducer"
 	"github.com/poteto/noodle/internal/state"
 )
@@ -89,7 +88,7 @@ func (l *Loop) captureRequestChanges(pending *pendingReviewCook) (requestChanges
 		return b, err
 	}
 	b.Files = make(map[string]string)
-	for _, name := range recoverySessionFiles {
+	for _, name := range recoveryFiles(node.Stages[pending.stageIndex].Runtime) {
 		data, err := os.ReadFile(filepath.Join(l.runtimeDir, "sessions", b.SessionID, name))
 		if err != nil {
 			return b, err
@@ -150,7 +149,7 @@ func (l *Loop) validateRecovery(order state.OrderNode, review state.PendingRevie
 	}
 	dir := filepath.Join(l.runtimeDir, "sessions", b.SessionID)
 	contents := map[string][]byte{}
-	for _, name := range recoverySessionFiles {
+	for _, name := range recoveryFiles(stage.Runtime) {
 		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			return fmt.Errorf("recovery %s: %w", name, err)
@@ -168,19 +167,8 @@ func (l *Loop) validateRecovery(order state.OrderNode, review state.PendingRevie
 	if json.Unmarshal(contents["spawn.json"], &spawn) != nil || spawn.SessionID != b.SessionID || spawn.WorktreePath != b.WorktreePath || spawn.RetryCount != b.Attempt {
 		return fmt.Errorf("recovery spawn identity mismatch")
 	}
-	var process struct {
-		SessionID string `json:"session_id"`
-		PID       int    `json:"pid"`
-	}
-	if json.Unmarshal(contents["process.json"], &process) != nil || process.SessionID != b.SessionID || process.PID <= 0 {
-		return fmt.Errorf("recovery process identity mismatch")
-	}
-	absent, err := procx.ProcessGroupAbsent(process.PID)
-	if err != nil {
+	if err := l.requireRecoveryStopped(order, stage, b, contents["process.json"]); err != nil {
 		return err
-	}
-	if !absent {
-		return fmt.Errorf("recovery prior process/group is live")
 	}
 	cook := &cookHandle{cookIdentity: cookIdentity{orderID: order.OrderID, stageIndex: si}, session: &adoptedSession{id: b.SessionID, status: "completed"}}
 	if l.isAdmittedLocalTask(order, stage) {

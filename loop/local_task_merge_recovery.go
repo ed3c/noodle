@@ -200,6 +200,9 @@ func (l *Loop) controlRecoverLocalTaskMerge(cmd ControlCommand) error {
 		return fmt.Errorf("local task original order differs")
 	}
 	stage := order.Stages[0]
+	if stage.Runtime == "openshell" {
+		return fmt.Errorf("OpenShell merge restoration is unavailable; preserve the original candidate and inspect its owner")
+	}
 	if len(stage.Attempts) == 0 {
 		return fmt.Errorf("local task original attempt missing")
 	}
