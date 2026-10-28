@@ -1,0 +1,50 @@
+--- a/harness2/core/spec.py
++++ b/harness2/core/spec.py
+@@ -30,7 +30,7 @@
+
+ ModelId = str
+
+-CHANNELS = ("claude_cli", "opencode")
++CHANNELS = ("claude_cli", "opencode", "noodle_owner")
+
+
+ @dataclass(frozen=True)
+--- a/harness2/core/proposer.py
++++ b/harness2/core/proposer.py
+@@ -139,6 +139,9 @@
+         `harvest` names a subpath of the session's working directory to copy out before that
+         directory is destroyed -- e.g. "context/harness", which is how an edited tree comes back.
+         """
++
++        if self.spec.kind == "noodle_owner":
++            raise ProposerError("noodle_owner requires an explicit original-owner delegate")
+
+         cache_key = _call_fingerprint(label, mission, system, context_dir)
+         cached = self._cached(label, cache_key, require_workspace=bool(harvest))
+--- a/harness2/core/prompts.py
++++ b/harness2/core/prompts.py
+@@ -629,7 +629,24 @@
+             _surface_part(_SURFACE_CODEX, "# HOW TO MAKE A CHANGE"),
+         ]
+     )
++    owner_surface = (
++        "# WHAT YOU CAN CHANGE\n\n"
++        "Edit only existing AGENTS.md and skills/<name>/SKILL.md files in context/harness. "
++        "These instruction bytes are materialized by the original Noodle owner. "
++        "Keep skill triggers in AGENTS.md. Do not add or remove files. "
++        "Scripts, subagents, hooks, plugins, tools, model/provider selection, credentials, "
++        "budgets, acceptance materials and execution configuration are not editable. "
++        "Edit the files in place and explain the observed reason in <notes>."
++    )
+     return {
++        "noodle-owner": _SurfaceText(
++            surface_md=owner_surface,
++            inv=_INV_TEMPLATE.replace("__LOOP_LEVER__", "instruction in AGENTS.md"),
++            dom=_DOM_TEMPLATE.replace(
++                "__TRIGGER_SENTENCE__", "Keep each existing skill named in AGENTS.md."
++            ),
++            tts_surface=owner_surface,
++        ),
+         "opencode": _SurfaceText(
+             surface_md=_SURFACE_OPENCODE,
+             inv=_INV_TEMPLATE.replace(

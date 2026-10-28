@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "upstream": "google-research/harness2",
+  "commit": "1cfe254e8d25b15f37048c3730134686abe60335",
+  "archive_url": "https://codeload.github.com/google-research/harness2/tar.gz/1cfe254e8d25b15f37048c3730134686abe60335",
+  "archive_sha256": "2337f91b71a130e055d8dfb99ead2667a46087c29df939d4d4f0a3c357b5748f",
+  "patch_sha256": "cbed7e1e86dd90f7e81c1d31c9b55af6deef2ec93ff8d5be15938c58a02f8514",
+  "license": "Apache-2.0",
+  "license_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+  "python": ">=3.12,<3.14"
+}
