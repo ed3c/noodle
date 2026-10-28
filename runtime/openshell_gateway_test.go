@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -138,6 +139,27 @@ func TestManagedOpenShellGatewayChild(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "retained")); err == nil {
 		g.sandboxes["retained"] = custodySandbox("retained", "retained-id", pb.SandboxPhase_SANDBOX_PHASE_STOPPED)
+	}
+	if _, err := os.Stat(filepath.Join(root, "runtime-dispatch")); err == nil {
+		native.exec = func(stream pb.OpenShell_ExecSandboxInteractiveServer) error {
+			if _, err := openShellReceiveStart(stream); err != nil {
+				return err
+			}
+			for {
+				_, err := stream.Recv()
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					return err
+				}
+			}
+			data := []byte("{\"type\":\"thread.started\",\"thread_id\":\"12345678-1234-4234-8234-123456789012\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"done\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}\n")
+			if err := stream.Send(&pb.ExecSandboxEvent{Payload: &pb.ExecSandboxEvent_Stdout{Stdout: &pb.ExecSandboxStdout{Data: data}}}); err != nil {
+				return err
+			}
+			return stream.Send(openShellExit(0))
+		}
 	}
 	server.openShellNativeServer = native
 	grpcServer := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{{Certificate: cfg.ServerCert, PrivateKey: key}}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: ca})))
