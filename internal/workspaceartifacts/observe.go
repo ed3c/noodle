@@ -2,8 +2,11 @@ package workspaceartifacts
 
 import (
 	"context"
+	"crypto/sha1"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
-	"strings"
+	"hash"
 )
 
 // ReadCleanHead observes raw committed bytes without git status/diff, filters,
@@ -37,11 +40,10 @@ func ReadCleanHead(ctx context.Context, target string) (string, error) {
 		if entry.Mode != expected.Mode {
 			return "", fmt.Errorf("candidate worktree mode differs from HEAD at %q", name)
 		}
-		object, err := git(ctx, root, data, "hash-object", "--stdin", "--no-filters")
-		if err != nil {
+		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		if strings.TrimSpace(string(object)) != expected.Object {
+		if !matchesRawBlob(data, expected.Object) {
 			return "", fmt.Errorf("candidate worktree bytes differ from HEAD at %q", name)
 		}
 	}
@@ -60,4 +62,21 @@ func ReadCleanHead(ctx context.Context, target string) (string, error) {
 		return "", fmt.Errorf("candidate HEAD or index changed during readback")
 	}
 	return head, nil
+}
+
+// Git hashes the raw blob header and bytes. Hash locally so observing a large
+// repository does not start a subprocess per file or execute attribute filters.
+func matchesRawBlob(data []byte, expected string) bool {
+	var digest hash.Hash
+	switch len(expected) {
+	case sha1.Size * 2:
+		digest = sha1.New()
+	case sha256.Size * 2:
+		digest = sha256.New()
+	default:
+		return false
+	}
+	fmt.Fprintf(digest, "blob %d\x00", len(data))
+	digest.Write(data)
+	return hex.EncodeToString(digest.Sum(nil)) == expected
 }
