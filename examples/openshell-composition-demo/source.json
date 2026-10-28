@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "scope": "public demonstration preparation, no held-out input",
+  "license": "MIT (repository LICENSE)",
+  "sources": [
+    {
+      "preparation_reference": "diagram-workflow-20261028/component-author/SKILL.md",
+      "sha256": "ff4eb0840546c4b720e7f76a48920b3250adf08fc914307fc5bd220849ab1c6e"
+    },
+    {
+      "preparation_reference": "openshell-progress-deployment/network-policy-demo-plan.json",
+      "sha256": "8e8fa6cd6a5e8b204aee8be71fbe22939f0e24a261ffa553740349db80a87a07"
+    }
+  ],
+  "upstream_repin": false,
+  "live_execution_claim": false
+}
