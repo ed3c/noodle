@@ -2,8 +2,10 @@ package loop
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,6 +115,68 @@ func TestMergeFailureRequiresObservedConflict(t *testing.T) {
 			result := l.effectLedger.All()[0]
 			if result.Status != reducer.EffectLedgerFailed || result.Result == nil || result.Result.Error != "merge interrupted" {
 				t.Fatalf("observed failure was not retained: %+v", result)
+			}
+		})
+	}
+}
+
+func TestUnresolvedMergeRefusesAnotherControlBeforeChangingCanonicalState(t *testing.T) {
+	wt := &fakeWorktree{mergeErr: errors.New("git exited 1 without confirmed conflict")}
+	l := newControlTestLoop(t, wt, newMockRuntime())
+	if err := l.controlMerge("42"); err != nil {
+		t.Fatal(err)
+	}
+	before := l.canonical.Clone()
+	effects := l.effectLedger.All()
+	merges := len(wt.merged)
+	wt.mergeErr = nil
+	if err := l.controlMerge("42"); err == nil || !strings.Contains(err.Error(), "original merge readback required") {
+		t.Fatalf("unresolved original merge allowed another owner: %v", err)
+	}
+	if !reflect.DeepEqual(before, l.canonical) || !reflect.DeepEqual(effects, l.effectLedger.All()) || len(wt.merged) != merges {
+		t.Fatal("refused merge changed original canonical/effect/Git custody")
+	}
+}
+
+func TestNewMergeEffectGuardPreservesOriginalUnknownAndAllowsSettledHistory(t *testing.T) {
+	for _, condition := range []string{"pending", "running", "different-order", "different-stage", "failed", "done"} {
+		t.Run(condition, func(t *testing.T) {
+			l := completedCleanupFixture(t)
+			order, stage := "done", 0
+			if condition == "different-order" {
+				order = "other"
+			}
+			if condition == "different-stage" {
+				stage = 1
+			}
+			payload, err := json.Marshal(map[string]any{"order_id": order, "stage_index": stage})
+			if err != nil {
+				t.Fatal(err)
+			}
+			l.effectLedger.Record(reducer.Effect{EffectID: "original", Type: reducer.EffectMerge, Payload: payload})
+			if condition == "running" || condition == "failed" || condition == "done" {
+				if err := l.effectLedger.MarkRunning("original"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if condition == "failed" {
+				if err := l.effectLedger.MarkFailed("original", reducer.EffectResult{EffectID: "original", Status: reducer.EffectResultFailed, Error: "retained conflict"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if condition == "done" {
+				if err := l.effectLedger.MarkDone("original", reducer.EffectResult{EffectID: "original", Status: reducer.EffectResultCompleted}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := l.effectLedger.All()
+			err = l.validateNewMergeEffects([]reducer.Effect{{EffectID: "new", Type: reducer.EffectMerge, Payload: []byte(`{"order_id":"done","stage_index":0}`)}})
+			blocked := condition == "pending" || condition == "running"
+			if (err != nil) != blocked {
+				t.Fatalf("blocked=%v error=%v", blocked, err)
+			}
+			if !reflect.DeepEqual(before, l.effectLedger.All()) {
+				t.Fatal("guard rewrote historical effects")
 			}
 		})
 	}

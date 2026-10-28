@@ -23,6 +23,9 @@ func (l *Loop) controlMerge(orderID string) error {
 		return err
 	}
 
+	if err := l.requireSettledMergeEffects(orderID, pending.stageIndex); err != nil {
+		return err
+	}
 	order := l.canonical.Orders[orderID]
 	localTask := len(order.Stages) == 1 && l.isAdmittedLocalTask(order, order.Stages[0])
 	if localTask && len(order.Stages[0].Extra[localTaskMergeKey]) == 0 {

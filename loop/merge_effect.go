@@ -80,3 +80,46 @@ func (l *Loop) recordMergeEffectResult(before, after state.State, event ingest.S
 	}
 	return l.effectLedger.MarkDone(selected.EffectID, result)
 }
+
+// A command error can occur after Git changed HEAD. Until the original effect
+// is reconciled, another merge would create a second owner for the same stage.
+func (l *Loop) requireSettledMergeEffects(orderID string, stageIndex int) error {
+	if l.effectLedger == nil {
+		return nil
+	}
+	for _, record := range l.effectLedger.All() {
+		if record.Effect.Type != reducer.EffectMerge || record.Status == reducer.EffectLedgerDone || record.Status == reducer.EffectLedgerFailed {
+			continue
+		}
+		var identity struct {
+			OrderID    string `json:"order_id"`
+			StageIndex int    `json:"stage_index"`
+		}
+		if err := json.Unmarshal(record.Effect.Payload, &identity); err != nil {
+			return fmt.Errorf("merge effect identity is unresolved: %w", err)
+		}
+		if identity.OrderID == orderID && identity.StageIndex == stageIndex {
+			return fmt.Errorf("merge effect %s is unresolved for %s/%d; original merge readback required", record.EffectID, orderID, stageIndex)
+		}
+	}
+	return nil
+}
+
+func (l *Loop) validateNewMergeEffects(effects []reducer.Effect) error {
+	for _, effect := range effects {
+		if effect.Type != reducer.EffectMerge {
+			continue
+		}
+		var identity struct {
+			OrderID    string `json:"order_id"`
+			StageIndex int    `json:"stage_index"`
+		}
+		if err := json.Unmarshal(effect.Payload, &identity); err != nil {
+			return fmt.Errorf("new merge effect identity is unresolved: %w", err)
+		}
+		if err := l.requireSettledMergeEffects(identity.OrderID, identity.StageIndex); err != nil {
+			return err
+		}
+	}
+	return nil
+}

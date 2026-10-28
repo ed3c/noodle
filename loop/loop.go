@@ -719,6 +719,9 @@ func (l *Loop) emitEventChecked(eventType ingest.EventType, payload any) error {
 	if err != nil {
 		return fmt.Errorf("canonical reducer failed: %w", err)
 	}
+	if err := l.validateNewMergeEffects(effects); err != nil {
+		return err
+	}
 	if err := l.recordMergeEffectResult(l.canonical, next, evt); err != nil {
 		return err
 	}

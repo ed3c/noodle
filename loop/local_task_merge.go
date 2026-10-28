@@ -63,6 +63,9 @@ func (l *Loop) controlMergeLocalTask(cmd ControlCommand) error {
 		return fmt.Errorf("local task candidate review missing")
 	}
 	stage := order.Stages[0]
+	if err := l.requireSettledMergeEffects(cmd.OrderID, stage.StageIndex); err != nil {
+		return err
+	}
 	if _, exists := stage.Extra[localTaskMergeKey]; exists {
 		return fmt.Errorf("local task merge already prepared; original merge readback required")
 	}
