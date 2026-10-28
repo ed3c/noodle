@@ -1,6 +1,6 @@
 # OpenShell custody and native identity
 
-- `runtime/openshell_custody*.go` provides a custody primitive, not a registered OpenShell Runtime or a gateway process supervisor. Formal dispatch and artifact application still need integration.
+- `runtime/openshell_custody*.go` owns native identity and operation receipts. `OpenShellGateway` manages the foreground service; `OpenShellRuntime` is wired through Host/Loop for Codex/Pi and validated artifact publication. Keep source/unit-test completion separate from real model acceptance and Soodles outer-loop integration.
 - Assign exactly one canonical state root to each dedicated gateway. The OS lock excludes cooperating local owners; it does not exclude an external CLI or add an atomic expected-ID condition to OpenShell's name-based API.
 - Persist task, name, mutation UUID and intent before Create, exec or Stop. Keep unknown effects and never recycle historical names. Reopening reads state; it does not replay commands.
 - Audit all workspaces without a label filter and consume every page. Unknown resources, missing IDs, replacements, specification drift or changed configuration binding block new dispatch.
