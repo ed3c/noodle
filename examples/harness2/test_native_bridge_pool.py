@@ -118,6 +118,59 @@ class NativeBridgePoolTests(unittest.TestCase):
         with self.assertRaises(Refused):
             changed.restore_templates(list(self.gate.state['calls'].values()))
 
+    def test_single_codex_driver_runs_complete_native_seq_without_paid_client(self):
+        import reproduce
+        from experiment_driver import run_experiment
+        from harness2.core import schedule
+        from owner_contract import tree_ref
+        from test_experiment_driver import PublicBundleTests
+
+        public = PublicBundleTests()
+        public.setUp()
+        self.addCleanup(public.doCleanups)
+        bundle = public.prepare()
+        upstream = Path(schedule.__file__).resolve().parents[2]
+        prepared = save(self.root / 'prepared-source.json', {'source_pin': reproduce.PIN,
+            'source_tree_sha256': reproduce.fingerprint(upstream)})
+        output = self.root / 'single-codex-experiment'
+        config = {'upstream': {'path': str(upstream), 'prepared_receipt': prepared},
+            'output_root': str(output), 'experiment_id': 'new-codex-full-round',
+            'initial_paid_spent_usd': '0.388148325', 'poll_s': 0.001,
+            'templates': [asdict(template) for template in self.templates], 'cli': {},
+            # Even an irrelevant billing section must not touch credentials/network.
+            'billing': {'environment_file': str(self.root / 'must-not-open.env')},
+            'groups': [{'route': {'group': 'codex', 'provider': 'codex', 'model': MODELS['codex'],
+                       'effort': 'low', 'timeout_s': 60}, 'task_bundle': bundle,
+                       'baseline': tree_ref(self.fixture.harness), 'always_on_max': 12000}]}
+        with (patch('experiment_driver.PinnedCLI', return_value=self.cli),
+              patch('experiment_driver.ReadOnlyOpenRouter', side_effect=AssertionError('no paid-key client')),
+              patch('experiment_driver.OpenRouterBilling', side_effect=AssertionError('no paid accounting client')),
+              patch.object(subprocess, 'run', side_effect=AssertionError('no process')),
+              patch.object(subprocess, 'Popen', side_effect=AssertionError('no process')),
+              patch.object(socket.socket, 'connect', side_effect=AssertionError('no network')),
+              patch('soodles_bridge.time.sleep')):
+            receipt = run_experiment(config, self.cli.review)
+        report = decode(read_ref(receipt))
+        self.assertEqual([row['group'] for row in report['groups']], ['codex'])
+        native = report['groups'][0]['result']['native_result']
+        self.assertEqual(native['status'], 'ok', native)
+        self.assertEqual(native['modes']['seq']['fell_back'], [])
+        self.assertEqual((native['modes']['seq']['ledger']['R'], native['modes']['seq']['ledger']['P']), (4, 3))
+        self.assertEqual(native['selections']['seq']['chosen_label'], 'c1')
+        self.assertEqual([call.role for call in self.cli.owner_calls],
+                         ['solver', 'proposer', 'proposer', 'solver', 'solver', 'proposer', 'solver'])
+        self.assertTrue(all(call.provider == 'codex' and call.model == MODELS['codex']
+                            and call.inputs['effort'] == 'low' for call in self.cli.owner_calls))
+        journal = decode((output / 'owner-journal.json').read_bytes())
+        self.assertEqual(len(journal['calls']), 7)
+        self.assertTrue(all(row['state'] == 'settled' and row['result']['cost_usd'] is None
+                            for row in journal['calls'].values()))
+        bindings = [decode((output / 'owner' / call.fingerprint() / 'binding.json').read_bytes())['template']
+                    for call in self.cli.owner_calls]
+        self.assertEqual(len({binding['repository'] for binding in bindings}), 7)
+        self.assertEqual([binding['role'] for binding in bindings], [call.role for call in self.cli.owner_calls])
+        self.assertFalse((output / 'pi').exists())
+
     def test_exhausted_role_refuses_before_directory_or_owner_and_unused_refusal_preserves_pool(self):
         call = replace(self.fixture.call, role='proposer')
         bridge = SoodlesOwnerBridge(self.cli, self.root / 'only-solvers', [self.templates[0]], review=self.cli.review)

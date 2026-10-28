@@ -1,4 +1,5 @@
 """Public preparation controls do not import/execute a model or owner transport."""
+import copy
 import sys
 import tempfile
 import types
@@ -163,6 +164,37 @@ class PublicBundleTests(unittest.TestCase):
             with self.assertRaises(Refused):
                 run_experiment(config, lambda *_: None)
             self.assertEqual(calls, [])
+            config['groups'][1]['route']['model'] = 'openrouter/deepseek/deepseek-v4.1-flash-1017'
+            original = copy.deepcopy(config)
+            for variant in ('empty', 'three', 'duplicate-provider', 'duplicate-group', 'foreign-provider', 'empty-group', 'pi-no-billing'):
+                with self.subTest(variant=variant):
+                    bad = copy.deepcopy(original)
+                    bad['output_root'] = str(self.root / ('invalid-' + variant))
+                    codex, pi = bad['groups']
+                    if variant == 'empty': bad['groups'] = []
+                    elif variant == 'three': bad['groups'].append(copy.deepcopy(codex))
+                    elif variant == 'duplicate-provider':
+                        bad['groups'][1] = copy.deepcopy(codex)
+                        bad['groups'][1]['route']['group'] = 'codex-second'
+                    elif variant == 'duplicate-group': pi['route']['group'] = 'codex'
+                    elif variant == 'foreign-provider': pi['route']['provider'] = 'foreign'
+                    elif variant == 'empty-group': codex['route']['group'] = ''
+                    elif variant == 'pi-no-billing': bad['groups'] = [pi]; del bad['billing']
+                    with (patch('experiment_driver.SoodlesOwnerBridge', side_effect=AssertionError('owner constructed before validation')),
+                          patch('experiment_driver.ReadOnlyOpenRouter', side_effect=AssertionError('paid client constructed before validation')),
+                          self.assertRaises(Refused)):
+                        run_experiment(bad, lambda *_: None)
+                    self.assertFalse(Path(bad['output_root']).exists())
+                    self.assertEqual(calls, [])
+            single_pi = copy.deepcopy(original)
+            single_pi['groups'] = [single_pi['groups'][1]]
+            single_pi['output_root'] = str(self.root / 'single-pi')
+            with (patch('experiment_driver.ReadOnlyOpenRouter') as paid_client,
+                  patch('experiment_driver.OpenRouterBilling') as paid_billing):
+                run_experiment(single_pi, lambda *_: None)
+            paid_client.assert_called_once()
+            paid_billing.assert_called_once()
+            self.assertEqual([item[1] for item in calls], ['pi'])
 
     def test_unaccepted_or_changed_artifact_refuses(self):
         value = decode(Path(self.accepted['path']).read_bytes())

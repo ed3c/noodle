@@ -1,4 +1,5 @@
 """Explicit entry for a bounded native experiment over an accepted frozen source."""
+import re
 import shutil
 import sys
 import tempfile
@@ -160,14 +161,28 @@ def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_obser
     require(Path(schedule.__file__).resolve().is_relative_to(upstream.resolve()),
             'imported native core differs from the pinned source')
 
+    group_configs = config.get('groups')
+    require(isinstance(group_configs, list) and 1 <= len(group_configs) <= 2,
+            'experiment requires one or two explicit model groups')
+    routes = [Route(**group['route']) for group in group_configs]
+    require(all(isinstance(route.group, str) and re.fullmatch(r'[a-z0-9][a-z0-9_-]*', route.group)
+                and route.provider in {'codex', 'pi'} for route in routes),
+            'experiment group or provider is invalid')
+    require(len({route.group for route in routes}) == len(routes)
+            and len({route.provider for route in routes}) == len(routes),
+            'experiment groups or providers are duplicated')
+    require(all(route.model == MODELS[route.provider] and route.effort == 'low' for route in routes),
+            'experiment model selection differs')
+    paid = any(route.provider == 'pi' for route in routes)
+    billing_config = config.get('billing') if paid else None
+    require(not paid or billing_config is not None, 'Pi execution has no original paid-key supplier')
+
     output = Path(config['output_root'])
     reopening = fresh_observation is not None or continue_group is not None
     if not reopening:
         output.mkdir(parents=True, exist_ok=False)
     else:
         require(output.is_dir() and (output / 'owner-journal.json').is_file(), 'original experiment is missing')
-    billing_config = config.get('billing')
-    require(billing_config is not None, 'two-group execution has no original paid-key supplier')
     billing = None
     if billing_config is not None:
         client = ReadOnlyOpenRouter(Path(billing_config['environment_file']),
@@ -182,12 +197,7 @@ def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_obser
     gate = SharedGate(output / 'owner-journal.json', bridge,
                       initial_paid_spent_usd=config['initial_paid_spent_usd'])
     groups, adapters, started = [], [], time.monotonic()
-    require(len(config['groups']) == 2 and {g['route']['provider'] for g in config['groups']} == {'codex', 'pi'}
-            and len({g['route']['group'] for g in config['groups']}) == 2,
-            'experiment requires exactly the two authorized model groups')
-    for group in config['groups']:
-        route = Route(**group['route'])
-        require(route.model == MODELS[route.provider] and route.effort == 'low', 'experiment model selection differs')
+    for group, route in zip(group_configs, routes):
         bundle = FrozenAcceptedSource(**decode(read_ref(group['task_bundle'])))
         public_tree(bundle.source)
         provenance = decode(read_ref(bundle.provenance))

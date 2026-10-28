@@ -42,8 +42,9 @@ Supply the following dictionary to `run_experiment`; this is host configuration,
 model source or optimizer-editable artifact:
 
 - `experiment_id`, new `output_root`, explicit `initial_paid_spent_usd`, and polling cadence
-  `poll_s`. Initial usage comes from a fresh original-key read after Stage A, not an old
-  example or a default zero.
+  `poll_s`. For a Pi group, initial usage comes from a fresh original-key read after Stage A,
+  not an old example or a default zero. A Codex-only round retains the explicit known cumulative
+  amount but performs no key read; its subscription cost remains unknown, not zero.
 - `upstream`: `{path, prepared_receipt}` for the existing pinned Harness² source and its
   `prepared.json` FileRef. Source tree/pin are checked before loading the actual core.
 - `cli`: all `PinnedCLI` arguments from OWNER_BRIDGE.md, with reviewed Soodles source bytes,
@@ -52,11 +53,17 @@ model source or optimizer-editable artifact:
   authorized call. Solver templates have `harness_skills` plus complete `skill_bases`;
   improver templates use the fixed improver Skill. Root supplies correct starting contents,
   write paths, original acceptance and explicit return paths; the driver never guesses them.
-- `groups`: exactly two entries, each `{route, task_bundle, baseline, always_on_max}`. `route`
+- `groups`: one or two explicit entries, each `{route, task_bundle, baseline, always_on_max}`. `route`
   contains native `Route` fields `group`, `provider`, `model`, `effort`, existing `timeout_s`,
-  and optional `paid_reservation_usd`. Group names are distinct. The fixed models are
-  gpt-5.6-sol/low and openrouter/deepseek/deepseek-v4.1-flash-1017/low. Both use the same gate.
-- `billing`: `{environment_file, key_name, timeout_s, exclusive_key, observations, interval_s}`.
+  and optional `paid_reservation_usd`. Group names and providers are each unique; providers
+  are limited to `codex` and `pi`. The fixed models are
+  gpt-5.6-sol/low and openrouter/deepseek/deepseek-v4.1-flash-1017/low. Selected groups share
+  the original gate. A new single-group round needs a new experiment/output namespace; it
+  does not repair or replace an earlier refused round.
+- `billing`: required only when a Pi group is selected;
+  `{environment_file, key_name, timeout_s, exclusive_key, observations, interval_s}`.
+  A Codex-only round does not construct the paid supplier or read its `.env`, even if an
+  unused billing section was supplied. It makes no OpenRouter GET requests.
   The exact private .env locator is consumed only by the GET supplier in the host process.
   `key_name` is normally OPENROUTER_API_KEY. The file is not copied into any bundle, receipt
   or model environment. `exclusive_key=true` is an operator declaration, not a Python lock
@@ -68,7 +75,8 @@ once original approval is submitted. No additional review format, token or optim
 is introduced. The bridge waits for original integration/acceptance readback before the
 next native call. Recovery or request-changes require explicit Session resolution.
 
-The entry prevalidates both groups' frozen sources before execution. It calls the actual
+The entry validates the selected group set before constructing the owner or paid supplier,
+and prevalidates all selected frozen sources before execution. It calls the actual
 `run_native_task` (k=1, seq) and saves each group result and the common journal. It reports
 measured optimization elapsed time, but whole-workflow USD/time remain null until original
 Stage-A receipts and all required measurements are aggregated. Hidden paired evaluation and
