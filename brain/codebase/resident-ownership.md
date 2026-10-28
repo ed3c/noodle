@@ -22,7 +22,8 @@ Host-managed process workers also retain their allocation until the original
 launcher and process group are absent. Session completion waits for this evidence.
 Terminate, ForceKill and cancellation use the original spawned group, including
 after its launcher exits. Recovery refuses a live or unconfirmed group. This
-contract does not adopt foreign processes or cover descendants that leave the group.
+contract does not adopt foreign processes. Observed descendant generations retain
+separate exit evidence; escaped or unsampled descendants remain unknown.
 
 
 ## Native consumer fixture leases
