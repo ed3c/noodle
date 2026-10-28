@@ -3,6 +3,9 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -18,6 +21,7 @@ const openShellObservationTimeout = 5 * time.Second
 // Task.AttemptID nor ExecAttemptID is a canonical scheduling-attempt identity.
 // The caller must separately bind its canonical attempt and published artifacts.
 type OpenShellCompletedObservation struct {
+	CommandSHA256         string `json:"command_sha256"`
 	Identity              OpenShellIdentity
 	Task                  OpenShellTask
 	ExecAttemptID         string
@@ -27,6 +31,16 @@ type OpenShellCompletedObservation struct {
 	Phase                 string
 	CreateAcknowledged    bool
 	StopAcknowledged      bool
+}
+
+// OpenShellCommandSHA256 binds every command field without exposing argv or env.
+func OpenShellCommandSHA256(command OpenShellCommand) (string, error) {
+	data, err := json.Marshal(command)
+	if err != nil {
+		return "", fmt.Errorf("encode OpenShell command digest: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // ObserveCompleted performs one fresh native Get against an already completed,
@@ -101,7 +115,11 @@ func (c *OpenShellCustody) ObserveCompleted(ctx context.Context, expected OpenSh
 	if record.Stopped.ComputeInstanceID != "" && status.GetAgentPod() != "" && status.GetAgentPod() != record.Stopped.ComputeInstanceID {
 		return OpenShellCompletedObservation{}, fmt.Errorf("openshell completion compute instance differs from stopped history")
 	}
-	return OpenShellCompletedObservation{Identity: record.Worker.Identity, Task: record.Task, ExecAttemptID: record.Exec.AttemptID, ExecRequestID: record.Exec.Command.RequestID, ExecExitCode: record.Exec.Result.ExitCode, MainProcessInstanceID: record.MainProcessInstanceID, Phase: "Stopped", CreateAcknowledged: true, StopAcknowledged: true}, nil
+	commandSHA256, err := OpenShellCommandSHA256(record.Exec.Command)
+	if err != nil {
+		return OpenShellCompletedObservation{}, err
+	}
+	return OpenShellCompletedObservation{CommandSHA256: commandSHA256, Identity: record.Worker.Identity, Task: record.Task, ExecAttemptID: record.Exec.AttemptID, ExecRequestID: record.Exec.Command.RequestID, ExecExitCode: record.Exec.Result.ExitCode, MainProcessInstanceID: record.MainProcessInstanceID, Phase: "Stopped", CreateAcknowledged: true, StopAcknowledged: true}, nil
 }
 
 func validateCompletedRecord(record OpenShellCustodyRecord, expected OpenShellIdentity) error {

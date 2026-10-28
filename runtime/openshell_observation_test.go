@@ -359,3 +359,79 @@ func TestOpenShellObserveCompletedGatewayRejectsReleasedLease(t *testing.T) {
 	}
 	f.spawns(t, 1)
 }
+
+func TestOpenShellObserveCompletedCommandDigestUsesOriginalOwner(t *testing.T) {
+	g, c, b, identity := completedObservationFixture(t)
+	original := c.Snapshot()
+	want, err := OpenShellCommandSHA256(original.Records[0].Exec.Command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := c.Snapshot()
+	changed.Records[0].Exec.Command.Argv = []string{"replacement-verifier", "--", "harness"}
+	body, err := json.Marshal(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(b.StateRoot, "owner.json"), body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	before := beforeObservation(t, g, c, b)
+	observed, err := c.ObserveCompleted(t.Context(), identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	altered, err := OpenShellCommandSHA256(changed.Records[0].Exec.Command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.CommandSHA256 != want || observed.CommandSHA256 == altered {
+		t.Fatal("disk command replaced original owner's command evidence")
+	}
+	encoded, err := json.Marshal(observed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(encoded, []byte(`"command_sha256"`)) || bytes.Contains(encoded, []byte("private-")) || bytes.Contains(encoded, []byte("replacement-verifier")) {
+		t.Fatal("command evidence field missing or exposed command contents")
+	}
+	assertObservationReadOnly(t, g, c, b, before, 1)
+}
+
+func TestOpenShellCommandDigestBindsEveryField(t *testing.T) {
+	base := OpenShellCommand{RequestID: openShellRequestID, Argv: []string{"harness", "--model", "selected"}, Workdir: "/sandbox/repo", Env: map[string]string{"A": "one", "B": "two"}}
+	want, err := OpenShellCommandSHA256(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"request", "argv", "workdir", "env"} {
+		t.Run(field, func(t *testing.T) {
+			changed := base
+			switch field {
+			case "request":
+				changed.RequestID = "other"
+			case "argv":
+				changed.Argv = []string{"other"}
+			case "workdir":
+				changed.Workdir = "/other"
+			case "env":
+				changed.Env = map[string]string{"A": "changed", "B": "two"}
+			}
+			got, err := OpenShellCommandSHA256(changed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got == want {
+				t.Fatal("command field omitted from digest")
+			}
+		})
+	}
+	base.Env = map[string]string{"B": "two", "A": "one"}
+	got, err := OpenShellCommandSHA256(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatal("equivalent environment map changed digest")
+	}
+}
