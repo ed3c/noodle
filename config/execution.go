@@ -33,6 +33,13 @@ func Bind(cfg Config, e *execution.Context) (Config, error) {
 		}
 		provider.Path = resolved
 	}
+	if cfg.Runtime.OpenShell.Profile != "" {
+		resolved, err := e.ResolvePath(cfg.Runtime.OpenShell.Profile)
+		if err != nil {
+			return Config{}, fmt.Errorf("resolve OpenShell profile: %w", err)
+		}
+		cfg.Runtime.OpenShell.Profile = resolved
+	}
 	return cfg, nil
 }
 

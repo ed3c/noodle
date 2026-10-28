@@ -88,6 +88,7 @@ func applyDefaultsFromMetadata(config *Config, metadata toml.MetaData, diagnosti
 
 	config.Runtime.spritesDefined = metadata.IsDefined("runtime", "sprites")
 	config.Runtime.cursorDefined = metadata.IsDefined("runtime", "cursor")
+	config.Runtime.openshellDefined = metadata.IsDefined("runtime", "openshell")
 	if !metadata.IsDefined("runtime", "default") {
 		config.Runtime.Default = defaultRuntimeName
 	}
@@ -265,7 +266,7 @@ func normalizeParsedValues(config *Config, metadata toml.MetaData, diagnostics *
 	} else {
 		config.Runtime.Default = stringx.Normalize(config.Runtime.Default)
 		switch config.Runtime.Default {
-		case "process", "sprites", "cursor":
+		case "process", "sprites", "cursor", "openshell":
 		default:
 			appendNormalizedValueDiagnostic(diagnostics, "runtime.default",
 				fmt.Sprintf("runtime.default %q unsupported; using %q", config.Runtime.Default, defaultRuntimeName),

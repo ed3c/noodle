@@ -48,16 +48,25 @@ func Validate(config Config) ValidationResult {
 
 	if rd := stringx.Normalize(config.Runtime.Default); rd != "" {
 		switch rd {
-		case "process", "sprites", "cursor":
+		case "process", "sprites", "cursor", "openshell":
 			// Known runtimes — ok.
 		default:
 			result.Diagnostics = append(result.Diagnostics, ConfigDiagnostic{
 				FieldPath: "runtime.default",
-				Message:   fmt.Sprintf("unknown runtime %q (valid: process, sprites, cursor)", config.Runtime.Default),
+				Message:   fmt.Sprintf("unknown runtime %q (valid: process, sprites, cursor, openshell)", config.Runtime.Default),
 				Severity:  DiagnosticSeverityWarning,
-				Fix:       "Set runtime.default to \"process\", \"sprites\", or \"cursor\" in .noodle.toml.",
+				Fix:       "Set runtime.default to \"process\", \"sprites\", \"cursor\", or \"openshell\" in .noodle.toml.",
 				Code:      DiagnosticCodeRuntimeDefaultUnknown,
 			})
+		}
+	}
+
+	if config.Runtime.openshellDefined || config.Runtime.Default == "openshell" || config.Runtime.OpenShell.Profile != "" {
+		if strings.TrimSpace(config.Runtime.OpenShell.Profile) == "" {
+			result.Diagnostics = append(result.Diagnostics, ConfigDiagnostic{FieldPath: "runtime.openshell.profile", Message: "OpenShell profile is missing", Severity: DiagnosticSeverityFatal})
+		}
+		if config.Runtime.OpenShell.MaxConcurrent < 0 {
+			result.Diagnostics = append(result.Diagnostics, ConfigDiagnostic{FieldPath: "runtime.openshell.max_concurrent", Message: "OpenShell concurrency is negative", Severity: DiagnosticSeverityFatal})
 		}
 	}
 
