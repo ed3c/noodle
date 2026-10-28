@@ -28,6 +28,7 @@ import (
 	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/internal/statever"
 	"github.com/poteto/noodle/loop"
+	loopruntime "github.com/poteto/noodle/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -98,22 +99,25 @@ type hostContext struct {
 	cancel         context.CancelFunc
 	lock           *lockfile.Lock
 	failed         bool
+	openShell      bool
 	environmentSHA string
 }
 
 type noodleHost struct {
-	dir        string
-	instanceID string
-	binaryPath string
-	binarySHA  string
-	webURL     string
-	receipts   []hostReceipt
-	contexts   map[string]*hostContext
-	completed  chan string
-	budget     *admission.Budget
-	residents  *admission.Residents
-	blocked    bool
-	newRuntime func(string, string, config.Config, loop.Dependencies) hostRuntime
+	dir              string
+	instanceID       string
+	binaryPath       string
+	binarySHA        string
+	webURL           string
+	receipts         []hostReceipt
+	contexts         map[string]*hostContext
+	completed        chan string
+	budget           *admission.Budget
+	residents        *admission.Residents
+	openShell        *loopruntime.OpenShellGateway
+	openShellProfile *loopruntime.OpenShellProfile
+	blocked          bool
+	newRuntime       func(string, string, config.Config, loop.Dependencies) hostRuntime
 }
 
 func newHostCmd(app *App) *cobra.Command {
@@ -517,6 +521,11 @@ func serveHost(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			for _, c := range h.contexts {
+				if c.openShell && h.openShell != nil {
+					if err := h.releaseOpenShell(c.receipt.ContextID); err != nil {
+						fmt.Fprintln(os.Stderr, "OpenShell shutdown release failed:", err)
+					}
+				}
 				if h.residents != nil {
 					if err := h.residents.ReleaseContext(c.receipt.ContextID); err != nil {
 						fmt.Fprintln(os.Stderr, "resident shutdown failed:", err)
@@ -545,6 +554,9 @@ func serveHost(ctx context.Context) error {
 			h.webURL = ""
 			webDone = nil
 		case <-h.residents.Released():
+			if err := h.closeIdleOpenShell(); err != nil {
+				fmt.Fprintln(os.Stderr, "OpenShell gateway custody retained:", err)
+			}
 			h.cleanupAutomaticContexts(ctx)
 		case id := <-h.completed:
 			if c := h.contexts[id]; c != nil && c.done != nil {
@@ -615,6 +627,12 @@ func (h *noodleHost) save() error {
 func (h *noodleHost) finish(c *hostContext, runErr error) {
 	c.done = nil
 	c.runtime.Shutdown()
+	if c.openShell && h.openShell != nil {
+		if err := h.releaseOpenShell(c.receipt.ContextID); err != nil {
+			h.blocked = true
+			fmt.Fprintln(os.Stderr, "OpenShell context release failed:", err)
+		}
+	}
 	if h.residents != nil {
 		if err := h.residents.ReleaseContext(c.receipt.ContextID); err != nil {
 			h.blocked = true
@@ -873,6 +891,11 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 	if remote {
 		return hostError("refused", errors.New("shared host does not support remote runtimes without confirmed remote completion"))
 	}
+	if cfg.Runtime.OpenShell.Profile != "" {
+		if err := h.prepareOpenShell(cfg.Runtime.OpenShell.Profile); err != nil {
+			return hostError("refused", err)
+		}
+	}
 	id, err := hostID()
 	if err != nil {
 		return hostError("refused", err)
@@ -898,10 +921,14 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 		return failBeforeRuntime(err)
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	rt := h.newRuntime(req.ProjectDir, h.binaryPath, cfg, loop.Dependencies{ModeOverride: state.RunMode(req.Mode), Execution: e, Admission: h.budget, AdmissionContext: id, CleanupCompleted: req.CleanupCompleted})
+	deps := loop.Dependencies{ModeOverride: state.RunMode(req.Mode), Execution: e, Admission: h.budget, AdmissionContext: id, CleanupCompleted: req.CleanupCompleted}
+	if cfg.Runtime.OpenShell.Profile != "" {
+		deps.OpenShellGateway, deps.OpenShellProfile = h.openShell, h.openShellProfile
+	}
+	rt := h.newRuntime(req.ProjectDir, h.binaryPath, cfg, deps)
 	environmentSHA := hostDigest([]byte(strings.Join(req.Environment, "\x00")))
 	req.Environment = nil
-	c := &hostContext{receipt: r, request: req, runtime: rt, done: make(chan error, 1), cancel: cancel, lock: lock, environmentSHA: environmentSHA}
+	c := &hostContext{receipt: r, request: req, runtime: rt, done: make(chan error, 1), cancel: cancel, lock: lock, openShell: cfg.Runtime.OpenShell.Profile != "", environmentSHA: environmentSHA}
 	if h.contexts == nil {
 		h.contexts = make(map[string]*hostContext)
 	}
@@ -910,6 +937,12 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 		h.budget.Register(id)
 	}
 	keepLock = true
+	if c.openShell {
+		if _, err = h.openShell.Acquire(ctx, id); err != nil {
+			h.finish(c, err)
+			return hostResponse{c.receipt, "unknown_effect", fmt.Sprintf("OpenShell gateway acquisition failed; original custody retained: %v", err)}
+		}
+	}
 	if req.Operation == "once" {
 		err = rt.Cycle(runCtx)
 		if err == nil {

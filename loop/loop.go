@@ -64,6 +64,22 @@ func New(projectDir, noodleBin string, cfg config.Config, deps Dependencies) *Lo
 			deps.StatusFile = defaults.StatusFile
 		}
 	}
+	if cfg.Runtime.OpenShell.Profile != "" {
+		if deps.OpenShellGateway == nil || deps.OpenShellProfile == nil || deps.AdmissionContext == "" {
+			bindingErr = errors.Join(bindingErr, fmt.Errorf("OpenShell runtime has no managed Host gateway binding"))
+		} else {
+			rt, err := loopruntime.NewOpenShellRuntime(loopruntime.OpenShellRuntimeConfig{
+				RuntimeDir: runtimeDir, ContextID: deps.AdmissionContext, Gateway: deps.OpenShellGateway,
+				Profile: *deps.OpenShellProfile, SkillResolver: skill.Resolver{SearchPaths: cfg.Skills.Paths},
+				EventSink: deps.EventSink, MaxConcurrent: cfg.Runtime.OpenShell.MaxConcurrent,
+			})
+			if err != nil {
+				bindingErr = errors.Join(bindingErr, err)
+			} else {
+				deps.Runtimes["openshell"] = rt
+			}
+		}
+	}
 	if deps.Now == nil {
 		deps.Now = time.Now
 	}

@@ -21,8 +21,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// OpenShellProfile is an immutable dispatch configuration snapshot. Credentials
-// remain in the gateway; this profile contains paths and public policy only.
+// OpenShellProfile snapshots dispatch policy and client TLS identity. Model
+// credentials remain in the gateway; the JSON source contains only paths and policy.
 type OpenShellProfile struct {
 	Gateway                         OpenShellGatewaySpec
 	CLI, GatewayName                string

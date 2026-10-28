@@ -254,6 +254,11 @@ func (l *Loop) dispatchSession(ctx context.Context, req loopruntime.DispatchRequ
 		session = l.retainDispatched(ctx, session)
 		return session, RuntimeFallbackOutcome{}, nil
 	}
+	if runtimeName == "openshell" {
+		// OpenShell returns a handle before any native mutation. An error here
+		// certifies local preflight refusal; neither fallback nor custody is needed.
+		return nil, RuntimeFallbackOutcome{}, classifyAgentStartFailure(runtimeName, err)
+	}
 	if runtimeName != "process" {
 		if l.deps.Admission != nil {
 			return nil, RuntimeFallbackOutcome{}, l.retainUnknownDispatch(ctx, err)

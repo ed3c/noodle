@@ -82,3 +82,26 @@ func TestOpenShellClientTrustAndKeyAreBound(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenShellClientRejectsExecutableReplacement(t *testing.T) {
+	for _, modeOnly := range []bool{false, true} {
+		t.Run(map[bool]string{false: "bytes", true: "mode"}[modeOnly], func(t *testing.T) {
+			filename, _ := profileFixture(t)
+			p, err := LoadOpenShellProfile(filename)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if modeOnly {
+				err = os.Chmod(p.CLI, 0755)
+			} else {
+				err = os.WriteFile(p.CLI, []byte("replacement executable"), 0700)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = VerifyOpenShellClient(p); err == nil {
+				t.Fatal("changed CLI executable accepted")
+			}
+		})
+	}
+}

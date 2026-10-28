@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +48,21 @@ func openShellClientHash(p OpenShellProfile) (string, error) {
 	}
 	root := filepath.Join(configRoot, "openshell", "gateways", p.GatewayName)
 	hash := sha256.New()
+	cli, err := os.Open(p.CLI)
+	if err != nil {
+		return "", fmt.Errorf("open OpenShell CLI executable: %w", err)
+	}
+	defer cli.Close()
+	info, err := cli.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+		return "", fmt.Errorf("OpenShell CLI executable unavailable")
+	}
+	fmt.Fprintf(hash, "cli\x00%s\x00%o\x00", p.CLI, info.Mode())
+	digest := sha256.New()
+	if _, err = io.Copy(digest, cli); err != nil {
+		return "", fmt.Errorf("fingerprint OpenShell CLI executable: %w", err)
+	}
+	hash.Write(digest.Sum(nil))
 	read := func(rel string) ([]byte, error) {
 		data, err := os.ReadFile(filepath.Join(root, rel))
 		if err != nil {

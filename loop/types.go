@@ -158,6 +158,8 @@ type Dependencies struct {
 	Admission        *admission.Budget
 	AdmissionContext string
 	CleanupCompleted bool
+	OpenShellGateway *loopruntime.OpenShellGateway
+	OpenShellProfile *loopruntime.OpenShellProfile
 	Runtimes         map[string]loopruntime.Runtime
 	Worktree         WorktreeManager
 	Adapter          AdapterRunner
