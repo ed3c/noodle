@@ -46,25 +46,8 @@ func (h *noodleHost) applyHostFinish(c *hostContext, runErr, releaseErr error) {
 			c.receipt.TerminalCause = c.runtime.TerminalCause()
 		}
 	}
-	for i := range h.receipts {
-		if h.receipts[i].ContextID == c.receipt.ContextID {
-			h.receipts[i] = c.receipt
-			break
-		}
-	}
-	if err := h.save(); err != nil {
-		c.failed = true
-		h.blocked = true
-		c.receipt.TerminalCause = ""
-		for i := range h.receipts {
-			if h.receipts[i].ContextID == c.receipt.ContextID {
-				h.receipts[i].TerminalCause = ""
-				break
-			}
-		}
+	if err := h.persistHostContextReceipt(c); err != nil {
 		fmt.Fprintln(os.Stderr, "host receipt persistence failed:", err)
-	} else {
-		c.receiptSaved = true
 	}
 	if !c.failed && h.shutdown == nil {
 		c.lock.Close()
@@ -73,4 +56,29 @@ func (h *noodleHost) applyHostFinish(c *hostContext, runErr, releaseErr error) {
 			h.budget.Unregister(c.receipt.ContextID)
 		}
 	}
+}
+
+// Persist the existing outcome; resource recovery never turns it into success.
+func (h *noodleHost) persistHostContextReceipt(c *hostContext) error {
+	c.receiptSaved = false
+	for i := range h.receipts {
+		if h.receipts[i].ContextID == c.receipt.ContextID {
+			h.receipts[i] = c.receipt
+			break
+		}
+	}
+	if err := h.save(); err != nil {
+		c.failed, h.blocked = true, true
+		c.receipt.ContextState = "failed"
+		c.receipt.TerminalCause = ""
+		for i := range h.receipts {
+			if h.receipts[i].ContextID == c.receipt.ContextID {
+				h.receipts[i] = c.receipt
+				break
+			}
+		}
+		return err
+	}
+	c.receiptSaved = true
+	return nil
 }

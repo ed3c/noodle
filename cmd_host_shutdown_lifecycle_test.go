@@ -371,3 +371,62 @@ func TestHostShutdownRetainsUnresolvedRecordsAndFailedPersistence(t *testing.T) 
 		})
 	}
 }
+
+func TestHostShutdownBoundReleaseRepersistsOriginalFailedReceipt(t *testing.T) {
+	h, c := newHostShutdownFixture(t)
+	data, err := json.Marshal(map[string]admission.Resident{"original-service": {
+		ID: "original-service", Name: "original", State: "exited", Released: []string{c.receipt.ContextID},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(h.dir, "residents.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	h.residents, err = admission.OpenResidents(h.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Refuse only Host receipt writes; original resident persistence still works.
+	h.dir = filepath.Join(h.dir, "repaired-receipts")
+	service, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.beginShutdown(service)
+	h.completeContext(c, nil)
+	h.applyShutdownResult(hostShutdownResultForTest(t, h))
+	if c.receiptSaved || !c.failed || h.shutdownReady() == nil {
+		t.Fatal("failed receipt write did not retain original owner")
+	}
+	original := c.receipt
+	req := hostRequest{Operation: "resident_release_bound", ProjectDir: original.ProjectDir, ContextID: original.ContextID, RequestID: original.RequestID, InstanceID: h.instanceID, BinarySHA256: h.binarySHA, ResidentID: "original-service"}
+	reply := make(chan any, 1)
+	for _, repaired := range []bool{false, true} {
+		if repaired {
+			if err := os.Mkdir(h.dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !h.handleShutdownCall(req, reply) {
+			t.Fatal("explicit original release was not handled")
+		}
+		h.applyShutdownResult(hostShutdownResultForTest(t, h))
+		response := (<-reply).(map[string]any)
+		if c.receiptSaved != repaired || c.receipt != original || !c.failed || c.releaseErr != nil || c.runtime.(*fakeHostRuntime).shutdowns != 1 {
+			t.Fatalf("receipt retry changed task outcome or resource proof: %+v %+v", response, c)
+		}
+		if !repaired && (response["status"] != "refused" || h.shutdownReady() == nil) {
+			t.Fatalf("unpersisted retry allowed exit: %+v", response)
+		}
+	}
+	if err := h.shutdownReady(); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(filepath.Join(h.dir, "receipts.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved []hostReceipt
+	if err := json.Unmarshal(data, &saved); err != nil || len(saved) != 1 || saved[0] != original {
+		t.Fatalf("original failed receipt was not preserved: %s %v", data, err)
+	}
+}

@@ -96,10 +96,16 @@ func (h *noodleHost) applyShutdownResult(result hostShutdownResult) {
 			}
 		}
 	}
+	retryErr := result.err
+	if retryErr == nil && !c.receiptSaved {
+		if err := h.persistHostContextReceipt(c); err != nil {
+			retryErr = fmt.Errorf("host receipt persistence failed: %w", err)
+		}
+	}
 	response := map[string]any{"schema": 1, "owner": "noodle.swap-manager", "host_instance_id": h.instanceID, "context_id": c.receipt.ContextID, "status": result.resident.State, "resident": result.resident, "resources": h.budget.Snapshot(), "next": nil}
-	if result.err != nil {
-		response["status"], response["error"] = "refused", result.err.Error()
-		fmt.Fprintln(os.Stderr, "resident shutdown release failed:", result.err)
+	if retryErr != nil {
+		response["status"], response["error"] = "refused", retryErr.Error()
+		fmt.Fprintln(os.Stderr, "resident shutdown release failed:", retryErr)
 	}
 	result.job.reply <- response
 }
