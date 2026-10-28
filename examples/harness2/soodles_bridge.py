@@ -232,12 +232,16 @@ class RequestTemplate:
     harvest: str | None = None
     harness_skills: tuple[str, ...] = ()
     skill_bases: dict = field(default_factory=dict)
+    composition: dict | None = None
+    producer_handoff: dict | None = None
 
-    def prepare(self, call, directory):
+    def prepare(self, call, directory, *, cli=None):
         require((self.group, self.role) == (call.group, call.role), "task template belongs to another call route")
         require(call.model == MODELS.get(call.provider) and call.inputs.get("effort") == "low",
                 "call differs from fixed model or reasoning selection")
         require(self.write_paths and self.acceptance, "original write scope or acceptance is missing")
+        require((self.composition is None) == (self.producer_handoff is None),
+                "fixed composition and original producer handoff are incomplete")
         selected, support = self.selected_skill, self.support_skills
         if call.role == "solver":
             require(selected is None and not support and self.harness_skills,
@@ -280,9 +284,14 @@ class RequestTemplate:
             "source_refs": list(dict.fromkeys(ref["path"] for ref in sources))}
         save(directory / "binding.json", {"call_sha256": call.fingerprint(), "template": asdict(self),
                                          "inputs": sources})
-        save(directory / "instruction-trees.json", [tree_ref(Path(ref["path"]).parent)
-            for ref in (selected, *support)])
-        return save(directory / "request.json", request)
+        trees = [tree_ref(Path(ref["path"]).parent) for ref in (selected, *support)]
+        if self.composition is not None:
+            from composition_handoff import prepare_composition
+            prepared, trees = prepare_composition(cli, self, call, directory, request)
+        else:
+            prepared = save(directory / "request.json", request)
+        save(directory / "instruction-trees.json", trees)
+        return prepared
 
 
 def public_trace(descriptor):
@@ -344,6 +353,11 @@ def validated_candidate(call, template, observation):
             and envelope.get("noodle") == template.noodle and envelope.get("goal") == request["goal"]
             and envelope.get("source_refs") == [reference(path) for path in request["source_refs"]],
             "captured task route or original request differs")
+    if template.composition is not None:
+        from composition_handoff import verify_derived_skills
+        require(all(envelope.get(key) == request.get(key) for key in ('composition', 'skill_bindings', 'handoff')),
+                "captured composition or original handoff differs")
+        verify_derived_skills(template, call, request)
     attempts = capture["attempts"]
     require(len(attempts) == 1, "original call has multiple attempts; retries are outside this driver")
     attempt = attempts[0]
@@ -570,7 +584,7 @@ class SoodlesOwnerBridge:
         self.cli.verify()
         directory = self.root / call.fingerprint()
         directory.mkdir()  # a prior interrupted call cannot be replayed
-        request = template.prepare(call, directory)
+        request = template.prepare(call, directory, cli=self.cli)
         binding_ref = reference(directory / "binding.json")
         instructions_ref = reference(directory / "instruction-trees.json")
         self.templates.remove(template)

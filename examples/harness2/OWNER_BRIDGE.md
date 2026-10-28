@@ -209,3 +209,29 @@ The driver then runs only the original Pi namespace with unused matching templat
 same shared journal/budget. It writes a separate continuation report; existing final reports
 are not overwritten. This is not a way to rerun a refused INV after its fallback was already
 used downstream. Such Codex history remains unchanged and visible.
+
+## Fixed compositions for new paired consumers
+
+New `RequestTemplate` inputs may bind both `composition={definition: FileRef, id}`
+and `producer_handoff={request: FileRef, artifact_path}`. Both are required together
+and are restricted to solver calls. The pinned original Soodles CLI must support
+`loop handoff --consumer-composition`: it validates the integrated producer and
+creates the single-stage consumer request. Preparation invokes no enter/model;
+partial output or an uncertain reply remains unknown and is never replayed.
+
+Each consumer gets a different fresh App control checkout and admission output.
+Both versions point directly to the same accepted A, never baseline B → final B.
+The catalog pins actual Git-derived skill modules. The bridge verifies their
+complete file inventory, bytes and modes against the same fixed skill bases with
+only the selected native SKILL.md bytes replaced. Qualified aliases must match.
+The original catalog owns Git/source validation, not this bridge. Record the real
+module commit, original upstream license and selected harness provenance; do not
+claim the derived module is unmodified upstream.
+
+The independent pair evaluator permits different derived catalog selections only
+after checking the selected native harness and full derived skill inventory. It
+still compares the same original producer, skill bases, Noodle/profile, CLI source,
+model, effort, timeout, task input, output scope and acceptance. A new/deleted/changed
+asset refuses. New heldout inputs contain the case input and accepted A/geometry;
+no evaluator rubric or oracle is a worker source. Use a new frozen CLI/config for
+this seam; do not rewrite original training requests, bindings or journals.

@@ -252,6 +252,23 @@ def execution_binding(call, result):
         )
     for base in template["skill_bases"].values():
         require(tree_ref(base["path"]) == base, "fixed skill assets changed")
+    if template.get("composition") is not None:
+        from composition_handoff import verify_derived_skills
+        from soodles_bridge import RequestTemplate
+        require(all(envelope.get(key) == request.get(key) for key in ("composition", "skill_bindings", "handoff")),
+                "paired original composition or handoff differs")
+        chosen = request.get("composition") or {}
+        require({key: chosen.get(key) for key in ("definition", "id")} == template["composition"],
+                "paired composition differs from fixed template")
+        read_ref(template["composition"]["definition"])
+        handoff = decode(read_ref(request["handoff"]))
+        producer = template["producer_handoff"]
+        require(handoff.get("consumer_composition") == template["composition"]
+                and handoff["producer"]["request"] == producer["request"]
+                and handoff["producer"]["artifact_path"] == producer["artifact_path"],
+                "paired accepted producer differs")
+        read_ref(producer["request"])
+        verify_derived_skills(RequestTemplate(**template), call, request)
     read_ref(intent["python"])
     for source in intent["sources"]:
         read_ref(source)
@@ -273,6 +290,7 @@ def execution_binding(call, result):
         for key in ("noodle", "profile", "skill_bases", "harness_skills", "write_paths", "acceptance", "deliverables")
     }
     environment.update(
+        producer_handoff=template.get("producer_handoff"),
         timeout_s=timeout,
         cli_source_commit=intent["source_commit"],
         cli_python=intent["python"],

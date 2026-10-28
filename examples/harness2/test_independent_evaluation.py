@@ -2,6 +2,7 @@
 
 import copy
 import json
+import shutil
 import tempfile
 import unittest
 from dataclasses import asdict
@@ -54,7 +55,9 @@ class IndependentTests(unittest.TestCase):
             call_root = self.root / label
             run = call_root / "result"
             (run / "workspace").mkdir(parents=True)
-            (run / "workspace/drawing.html").write_text("<svg>fixture drawing " + label + "</svg>")
+            (run / "workspace/drawing.html").write_text(
+                "<svg>fixture drawing " + label + "</svg>"
+            )
             harness = self.root / (label + "-harness")
             harness.mkdir()
             (harness / "AGENTS.md").write_text(label + " frozen instructions")
@@ -83,10 +86,17 @@ class IndependentTests(unittest.TestCase):
                 "deliverables": ["drawing.html"],
             }
             self.templates[label] = template
-            save(call_root / "binding.json", {"call_sha256": call.fingerprint(), "template": template})
+            save(
+                call_root / "binding.json",
+                {"call_sha256": call.fingerprint(), "template": template},
+            )
             request = save(
                 call_root / "request.json",
-                {"noodle": self.noodle["path"], "profile": self.profile["path"], "repository": template["repository"]},
+                {
+                    "noodle": self.noodle["path"],
+                    "profile": self.profile["path"],
+                    "repository": template["repository"],
+                },
             )
             (call_root / "operation-0000").mkdir()
             save(
@@ -96,7 +106,13 @@ class IndependentTests(unittest.TestCase):
                     "source_commit": "f" * 40,
                     "python": self.noodle,
                     "sources": [self.noodle],
-                    "argv": [self.noodle["path"], "-B", self.noodle["path"], "loop", "enter"],
+                    "argv": [
+                        self.noodle["path"],
+                        "-B",
+                        self.noodle["path"],
+                        "loop",
+                        "enter",
+                    ],
                 },
             )
             envelope = save(
@@ -110,7 +126,9 @@ class IndependentTests(unittest.TestCase):
                     "noodle": self.noodle,
                 },
             )
-            candidate = save(self.root / (label + "-candidate.json"), {"task_envelope": envelope})
+            candidate = save(
+                self.root / (label + "-candidate.json"), {"task_envelope": envelope}
+            )
             accepted = save(
                 self.root / (label + "-accepted.json"),
                 {
@@ -235,14 +253,18 @@ class IndependentTests(unittest.TestCase):
         accepted_path = Path(receipt["original_review"]["path"])
         accepted = json.loads(accepted_path.read_text())
         if kind in {"profile", "noodle"}:
-            changed = save(self.root / ("different-" + kind + ".json"), {"different_fixture": kind})
+            changed = save(
+                self.root / ("different-" + kind + ".json"), {"different_fixture": kind}
+            )
             binding["template"][kind] = changed
             request[kind] = changed["path"]
             envelope[kind] = changed
         elif kind == "timeout":
             row["call"]["inputs"]["timeout_s"] = 120
             fingerprint = OwnerCall(**row["call"]).fingerprint()
-            row["input_sha256"] = binding["call_sha256"] = receipt["call_sha256"] = fingerprint
+            row["input_sha256"] = binding["call_sha256"] = receipt["call_sha256"] = (
+                fingerprint
+            )
         elif kind == "fixed_assets":
             changed = self.root / "different-assets"
             changed.mkdir()
@@ -258,12 +280,17 @@ class IndependentTests(unittest.TestCase):
         candidate["task_envelope"] = reference(root / "envelope.json")
         candidate_path.write_text(json.dumps(candidate))
         receipt["candidate"] = reference(candidate_path)
-        accepted["inner"]["review_progress"]["review"]["candidate"] = receipt["candidate"]
+        accepted["inner"]["review_progress"]["review"]["candidate"] = receipt[
+            "candidate"
+        ]
         accepted_path.write_text(json.dumps(accepted))
         receipt["original_review"] = reference(accepted_path)
         receipt_path.write_text(json.dumps(receipt))
         row["result"]["receipt_sha256"] = reference(receipt_path)["sha256"]
-        self.journal = save(self.root / ("journal-" + kind + ".json"), {"paid_limit_usd": "5", "calls": self.rows})
+        self.journal = save(
+            self.root / ("journal-" + kind + ".json"),
+            {"paid_limit_usd": "5", "calls": self.rows},
+        )
         self.selection["journal"] = self.journal
 
     def test_pair_requires_same_original_execution_environment(self):
@@ -274,8 +301,126 @@ class IndependentTests(unittest.TestCase):
                 fixture.setUp()
                 self.addCleanup(fixture.doCleanups)
                 fixture.change_candidate_environment(kind)
-                with self.assertRaisesRegex(Refused, "paired execution environment differs"):
+                with self.assertRaisesRegex(
+                    Refused, "paired execution environment differs"
+                ):
                     fixture.compare("changed-environment")
+
+    def test_distinct_derived_catalogs_allow_only_selected_skill_changes(self):
+        (self.skill_base / "SKILL.md").write_text("Original skill")
+        producer = save(
+            self.root / "accepted-source.json", {"fixture": "accepted original A"}
+        )
+        for label in ("baseline", "candidate"):
+            root, row = self.root / label, self.rows[label]
+            harness = Path(row["call"]["inputs"]["harness"]["path"])
+            entry = harness / "skills/main/SKILL.md"
+            entry.parent.mkdir(parents=True)
+            entry.write_text(label + " selected SKILL")
+            row["call"]["inputs"]["harness"] = tree_ref(harness)
+            row["input_sha256"] = OwnerCall(**row["call"]).fingerprint()
+            derived = self.root / (label + "-derived")
+            shutil.copytree(self.skill_base, derived)
+            (derived / "SKILL.md").write_bytes(entry.read_bytes())
+            selection = {
+                "definition": save(
+                    self.root / (label + "-catalog.json"), {"fixture": label}
+                ),
+                "id": label,
+            }
+            binding = json.loads((root / "binding.json").read_bytes())
+            template = binding["template"]
+            template.update(
+                group="codex",
+                role="solver",
+                selected_skill=None,
+                support_skills=[],
+                composition=selection,
+                producer_handoff={
+                    "request": producer,
+                    "artifact_path": "component.html",
+                },
+                skill_bases={"main": tree_ref(self.skill_base)},
+            )
+            binding["call_sha256"] = row["input_sha256"]
+            (root / "binding.json").write_text(json.dumps(binding))
+            request = json.loads((root / "request.json").read_bytes())
+            request.update(
+                composition={**selection, "stage_id": "render"},
+                selected_skill=str(derived / "SKILL.md"),
+                support_skills=[],
+                skill_bindings=[
+                    {
+                        "source": "derived",
+                        "alias": "main",
+                        "path": str(derived / "SKILL.md"),
+                    }
+                ],
+                handoff=save(
+                    root / "handoff.json",
+                    {
+                        "consumer_composition": selection,
+                        "producer": {
+                            "request": producer,
+                            "artifact_path": "component.html",
+                        },
+                    },
+                ),
+            )
+            (root / "request.json").write_text(json.dumps(request))
+            envelope = json.loads((root / "envelope.json").read_bytes())
+            envelope.update(
+                {
+                    key: request[key]
+                    for key in ("composition", "skill_bindings", "handoff")
+                }
+            )
+            (root / "envelope.json").write_text(json.dumps(envelope))
+            receipt_path = Path(row["result"]["receipt_path"])
+            receipt = json.loads(receipt_path.read_bytes())
+            candidate_path = Path(receipt["candidate"]["path"])
+            candidate_path.write_text(
+                json.dumps({"task_envelope": reference(root / "envelope.json")})
+            )
+            receipt["candidate"] = reference(candidate_path)
+            receipt["call_sha256"] = row["input_sha256"]
+            receipt["request"] = reference(root / "request.json")
+            accepted_path = Path(receipt["original_review"]["path"])
+            accepted = json.loads(accepted_path.read_bytes())
+            accepted["inner"]["review_progress"]["review"]["candidate"] = receipt[
+                "candidate"
+            ]
+            accepted_path.write_text(json.dumps(accepted))
+            receipt["original_review"] = reference(accepted_path)
+            receipt_path.write_text(json.dumps(receipt))
+            row["result"]["receipt_sha256"] = reference(receipt_path)["sha256"]
+            intent_path = root / "operation-0000/intent.json"
+            intent = json.loads(intent_path.read_bytes())
+            intent["request"] = receipt["request"]
+            intent_path.write_text(json.dumps(intent))
+        self.journal = save(
+            self.root / "composed-journal.json",
+            {"paid_limit_usd": "5", "calls": self.rows},
+        )
+        self.selection["journal"] = self.journal
+        self.assertEqual(self.compare("derived-pair")["quality_non_regression"], "PASS")
+        asset = self.root / "candidate-derived/example.html"
+        raw = asset.read_bytes()
+        for change in ("added", "deleted", "changed"):
+            extra = asset.parent / "extra.html"
+            if change == "added":
+                extra.write_text("foreign")
+            elif change == "deleted":
+                asset.unlink()
+            else:
+                asset.write_text("foreign")
+            with (
+                self.subTest(change=change),
+                self.assertRaisesRegex(Refused, "fixed asset inventory"),
+            ):
+                self.compare("derived-" + change)
+            extra.unlink(missing_ok=True)
+            asset.write_bytes(raw)
 
     def test_native_judge_loader_requires_the_original_prepared_source(self):
         import reproduce
@@ -283,11 +428,17 @@ class IndependentTests(unittest.TestCase):
         root = Path(judge.__file__).resolve().parents[2]
         prepared = save(
             self.root / "prepared.json",
-            {"source_pin": reproduce.PIN, "source_tree_sha256": reproduce.fingerprint(root)},
+            {
+                "source_pin": reproduce.PIN,
+                "source_tree_sha256": reproduce.fingerprint(root),
+            },
         )
-        self.assertIs(load_native_judge({"path": str(root), "prepared_receipt": prepared}), judge)
+        self.assertIs(
+            load_native_judge({"path": str(root), "prepared_receipt": prepared}), judge
+        )
         changed = save(
-            self.root / "wrong-prepared.json", {"source_pin": {}, "source_tree_sha256": reproduce.fingerprint(root)}
+            self.root / "wrong-prepared.json",
+            {"source_pin": {}, "source_tree_sha256": reproduce.fingerprint(root)},
         )
         with self.assertRaises(Refused):
             load_native_judge({"path": str(root), "prepared_receipt": changed})
@@ -301,7 +452,9 @@ class IndependentTests(unittest.TestCase):
         self.assertTrue(result["native_judgments"][0]["n_criteria"] > 0)
         self.assertEqual(result["native_judgments"][0]["n_passed"], 1)
         self.assertFalse(result["native_judgments"][0]["all_pass"])
-        self.assertEqual(efficiency_decision("FAIL", "1", "0.1", 10, 1), "quality_blocked")
+        self.assertEqual(
+            efficiency_decision("FAIL", "1", "0.1", 10, 1), "quality_blocked"
+        )
 
     def test_quality_regression_and_unknown_do_not_become_improvement(self):
         self.reports["candidate"]["quality"][0]["score"] = 1
@@ -310,9 +463,15 @@ class IndependentTests(unittest.TestCase):
         result = self.compare("unknown")
         self.assertEqual(result["quality_non_regression"], "UNKNOWN")
         self.assertIsNone(result["native_judgments"][1]["n_criteria"])
-        self.assertEqual(efficiency_decision("PASS", None, "0.01", 10, 1), "inconclusive")
-        self.assertEqual(efficiency_decision("PASS", "1", "0.5", 10, 11), "tradeoff_or_regression")
-        self.assertEqual(efficiency_decision("PASS", "1", "0.5", 10, 9), "pareto_improvement")
+        self.assertEqual(
+            efficiency_decision("PASS", None, "0.01", 10, 1), "inconclusive"
+        )
+        self.assertEqual(
+            efficiency_decision("PASS", "1", "0.5", 10, 11), "tradeoff_or_regression"
+        )
+        self.assertEqual(
+            efficiency_decision("PASS", "1", "0.5", 10, 9), "pareto_improvement"
+        )
 
     def test_changed_artifact_and_unselected_candidate_refuse(self):
         artifact = Path(self.reports["candidate"]["artifact"]["path"])
@@ -332,7 +491,8 @@ class IndependentTests(unittest.TestCase):
             },
         )
         with patch(
-            "independent_evaluation.review_report", side_effect=AssertionError("heldout report read before freeze")
+            "independent_evaluation.review_report",
+            side_effect=AssertionError("heldout report read before freeze"),
         ):
             with self.assertRaises(Refused):
                 self.compare("unselected")
@@ -427,7 +587,9 @@ class IndependentTests(unittest.TestCase):
             },
         )
         self.assertEqual(
-            accounting([self.journal], external_calls=extra, wall_interval=timing)["whole_workflow_wall_s"],
+            accounting([self.journal], external_calls=extra, wall_interval=timing)[
+                "whole_workflow_wall_s"
+            ],
             75,
         )
         unknown = copy.deepcopy(self.rows["candidate"])
@@ -441,7 +603,11 @@ class IndependentTests(unittest.TestCase):
             self.root / "unknown.json",
             {"paid_limit_usd": "5", "calls": {"unknown": unknown}},
         )
-        self.assertIsNone(accounting([journal], external_calls=extra)["groups"]["pi"]["total_cost_usd"])
+        self.assertIsNone(
+            accounting([journal], external_calls=extra)["groups"]["pi"][
+                "total_cost_usd"
+            ]
+        )
 
     def test_known_clipping_failure_is_not_hidden_by_other_unknown_measurements(self):
         self.reports["baseline"]["conditions"][1]["status"] = "FAIL"
