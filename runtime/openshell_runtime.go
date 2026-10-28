@@ -142,6 +142,7 @@ type openShellDispatchReceipt struct {
 	Worker                                                         *OpenShellWorkerRecord
 	Outcome                                                        SessionOutcome
 	Delivery                                                       *workspaceartifacts.Result
+	Maintenance                                                    *SessionReadbackFileRef
 }
 
 type openShellSession struct {

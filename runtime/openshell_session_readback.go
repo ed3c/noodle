@@ -132,7 +132,24 @@ func (r *OpenShellRuntime) readSettledSession(ctx context.Context, b CompletedSe
 	if err = read("openshell-dispatch.json", &receipt); err != nil {
 		return result, err
 	}
-	if receipt.ProfileSHA256 != profileSHA || receipt.Version != 1 || receipt.ContextID != r.config.ContextID || receipt.OrderID != b.OrderID || receipt.SessionID != b.SessionID || receipt.Target != b.WorktreePath || receipt.AttemptID == "" || receipt.Phase != "settled" || receipt.Error != "" || receipt.Worker == nil || receipt.Baseline == nil {
+	if receipt.ContextID != r.config.ContextID {
+		if _, err := maintenanceCompletion(receipt); err != nil {
+			return result, err
+		}
+	}
+	if receipt.Maintenance != nil {
+		if _, err := maintenanceCompletion(receipt); err != nil {
+			return result, err
+		}
+		var marker SessionReadbackFileRef
+		if err = read("maintenance-completion.json", &marker); err != nil {
+			return result, err
+		}
+		if marker != *receipt.Maintenance {
+			return result, fmt.Errorf("maintenance completion marker differs")
+		}
+	}
+	if receipt.ProfileSHA256 != profileSHA || receipt.Version != 1 || receipt.OrderID != b.OrderID || receipt.SessionID != b.SessionID || receipt.Target != b.WorktreePath || receipt.AttemptID == "" || receipt.Phase != "settled" || receipt.Error != "" || receipt.Worker == nil || receipt.Baseline == nil {
 		return result, fmt.Errorf("original OpenShell dispatch is not a bound successful settled result")
 	}
 	publishedHead := receipt.CandidateHead
@@ -245,6 +262,13 @@ func (r *OpenShellRuntime) readSettledSession(ctx context.Context, b CompletedSe
 	}
 	if count != 1 {
 		return result, fmt.Errorf("original OpenShell completion source missing or ambiguous")
+	}
+	if receipt.Maintenance != nil {
+		refs, err := maintainedSources(receipt, original)
+		if err != nil {
+			return result, err
+		}
+		maps.Copy(sources, refs)
 	}
 	validate := validateCompletedRecord
 	if progress {

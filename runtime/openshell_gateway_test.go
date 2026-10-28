@@ -151,6 +151,15 @@ func TestManagedOpenShellGatewayChild(t *testing.T) {
 		server.event("get")
 		return nativeGet(ctx, req)
 	}
+	nativeStop := native.stop
+	native.stop = func(ctx context.Context, req *pb.StopSandboxRequest) (*pb.SandboxResponse, error) {
+		server.event("stop")
+		response, err := nativeStop(ctx, req)
+		if _, failure := os.Stat(filepath.Join(root, "stop-ack-lost")); failure == nil && err == nil {
+			return nil, status.Error(codes.Unavailable, "stop acknowledgement lost after effect")
+		}
+		return response, err
+	}
 	if _, err := os.Stat(filepath.Join(root, "retained")); err == nil {
 		g.sandboxes["retained"] = custodySandbox("retained", "retained-id", pb.SandboxPhase_SANDBOX_PHASE_STOPPED)
 	}

@@ -18,11 +18,18 @@ func progressDirectory(session string) string {
 }
 
 func wrapOpenShellProgress(command OpenShellCommand, binary, session, token string) (OpenShellCommand, error) {
+	return wrapOpenShellProgressIn(command, binary, session, token, progressDirectory(session))
+}
+
+func wrapOpenShellProgressIn(command OpenShellCommand, binary, session, token, directory string) (OpenShellCommand, error) {
 	if err := command.validate(); err != nil {
 		return OpenShellCommand{}, err
 	}
 	if !strings.HasPrefix(binary, "/sandbox/payload/") || path.Clean(binary) != binary || session == "" || path.Base(session) != session || session == "." || session == ".." || len(token) != 64 || command.Env["NOODLE_SESSION_DIR"] == "" || command.Env["NOODLE_PROGRESS_TOKEN"] != "" {
 		return OpenShellCommand{}, fmt.Errorf("OpenShell progress launch identity invalid")
+	}
+	if !path.IsAbs(directory) || path.Clean(directory) != directory || path.Base(directory) != path.Base(progressDirectory(session)) {
+		return OpenShellCommand{}, fmt.Errorf("OpenShell progress directory differs from its original session")
 	}
 	digest, err := OpenShellCommandSHA256(command)
 	if err != nil {
@@ -31,7 +38,7 @@ func wrapOpenShellProgress(command OpenShellCommand, binary, session, token stri
 	wrapped := command
 	wrapped.Env = maps.Clone(command.Env)
 	wrapped.Env["NOODLE_PROGRESS_TOKEN"] = token
-	wrapped.Argv = append([]string{binary, "run", "--directory", progressDirectory(session), "--session-id", session, "--command-sha256", digest, "--repository", command.Workdir, "--session-directory", command.Env["NOODLE_SESSION_DIR"], "--"}, command.Argv...)
+	wrapped.Argv = append([]string{binary, "run", "--directory", directory, "--session-id", session, "--command-sha256", digest, "--repository", command.Workdir, "--session-directory", command.Env["NOODLE_SESSION_DIR"], "--"}, command.Argv...)
 	return wrapped, nil
 }
 
@@ -46,7 +53,7 @@ func unwrapOpenShellProgress(command OpenShellCommand) (OpenShellCommand, openSh
 	base.Env = maps.Clone(command.Env)
 	token := base.Env["NOODLE_PROGRESS_TOKEN"]
 	delete(base.Env, "NOODLE_PROGRESS_TOKEN")
-	expected, err := wrapOpenShellProgress(base, a[0], a[5], token)
+	expected, err := wrapOpenShellProgressIn(base, a[0], a[5], token, a[3])
 	if err != nil {
 		return OpenShellCommand{}, binding, err
 	}

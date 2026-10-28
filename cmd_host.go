@@ -145,7 +145,7 @@ func newHostCmd(app *App) *cobra.Command {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 2, "runtime_admitted_orders": true, "config_key": "runtime.admitted_orders", "empty_unrestricted": true, "scope": "runtime_dispatch"})
 	}})
 	task.AddCommand(&cobra.Command{Use: "review-capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "local_task_review_recovery": true, "candidate_bound_merge": true, "local_task_merge_recovery": true, "local_task_completion_recovery": true, "local_task_completion_recovery_version": 2, "local_task_roles": 1, "local_task_directory_scope": 1, "openshell_local_task_review": 1, "openshell_instruction_materialization": 1, "openshell_saved_progress_attempt": 1})
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "local_task_review_recovery": true, "candidate_bound_merge": true, "local_task_merge_recovery": true, "local_task_completion_recovery": true, "local_task_completion_recovery_version": 2, "local_task_roles": 1, "local_task_directory_scope": 1, "openshell_local_task_review": 1, "openshell_instruction_materialization": 1, "openshell_saved_progress_attempt": 1, "openshell_progress_maintenance": 1})
 	}})
 	task.AddCommand(newHostSessionReadbackCmd(app), newHostSavedProgressCmd(app, false), newHostSavedProgressCmd(app, true))
 	cmd.AddCommand(task)
@@ -433,6 +433,9 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 	defer lock.Close()
 	path, err := os.Executable()
 	if err != nil {
+		return err
+	}
+	if err := verifyProgressMaintenanceTransactions(dir); err != nil {
 		return err
 	}
 	data, err := os.ReadFile(path)
@@ -793,6 +796,9 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 }
 
 func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
+	if err := verifyProgressMaintenanceTransactions(h.dir); err != nil {
+		return hostError("unknown_effect", err)
+	}
 	data, err := readHostRequestConfig(req)
 	if err != nil {
 		return hostError("refused", err)

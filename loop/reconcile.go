@@ -54,6 +54,9 @@ func (l *Loop) reconcile(ctx context.Context) error {
 		)
 	}
 
+	if err := l.reconcileMaintainedProgress(ctx); err != nil {
+		return fmt.Errorf("reconcile maintained OpenShell progress: %w", err)
+	}
 	if err := l.recoverAdoptedSessions(ctx); err != nil {
 		return err
 	}
