@@ -159,6 +159,20 @@
   display: block;
   touch-action: none;
 }
+
+.lg-pele {
+  background: #fff;
+}
+
+.lg-pele svg {
+  max-width: none;
+  touch-action: auto;
+}
+
+.lg-pele[data-fit="true"] svg {
+  max-width: 100%;
+  height: auto;
+}
 .lg-band rect {
   fill: #13241b;
   stroke: #294434;

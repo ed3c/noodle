@@ -81,6 +81,6 @@ export function renderPeleProjection(graph: LoopGraph, runID: string) {
     outputLimit: 1_000_000,
     maxEdges: 150,
     idPrefix: "noodle-pele",
-    responsive: true,
+    responsive: false,
   }).svg;
 }
