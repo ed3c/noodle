@@ -61,3 +61,29 @@ its dedicated subscription login, while Pi selects the exact OpenRouter model
 from the dispatched task. A stopped VM cannot perform SSH download: collect
 outputs first, confirm native stop, then apply validated artifacts to the source
 snapshot. Interruption never implies an automatic model retry.
+
+Before starting the harness, Noodle checks native provider readiness against the
+original VM identity and main process. It pins the native observation receipt
+and desired configuration while waiting, and refuses withheld, failed or changed
+credentials. The query creates native observation metadata; it does not call the
+model or rotate credentials. Safe readiness evidence is saved in
+`openshell-providers.json` in the local session directory.
+
+For completed-session inspection and the narrowly scoped retained initialization
+repair, see the [CLI reference](../../docs/reference/cli.md).
+
+## OpenShell 0.1.5 shutdown limitation
+
+The native gateway does not join background OAuth refresh transactions before
+normal shutdown. Noodle's VM stop barrier proves VM completion, but does not
+prove that credential refresh has finished. Increasing termination grace does
+not resolve this native limitation. A refreshed login is therefore not evidence
+that on-demand gateway shutdown is safe for refresh-managed credentials.
+
+Keep this limitation explicit when accepting the subscription route. An
+interrupted refresh with an unknown issuer result needs a new dedicated login;
+do not replay the saved refresh token or clear its state to retry. Native
+shutdown needs to stop admitting refreshes and drain admitted transactions to
+provide a complete guarantee. See the pinned native
+[shutdown path](https://github.com/NVIDIA/OpenShell/blob/v0.1.5/crates/openshell-server/src/lib.rs#L1013)
+and [refresh worker](https://github.com/NVIDIA/OpenShell/blob/v0.1.5/crates/openshell-server/src/provider_refresh.rs#L2229).

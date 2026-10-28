@@ -78,10 +78,32 @@ Swapout 速率是相鄰有效樣本的差值除以時間，不是目前 Swap 使
 不能計算速率時，`swapout_bytes_per_second` 為 `null`。
 額度涵蓋已接納的準備工作與尚未確認結束的 worker，所以 `active_workers` 不等於瞬間 OS 進程數量。
 替換不可即時 steer 的 worker 時，Host 先確認資源條件，再停止並等待舊 worker 結束，沿用同一額度。
-本機連線結束不能證明遠端 worker 已退出。因此這版共享 Host 在啟動前拒絕遠端 runtime，避免把未知退出誤認成可用額度。
+本機連線結束不能證明遠端 worker 已退出。共享 Host 的 OpenShell 路徑會保留額度，直到原 VM 的停止回覆與 fresh same-ID Stopped 觀察都成立；Sprites 與 Cursor 仍在啟動前拒絕。
 
 這個機制控制啟動速度與同時執行數量。它不限制 worker 自行建立的子進程、單次寫入大小或 RSS，也不能保證 Swap 不增加。
 它不修改 Spotlight、Time Machine、Gatekeeper 或系統 Swap 設定。Poteto playbook 與原有 Issue admission 保持原本的責任。
+
+### 原 Host 的 OpenShell 完成證據
+
+```sh
+noodle --project-dir /path/to/control host task session-readback \
+  --request-file /path/to/original-attach.json \
+  --order-id EXACT_ORDER --session-id EXACT_SESSION
+```
+
+必須使用原 attach 的 binary、request 與仍持有該 context 的 Host。此命令不啟動缺失的 Host、不接管舊 session，也不重新派工。它核對 canonical attempt、執行結果、成果回寫、乾淨候選 HEAD，以及原 gateway 的 fresh same-ID Stopped 證據。
+
+`status=observed` 表示這些完成證據一致；canonical 審查狀態另行回報，並不因此接受或合併候選。`effects=[]` 只描述此次讀回沒有任務操作；執行中的 Host 仍可獨立更新狀態，來源在讀回期間變更會被拒絕。候選檢查不執行 Git hooks／filters，不更新 index；正常 Publish 仍執行 hooks。
+
+### 精確的 retained 初始化誤判恢復
+
+```sh
+noodle openshell recover-retained-init \
+  --profile /absolute/path/to/original-profile.json \
+  --expected-owner-sha256 REVIEWED_OWNER_SHA256
+```
+
+預設只檢查。僅在原 owner 尚無 worker 紀錄、完整 pending retained 清單與設定相同，且阻擋原因精確為 `retained initialization supplied for existing custody` 時，才回報可恢復。明確加入 `--apply` 會先保存原資料與前後摘要，再清除這一項本機誤判。此操作不呼叫原生 gateway、不刪除歷史、不啟動 VM；其他原因與未完成的恢復紀錄均拒絕。下一次正常取得 gateway 時仍需重新核對原生 VM。
 
 ---
 
