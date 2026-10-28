@@ -10,13 +10,15 @@ import (
 type Pressure string
 
 const (
-	Unknown       Pressure = "unknown"
-	Normal        Pressure = "normal"
-	Warning       Pressure = "warning"
-	Critical      Pressure = "critical"
-	PollInterval           = 5 * time.Second
-	SampleTimeout          = time.Second
-	MaxSampleAge           = 15 * time.Second
+	Unknown               Pressure = "unknown"
+	Normal                Pressure = "normal"
+	Warning               Pressure = "warning"
+	Critical              Pressure = "critical"
+	DefaultSwapUsedLimit           = uint64(15_000_000_000)
+	WorkerAdmissionPolicy          = "swap-used-critical-guard-v2"
+	PollInterval                   = 5 * time.Second
+	SampleTimeout                  = time.Second
+	MaxSampleAge                   = 15 * time.Second
 )
 
 var ErrDeferred = errors.New("worker resource admission deferred")
@@ -25,6 +27,7 @@ type Sample struct {
 	At               time.Time
 	Pressure         Pressure
 	Swapouts         uint64 // cumulative bytes
+	SwapUsedBytes    uint64 // current system-wide allocation
 	TotalMemoryBytes uint64
 	CPUs             int
 	Unsupported      bool
@@ -35,24 +38,33 @@ type Sampler interface {
 }
 
 type Snapshot struct {
-	UnresolvedResidents int      `json:"unresolved_residents"`
-	Pressure            Pressure `json:"pressure"`
-	SampleError         *string  `json:"sample_error"`
-	Reason              string   `json:"reason"`
-	Active              int      `json:"active_workers"`
-	Residents           int      `json:"active_residents"`
-	Allocations         int      `json:"active_allocations"`
-	Maximum             int      `json:"maximum_workers"`
-	Limit               int      `json:"effective_limit"`
-	Credit              int      `json:"start_credit"`
-	StableSamples       int      `json:"stable_samples"`
-	SwapoutRate         *float64 `json:"swapout_bytes_per_second"`
-	SampleAgeSeconds    float64  `json:"sample_age_seconds"`
-	Unsupported         bool     `json:"unsupported_monitor"`
+	AdmissionPolicy     string               `json:"worker_admission_policy"`
+	SharedQuota         *SharedQuotaSnapshot `json:"shared_quota,omitempty"`
+	OwnedAllocations    int                  `json:"owned_allocations"`
+	UnresolvedResidents int                  `json:"unresolved_residents"`
+	Pressure            Pressure             `json:"pressure"`
+	SampleError         *string              `json:"sample_error"`
+	Reason              string               `json:"reason"`
+	Active              int                  `json:"active_workers"`
+	Residents           int                  `json:"active_residents"`
+	Allocations         int                  `json:"active_allocations"`
+	Maximum             int                  `json:"maximum_workers"`
+	Limit               int                  `json:"effective_limit"`
+	Credit              int                  `json:"start_credit"`
+	StableSamples       int                  `json:"stable_samples"`
+	SwapUsedLimit       uint64               `json:"swap_used_limit_bytes"`
+	SwapUsedBytes       *uint64              `json:"swap_used_bytes"`
+	SwapoutRate         *float64             `json:"swapout_bytes_per_second"`
+	SampleAgeSeconds    float64              `json:"sample_age_seconds"`
+	Unsupported         bool                 `json:"unsupported_monitor"`
 }
 
 type Budget struct {
+	shared                                 *sharedQuota
+	sharedError                            string
+	pendingSharedReturns                   map[string]bool
 	unresolvedResidents                    int
+	switching                              bool
 	mu                                     sync.Mutex
 	maximum, active, limit, credit, stable int
 	residents                              int
@@ -60,6 +72,7 @@ type Budget struct {
 	previous                               *Sample
 	pressure                               Pressure
 	reason                                 string
+	swapUsedLimit                          uint64
 	rate                                   float64
 	rateValid                              bool
 	unsupported                            bool
@@ -76,7 +89,17 @@ func (b *Budget) SetUnresolvedResidents(count int) {
 	b.unresolvedResidents = count
 }
 
+// HoldForSwitch stops new workers without changing live owners or task pause state.
+// Shared proof can still admit services needed by a worker in the old round.
+func (b *Budget) HoldForSwitch() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.switching = true
+	b.credit = 0
+}
+
 type allocation struct {
+	sharedID string
 	budget   *Budget
 	refs     int
 	resident bool
@@ -105,11 +128,15 @@ func HardwareLimit(memory uint64, cpus int) int {
 }
 
 func NewBudget(maxWorkers int) *Budget {
+	return NewBudgetWithSwapUsedLimit(maxWorkers, DefaultSwapUsedLimit)
+}
+
+func NewBudgetWithSwapUsedLimit(maxWorkers int, bytes uint64) *Budget {
 	auto := maxWorkers <= 0
 	if maxWorkers < 1 {
 		maxWorkers = 1
 	}
-	return &Budget{maximum: maxWorkers, auto: auto, pressure: Unknown, reason: "awaiting_sample", contexts: map[string]bool{}, waited: map[string]time.Time{}, now: time.Now}
+	return &Budget{swapUsedLimit: bytes, maximum: maxWorkers, auto: auto, pressure: Unknown, reason: "awaiting_sample", contexts: map[string]bool{}, waited: map[string]time.Time{}, now: time.Now}
 }
 
 func (b *Budget) Register(id string) { b.mu.Lock(); defer b.mu.Unlock(); b.contexts[id] = true }
@@ -149,6 +176,9 @@ func (b *Budget) Run(ctx context.Context, sampler Sampler) {
 func (b *Budget) Observe(s Sample, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	for id := range b.pendingSharedReturns {
+		b.returnSharedAllocation(id)
+	}
 	b.credit = 0
 	b.rateValid = false
 	b.sampleError = nil
@@ -179,8 +209,8 @@ func (b *Budget) Observe(s Sample, err error) {
 	if s.Unsupported {
 		b.previous = &s
 		b.pressure = Unknown
-		b.reason = "unsupported_monitor_static_limit"
-		b.limit = b.maximum
+		b.reason = "unsupported_swap_monitor"
+		b.limit = 0
 		return
 	}
 	previous := b.previous
@@ -195,10 +225,11 @@ func (b *Budget) Observe(s Sample, err error) {
 	}
 	b.rateValid = true
 	b.rate = float64(s.Swapouts-previous.Swapouts) / s.At.Sub(previous.At).Seconds()
-	if s.Pressure != Normal || b.rate > 0 {
+	pressureAllowsAdmission := s.Pressure == Normal || s.Pressure == Warning
+	if !pressureAllowsAdmission || s.SwapUsedBytes >= b.swapUsedLimit {
 		b.reason = "memory_pressure"
-		if b.rate > 0 {
-			b.reason = "swapout_rate"
+		if pressureAllowsAdmission && s.SwapUsedBytes >= b.swapUsedLimit {
+			b.reason = "swap_used_limit"
 		}
 		b.stable = 0
 		b.limit = 0
@@ -221,10 +252,12 @@ func (b *Budget) stale() bool {
 	return b.previous == nil || b.now().Sub(b.previous.At) > MaxSampleAge || b.now().Before(b.previous.At)
 }
 
-func (b *Budget) TryAcquire(id string) (*Permit, error) {
+func (b *Budget) TryAcquire(id string) (*Permit, error) { return b.tryAcquire(id, false, "") }
+
+func (b *Budget) tryAcquire(id string, resident bool, residentKey string) (*Permit, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if !b.contexts[id] || b.unresolvedResidents != 0 {
+	if len(b.pendingSharedReturns) != 0 || !b.contexts[id] || b.unresolvedResidents != 0 || (b.switching && (!resident || b.shared == nil || !b.shared.workerContext(id))) {
 		return nil, ErrDeferred
 	}
 	if _, ok := b.waited[id]; !ok {
@@ -242,13 +275,32 @@ func (b *Budget) TryAcquire(id string) (*Permit, error) {
 	if b.stale() || b.active >= b.limit || (!b.unsupported && b.credit == 0) || len(b.waiters) == 0 || b.waiters[0] != id {
 		return nil, ErrDeferred
 	}
+	sharedID := ""
+	if b.shared != nil {
+		var err error
+		sharedID, err = b.shared.acquire(id, b.maximum, b.now(), !b.unsupported, resident, residentKey, b.switching)
+		if err != nil {
+			var uncertain *quotaWriteUncertain
+			if errors.As(err, &uncertain) {
+				b.rememberSharedReturn(sharedID)
+			}
+			if !errors.Is(err, ErrDeferred) {
+				b.sharedError = err.Error()
+			}
+			return nil, ErrDeferred
+		}
+		b.sharedError = ""
+	}
 	b.active++
+	if resident {
+		b.residents++
+	}
 	if !b.unsupported {
 		b.credit = 0
 	}
 	b.removeWaiter(id)
 	delete(b.waited, id)
-	return &Permit{allocation: &allocation{budget: b, refs: 1}}, nil
+	return &Permit{allocation: &allocation{budget: b, refs: 1, sharedID: sharedID, resident: resident}}, nil
 }
 
 func (p *Permit) Release() {
@@ -265,6 +317,9 @@ func (p *Permit) Release() {
 		}
 		p.allocation.refs--
 		if p.allocation.refs == 0 {
+			if b.shared != nil {
+				b.returnSharedAllocation(p.allocation.sharedID)
+			}
 			b.active--
 			if p.allocation.resident {
 				b.residents--
@@ -277,8 +332,16 @@ func (p *Permit) ReserveReplacement(id string) (*Permit, error) {
 	b := p.allocation.budget
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if p.released || p.replacementReserved || !b.contexts[id] || b.unresolvedResidents != 0 || b.stale() || b.limit == 0 || b.active > b.limit || (!b.unsupported && b.credit == 0) {
+	if len(b.pendingSharedReturns) != 0 || p.released || p.replacementReserved || !b.contexts[id] || b.unresolvedResidents != 0 || b.switching || b.stale() || b.limit == 0 || b.active > b.limit || (!b.unsupported && b.credit == 0) {
 		return nil, ErrDeferred
+	}
+	if b.shared != nil {
+		if err := b.shared.replacement(p.allocation.sharedID, b.now(), !b.unsupported); err != nil {
+			if !errors.Is(err, ErrDeferred) {
+				b.sharedError = err.Error()
+			}
+			return nil, ErrDeferred
+		}
 	}
 	if !b.unsupported {
 		b.credit = 0
@@ -291,7 +354,7 @@ func (p *Permit) ReserveReplacement(id string) (*Permit, error) {
 func (b *Budget) Snapshot() Snapshot {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	s := Snapshot{Pressure: b.pressure, Reason: b.reason, Active: b.active - b.residents, Residents: b.residents, Allocations: b.active, Maximum: b.maximum, Limit: b.limit, Credit: b.credit, StableSamples: b.stable, Unsupported: b.unsupported}
+	s := Snapshot{AdmissionPolicy: WorkerAdmissionPolicy, SwapUsedLimit: b.swapUsedLimit, Pressure: b.pressure, Reason: b.reason, Active: b.active - b.residents, Residents: b.residents, Allocations: b.active, Maximum: b.maximum, Limit: b.limit, Credit: b.credit, StableSamples: b.stable, Unsupported: b.unsupported}
 	if b.sampleError != nil {
 		message := *b.sampleError
 		s.SampleError = &message
@@ -299,6 +362,10 @@ func (b *Budget) Snapshot() Snapshot {
 	if b.rateValid {
 		rate := b.rate
 		s.SwapoutRate = &rate
+	}
+	if b.previous != nil && !b.unsupported {
+		used := b.previous.SwapUsedBytes
+		s.SwapUsedBytes = &used
 	}
 	if b.previous != nil {
 		s.SampleAgeSeconds = b.now().Sub(b.previous.At).Seconds()
@@ -311,23 +378,62 @@ func (b *Budget) Snapshot() Snapshot {
 		s.Credit = 0
 		s.Limit = 0
 		s.SwapoutRate = nil
+		s.SwapUsedBytes = nil
+	}
+	if b.switching {
+		s.Limit, s.Credit = 0, 0
+		s.Reason = "host_switch_draining"
 	}
 	s.UnresolvedResidents = b.unresolvedResidents
 	if b.unresolvedResidents != 0 {
 		s.Limit, s.Credit = 0, 0
 		s.Reason = "resident_owner_readback_required"
 	}
+	s.OwnedAllocations = b.active
+	if b.shared != nil {
+		shared := b.shared.snapshot()
+		s.SharedQuota = &shared
+		if shared.Error == "" {
+			s.Allocations = shared.Allocations
+			s.Residents = shared.Residents
+			s.Active = shared.Allocations - shared.Residents
+			s.OwnedAllocations = shared.Owned
+		}
+		if len(b.pendingSharedReturns) != 0 && shared.Error == "" {
+			shared.Error = b.sharedError
+		}
+		if shared.Error != "" {
+			s.Limit, s.Credit = 0, 0
+			s.Reason = "shared_quota_unknown"
+		}
+		if b.sharedError != "" {
+			message := b.sharedError
+			s.SampleError = &message
+		}
+	}
 	return s
 }
 
 func (b *Budget) TryAcquireResident(id string) (*Permit, error) {
-	p, err := b.TryAcquire(id)
-	if err != nil {
-		return nil, err
+	return b.tryAcquire(id, true, "")
+}
+
+// Only an unreturned reservation or a joined worker may enter this return set.
+// The original Host sampler retries the same nonce, never another dispatch.
+func (b *Budget) rememberSharedReturn(id string) {
+	if b.pendingSharedReturns == nil {
+		b.pendingSharedReturns = make(map[string]bool)
 	}
-	b.mu.Lock()
-	p.allocation.resident = true
-	b.residents++
-	b.mu.Unlock()
-	return p, nil
+	b.pendingSharedReturns[id] = true
+}
+func (b *Budget) returnSharedAllocation(id string) {
+	if err := b.shared.release(id); err != nil {
+		b.rememberSharedReturn(id)
+		b.sharedError = err.Error()
+		return
+	}
+	delete(b.pendingSharedReturns, id)
+	if len(b.pendingSharedReturns) == 0 {
+		b.sharedError = ""
+	}
 }

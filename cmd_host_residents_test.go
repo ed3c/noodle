@@ -97,7 +97,10 @@ func TestHostResidentLeaseRejectsProjectOnlyRelease(t *testing.T) {
 	}
 	b := admission.NewBudget(1)
 	b.Register("current")
-	b.Observe(admission.Sample{At: time.Now(), Unsupported: true}, nil)
+	now := time.Now()
+	for i := 0; i < 4; i++ {
+		b.Observe(admission.Sample{At: now.Add(time.Duration(i-3) * time.Second), Pressure: admission.Normal}, nil)
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)

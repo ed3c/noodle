@@ -50,7 +50,9 @@ func TestResidentLauncherExitRetainsAllocationUntilGroupAbsent(t *testing.T) {
 	}
 	newBudget := NewBudget(4)
 	newBudget.Register("new-context")
-	newBudget.Observe(Sample{At: time.Now(), Unsupported: true}, nil)
+	for range 4 {
+		observeResidentFixtureSample(newBudget)
+	}
 	reopened.BindBudget(newBudget)
 	if _, err := newBudget.TryAcquire("new-context"); err == nil {
 		t.Fatal("Host restart forgot unresolved resident")

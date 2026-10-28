@@ -151,7 +151,7 @@ func TestResourceSteerCapOneTransfersAndPressureRefusesBeforeKill(t *testing.T) 
 			old := l.cooks.activeCooksByOrder["42"]
 			before := resourceTree(t, l.projectDir)
 			if pressure {
-				b.Observe(admission.Sample{At: time.Now(), Pressure: admission.Warning}, nil)
+				b.Observe(admission.Sample{At: time.Now(), Pressure: admission.Critical}, nil)
 			} else {
 				b.Observe(admission.Sample{At: time.Now(), Pressure: admission.Normal}, nil)
 			}
@@ -289,7 +289,7 @@ func TestResourceControlQueueRetainsPressureWaitAndUnknownCustody(t *testing.T) 
 				rt.dispatchErr = errors.New("remote response lost after send")
 				b.Observe(admission.Sample{At: time.Now(), Pressure: admission.Normal}, nil)
 			} else {
-				b.Observe(admission.Sample{At: time.Now(), Pressure: admission.Warning}, nil)
+				b.Observe(admission.Sample{At: time.Now(), Pressure: admission.Critical}, nil)
 			}
 			command := ControlCommand{ID: "original-steer", Action: "steer", Target: old.session.ID(), Prompt: "retain exact direction"}
 			raw, _ := json.Marshal(command)
@@ -359,7 +359,7 @@ func TestResourceControlWaitAllowsLoadReductionAndHydration(t *testing.T) {
 				t.Fatal(err)
 			}
 			old := l.cooks.activeCooksByOrder[order.ID]
-			b.Observe(admission.Sample{At: time.Now(), Pressure: admission.Warning}, nil)
+			b.Observe(admission.Sample{At: time.Now(), Pressure: admission.Critical}, nil)
 			raw, _ := json.Marshal(ControlCommand{ID: "waiting-steer", Action: "steer", Target: old.session.ID(), Prompt: "original queued direction"})
 			raw = append(raw, '\n')
 			reduction, _ := json.Marshal(ControlCommand{ID: "reduce-load", Action: action})
