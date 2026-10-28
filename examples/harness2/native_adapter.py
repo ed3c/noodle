@@ -143,8 +143,19 @@ class NoodleAdapter:
 
     def trajectory(self, run_dir, *, obs_trunc):
         self._result(run_dir)
-        # Real bridge must produce this projection from captured native events.
-        return (Path(run_dir) / "trajectory.md").read_text()[:obs_trunc]
+        # The original bridge projects one classified public event per JSON line.
+        # Bound individual text observations while retaining every event and field.
+        def clip(value):
+            if isinstance(value, str) and len(value) > obs_trunc:
+                return value[:obs_trunc] + " [truncated]"
+            if isinstance(value, list):
+                return [clip(item) for item in value]
+            if isinstance(value, dict):
+                return {key: clip(item) for key, item in value.items()}
+            return value
+
+        events = (Path(run_dir) / "trajectory.md").read_text().splitlines()
+        return "\n".join(json.dumps(clip(json.loads(event)), ensure_ascii=False) for event in events)
 
     def deliverable_files(self, run_dir):
         self._result(run_dir)

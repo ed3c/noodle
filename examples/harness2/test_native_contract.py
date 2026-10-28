@@ -32,6 +32,7 @@ class FakeOwner:
         self.calls = []
         self.unknown_proposer = False
         self.invalid_edit = False
+        self.trace_events = None
 
     def execute(self, call):
         self.calls.append(call)
@@ -51,7 +52,11 @@ class FakeOwner:
             instruction = (Path(call.inputs["harness"]["path"]) / "AGENTS.md").read_text()
             answer = "signed total" if "signed" in instruction else "positive total"
             (directory / "deliverables.json").write_text(json.dumps({"answer.txt": answer}))
-            (directory / "trajectory.md").write_text("[ACTION] Reconcile records\n[OBSERVATION] " + answer)
+            events = self.trace_events or [
+                {"event_id": "action", "record": {"action": "Reconcile records"}},
+                {"event_id": "observation", "record": {"text": answer}},
+            ]
+            (directory / "trajectory.md").write_text("\n".join(json.dumps(event) for event in events))
         receipt = directory / "fake-owner-receipt.json"
         receipt.write_text(json.dumps({"fixture_only": True, "input_sha256": call.fingerprint(),
                                       "canonical_attempt": "fixture-canonical", "native_attempt": "fixture-native"}))
@@ -118,6 +123,28 @@ class NativeContractTests(unittest.TestCase):
         subscription = [r for r in journal["calls"].values() if r["provider"] == "codex"]
         self.assertTrue(all(r["result"]["cost_usd"] is None for r in subscription))
         self.assertEqual(str(self.gate._spent()), "0.07")
+
+    def test_trajectory_bounds_each_text_but_retains_late_events_and_fields(self):
+        adapter = self.adapter()
+        self.owner.trace_events = [
+            {"event_id": "early", "record": {"output": "x" * 30000, "exit_code": 0}},
+            {"event_id": "multi", "entries": [
+                {"path": ["outputs", 0], "value": "a" * 30000},
+                {"path": ["outputs", 1], "value": "b" * 30000}]},
+            {"event_id": "late-error", "record": {"error": "drawing label clipped", "exit_code": 1}},
+            {"event_id": "terminal", "record": {"type": "task_complete", "text": "artifact delivered"}},
+        ]
+        run = adapter.execute("records", None, "trace")
+        original = (Path(run) / "trajectory.md").read_bytes()
+        events = [json.loads(line) for line in adapter.trajectory(run, obs_trunc=10000).splitlines()]
+        self.assertEqual([row["event_id"] for row in events], [row["event_id"] for row in self.owner.trace_events])
+        self.assertEqual(events[0]["record"], {"output": "x" * 10000 + " [truncated]", "exit_code": 0})
+        self.assertEqual(events[1]["entries"][0]["value"], "a" * 10000 + " [truncated]")
+        self.assertEqual(events[1]["entries"][1]["value"], "b" * 10000 + " [truncated]")
+        self.assertEqual(events[1]["entries"][1]["path"], ["outputs", 1])
+        self.assertEqual(events[2:], self.owner.trace_events[2:])
+        self.assertEqual((Path(run) / "trajectory.md").read_bytes(), original)
+        self.assertEqual(adapter.deliverable_files(run), {"answer.txt": "positive total"})
 
     def test_same_run_reuses_owner_and_different_input_refuses(self):
         adapter = self.adapter()
