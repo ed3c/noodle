@@ -41,6 +41,44 @@ function observation(): ContextObservation {
   };
 }
 afterEach(() => vi.unstubAllGlobals());
+it("starts a saved-progress attempt only explicitly and does not present a queued acknowledgement as running", async () => {
+  const saved = observation();
+  saved.status = "stopped";
+  saved.actions.start = { available: false, reason: "not_started" };
+  saved.actions.new_attempt = { available: true, reason: "original_saved_progress_retryable" };
+  const queued = {
+    ...saved,
+    status: "queued",
+    actions: {
+      ...saved.actions,
+      new_attempt: { available: false, reason: "original_owner_readback_required" },
+    },
+    effects: ["original_control_queued"],
+  };
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ schema: 1, choices: [choice] }))
+    .mockResolvedValueOnce(Response.json(saved))
+    .mockResolvedValueOnce(Response.json(queued));
+  vi.stubGlobal("fetch", fetch);
+  render(<ContextControls />);
+  await screen.findByRole("option", { name: choice.label });
+  await userEvent.selectOptions(screen.getByLabelText("選擇組合與任務"), choice.id);
+  await userEvent.click(screen.getByRole("button", { name: "查明原任務狀態" }));
+  const retry = await screen.findByRole("button", { name: "以已保存成果開始新嘗試" });
+  expect(fetch).toHaveBeenCalledTimes(2);
+  await userEvent.click(retry);
+  await screen.findByText("原任務狀態：已收到操作，等待原任務確認");
+  expect(screen.queryByText("原任務狀態：執行中")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "依原審查開始新嘗試" })).toBeDisabled();
+  expect(JSON.parse(fetch.mock.calls[2]?.[1].body)).toEqual({
+    id: choice.id,
+    registry_version: choice.version,
+    expected_version: saved.version,
+    action: "new_attempt",
+  });
+  expect(fetch).toHaveBeenCalledTimes(3);
+});
 it("requires explicit selection and observation before sending only bound IDs to the owner", async () => {
   const fetch = vi
     .fn()

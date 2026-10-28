@@ -32,6 +32,7 @@ const reasonLabels: Record<string, string> = {
   review_required: "先完成原審查流程。",
   original_review_required: "先完成原審查流程。",
   original_saved_revision_next: "原審查已允許修改，可開始新嘗試。",
+  original_saved_progress_retryable: "已確認前次工作停止並保存成果，可以明確開始新嘗試。",
   original_revision_next_unavailable: "原審查尚未允許新的嘗試。",
   original_attempt_unavailable: "尚無可銜接的前次嘗試。",
   original_attempt_not_terminal: "前次工作尚未結束。",
@@ -53,6 +54,7 @@ const statusLabels: Record<string, string> = {
   running: "執行中",
   active: "執行中",
   pending: "等待執行",
+  queued: "已收到操作，等待原任務確認",
   stopped: "已停止",
   completed: "已完成",
   failed: "執行失敗",
@@ -70,6 +72,7 @@ function reasonLabel(reason: string, available: boolean) {
       "original_task_active",
       "original_entry",
       "original_saved_revision_next",
+      "original_saved_progress_retryable",
     ].includes(reason)
   ) {
     return "目前無法執行，請查明狀態。";
@@ -272,7 +275,10 @@ export function ContextControls() {
                   className="border border-border-subtle px-3 py-2 disabled:opacity-50"
                   onClick={() => void invoke(action)}
                 >
-                  {actionLabels[action]}
+                  {action === "new_attempt" &&
+                  observation.actions[action].reason === "original_saved_progress_retryable"
+                    ? "以已保存成果開始新嘗試"
+                    : actionLabels[action]}
                 </button>
                 <p className="text-sm">
                   {reasonLabel(
@@ -283,7 +289,12 @@ export function ContextControls() {
               </div>
             ))}
             <p>原模型對話續接：不支援。</p>
-            <p>新嘗試需要原任務已安全停止，且原審查流程允許；保留前次歷史，不代表續接原對話。</p>
+            <p>
+              新嘗試需要原任務已安全停止，並確認保存成果或通過原審查；保留前次歷史，不代表續接原對話。
+            </p>
+            {observation.status === "queued" && (
+              <p role="status">操作已排入原任務佇列，尚未確認開始執行。請查明原任務狀態。</p>
+            )}
           </section>
           <section aria-label="原任務成果與驗收" className="space-y-3">
             <h2 className="text-lg font-semibold">成果與驗收</h2>
