@@ -63,7 +63,13 @@ func verifyCleanupProgressArchives(ctx context.Context, dir string, receipt open
 	if err != nil {
 		return err
 	}
+	names := map[string]bool{"noodle-result.tar": false, "noodle-session.tar": false}
 	for _, archive := range receipt.Progress.Archives {
+		seen, ok := names[archive.Name]
+		if !ok || seen || archive.Bytes <= 0 {
+			return fmt.Errorf("cleanup retained archive identity differs")
+		}
+		names[archive.Name] = true
 		count := 0
 		for _, entry := range entries {
 			if !strings.HasPrefix(entry.Name(), "progress-archive-") {

@@ -95,7 +95,7 @@ func (l *Loop) checkCompletedTasks() error {
 	if err := validateAdmissionSnapshot(snapshot); err != nil {
 		return fmt.Errorf("completion evidence is unresolved: %w", err)
 	}
-	if err := observeAdmissionSessions(l.runtimeDir, l.canonical); err != nil {
+	if err := l.observeCleanupSessions(); err != nil {
 		return fmt.Errorf("original session readback is unresolved: %w", err)
 	}
 	return nil

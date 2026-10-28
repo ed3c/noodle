@@ -114,3 +114,16 @@ func TestOpenShellCleanupMetadataProjection(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenShellCleanupRejectsArchivePathBeforeOpening(t *testing.T) {
+	r, b, _ := completedReadbackFixture(t)
+	dir := filepath.Join(r.config.RuntimeDir, "sessions", b.SessionID)
+	var receipt openShellDispatchReceipt
+	if _, err := ReadSessionReadbackFile(filepath.Join(dir, "openshell-dispatch.json"), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	receipt.Progress.Archives[0].Name = "../foreign.tar"
+	if err := verifyCleanupProgressArchives(t.Context(), dir, receipt); err == nil {
+		t.Fatal("foreign archive path accepted")
+	}
+}
