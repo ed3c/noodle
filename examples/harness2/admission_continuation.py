@@ -22,7 +22,7 @@ def verify_admission_continuation(call, proof, refused, original_intent, origina
             and refused.get('problem') == {'field': 'task.host.attach', 'value': 'host context limit reached (16)'}
             and refused.get('effects') == [] and refused.get('authorizes_landing') is False
             and refused.get('next') == {'kind': 'input', 'owner': 'Noodle', 'required': ['original_request_readback']}
-            and 'inner' not in refused and proof.get('retained_result') is None,
+            and 'inner' not in refused,
             'original operation is not the exact effect-free capacity refusal')
     read_ref(original_receipt['stderr'])
     body = decode(read_ref(proof['request']))

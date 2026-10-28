@@ -9,6 +9,7 @@ import os
 import re
 import stat
 import subprocess
+import tempfile
 import time
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path, PurePosixPath
@@ -506,6 +507,15 @@ def host_identity(observation):
     return {key: host[key] for key in fields}
 
 
+def selected_candidate(inner):
+    """An original approval binds its candidate before later review metadata updates."""
+    selection = (inner.get("review_progress") or {}).get("review") or {}
+    if selection.get("decision") == "approve":
+        require(selection.get("candidate") is not None, "original approval has no candidate")
+        return selection["candidate"]
+    return inner.get("candidate")
+
+
 def verify_call_reconciliation(call, proof):
     require(proof.get("kind") == "original-call-readback" and proof.get("call_sha256") == call.fingerprint(),
             "recovery does not bind the original call")
@@ -641,17 +651,17 @@ class SoodlesOwnerBridge:
         fresh = decode(read_ref(fresh_observation))
         if frozen:
             inner = original_inner(fresh, request)
-            selection = (inner.get('review_progress') or {}).get('review') or {}
-            require((inner.get('candidate') or selection.get('candidate')) == frozen[0], 'fresh original candidate differs from retained snapshot')
-        save(directory / "reconciliation-intent.json", proof)
+            require(selected_candidate(inner) == frozen[0], 'fresh original candidate differs from retained snapshot')
+        evidence = Path(tempfile.mkdtemp(prefix='reconciliation-', dir=directory))
+        save(evidence / "intent.json", proof)
         self.templates.remove(template)
         before = reference(directory / 'billing-before/before.json') if call.provider == 'pi' else None
-        result = self._follow(call, template, directory, request, binding_ref,
+        result = self._follow(call, template, evidence, request, binding_ref,
             reference(directory / "instruction-trees.json"), result_dir, before,
             read_only=True, expected_host=expected_host, frozen=frozen)
         proof["result_receipt"] = {"path": result.receipt_path, "sha256": result.receipt_sha256}
         proof["completed_observation"] = decode(read_ref(proof["result_receipt"]))["original_review"]
-        return result, save(directory / "reconciliation-settled.json", proof)
+        return result, save(evidence / "reconciliation-settled.json", proof)
 
     def _follow(self, call, template, directory, request, binding_ref, instructions_ref, result_dir, before,
                 *, read_only=False, expected_host=None, frozen=None):
@@ -694,7 +704,7 @@ class SoodlesOwnerBridge:
                 if frozen is not None:
                     progress = inner.get("review_progress") or {}
                     selection = progress.get("review") or {}
-                    require((inner.get("candidate") or selection.get("candidate")) == frozen[0],
+                    require(selected_candidate(inner) == frozen[0],
                             "original reviewed candidate changed")
                     require(not selection or selection.get("decision") == "approve",
                             "Session selected a revision; no automatic replacement call is authorized")

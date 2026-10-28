@@ -48,6 +48,8 @@ class ScriptedCLI:
             value.pop('capture')
             value['inner'].update(review_progress={'status': 'locally_integrated',
                 'review': {'decision': 'approve', 'candidate': value['inner']['candidate']}}, acceptance='PASS')
+            if getattr(self, 'published_candidate', None) is not None:
+                value['inner']['candidate'] = self.published_candidate
         elif len(self.calls) >= 3:
             value = self.test.completion(request)
             value.pop('capture')
@@ -308,12 +310,15 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual([verb for verb, _ in cli.calls].count('enter'), 1)
         self.assertTrue(gate.state['blocked'])
         proof_data = decode(read_ref(proof))
-        for name in ('acceptance', 'candidate', 'host'):
+        for name in ('acceptance', 'candidate', 'merge_failure', 'host'):
             completed = decode(read_ref(proof_data['completed_observation']))
             if name == 'acceptance':
                 completed['inner']['acceptance'] = 'UNKNOWN'
             elif name == 'candidate':
                 completed['inner']['review_progress']['review']['candidate'] = {'path': '/other', 'sha256': 'c' * 64}
+            elif name == 'merge_failure':
+                completed['inner']['review_progress']['status'] = 'pending'
+                completed['inner']['review_progress']['reason'] = 'merge failed'
             else:
                 completed['inner']['native_host']['host_instance_id'] = 'replacement-host'
             changed = {**proof_data, 'completed_observation': save(self.root / (name + '-completion.json'), completed)}

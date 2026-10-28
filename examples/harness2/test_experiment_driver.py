@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from experiment_driver import (
+    archive_reconciliation,
     journal_elapsed,
     ordered_calls,
     prepare_editable_harness,
@@ -14,7 +15,7 @@ from experiment_driver import (
     public_tree,
     run_experiment,
 )
-from owner_contract import Refused, tree_ref
+from owner_contract import OwnerCall, Refused, tree_ref
 from soodles_bridge import decode, reference, save
 
 
@@ -41,6 +42,44 @@ class PublicBundleTests(unittest.TestCase):
                 'provenance': (self.accepted,)}
         args.update(changes)
         return prepare_public_task_bundle(**args)
+
+    def test_repeated_readback_archives_preserve_each_original_native_state(self):
+        output = self.root / 'experiment'
+        native = output / 'pi'
+        native.mkdir(parents=True)
+        checkpoint = native / 'checkpoint.json'
+        checkpoint.write_text('{"state":"unknown"}')
+        journal = output / 'owner-journal.json'
+        journal.write_text('{"original":"unknown"}')
+        prior_result = save(output / 'pi-result.json', {'prior': 'failed'})
+        call = OwnerCall('pi', 'original/final', 'solver', 'pi',
+            'openrouter/deepseek/deepseek-v4.1-flash-1017', {'prompt': 'original'})
+        call_ref = save(output / 'call.json', call.__dict__)
+        fresh = save(output / 'fresh.json', {'fixture': 'read-only'})
+        first = archive_reconciliation(output, call_ref, ['pi', 'codex'], journal, fresh)
+        original = tree_ref(first)
+        checkpoint.write_text('{"state":"readback-interrupted"}')
+        second = archive_reconciliation(output, call_ref, ['pi', 'codex'], journal, fresh)
+        self.assertNotEqual(first, second)
+        self.assertEqual(tree_ref(first), original)
+        self.assertEqual((second / 'pi/checkpoint.json').read_bytes(), checkpoint.read_bytes())
+        for archive in (first, second):
+            source = decode((archive / 'source.json').read_bytes())
+            self.assertEqual(source['original_call'], call_ref)
+            self.assertEqual(source['original_journal'], reference(journal))
+            self.assertEqual(reference(archive / 'pi-result.json')['sha256'], prior_result['sha256'])
+            self.assertFalse((archive / 'codex').exists())
+        self.assertEqual(journal.read_text(), '{"original":"unknown"}')
+
+    def test_integrated_acceptance_selects_original_approval_before_review_metadata(self):
+        value = decode(Path(self.accepted['path']).read_bytes())
+        value['inner']['candidate'] = save(self.root / 'updated-review.json',
+            {**decode(Path(self.candidate['path']).read_bytes()), 'review_sha256': 'c' * 64})
+        accepted = save(self.root / 'updated-inspect.json', value)
+        ref = self.prepare(owner_acceptance=accepted)
+        bundle = decode(Path(ref['path']).read_bytes())
+        provenance = decode(Path(bundle['provenance']['path']).read_bytes())
+        self.assertEqual(provenance['candidate'], self.candidate)
 
     def test_elapsed_uses_original_journal_start_and_includes_reconciliation_wait(self):
         state = {'calls': {'baseline': {'call': {'group': 'codex'}, 'state': 'settled',

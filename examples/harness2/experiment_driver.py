@@ -1,6 +1,7 @@
 """Explicit entry for a bounded native experiment over an accepted frozen source."""
 import shutil
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -17,6 +18,7 @@ from soodles_bridge import (
     reference,
     require,
     save,
+    selected_candidate,
 )
 
 
@@ -72,7 +74,7 @@ def prepare_public_task_bundle(*, destination: Path, task_id: str, prompt: str,
     inner = accepted.get('inner') or {}
     progress = inner.get('review_progress') or {}
     selection = progress.get('review') or {}
-    candidate_ref = inner.get('candidate') or selection.get('candidate')
+    candidate_ref = selected_candidate(inner)
     require(accepted.get('owner') == 'soodles.loop' and inner.get('owner') == 'issue-execution.local-task'
             and progress.get('status') == 'locally_integrated' and inner.get('acceptance') == 'PASS'
             and selection.get('decision') == 'approve' and selection.get('candidate') == candidate_ref,
@@ -221,19 +223,9 @@ def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_obser
             elif row is not unresolved[0]:
                 require(row['state'] == 'refused', 'prior original owner is unresolved')
         bridge.restore_templates(rows, call)
-        reconciliation_id = call.fingerprint()
-        archive = output / ('reconciliation-native-before-' + reconciliation_id)
-        archive.mkdir()
-        archived = []
-        for route, bundle, adapter in adapters:
-            native_root = output / route.group
-            if native_root.is_dir():
-                shutil.copytree(native_root, archive / route.group)
-                archived.append({'original': tree_ref(native_root), 'saved': tree_ref(archive / route.group)})
-        for old_result in output.glob('*result.json'):
-            shutil.copy2(old_result, archive / old_result.name)
-        save(archive / 'source.json', {'native_trees': archived, 'original_journal': reference(gate.journal),
-            'original_call': call_ref, 'fresh_observation': fresh_observation})
+        archive = archive_reconciliation(output, call_ref, [route.group for route, _, _ in adapters],
+                                         gate.journal, fresh_observation)
+        reconciliation_id = archive.name.removeprefix('reconciliation-native-before-')
         if billing is not None:
             known = [money(row['result']['cost_usd']) for row in rows if row['provider'] == 'pi'
                      and row['state'] == 'settled' and row['result']['cost_usd'] is not None]
@@ -264,6 +256,23 @@ def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_obser
         'whole_workflow_cost_usd': None, 'whole_workflow_wall_s': None,
         'stage_a_accounting': 'combine original Stage-A receipts; unknown remains null',
         'hidden_evaluation': 'not performed', 'adoption_authorized': False})
+
+
+def archive_reconciliation(output, call_ref, groups, journal, fresh_observation):
+    """Preserve each explicit readback's inputs, including earlier failed readbacks."""
+    call = OwnerCall(**decode(read_ref(call_ref)))
+    archive = Path(tempfile.mkdtemp(prefix='reconciliation-native-before-' + call.fingerprint() + '-', dir=output))
+    archived = []
+    for group in groups:
+        native_root = output / group
+        if native_root.is_dir():
+            shutil.copytree(native_root, archive / group)
+            archived.append({'original': tree_ref(native_root), 'saved': tree_ref(archive / group)})
+    for old_result in output.glob('*result.json'):
+        shutil.copy2(old_result, archive / old_result.name)
+    save(archive / 'source.json', {'native_trees': archived, 'original_journal': reference(journal),
+        'original_call': call_ref, 'fresh_observation': fresh_observation})
+    return archive
 
 
 def ordered_calls(state):

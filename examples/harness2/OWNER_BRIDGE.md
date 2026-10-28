@@ -173,7 +173,14 @@ baseline and later proposer use this same reconciliation path, not separate reco
 Original unknown journal bytes/rows, native summaries and failed outputs are archived before
 same-namespace continuation. Already settled solver/proposer calls return only their verified
 cache; the remaining original templates and accounting continue unchanged. Unknown history
-is never reset. An interrupted reconciliation retains its intent and does not authorize replay.
+is never reset. Every explicit reconciliation creates a new immutable evidence directory
+for its intent, inspections/capture, settlement and billing readbacks, and a separate native
+archive/result suffix. An interrupted reconciliation retains all earlier evidence. Another
+explicit readback may validate the same complete retained snapshot and settle it; it never
+repeats `enter`. Partial or changed snapshots still refuse. Original approved `review.candidate`
+selects that snapshot even when the latest candidate projection has a newer review digest;
+a different approved candidate refuses. Approval alone does not settle a call: original
+`locally_integrated` and acceptance `PASS` are still required.
 
 Only a non-capture `inspect` with original exit 2, `effects=[]`, no landing authority and the
 exact `task.session_readback.native` / `session readback source changed: canonical_snapshot`

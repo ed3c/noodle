@@ -254,14 +254,18 @@ class SharedGate:
             original = self.journal.read_bytes()
             digest = hashlib.sha256(original).hexdigest()
             archive = self.journal.with_name(self.journal.name + ".unknown-" + digest + ".json")
-            with archive.open("xb") as stream:
-                stream.write(original)
-                stream.flush()
-                os.fsync(stream.fileno())
             if result.billing_receipt is not None:
                 from openrouter_billing import verify_settlement
                 bill = verify_settlement(call, result, result.billing_receipt)
                 self._require_unique_bill(key, bill)
+            try:
+                with archive.open("xb") as stream:
+                    stream.write(original)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            except FileExistsError:
+                # A prior explicit settlement may have archived before its journal write failed.
+                read_ref({"path": str(archive), "sha256": digest})
             prior_row = json.loads(canonical(row))
             history = list(row.get('reconciliations', []))
             history.append({"kind": "original-call-readback", "prior_row": prior_row,

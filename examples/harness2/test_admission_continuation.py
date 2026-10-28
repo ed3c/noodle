@@ -3,6 +3,7 @@ import copy
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import test_soodles_bridge as fixtures
 from owner_contract import SharedGate, UnknownEffect, Refused
@@ -110,6 +111,73 @@ class AdmissionContinuationTests(unittest.TestCase):
         row = next(iter(self.gate.state['calls'].values()))
         self.assertEqual(row['state'], 'settled')
         self.assertEqual(read_ref(row['reconciliations'][0]['prior_journal']), self.original_journal)
+
+    def test_failed_reconciliation_can_read_only_settle_same_captured_approved_candidate(self):
+        failed = {p.name: p.read_bytes() for p in (self.directory / 'operation-0000').iterdir()}
+        def interrupted_review(*_):
+            self.cli.accepted = True
+            raise UnknownEffect('Session review readback interrupted')
+        first = SoodlesOwnerBridge(self.cli, self.bridge.root, [self.f.template],
+            review=interrupted_review, reopen=True, poll_s=0.001)
+        with self.assertRaises(UnknownEffect):
+            first.reconcile_call(self.f.call, self.proof['fresh_observation'],
+                admission_continuation=self.proof['admission_continuation'])
+        prior = list(self.directory.glob('reconciliation-*'))
+        self.assertEqual(len(prior), 1)
+        preserved = {p.relative_to(prior[0]): p.read_bytes() for p in prior[0].rglob('*') if p.is_file()}
+        self.assertTrue((self.directory / 'result/native-evidence.json').exists())
+        original = self.f.completed['inner']['candidate']
+        candidate = decode(read_ref(original))
+        self.cli.published_candidate = save(self.f.root / 'later-review-metadata.json',
+            {**candidate, 'review_sha256': 'f' * 64})
+        fresh, fresh_ref = self.cli.invoke('inspect', self.request, self.f.root / 'fresh-after-review')
+        self.assertNotEqual(fresh['inner']['candidate'], original)
+        self.assertEqual(fresh['inner']['review_progress']['review']['candidate'], original)
+        reopened = SoodlesOwnerBridge(self.cli, self.bridge.root, [self.f.template],
+            review=self.fail, reopen=True, poll_s=0.001)
+        changed = copy.deepcopy(fresh)
+        changed['inner']['review_progress']['review']['candidate'] = self.cli.published_candidate
+        wrong_ref = save(self.f.root / 'different-selected-candidate.json', changed)
+        with self.assertRaisesRegex(Refused, 'fresh original candidate differs'):
+            reopened.reconcile_call(self.f.call, wrong_ref, admission_continuation=self.proof['admission_continuation'])
+        artifact = self.directory / 'result/workspace/answer.txt'
+        original_artifact = artifact.read_bytes()
+        artifact.write_text('changed saved result')
+        with self.assertRaises(Refused):
+            reopened.reconcile_call(self.f.call, fresh_ref, admission_continuation=self.proof['admission_continuation'])
+        artifact.write_bytes(original_artifact)
+        self.assertEqual(self.gate.journal.read_bytes(), self.original_journal)
+        result, proof = reopened.reconcile_call(self.f.call, fresh_ref,
+            admission_continuation=self.proof['admission_continuation'])
+        self.assertEqual(len(list(self.directory.glob('reconciliation-*'))), 2)
+        self.assertEqual(preserved, {p.relative_to(prior[0]): p.read_bytes() for p in prior[0].rglob('*') if p.is_file()})
+        self.assertEqual(failed, {p.name: p.read_bytes() for p in (self.directory / 'operation-0000').iterdir()})
+        self.assertIsNotNone(decode(read_ref(proof))['retained_result'])
+        self.gate.reconcile_original_call(self.f.call, result, proof)
+        self.assertEqual([verb for verb, _ in self.cli.calls].count('enter'), 1)
+        self.assertEqual(next(iter(self.gate.state['calls'].values()))['state'], 'settled')
+
+    def test_settlement_write_failure_preserves_unknown_and_reuses_only_exact_archive(self):
+        reopened = SoodlesOwnerBridge(self.cli, self.bridge.root, [self.f.template],
+            review=self.bridge.review, reopen=True, poll_s=0.001)
+        result, proof = reopened.reconcile_call(self.f.call, self.proof['fresh_observation'],
+            admission_continuation=self.proof['admission_continuation'])
+        with patch.object(self.gate, '_save', side_effect=OSError('fixture persistence failure')):
+            with self.assertRaises(UnknownEffect):
+                self.gate.reconcile_original_call(self.f.call, result, proof)
+        self.assertEqual(self.gate.journal.read_bytes(), self.original_journal)
+        archive, = self.f.root.glob('gate.json.unknown-*.json')
+        self.assertEqual(archive.read_bytes(), self.original_journal)
+        fresh_gate = SharedGate(self.gate.journal, None, initial_paid_spent_usd='0.091620363')
+        archive.write_text('corrupt earlier archive')
+        with self.assertRaisesRegex(Refused, 'bound file bytes changed'):
+            fresh_gate.reconcile_original_call(self.f.call, result, proof)
+        self.assertEqual(self.gate.journal.read_bytes(), self.original_journal)
+        archive.write_bytes(self.original_journal)
+        fresh_gate.reconcile_original_call(self.f.call, result, proof)
+        self.assertEqual(archive.read_bytes(), self.original_journal)
+        self.assertEqual(next(iter(fresh_gate.state['calls'].values()))['state'], 'settled')
+        self.assertEqual([verb for verb, _ in self.cli.calls].count('enter'), 1)
 
     def test_capacity_refusal_requires_explicit_continuation(self):
         proof = {k: v for k, v in self.proof.items() if k != 'admission_continuation'}
