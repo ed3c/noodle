@@ -67,6 +67,8 @@ class BridgeTests(unittest.TestCase):
         self.skill.parent.mkdir(parents=True)
         self.skill.write_text('Read the original source files.')
         (self.harness / 'AGENTS.md').write_text('Use the evaluated main skill.')
+        self.skill_base = self.root / 'immutable-main'
+        shutil.copytree(self.skill.parent, self.skill_base)
         self.profile = self.root / 'profile.json'
         self.profile.write_text('{}')
         self.noodle = self.root / 'noodle'
@@ -75,7 +77,7 @@ class BridgeTests(unittest.TestCase):
         self.repo.mkdir()
         self.template = RequestTemplate('codex', 'solver', str(self.repo), None, (),
                 reference(self.noodle), reference(self.profile), ('answer.txt', 'run', 'deleted.txt'),
-                ('Include all signed transactions.',), ('answer.txt',), harness_skills=('main',))
+                ('Include all signed transactions.',), ('answer.txt',), harness_skills=('main',), skill_bases={'main': tree_ref(self.skill_base)})
         self.call = OwnerCall('codex', 'original/run-1', 'solver', 'codex', MODELS['codex'],
                 {'prompt': 'Reconcile all records.', 'source': tree_ref(self.source), 'harness': tree_ref(self.harness), 'effort': 'low'})
         self.fixture = self.root / 'capture-fixture'
@@ -184,7 +186,7 @@ class BridgeTests(unittest.TestCase):
         output.mkdir()
         ref = self.template.prepare(changed, output)
         request = decode(Path(ref['path']).read_bytes())
-        self.assertEqual(request['selected_skill'], str(self.skill))
+        self.assertEqual(request['selected_skill'], str(output / 'skills/main/SKILL.md'))
         self.assertNotEqual(reference(request['selected_skill']), baseline)
         self.assertIn(str(self.harness / 'AGENTS.md'), request['source_refs'])
         self.assertIn(self.call.inputs['prompt'], request['goal'])
@@ -193,6 +195,31 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaisesRegex(Refused, 'evaluated harness skill selection'):
             fixed.prepare(changed, output)
 
+    def test_skill_overlay_preserves_complete_immutable_assets(self):
+        examples = self.skill_base / 'examples'
+        examples.mkdir()
+        (examples / 'component.html').write_bytes(b'<svg>exact frozen asset</svg>')
+        (self.skill_base / 'LICENSE').write_bytes(b'unchanged license')
+        (self.skill_base / 'render').write_bytes(b'#!/bin/sh\nexit 0\n')
+        (self.skill_base / 'render').chmod(0o755)
+        template = replace(self.template, skill_bases={'main': tree_ref(self.skill_base)})
+        self.skill.write_text('Native optimized instruction text.')
+        call = replace(self.call, inputs={**self.call.inputs, 'harness': tree_ref(self.harness)})
+        output = self.root / 'overlay'
+        output.mkdir()
+        request = decode(Path(template.prepare(call, output)['path']).read_bytes())
+        prepared = Path(request['selected_skill']).parent
+        self.assertEqual((prepared / 'SKILL.md').read_text(), self.skill.read_text())
+        self.assertEqual((prepared / 'examples/component.html').read_bytes(), (examples / 'component.html').read_bytes())
+        self.assertEqual((prepared / 'LICENSE').read_bytes(), b'unchanged license')
+        self.assertEqual((prepared / 'render').stat().st_mode & 0o777, 0o755)
+        (self.skill_base / '.env').write_text('fixture-secret-must-not-be-read')
+        blocked = self.root / 'blocked'
+        blocked.mkdir()
+        with self.assertRaisesRegex(Refused, 'private path'):
+            template.prepare(call, blocked)
+        self.assertFalse((blocked / 'skills').exists())
+
     def test_proposer_returns_only_original_candidate_harness(self):
         context = self.root / 'native-context'
         shutil.copytree(self.harness, context / 'harness')
@@ -200,7 +227,7 @@ class BridgeTests(unittest.TestCase):
             'system': 'Edit only the frozen instruction surface.', 'context': tree_ref(context),
             'harvest': 'context/harness', 'effort': 'low'})
         self.template = replace(self.template, role='proposer', selected_skill=reference(self.skill),
-            harness_skills=(), write_paths=('context/harness',), deliverables=(), harvest='context/harness')
+            harness_skills=(), skill_bases={}, write_paths=('context/harness',), deliverables=(), harvest='context/harness')
         request = self.request()
         observation = self.completion(request)
         candidate = decode(Path(observation['inner']['candidate']['path']).read_bytes())

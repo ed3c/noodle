@@ -7,9 +7,10 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
@@ -137,6 +138,49 @@ class PinnedCLI:
             raise UnknownEffect("original Soodles operation has no validated response; never replay") from exc
 
 
+def skill_overlay(bases, names, harness, directory):
+    """Preserve pinned skill assets; only native SKILL.md text is editable."""
+    require(set(bases) == set(names), "fixed skill bases differ from explicit harness aliases")
+    entries, receipts = [], []
+    private = {".git", ".ssh", ".gnupg", ".aws", ".env"}
+    leaves = {"auth.json", "credentials", "credentials.json", "credentials.toml"}
+    for name in names:
+        base = bases[name]
+        root = Path(base["path"])
+        require(root.is_absolute() and root.resolve() == root and root.is_dir(), "fixed skill base is unavailable")
+        require(not any(part.casefold() in private or part.casefold().startswith(".env.")
+                        for part in root.parts), "fixed skill base is in a private path")
+        paths = sorted(root.rglob("*"))
+        for path in paths:
+            parts = [part.casefold() for part in path.relative_to(root).parts]
+            require(not any(part in private or part.startswith(".env.") for part in parts)
+                    and parts[-1] not in leaves and not parts[-1].endswith((".pem", ".key")),
+                    "fixed skill base contains a private path")
+            mode = path.lstat().st_mode
+            require(stat.S_ISDIR(mode) or stat.S_ISREG(mode), "fixed skill base contains a link or special file")
+            require(not mode & 0o7000, "fixed skill base contains unsupported mode bits")
+        require(tree_ref(root) == base, "fixed skill base changed")
+        target = directory / "skills" / name
+        target.mkdir(parents=True)
+        for path in paths:
+            output = target / path.relative_to(root)
+            if path.is_dir():
+                output.mkdir(exist_ok=True)
+            else:
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_bytes(path.read_bytes())
+                output.chmod(stat.S_IMODE(path.stat().st_mode))
+        candidate = reference(Path(harness["path"]) / "skills" / name / "SKILL.md")
+        require((target / "SKILL.md").is_file(), "fixed skill base has no original SKILL.md")
+        (target / "SKILL.md").write_bytes(read_ref(candidate))
+        require(tree_ref(root) == base and tree_ref(harness["path"]) == harness,
+                "skill input changed while materializing")
+        entries.append(reference(target / "SKILL.md"))
+        receipts.append({"name": name, "base": base, "candidate_skill": candidate, "prepared": tree_ref(target)})
+    save(directory / "skill-overlay.json", receipts)
+    return tuple(entries)
+
+
 @dataclass(frozen=True)
 class RequestTemplate:
     """One preallocated, fresh App control worktree; consumed once, never recycled."""
@@ -153,6 +197,7 @@ class RequestTemplate:
     deliverables: tuple[str, ...]
     harvest: str | None = None
     harness_skills: tuple[str, ...] = ()
+    skill_bases: dict = field(default_factory=dict)
 
     def prepare(self, call, directory):
         require((self.group, self.role) == (call.group, call.role), "task template belongs to another call route")
@@ -168,11 +213,11 @@ class RequestTemplate:
                 "evaluated skill aliases are invalid or duplicated")
             harness = call.inputs["harness"]
             require(tree_ref(harness["path"]) == harness, "evaluated harness changed")
-            entries = tuple(reference(Path(harness["path"]) / "skills" / name / "SKILL.md")
-                            for name in self.harness_skills)
+            entries = skill_overlay(self.skill_bases, self.harness_skills, harness, directory)
             selected, support = entries[0], entries[1:]
         else:
-            require(selected is not None and not self.harness_skills, "improver skill selection is ambiguous")
+            require(selected is not None and not self.harness_skills and not self.skill_bases,
+                    "improver skill selection is ambiguous")
         for ref in (selected, *support, self.noodle, self.profile):
             read_ref(ref)
         require(not (Path(self.repository) / ".noodle").exists(), "control worktree already has an owner")

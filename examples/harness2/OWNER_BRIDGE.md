@@ -41,7 +41,14 @@ SoodlesOwnerBridge(cli, evidence_root, templates, review=session_review, poll_s=
   recycles a previously integrated task. App allocation remains the caller's responsibility.
   For solver templates set `selected_skill=None`, `support_skills=()`, and explicit
   `harness_skills=(selected_alias, support_alias, ...)`. The driver selects those skills
-  from each call's actual hash-bound `inputs.harness/skills/<alias>/SKILL.md`; it cannot keep
+  from each call's actual hash-bound `inputs.harness/skills/<alias>/SKILL.md`. Also provide
+  `skill_bases={alias: {path, sha256}, ...}` binding each complete fixed skill directory
+  with `tree_ref`. The dispatch overlay copies all original examples/license/assets and
+  modes, replacing only SKILL.md bytes with the evaluated candidate. Aliases must match
+  exactly; symlinks, special files and private paths refuse before copying. Native
+  `read_tree` only reads editable files; native `write_tree` preserves off-surface files
+  only if already present, so relying on a newly created candidate directory loses assets.
+  The overlay leaves the native editable surface unchanged. This cannot keep
   executing a stale baseline Skill after native optimization changes it. For proposer
   templates supply fixed selected/support Skill FileRefs and `harness_skills=()`.
 - `review(call, observation, observation_ref)` is the Session's semantic review callback.
