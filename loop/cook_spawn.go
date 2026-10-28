@@ -61,6 +61,10 @@ func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, or
 	}
 
 	stage := cand.Stage
+	instructions, reasoning, err := l.remoteTaskInputs(cand)
+	if err != nil {
+		return err
+	}
 	interruption, err := l.interruptionForDispatch(cand, opts.attempt)
 	if err != nil {
 		return err
@@ -113,18 +117,20 @@ func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, or
 
 	taskType, _ := l.registry.ByKey(stage.TaskKey)
 	req := loopruntime.DispatchRequest{
-		Name:         name,
-		Prompt:       prompt,
-		Provider:     nonEmpty(stage.Provider, l.config.Routing.Defaults.Provider),
-		Model:        nonEmpty(stage.Model, l.config.Routing.Defaults.Model),
-		Skill:        roleSkill,
-		TaskRole:     roleKey,
-		WorktreePath: worktreePath,
-		TaskKey:      taskType.Key,
-		Runtime:      nonEmpty(stage.Runtime, "process"),
-		DisplayName:  opts.displayName,
-		Title:        order.Title,
-		RetryCount:   opts.attempt,
+		InstructionBundle: instructions,
+		ReasoningLevel:    reasoning,
+		Name:              name,
+		Prompt:            prompt,
+		Provider:          nonEmpty(stage.Provider, l.config.Routing.Defaults.Provider),
+		Model:             nonEmpty(stage.Model, l.config.Routing.Defaults.Model),
+		Skill:             roleSkill,
+		TaskRole:          roleKey,
+		WorktreePath:      worktreePath,
+		TaskKey:           taskType.Key,
+		Runtime:           nonEmpty(stage.Runtime, "process"),
+		DisplayName:       opts.displayName,
+		Title:             order.Title,
+		RetryCount:        opts.attempt,
 		EnvVars: map[string]string{
 			"NOODLE_PROJECT_DIR": l.projectDir,
 			"NOODLE_ORDER_ID":    cand.OrderID,

@@ -23,7 +23,7 @@ func TestHostTaskReviewCapabilitiesAreOfflineAndSeparate(t *testing.T) {
 			if len(result) != 5 || result["schema_version"] != float64(2) || result["runtime_admitted_orders"] != true || result["config_key"] != "runtime.admitted_orders" || result["scope"] != "runtime_dispatch" || result["empty_unrestricted"] != true {
 				t.Fatal("runtime admission capability differs")
 			}
-		} else if len(result) != 9 || result["schema_version"] != float64(1) || result["candidate_bound_merge"] != true || result["local_task_review_recovery"] != true || result["local_task_merge_recovery"] != true || result["local_task_completion_recovery"] != true || result["local_task_completion_recovery_version"] != float64(2) || result["local_task_roles"] != float64(1) || result["local_task_directory_scope"] != float64(1) || result["openshell_local_task_review"] != float64(1) {
+		} else if len(result) != 10 || result["schema_version"] != float64(1) || result["candidate_bound_merge"] != true || result["local_task_review_recovery"] != true || result["local_task_merge_recovery"] != true || result["local_task_completion_recovery"] != true || result["local_task_completion_recovery_version"] != float64(2) || result["local_task_roles"] != float64(1) || result["local_task_directory_scope"] != float64(1) || result["openshell_local_task_review"] != float64(1) || result["openshell_instruction_materialization"] != float64(1) {
 			t.Fatal(result)
 		}
 	}

@@ -41,3 +41,11 @@ See also [[codebase/owned-worker-exit-and-recovery-evidence]] and [[codebase/run
 - Reports expose source paths/digests and selected observation fields, never whole custody command/environment records; `effects=[]` applies to the readback operation. The running Host may independently checkpoint, and source drift causes refusal.
 
 - Readback cannot use normal `git status` as a side-effect-free cleanliness check: fsmonitor hooks and clean filters may execute even with `--no-optional-locks`. Use `workspaceartifacts.ReadCleanHead`, which compares HEAD/index/raw worktree bytes through the existing isolated plumbing and leaves the real index untouched. Inherited `GIT_*` selectors must never redirect the observed repository; normal publication hooks remain enabled.
+
+## Frozen guest instructions and completion proof
+
+- The admitted local-task prompt supplies an explicit manifest reference and reasoning selection before worktree creation. OpenShell local tasks cannot omit the reference; ordinary bare runtime calls remain a separate, explicit capability.
+- The materialization consumer copies the complete enumerated frozen files outside the returned repository, preserves bytes/modes, and rejects path ambiguity, private files and unlisted entries. Original-source paths are provenance only, never fallback reads. A pinned Linux verifier checks the transported tree before replacing itself with the harness in the original native Exec.
+- A completion reader must compare the persisted command against a SHA-256 of the original custody owner's in-memory command. Matching only native request/attempt IDs would let edited disk argv invent verifier execution. Return the digest, never command environment values.
+- Missing manifest/mapping cannot downgrade a verified execution into a bare harness execution. The original command must either bind the exact verifier/order/manifest or directly select the configured bare harness. Recheck transported manifest/files/modes and bounded mapping/input refs around completion readback.
+- Test mock Terminate only requests termination; it does not close Done. Watcher cleanup tests must use the existing mock completion signal before waiting, just as real cleanup must wait for original native completion.

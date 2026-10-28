@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 
+	"github.com/poteto/noodle/dispatcher"
 	"github.com/poteto/noodle/internal/workspaceartifacts"
 )
 
@@ -23,6 +25,8 @@ type CompletedSessionBinding struct {
 	StageIndex, RetryCount                            int
 }
 type CompletedSessionReadback struct {
+	CommandSHA256         string                            `json:"command_sha256"`
+	Instructions          *CompletedInstructionEvidence     `json:"instructions"`
 	NativeAttemptID       string                            `json:"native_attempt_id"`
 	CandidateHead         string                            `json:"candidate_head"`
 	NativeExecExitCode    int                               `json:"native_exec_exit_code"`
@@ -111,14 +115,15 @@ func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b Completed
 		return result, fmt.Errorf("original OpenShell dispatch is not a bound successful settled result")
 	}
 	var spawn struct {
-		SessionID    string `json:"session_id"`
-		Provider     string `json:"provider"`
-		Model        string `json:"model"`
-		Runtime      string `json:"runtime"`
-		WorktreePath string `json:"worktree_path"`
-		OrderID      string `json:"order_id"`
-		StageIndex   string `json:"stage_index"`
-		RetryCount   int    `json:"retry_count"`
+		InstructionBundle *dispatcher.InstructionBundleRef `json:"instruction_bundle"`
+		SessionID         string                           `json:"session_id"`
+		Provider          string                           `json:"provider"`
+		Model             string                           `json:"model"`
+		Runtime           string                           `json:"runtime"`
+		WorktreePath      string                           `json:"worktree_path"`
+		OrderID           string                           `json:"order_id"`
+		StageIndex        string                           `json:"stage_index"`
+		RetryCount        int                              `json:"retry_count"`
 	}
 	if err = read("spawn.json", &spawn); err != nil {
 		return result, err
@@ -207,6 +212,18 @@ func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b Completed
 	if observed.Identity != identity || observed.Task != (OpenShellTask{b.OrderID, receipt.AttemptID, b.SessionID}) || observed.ExecExitCode != 0 || observed.Phase != "Stopped" || !observed.StopAcknowledged || !observed.CreateAcknowledged || observed.MainProcessInstanceID == "" || observed.MainProcessInstanceID != original.MainProcessInstanceID || observed.ExecAttemptID != original.Exec.AttemptID || observed.ExecRequestID != original.Exec.Command.RequestID {
 		return result, fmt.Errorf("OpenShell native completion differs")
 	}
+	commandSHA256, err := OpenShellCommandSHA256(original.Exec.Command)
+	if err != nil {
+		return result, err
+	}
+	if observed.CommandSHA256 != commandSHA256 {
+		return result, fmt.Errorf("OpenShell native command differs from original owner")
+	}
+	instructions, instructionSources, err := r.instructionReadback(ctx, dir, b, spawn.InstructionBundle, original.Exec.Command)
+	if err != nil {
+		return result, err
+	}
+	maps.Copy(sources, instructionSources)
 	if err = VerifySessionReadbackFiles(sources); err != nil {
 		return result, err
 	}
@@ -217,5 +234,14 @@ func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b Completed
 	if after != head {
 		return result, fmt.Errorf("OpenShell candidate HEAD changed during readback")
 	}
-	return CompletedSessionReadback{NativeAttemptID: receipt.AttemptID, CandidateHead: head, NativeExecExitCode: observed.ExecExitCode, NativePhase: observed.Phase, StopAcknowledged: observed.StopAcknowledged, MainProcessInstanceID: observed.MainProcessInstanceID, Sources: sources}, nil
+	if instructions != nil {
+		afterInstructions, afterSources, e := r.instructionReadback(ctx, dir, b, spawn.InstructionBundle, original.Exec.Command)
+		if e != nil {
+			return result, e
+		}
+		if !reflect.DeepEqual(instructions, afterInstructions) || !maps.Equal(instructionSources, afterSources) {
+			return result, fmt.Errorf("OpenShell instruction evidence changed during readback")
+		}
+	}
+	return CompletedSessionReadback{CommandSHA256: commandSHA256, Instructions: instructions, NativeAttemptID: receipt.AttemptID, CandidateHead: head, NativeExecExitCode: observed.ExecExitCode, NativePhase: observed.Phase, StopAcknowledged: observed.StopAcknowledged, MainProcessInstanceID: observed.MainProcessInstanceID, Sources: sources}, nil
 }
