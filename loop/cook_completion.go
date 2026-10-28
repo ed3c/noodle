@@ -118,6 +118,16 @@ func (l *Loop) handleBootstrapResult(result StageResult) {
 }
 
 func (l *Loop) handleCompletion(ctx context.Context, cook *cookHandle, resultStatus StageResultStatus, rawStatus string) error {
+	if cook.stage.Runtime == "openshell" && (resultStatus == StageResultCancelled || resultStatus == StageResultFailed) {
+		order, exists := l.canonical.Orders[cook.orderID]
+		if exists && cook.stageIndex >= 0 && cook.stageIndex < len(order.Stages) && l.isAdmittedLocalTask(order, order.Stages[cook.stageIndex]) {
+			status := state.AttemptFailed
+			if resultStatus == StageResultCancelled {
+				status = state.AttemptCancelled
+			}
+			return l.parkPendingReviewAttempt(cook, "OpenShell task stopped; saved progress requires original-owner inspection", status)
+		}
+	}
 	if resultStatus == StageResultFailed {
 		if handled, err := l.recoverMissingNativeContext(ctx, cook); handled {
 			if err != nil {

@@ -65,20 +65,21 @@ type orderStagePayload struct {
 }
 
 type reviewPayload struct {
-	OrderID      string   `json:"order_id"`
-	StageIndex   int      `json:"stage_index"`
-	AttemptID    string   `json:"attempt_id"`
-	SessionID    string   `json:"session_id"`
-	WorktreeName string   `json:"worktree_name"`
-	WorktreePath string   `json:"worktree_path"`
-	Reason       string   `json:"reason"`
-	TaskKey      string   `json:"task_key"`
-	Prompt       string   `json:"prompt"`
-	Provider     string   `json:"provider"`
-	Model        string   `json:"model"`
-	Runtime      string   `json:"runtime"`
-	Skill        string   `json:"skill"`
-	Plan         []string `json:"plan"`
+	AttemptStatus state.AttemptStatus `json:"attempt_status"`
+	OrderID       string              `json:"order_id"`
+	StageIndex    int                 `json:"stage_index"`
+	AttemptID     string              `json:"attempt_id"`
+	SessionID     string              `json:"session_id"`
+	WorktreeName  string              `json:"worktree_name"`
+	WorktreePath  string              `json:"worktree_path"`
+	Reason        string              `json:"reason"`
+	TaskKey       string              `json:"task_key"`
+	Prompt        string              `json:"prompt"`
+	Provider      string              `json:"provider"`
+	Model         string              `json:"model"`
+	Runtime       string              `json:"runtime"`
+	Skill         string              `json:"skill"`
+	Plan          []string            `json:"plan"`
 }
 
 type orderPayload struct {
@@ -604,6 +605,15 @@ func reduceStageReviewParked(current state.State, event ingest.StateEvent) (stat
 	if err := decodeEventPayload(event, &payload); err != nil {
 		return current, nil, fmt.Errorf("reduce stage_review_parked: %w", err)
 	}
+	if payload.AttemptStatus == "" {
+		payload.AttemptStatus = state.AttemptCompleted
+	}
+	switch payload.AttemptStatus {
+	case state.AttemptCompleted, state.AttemptCancelled, state.AttemptFailed:
+	default:
+		return current, nil, fmt.Errorf("review attempt outcome %q is not terminal", payload.AttemptStatus)
+	}
+
 	order, stage, ok := current.LookupStage(payload.OrderID, payload.StageIndex)
 	if !ok || order.Status.IsTerminal() {
 		return current, nil, nil
@@ -751,7 +761,7 @@ func recordReviewAttempt(stage *state.StageNode, payload reviewPayload, event in
 			return
 		}
 		stage.Attempts[idx].SessionID = strings.TrimSpace(payload.SessionID)
-		stage.Attempts[idx].Status = state.AttemptCompleted
+		stage.Attempts[idx].Status = payload.AttemptStatus
 		stage.Attempts[idx].CompletedAt = event.Timestamp
 		if stage.Attempts[idx].WorktreeName == "" {
 			stage.Attempts[idx].WorktreeName = strings.TrimSpace(payload.WorktreeName)
@@ -761,7 +771,7 @@ func recordReviewAttempt(stage *state.StageNode, payload reviewPayload, event in
 	stage.Attempts = append(stage.Attempts, state.AttemptNode{
 		AttemptID:    attemptID,
 		SessionID:    strings.TrimSpace(payload.SessionID),
-		Status:       state.AttemptCompleted,
+		Status:       payload.AttemptStatus,
 		StartedAt:    event.Timestamp,
 		CompletedAt:  event.Timestamp,
 		WorktreeName: strings.TrimSpace(payload.WorktreeName),
