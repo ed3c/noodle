@@ -24,6 +24,7 @@
 - [[principles/prove-it-works]]
 
 ## Codebase
+- [[codebase/swap-used-host-maintenance]]
 - [[codebase/adopted-session-reconciliation]]
 - [[codebase/backlog-sync-parse-errors-are-recoverable-warnings]]
 - [[codebase/claude-code-ndjson-protocol]]

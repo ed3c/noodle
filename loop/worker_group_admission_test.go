@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/poteto/noodle/dispatcher"
-	"github.com/poteto/noodle/internal/admission"
 	"github.com/poteto/noodle/internal/procx"
 	loopruntime "github.com/poteto/noodle/runtime"
 )
@@ -36,7 +35,7 @@ func checkWorkerGroupAdmission(t *testing.T, stop string) {
 	capacity := rt.(interface{ CapacityAvailable() bool })
 	l := &Loop{projectDir: root, runtimeDir: runtimeDir, deps: Dependencies{Runtimes: map[string]loopruntime.Runtime{"process": rt}}}
 	b := resourceBudget(l, 1)
-	b.Observe(admission.Sample{At: time.Now(), Unsupported: true}, nil)
+	healthyResourceBudget(b)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var session loopruntime.SessionHandle

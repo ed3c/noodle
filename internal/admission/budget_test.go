@@ -54,17 +54,19 @@ func TestBudgetPressureRecoveryCreditAndCeiling(t *testing.T) {
 	sample(Warning, 50, nil)
 	p.Release()
 	p.Release()
-	if _, err = b.TryAcquire("a"); !errors.Is(err, ErrDeferred) {
-		t.Fatal("warning admitted worker")
-	}
 	if b.Snapshot().Active != 1 {
 		t.Fatal("release was not exactly once")
 	}
+	r, err := b.TryAcquire("a")
+	if err != nil {
+		t.Fatal("warning below Swap ceiling must permit ordinary admission", err)
+	}
+	r.Release()
 	q.Release()
 }
 
-func TestBudgetUnknownResetGapAndPositiveRateBlock(t *testing.T) {
-	for _, kind := range []string{"error", "reset", "gap", "stale", "positive", "critical"} {
+func TestBudgetUnknownResetGapAndCapacityBlock(t *testing.T) {
+	for _, kind := range []string{"error", "reset", "gap", "stale", "capacity", "critical"} {
 		t.Run(kind, func(t *testing.T) {
 			b, sample := testBudget(4)
 			b.Register("a")
@@ -83,8 +85,10 @@ func TestBudgetUnknownResetGapAndPositiveRateBlock(t *testing.T) {
 			case "stale":
 				now := b.now().Add(MaxSampleAge + time.Second)
 				b.now = func() time.Time { return now }
-			case "positive":
-				sample(Normal, 101, nil)
+			case "capacity":
+				now := b.now().Add(PollInterval)
+				b.now = func() time.Time { return now }
+				b.Observe(Sample{At: now, Pressure: Normal, Swapouts: 101, SwapUsedBytes: DefaultSwapUsedLimit + 1}, nil)
 			case "critical":
 				sample(Critical, 100, nil)
 			}
@@ -94,7 +98,7 @@ func TestBudgetUnknownResetGapAndPositiveRateBlock(t *testing.T) {
 			if b.Snapshot().Limit != 0 {
 				t.Fatal("blocked admission reports nonzero effective capacity")
 			}
-			if kind != "positive" && kind != "critical" && b.Snapshot().SwapoutRate != nil {
+			if kind != "capacity" && kind != "critical" && b.Snapshot().SwapoutRate != nil {
 				t.Fatal("unknown rate represented as observed zero")
 			}
 		})
@@ -187,16 +191,14 @@ func TestBudgetHardwareAndUnsupportedAreFinite(t *testing.T) {
 	b := NewBudget(0)
 	b.Register("a")
 	b.Observe(Sample{At: time.Now(), Unsupported: true, CPUs: 10}, nil)
-	p, e := b.TryAcquire("a")
-	if e != nil {
-		t.Fatal(e)
+	if _, err := b.TryAcquire("a"); !errors.Is(err, ErrDeferred) {
+		t.Fatal("unobservable Swap capacity admitted worker")
 	}
-	defer p.Release()
 	if b.Snapshot().Maximum != 1 || b.Snapshot().Pressure != Unknown || !b.Snapshot().Unsupported || b.Snapshot().SwapoutRate != nil {
 		t.Fatal("unsupported platform claimed memory health")
 	}
-	if _, e = b.TryAcquire("a"); !errors.Is(e, ErrDeferred) {
-		t.Fatal("unsupported platform is unbounded")
+	if _, err := b.TryAcquire("a"); !errors.Is(err, ErrDeferred) {
+		t.Fatal("unsupported Swap monitor admitted worker")
 	}
 }
 

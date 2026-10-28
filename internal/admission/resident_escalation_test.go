@@ -111,6 +111,7 @@ func TestResidentUnknownIdentityNeverSignalsAndHistorySurvives(t *testing.T) {
 	if err := os.Remove(filepath.Join(spec.Directory, "exit")); err != nil {
 		t.Fatal(err)
 	}
+	observeResidentFixtureSample(b)
 	next, err := r.Acquire(spec, "b", b)
 	if err != nil {
 		t.Fatal(err)
@@ -284,6 +285,7 @@ func TestResidentReconcileWaitsForPublishedCompletionBeforeReplacement(t *testin
 			t.Fatal(err)
 		}
 	}
+	observeResidentFixtureSample(b)
 	next, err := r.Acquire(spec, "b", b)
 	if err != nil {
 		t.Fatal(err)

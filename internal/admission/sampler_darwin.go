@@ -5,6 +5,7 @@ package admission
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"os/exec"
@@ -45,6 +46,14 @@ func (darwinSampler) Read(ctx context.Context) (Sample, error) {
 	if err != nil {
 		return Sample{}, err
 	}
+	rawSwap, err := unix.SysctlRaw("vm.swapusage")
+	if err != nil {
+		return Sample{}, fmt.Errorf("read swap usage: %w", err)
+	}
+	used, err := parseSwapUsage(rawSwap)
+	if err != nil {
+		return Sample{}, err
+	}
 	level, err := unix.SysctlUint32("kern.memorystatus_vm_pressure_level")
 	if err != nil {
 		return Sample{}, fmt.Errorf("read memory pressure: %w", err)
@@ -56,7 +65,7 @@ func (darwinSampler) Read(ctx context.Context) (Sample, error) {
 	if err := ctx.Err(); err != nil {
 		return Sample{}, err
 	}
-	return Sample{At: time.Now(), Pressure: pressure, Swapouts: swapouts, TotalMemoryBytes: memory, CPUs: int(cpus)}, nil
+	return Sample{At: time.Now(), Pressure: pressure, Swapouts: swapouts, SwapUsedBytes: used, TotalMemoryBytes: memory, CPUs: int(cpus)}, nil
 }
 
 func darwinPressure(level uint32) (Pressure, error) {
@@ -143,4 +152,19 @@ func parseVMStat(data []byte) (uint64, error) {
 		return 0, fmt.Errorf("vm_stat Swapouts counter missing")
 	}
 	return pages * pageSize, nil
+}
+
+// Darwin sys/sysctl.h xsw_usage: total, available, used (uint64),
+// page size and encrypted (uint32), all in native byte order.
+func parseSwapUsage(raw []byte) (uint64, error) {
+	if len(raw) != 32 {
+		return 0, fmt.Errorf("invalid vm.swapusage size: %d", len(raw))
+	}
+	total := binary.NativeEndian.Uint64(raw[0:8])
+	available := binary.NativeEndian.Uint64(raw[8:16])
+	used := binary.NativeEndian.Uint64(raw[16:24])
+	if used > total || available > total || used != total-available {
+		return 0, fmt.Errorf("inconsistent vm.swapusage counters")
+	}
+	return used, nil
 }

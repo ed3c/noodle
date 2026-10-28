@@ -53,5 +53,6 @@ manifest through the bound `recover` operation. Name and PID alone never grant
 control. Existing recovery intents are not repeated. The supported native
 platform uses generation-bound controls; unsupported access remains unknown.
 The Host tick projects confirmed recovery exit back into the original resident
-ledger. Retired Host pool inheritance and cross-generation quota migration are
-outside this single Host integration.
+ledger. Native fixture sharing remains a single live owner contract. The separately
+confirmed [[swap-used-host-maintenance]] boundary can preserve retired Host
+metadata and migrate an empty quota; it does not adopt live resident handles.

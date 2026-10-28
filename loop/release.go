@@ -8,6 +8,21 @@ import (
 	"path/filepath"
 )
 
+type TerminalCause string
+
+const (
+	TerminalAutoCompleted   TerminalCause = "auto-completed"
+	TerminalExplicitCleanup TerminalCause = "explicit-cleanup"
+	TerminalMigrationDetach TerminalCause = "migration-detach"
+)
+
+type HostContinuation struct {
+	Mode          string `json:"mode"`
+	DispatchState State  `json:"dispatch_state"`
+}
+
+func (l *Loop) TerminalCause() TerminalCause { return l.terminalCause }
+
 var ErrReleaseBusy = errors.New("loop has unfinished work")
 
 type releaseRequest struct {

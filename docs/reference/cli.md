@@ -63,16 +63,18 @@ Host 重啟若發現未解決的 active receipt，會回傳 `unknown_effect` 並
 每個 worker 及其準備工作都可能使用記憶體與磁碟。因此 Host 在建立 worktree、安裝依賴或啟動 worker 前，先取得共享額度。
 每個 Loop 原有的並行設定仍有效；共享額度是額外的全 Host 限制。
 
-macOS Host 每 5 秒讀取系統 memory pressure 與累計 Swapouts bytes。每次採樣最多等待 1 秒。
-Swapout 速率是相鄰有效樣本的差值除以時間，不是目前 Swap 使用量。
-初次採樣、計數器重設、超過 15 秒沒有有效樣本、採樣失敗、warning／critical pressure，或正的 Swapout 速率，都會停止接納新 worker。
-連續三個正常、零 Swapout 速率的樣本後，額度逐次恢復。每個正常採樣最多提供一次啟動機會，不累積突發啟動額度。
+macOS Host 每 5 秒讀取系統 memory pressure、目前 Swap 已用 bytes 與累計 Swapouts。每次採樣最多等待 1 秒。
+預設容量門檻為 **15,000,000,000 bytes（15 GB）**，已用量 **大於或等於** 門檻就停止接納新 worker。
+warning pressure 與正的 Swapout 速率本身不會提早停派；critical、未知壓力、採樣失敗或超過 15 秒沒有有效樣本仍會停派。
+初次採樣及計數器重設先建立基線；連續三個有效、壓力為 normal／warning 且容量低於門檻的樣本後，額度逐次恢復。
+每個有效採樣最多提供一次啟動機會，不累積突發啟動額度。
+`NOODLE_HOST_SWAP_USED_LIMIT_BYTES` 可在啟動 owner 前指定整數 bytes；同帳本的所有世代必須使用相同門檻。
 等待不計為 worker 失敗，也不增加重試次數。已啟動的 worker 繼續執行；完成處理與清理不等待新額度。
 等待期間仍可處理 pause、drain、kill、stop 與 stop-all。原控制檔內容不變時，Loop 不重寫它，避免觸發新的檔案事件。
 
 硬體上限為 `min(CPU 數量, max(1, floor((RAM − 4 GiB) / 3 GiB)))`。
 16 GiB、10 CPU 的機器最多同時持有 4 個 worker 額度。這是保守的初始政策，並非實測最佳吞吐量或每個 worker 的記憶體配額。
-非 macOS 平台會回報 `unsupported_monitor=true`，使用 1 個 worker 的固定上限；不宣稱已有系統壓力監控。
+非 macOS 平台會回報 `unsupported_monitor=true` 並停止新 admission；缺少 Swap 讀值時不假設容量安全。
 
 `noodle host resources` 不啟動 Host。它讀回目前 Host PID、context 數量、有效額度、使用中的額度、壓力與 Swapout 速率。
 不能計算速率時，`swapout_bytes_per_second` 為 `null`。
@@ -82,6 +84,27 @@ Swapout 速率是相鄰有效樣本的差值除以時間，不是目前 Swap 使
 
 這個機制控制啟動速度與同時執行數量。它不限制 worker 自行建立的子進程、單次寫入大小或 RSS，也不能保證 Swap 不增加。
 它不修改 Spotlight、Time Machine、Gatekeeper 或系統 Swap 設定。Poteto playbook 與原有 Issue admission 保持原本的責任。
+
+### 受限 Host 維護交接
+
+先以 `noodle host switch --maintenance-plan --binary /absolute/immutable/noodle --request-file /absolute/original-request.json` 讀回計畫。
+多個原請求逐一加上 `--request-file`。計畫核對原 accepted request、設定來源、程序世代、快照、歷史紀錄與空帳本；缺證據會列為 blocker。
+只有確認這份來源與目標後，才使用 `noodle host maintenance --plan /absolute/plan.json --confirm-plan-sha256 <digest>`。
+`host switch --status` 讀取既有世代紀錄；`host maintenance --plan /absolute/plan.json --status` 只讀回原交接狀態，不推進操作。
+
+狀態機先封住新 admission，再由原 owner 各送一次 pause、原生 checkpoint 與 detach。
+原程序及其群組確認退出、原 runtime 鎖釋放後，才移轉空的 schema-1 帳本至 schema 2，並啟動一次新世代。
+移轉保留原 bytes、容量門檻、啟動窗口及未知欄位；非空帳本、政策不一致或未知寫入一律拒絕。
+每項效果先保存 intent；回覆遺失或未知時只讀回，不能藉重跑命令重送控制、重置帳本或啟動另一代。
+
+此相容入口只支援已驗明的原版 `2b636db20166ada9e304ac3462db52dd07c69899`；原 binary 必須有乾淨的 build revision 且符合計畫 digest。
+其他來源需提供原生維護契約，不能套用這個例外。未完成交接時 admission 保持關閉。
+原證據與 binary 可供讀回，但 schema 2 不能直接交給 schema-1 owner；回復不得覆寫帳本或清空未知租約。
+
+歷史 owner、原 request／binding、設定檔、原執行模式與派工狀態保留，所有原工作加上 maintenance hold。
+本入口不消費歷史換版佇列、不重建 context，也不恢復業務派工。一般 rolling 升版與停放工作的恢復需另有明確契約。
+新世代透過共享帳本鎖計入 worker 與 resident 額度；Host 結束本身不會清掉未證實退出的租約。
+這項交接不包含 iOS、REPL、原生 Codex 派工、聊天搬移或封存。
 
 ---
 

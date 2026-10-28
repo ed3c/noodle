@@ -413,7 +413,7 @@ func TestHostCapabilitiesPreservesProtocolContract(t *testing.T) {
 	if err := json.Unmarshal([]byte(output.String()), &value); err != nil {
 		t.Fatal(err)
 	}
-	if len(value) != 7 || value["schema"] != float64(1) || value["protocol"] != "noodle-host-v1" || value["resident_request_binding"] != float64(1) || value["native_consumer_leases"] != float64(1) || value["native_consumer_worktrees"] != float64(1) || value["stateless_fixture_recovery"] != float64(1) || value["shared_service_adapter"] != "stateless_fixtures_only" {
+	if len(value) != 11 || value["schema"] != float64(1) || value["protocol"] != "noodle-host-v1" || value["resident_request_binding"] != float64(1) || value["native_consumer_leases"] != float64(1) || value["native_consumer_worktrees"] != float64(1) || value["stateless_fixture_recovery"] != float64(1) || value["shared_service_adapter"] != "stateless_fixtures_only" || value["restricted_host_maintenance"] != float64(1) || value["rolling_host_version"] != float64(1) || value["shared_worker_quota"] != float64(1) || value["worker_admission_policy"] != "swap-used-critical-guard-v2" {
 		t.Fatalf("host protocol changed: %v", value)
 	}
 }

@@ -78,12 +78,13 @@ type ControlCommand struct {
 }
 
 type ControlAck struct {
-	ID      string             `json:"id"`
-	Action  string             `json:"action"`
-	Status  string             `json:"status"`
-	Message string             `json:"message,omitempty"`
-	Failure *ControlAckFailure `json:"failure,omitempty"`
-	At      time.Time          `json:"at"`
+	DispatchState State              `json:"dispatch_state,omitempty"`
+	ID            string             `json:"id"`
+	Action        string             `json:"action"`
+	Status        string             `json:"status"`
+	Message       string             `json:"message,omitempty"`
+	Failure       *ControlAckFailure `json:"failure,omitempty"`
+	At            time.Time          `json:"at"`
 }
 
 type StageResult struct {
@@ -178,14 +179,15 @@ func (l *Loop) effectiveMode() state.RunMode {
 }
 
 type Loop struct {
-	projectDir  string
-	runtimeDir  string
-	config      config.Config
-	registry    taskreg.Registry
-	registryErr error
-	deps        Dependencies
-	logger      *slog.Logger
-	events      *event.LoopEventWriter
+	terminalCause TerminalCause
+	projectDir    string
+	runtimeDir    string
+	config        config.Config
+	registry      taskreg.Registry
+	registryErr   error
+	deps          Dependencies
+	logger        *slog.Logger
+	events        *event.LoopEventWriter
 
 	// Components — field-grouping sub-structs.
 	cooks           cookTracker

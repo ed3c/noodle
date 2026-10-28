@@ -108,7 +108,10 @@ func residentFixture(t *testing.T) (*Residents, *Budget, ResidentSpec) {
 	b := NewBudget(3)
 	b.Register("a")
 	b.Register("b")
-	b.Observe(Sample{At: time.Now(), Unsupported: true}, nil)
+	now := time.Now()
+	for i := 0; i < 4; i++ {
+		b.Observe(Sample{At: now.Add(time.Duration(i-3) * time.Second), Pressure: Normal, SwapUsedBytes: 0, CPUs: 4, TotalMemoryBytes: 16 << 30}, nil)
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -134,6 +137,17 @@ func residentFixture(t *testing.T) (*Residents, *Budget, ResidentSpec) {
 	})
 	return r, b, spec
 }
+
+// A released allocation does not create a start credit. Advance one real
+// sampling event before a test admits a distinct replacement generation.
+func observeResidentFixtureSample(b *Budget) {
+	at := time.Now()
+	if b.previous != nil && !at.After(b.previous.At) {
+		at = b.previous.At.Add(time.Nanosecond)
+	}
+	b.Observe(Sample{At: at, Pressure: Normal, CPUs: 4, TotalMemoryBytes: 16 << 30}, nil)
+}
+
 func awaitResidentExit(t *testing.T, r *Residents, id string) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -191,6 +205,7 @@ func TestResidentsShareLeaseAndReleaseOnlyLastConsumer(t *testing.T) {
 		t.Fatal("completed request replay spawned")
 	}
 	b.Register("c")
+	observeResidentFixtureSample(b)
 	fresh, err := r.Acquire(spec, "c", b)
 	if err != nil {
 		t.Fatal(err)
@@ -220,7 +235,7 @@ func TestResidentsRefuseConflictStdioAndPressureButReuse(t *testing.T) {
 	if _, err = r.Acquire(stdio, "b", b); err == nil {
 		t.Fatal("stateful stdio shared")
 	}
-	b.Observe(Sample{At: time.Now(), Pressure: Warning, TotalMemoryBytes: 16 << 30, CPUs: 8}, nil)
+	b.Observe(Sample{At: time.Now(), Pressure: Critical, TotalMemoryBytes: 16 << 30, CPUs: 8}, nil)
 	reused, err := r.Acquire(spec, "b", b)
 	if err != nil || reused.PID != first.PID {
 		t.Fatalf("reuse under pressure: %+v %v", reused, err)

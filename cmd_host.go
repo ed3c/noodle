@@ -34,19 +34,22 @@ import (
 const hostProtocol = "noodle-host-v1"
 
 type hostReceipt struct {
-	Schema         int    `json:"schema"`
-	Protocol       string `json:"protocol"`
-	HostPID        int    `json:"host_pid"`
-	HostInstanceID string `json:"host_instance_id"`
-	ContextID      string `json:"context_id"`
-	ProjectDir     string `json:"project_dir"`
-	ContextState   string `json:"context_state"`
-	Mode           string `json:"mode"`
-	ConfigSHA256   string `json:"config_sha256"`
-	BinaryPath     string `json:"binary_path"`
-	BinarySHA256   string `json:"binary_sha256"`
-	RequestID      string `json:"request_id"`
-	HostDir        string `json:"host_dir"`
+	ConfigPath       string             `json:"config_path"`
+	CleanupCompleted bool               `json:"cleanup_completed,omitempty"`
+	TerminalCause    loop.TerminalCause `json:"terminal_cause,omitempty"`
+	Schema           int                `json:"schema"`
+	Protocol         string             `json:"protocol"`
+	HostPID          int                `json:"host_pid"`
+	HostInstanceID   string             `json:"host_instance_id"`
+	ContextID        string             `json:"context_id"`
+	ProjectDir       string             `json:"project_dir"`
+	ContextState     string             `json:"context_state"`
+	Mode             string             `json:"mode"`
+	ConfigSHA256     string             `json:"config_sha256"`
+	BinaryPath       string             `json:"binary_path"`
+	BinarySHA256     string             `json:"binary_sha256"`
+	RequestID        string             `json:"request_id"`
+	HostDir          string             `json:"host_dir"`
 }
 
 type hostResponse struct {
@@ -56,24 +59,28 @@ type hostResponse struct {
 }
 
 type hostRequest struct {
-	FixtureManifest *admission.FixtureManifest `json:"fixture_manifest,omitempty"`
-	NativeConsumer  bool                       `json:"native_consumer,omitempty"`
-	ConsumerLease   string                     `json:"consumer_lease,omitempty"`
-	peerPID         int
-	peerError       error
-	Operation       string                  `json:"operation"`
-	ProjectDir      string                  `json:"project_dir"`
-	ContextID       string                  `json:"context_id"`
-	InstanceID      string                  `json:"instance_id"`
-	ConfigSHA256    string                  `json:"config_sha256"`
-	Mode            string                  `json:"mode"`
-	Environment     []string                `json:"environment,omitempty"`
-	BinarySHA256    string                  `json:"binary_sha256"`
-	RequestID       string                  `json:"request_id"`
-	ResidentSpec    *admission.ResidentSpec `json:"resident_spec,omitempty"`
-	ResidentID      string                  `json:"resident_id,omitempty"`
-	RequestFile     string                  `json:"-"`
-	HostDir         string                  `json:"-"`
+	ConfigPath       string                     `json:"config_path"`
+	CleanupCompleted bool                       `json:"cleanup_completed,omitempty"`
+	AdmissionSHA     string                     `json:"admission_binary_sha256,omitempty"`
+	AdmissionPath    string                     `json:"admission_binary_path,omitempty"`
+	FixtureManifest  *admission.FixtureManifest `json:"fixture_manifest,omitempty"`
+	NativeConsumer   bool                       `json:"native_consumer,omitempty"`
+	ConsumerLease    string                     `json:"consumer_lease,omitempty"`
+	peerPID          int
+	peerError        error
+	Operation        string                  `json:"operation"`
+	ProjectDir       string                  `json:"project_dir"`
+	ContextID        string                  `json:"context_id"`
+	InstanceID       string                  `json:"instance_id"`
+	ConfigSHA256     string                  `json:"config_sha256"`
+	Mode             string                  `json:"mode"`
+	Environment      []string                `json:"environment,omitempty"`
+	BinarySHA256     string                  `json:"binary_sha256"`
+	RequestID        string                  `json:"request_id"`
+	ResidentSpec     *admission.ResidentSpec `json:"resident_spec,omitempty"`
+	ResidentID       string                  `json:"resident_id,omitempty"`
+	RequestFile      string                  `json:"-"`
+	HostDir          string                  `json:"-"`
 }
 
 type hostRuntime interface {
@@ -97,6 +104,7 @@ type hostContext struct {
 }
 
 type noodleHost struct {
+	rolling    *hostRolling
 	dir        string
 	instanceID string
 	binaryPath string
@@ -114,6 +122,8 @@ type noodleHost struct {
 func newHostCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{Use: "host", Short: "Manage the single persistent Noodle host"}
 	cmd.AddCommand(newHostResourcesCmd(app))
+	cmd.AddCommand(newHostRollingCmd())
+	cmd.AddCommand(newHostRestrictedCmd())
 	cmd.AddCommand(newHostRecoverCmd(app))
 	cmd.AddCommand(newHostViewsCmd())
 	task := &cobra.Command{Use: "task", Short: "Read native task dispatch capabilities"}
@@ -125,7 +135,7 @@ func newHostCmd(app *App) *cobra.Command {
 	}})
 	cmd.AddCommand(task)
 	cmd.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "protocol": hostProtocol, "resident_request_binding": 1, "native_consumer_leases": 1, "native_consumer_worktrees": 1, "stateless_fixture_recovery": 1, "shared_service_adapter": "stateless_fixtures_only"})
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(hostCapabilities())
 	}})
 	cmd.AddCommand(&cobra.Command{Use: "serve", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
@@ -133,9 +143,9 @@ func newHostCmd(app *App) *cobra.Command {
 		return serveHost(ctx)
 	}})
 	for _, operation := range []string{"attach", "once", "status", "detach"} {
-		var mode, contextID, instanceID, configSHA, requestFile string
+		var mode, contextID, instanceID, configSHA, requestFile, configPath string
 		child := &cobra.Command{Use: operation, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-			req := hostRequest{Operation: operation, ProjectDir: app.projectDir, Mode: mode, ContextID: contextID, InstanceID: instanceID, ConfigSHA256: configSHA, RequestFile: requestFile}
+			req := hostRequest{Operation: operation, ProjectDir: app.projectDir, Mode: mode, ContextID: contextID, InstanceID: instanceID, ConfigSHA256: configSHA, RequestFile: requestFile, ConfigPath: configPath}
 			response := callHost(cmd.Context(), req)
 			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(response); err != nil {
 				return err
@@ -146,6 +156,9 @@ func newHostCmd(app *App) *cobra.Command {
 			return nil
 		}}
 		child.Flags().StringVar(&requestFile, "request-file", "", "Native request binding file")
+		if operation == "attach" || operation == "once" {
+			child.Flags().StringVar(&configPath, "config-file", "", "Exact task config source without replacing repository settings")
+		}
 		if operation != "detach" {
 			child.Flags().StringVar(&mode, "mode", "", "Run mode")
 		}
@@ -224,12 +237,13 @@ func callHost(ctx context.Context, req hostRequest) hostResponse {
 		return hostError("refused", err)
 	}
 	req.BinarySHA256 = hostDigest(binary)
+	req.AdmissionSHA, req.AdmissionPath = req.BinarySHA256, path
 	req.ProjectDir, err = filepath.EvalSymlinks(req.ProjectDir)
 	if err != nil {
 		return hostError("refused", err)
 	}
 	if req.Operation == "attach" || req.Operation == "once" || (req.Operation == "status" && req.ContextID == "" && req.RequestFile == "") {
-		data, err := readHostConfig(req.ProjectDir)
+		data, err := readHostRequestConfig(req)
 		if err != nil {
 			return hostError("refused", err)
 		}
@@ -268,8 +282,19 @@ func callHost(ctx context.Context, req hostRequest) hostResponse {
 	if req.Operation == "status" && req.ContextID == "" && req.ConfigSHA256 == "" {
 		return hostError("refused", errors.New("status needs context identity or config-sha256"))
 	}
+	rootDir := dir
+	if wait := maintenanceWaitResponse(rootDir); wait != nil && (req.Operation == "attach" || req.Operation == "once") {
+		return *wait
+	}
+	dir, err = routeBoundHost(rootDir, &req)
+	if err != nil {
+		return hostError("refused", err)
+	}
 	conn, err := net.DialTimeout("unix", filepath.Join(dir, "host.sock"), time.Second)
 	if err != nil && (req.Operation == "attach" || req.Operation == "once") {
+		if _, poolErr := os.Stat(filepath.Join(rootDir, "pool.json")); poolErr == nil {
+			return hostError("unknown_effect", errors.New("selected Host unavailable; original generation readback required"))
+		}
 		if err = startHostProcess(ctx, path, dir); err == nil {
 			conn, err = net.DialTimeout("unix", filepath.Join(dir, "host.sock"), time.Second)
 		}
@@ -370,7 +395,7 @@ func serveHost(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	lock, err := lockfile.TryLock(filepath.Join(dir, "host.lock"))
+	lock, err := hostGenerationFence(dir)
 	if err != nil {
 		return err
 	}
@@ -383,15 +408,25 @@ func serveHost(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	id, err := hostID()
+	id := os.Getenv("NOODLE_HOST_GENERATION")
+	if id == "" {
+		id, err = hostID()
+		if err != nil {
+			return err
+		}
+	}
+	budget, err := newHostBudget()
 	if err != nil {
 		return err
 	}
-	budget := admission.NewBudget(0)
-	go budget.Run(ctx, admission.NewSampler())
 	h := &noodleHost{budget: budget, contexts: make(map[string]*hostContext), completed: make(chan string, 16), dir: dir, instanceID: id, binaryPath: path, binarySHA: hostDigest(data), newRuntime: func(dir, bin string, cfg config.Config, deps loop.Dependencies) hostRuntime {
 		return loop.New(dir, bin, cfg, deps)
 	}}
+	h.rolling, err = joinHostGeneration(dir, id, path, h.binarySHA, budget)
+	if err != nil {
+		return err
+	}
+	go budget.Run(ctx, admission.NewSampler())
 	h.residents, err = admission.OpenResidents(dir)
 	if err != nil {
 		return err
@@ -598,6 +633,9 @@ func (h *noodleHost) finish(c *hostContext, runErr error) {
 		c.failed = true
 	} else {
 		c.receipt.ContextState = "detached"
+		if terminal, ok := c.runtime.(interface{ TerminalCause() loop.TerminalCause }); ok {
+			c.receipt.TerminalCause = terminal.TerminalCause()
+		}
 	}
 	for i := range h.receipts {
 		if h.receipts[i].ContextID == c.receipt.ContextID {
@@ -609,6 +647,11 @@ func (h *noodleHost) finish(c *hostContext, runErr error) {
 		c.failed = true
 		h.blocked = true
 		fmt.Fprintln(os.Stderr, "host receipt persistence failed:", err)
+	}
+	if err := h.recordGenerationReceipt(c.request, c.receipt); err != nil {
+		c.failed = true
+		h.blocked = true
+		fmt.Fprintln(os.Stderr, "generation receipt persistence failed:", err)
 	}
 	if !c.failed {
 		c.lock.Close()
@@ -645,6 +688,17 @@ func offlineHostStatus(dir string, req hostRequest, dialErr error) hostResponse 
 }
 
 func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
+	if forwarded, ok := h.forwardGeneration(ctx, req); ok {
+		if response, ok := forwarded.(hostResponse); ok {
+			return response
+		}
+		raw, _ := json.Marshal(forwarded)
+		var response hostResponse
+		if err := json.Unmarshal(raw, &response); err != nil {
+			return hostError("unknown_effect", err)
+		}
+		return response
+	}
 	if req.Operation == "once" {
 		req.Mode = "manual"
 	}
@@ -741,7 +795,7 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 }
 
 func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
-	data, err := readHostConfig(req.ProjectDir)
+	data, err := readHostRequestConfig(req)
 	if err != nil {
 		return hostError("refused", err)
 	}
@@ -823,13 +877,18 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 	if err != nil {
 		return hostError("refused", err)
 	}
-	r := hostReceipt{1, hostProtocol, os.Getpid(), h.instanceID, id, req.ProjectDir, "active", cfg.Mode, req.ConfigSHA256, h.binaryPath, h.binarySHA, req.RequestID, h.dir}
+	r := hostReceipt{Schema: 1, Protocol: hostProtocol, HostPID: os.Getpid(), HostInstanceID: h.instanceID, ContextID: id, ProjectDir: req.ProjectDir, ContextState: "active", Mode: cfg.Mode, ConfigPath: req.ConfigPath, ConfigSHA256: req.ConfigSHA256, BinaryPath: h.binaryPath, BinarySHA256: h.binarySHA, RequestID: req.RequestID, HostDir: h.controlRoot(), CleanupCompleted: req.CleanupCompleted}
 	h.receipts = append(h.receipts, r)
 	if err = h.save(); err != nil {
 		h.receipts = h.receipts[:len(h.receipts)-1]
 		return hostError("refused", err)
 	}
 	runCtx, cancel := context.WithCancel(ctx)
+	if err = h.recordGenerationReceipt(req, r); err != nil {
+		cancel()
+		h.blocked = true
+		return hostResponse{r, "unknown_effect", err.Error()}
+	}
 	rt := h.newRuntime(req.ProjectDir, h.binaryPath, cfg, loop.Dependencies{ModeOverride: state.RunMode(req.Mode), Execution: e, Admission: h.budget, AdmissionContext: id})
 	environmentSHA := hostDigest([]byte(strings.Join(req.Environment, "\x00")))
 	req.Environment = nil
@@ -886,7 +945,7 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 
 func hostBaselineEnvironment(dir string) []string {
 	result := []string{"NOODLE_HOST_DIR=" + dir}
-	for _, key := range []string{"HOME", "PATH", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "USER", "LOGNAME", "SystemRoot", "WINDIR"} {
+	for _, key := range []string{"HOME", "PATH", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "USER", "LOGNAME", "SystemRoot", "WINDIR", "NOODLE_HOST_SWAP_USED_LIMIT_BYTES"} {
 		if value, ok := os.LookupEnv(key); ok {
 			result = append(result, key+"="+value)
 		}
