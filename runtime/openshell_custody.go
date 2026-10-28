@@ -103,7 +103,8 @@ type OpenShellCustody struct {
 
 // OpenOpenShellCustody returns a non-nil owner on an inventory/binding block.
 // Callers must Close it even on error; Snapshot remains available for diagnosis.
-// Existing state is read back, never replayed. Retained is initialization-only.
+// Existing state is read back, never replayed. Repeated retained receipts must
+// identify exactly the already-bound history; they never initialize it again.
 func OpenOpenShellCustody(ctx context.Context, binding OpenShellCustodyBinding, security OpenShellTLS, retained []OpenShellRetainedSandbox) (*OpenShellCustody, error) {
 	for _, value := range []string{binding.StateRoot, binding.Gateway, binding.Workspace, binding.Owner, binding.ConfigSource, binding.ConfigFingerprint} {
 		if strings.TrimSpace(value) == "" || strings.ContainsRune(value, 0) {
@@ -167,8 +168,8 @@ func reserveOpenShellCustody(binding OpenShellCustodyBinding, conn *grpc.ClientC
 			c.state.Binding.StateRoot = root
 			return c, c.block("openshell custody configuration/owner binding changed")
 		}
-		if len(retained) != 0 {
-			return c, c.block("retained initialization supplied for existing custody")
+		if len(retained) != 0 && !sameOpenShellRetained(c.state, retained) {
+			return c, c.block("retained sandbox receipt set changed")
 		}
 	} else if os.IsNotExist(err) {
 		c.state = OpenShellCustodyState{Version: openShellCustodyVersion, Binding: binding, PendingRetained: slices.Clone(retained)}
@@ -184,6 +185,38 @@ func reserveOpenShellCustody(binding OpenShellCustodyBinding, conn *grpc.ClientC
 		return c, c.block(err.Error())
 	}
 	return c, nil
+}
+
+// The persisted pending/initialized history is authoritative. Input order does
+// not matter, but duplicates, replacements, additions and removals do.
+func sameOpenShellRetained(state OpenShellCustodyState, retained []OpenShellRetainedSandbox) bool {
+	expected := make(map[OpenShellRetainedSandbox]bool)
+	for _, ref := range state.PendingRetained {
+		if expected[ref] {
+			return false
+		}
+		expected[ref] = true
+	}
+	for _, record := range state.Records {
+		if !record.Retained {
+			continue
+		}
+		ref := OpenShellRetainedSandbox{record.Name, record.Worker.Identity.Sandbox.SandboxID, record.Worker.Identity.Sandbox.Workspace}
+		if expected[ref] {
+			return false
+		}
+		expected[ref] = true
+	}
+	if len(expected) != len(retained) {
+		return false
+	}
+	for _, ref := range retained {
+		if !expected[ref] {
+			return false
+		}
+		delete(expected, ref)
+	}
+	return len(expected) == 0
 }
 
 // Validate only local ledger structure here; native identity is audited after
