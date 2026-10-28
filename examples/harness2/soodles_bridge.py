@@ -517,6 +517,9 @@ def selected_candidate(inner):
 
 
 def verify_call_reconciliation(call, proof):
+    if proof.get('kind') == 'stopped-original-call-integration':
+        from stopped_settlement import verify_stopped_reconciliation
+        return verify_stopped_reconciliation(call, proof)
     require(proof.get("kind") == "original-call-readback" and proof.get("call_sha256") == call.fingerprint(),
             "recovery does not bind the original call")
     binding = decode(read_ref(proof["binding"]))

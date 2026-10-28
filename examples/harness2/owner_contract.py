@@ -268,7 +268,7 @@ class SharedGate:
                 read_ref({"path": str(archive), "sha256": digest})
             prior_row = json.loads(canonical(row))
             history = list(row.get('reconciliations', []))
-            history.append({"kind": "original-call-readback", "prior_row": prior_row,
+            history.append({"kind": proof['kind'], "prior_row": prior_row,
                 "prior_journal": {"path": str(archive), "sha256": digest}, "recovery": recovery_ref})
             row.update(state="settled", result=asdict(result), reconciliations=history,
                 elapsed_s=time.time() - row["started_unix_s"], settled_unix_s=time.time())
