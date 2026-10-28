@@ -14,6 +14,7 @@ import (
 	"github.com/poteto/noodle/internal/filex"
 	"github.com/poteto/noodle/internal/workspaceartifacts"
 	"github.com/poteto/noodle/skill"
+	"github.com/poteto/noodle/worktree"
 )
 
 type OpenShellRuntimeConfig struct {
@@ -81,7 +82,17 @@ func (r *OpenShellRuntime) Dispatch(ctx context.Context, req DispatchRequest) (S
 			return nil, fmt.Errorf("openshell task environment override %q unsupported", key)
 		}
 	}
+	if !req.AllowPrimaryCheckout {
+		canonical, err := worktree.ValidateLinkedCheckout(req.WorktreePath)
+		if err != nil {
+			return nil, fmt.Errorf("openshell worktree enforcement: %w", err)
+		}
+		req.WorktreePath = canonical
+	}
 	if err := VerifyOpenShellPayload(r.config.Profile); err != nil {
+		return nil, err
+	}
+	if err := workspaceartifacts.RequireClean(ctx, req.WorktreePath); err != nil {
 		return nil, err
 	}
 	plan, err := dispatcher.PrepareRemoteHarness(r.config.RuntimeDir, r.config.SkillResolver, req, route.Binary, "/sandbox/noodle-sessions")
@@ -111,6 +122,7 @@ func (r *OpenShellRuntime) Dispatch(ctx context.Context, req DispatchRequest) (S
 }
 
 type openShellDispatchReceipt struct {
+	CandidateHead                                                  string
 	Version                                                        int
 	ContextID, OrderID, AttemptID, SessionID, Target, Phase, Error string
 	Baseline                                                       *workspaceartifacts.Baseline
@@ -188,12 +200,16 @@ func (s *openShellSession) persistLocked() error {
 	if e != nil {
 		return e
 	}
-	return filex.WriteFileAtomic(filepath.Join(s.dir, "openshell-dispatch.json"), b)
+	return filex.WriteFileAtomicDurable(filepath.Join(s.dir, "openshell-dispatch.json"), b)
 }
 func (s *openShellSession) fail(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.receipt.Error = errors.Join(errors.New(s.receipt.Error), err).Error()
+	if s.receipt.Error == "" {
+		s.receipt.Error = err.Error()
+	} else {
+		s.receipt.Error = errors.Join(errors.New(s.receipt.Error), err).Error()
+	}
 	s.receipt.Outcome = SessionOutcome{Status: StatusFailed, Reason: s.receipt.Error, ExitCode: -1}
 	if e := s.persistLocked(); e != nil {
 		s.receipt.Error = errors.Join(err, e).Error()
@@ -371,6 +387,10 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 		return
 	}
 	if err == nil && s.Outcome().Status == StatusCompleted && !s.interrupted() {
+		if err = s.phase("delivery-in-progress"); err != nil {
+			s.fail(err)
+			return
+		}
 		delivery, applyErr := workspaceartifacts.Apply(context.Background(), req.WorktreePath, s.receipt.Baseline, filepath.Join(s.dir, "returned"), filepath.Join(s.dir, "delivery"))
 		s.mu.Lock()
 		s.receipt.Delivery = delivery
@@ -380,6 +400,22 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 			if delivery != nil && delivery.State == "unknown" {
 				_ = s.phase("delivery-unknown")
 				return
+			}
+		}
+		if applyErr == nil && delivery.Applied {
+			if err = s.phase("publishing"); err != nil {
+				s.fail(err)
+				return
+			}
+			message := fmt.Sprintf("feat: retain OpenShell worker output\n\nRecord the validated result for order %s from native session %s after its original VM stopped. The candidate remains subject to the existing review process.", s.receipt.OrderID, s.id)
+			candidate, publishErr := workspaceartifacts.Publish(context.Background(), req.WorktreePath, s.receipt.Baseline, delivery, message)
+			if publishErr != nil {
+				s.fail(publishErr)
+				return
+			} else {
+				s.mu.Lock()
+				s.receipt.CandidateHead = candidate
+				s.mu.Unlock()
 			}
 		}
 	}
@@ -480,11 +516,14 @@ func (r *OpenShellRuntime) Recover(ctx context.Context) ([]RecoveredSession, err
 		if err = json.Unmarshal(raw, &receipt); err != nil {
 			return nil, err
 		}
-		if receipt.Version != 1 || receipt.ContextID != r.config.ContextID {
-			return nil, fmt.Errorf("openshell saved dispatch binding conflicts with context")
+		if receipt.Version != 1 {
+			return nil, fmt.Errorf("openshell saved dispatch version unsupported")
 		}
 		if receipt.Phase == "settled" {
 			continue
+		}
+		if receipt.ContextID != r.config.ContextID {
+			return nil, fmt.Errorf("openshell saved dispatch binding conflicts with context")
 		}
 		s := newOpenShellSession(r, receipt.SessionID, filepath.Dir(path))
 		s.receipt = receipt
@@ -506,10 +545,10 @@ func (r *OpenShellRuntime) Recover(ctx context.Context) ([]RecoveredSession, err
 		} else if original.CreateAcknowledged {
 			w, readErr := custody.RecoverWorker(ctx, original.Worker.Identity.Sandbox)
 			s.worker = w
-			s.fail(errors.Join(fmt.Errorf("interrupted attempt retained; no execution or artifact application replayed"), readErr))
-			if w != nil && readErr == nil && w.Record().Boundary == OpenShellBoundaryStopped && receipt.Phase != "delivery-unknown" {
+			s.fail(errors.Join(fmt.Errorf("interrupted attempt retained at %s; inspect original VM and local delivery evidence before an explicit new attempt; no operation replayed", receipt.Phase), readErr))
+			if w != nil && readErr == nil && w.Record().Boundary == OpenShellBoundaryStopped && !openShellDeliveryPending(receipt.Phase) {
 				s.complete()
-			} else if w != nil && receipt.Phase != "delivery-unknown" {
+			} else if w != nil && !openShellDeliveryPending(receipt.Phase) {
 				go func() {
 					select {
 					case <-s.stopRequested:
@@ -524,4 +563,8 @@ func (r *OpenShellRuntime) Recover(ctx context.Context) ([]RecoveredSession, err
 		recovered = append(recovered, RecoveredSession{OrderID: receipt.OrderID, SessionHandle: s, RuntimeName: "openshell", Reason: s.Outcome().Reason})
 	}
 	return recovered, nil
+}
+
+func openShellDeliveryPending(phase string) bool {
+	return phase == "delivery-in-progress" || phase == "delivery-unknown" || phase == "publishing"
 }

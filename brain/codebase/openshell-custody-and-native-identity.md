@@ -15,3 +15,13 @@
 - Restricted worker TCP/process-query failures are not PASS. Preserve them and verify the same candidate bytes in the supervising environment; in-process mTLS tests supplement rather than replace TCP acceptance.
 
 See also [[codebase/owned-worker-exit-and-recovery-evidence]] and [[codebase/runtime-routing-owned-by-orders]].
+
+## Formal dispatch and artifact return
+
+- `OpenShellRuntime` now reuses the local Codex/Pi protocol parser through native streams. Its session completion still waits for the original VM stop acknowledgement and a fresh same-ID Stopped read.
+- OpenShell 0.1.5 cannot SSH-download from Stopped VMs. Guest launchers archive the workspace and native session before exiting; download those individual archive files while Ready, validate all archive headers, then stop and apply locally.
+- Native directory download is not a security/completeness check: its tar library skips `..` members and permits outward symlink entries. `workspaceartifacts.Extract` rejects these instead of silently dropping them.
+- Even `git apply --check` can execute a target clean filter. Artifact application uses an isolated Git directory plus highest-precedence attributes disabling text/filter/ident/working-tree-encoding; normal candidate commits must still execute repository hooks.
+- Persist a local delivery intent before applying or publishing. A stopped VM cannot settle a partially applied local patch or an uncertain Git commit.
+- OpenShell `stop`, `kill`, and `stop-all` must retain the original watcher and worktree until Session.Done. Returning from a stop request is not proof of stopping.
+- Active native Runtime readback is not the same as cross-Host recovery. The existing shared-admission original-owner guard still refuses unresolved sessions from a lost Host; do not describe that guard as a working UI resume path.

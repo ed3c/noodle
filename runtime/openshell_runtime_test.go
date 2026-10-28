@@ -62,7 +62,7 @@ func openShellRuntimeFixture(t *testing.T) (*OpenShellRuntime, *managedFixture, 
 	if err := os.Mkdir(target, 0700); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"init", "--quiet", "--template="}, {"-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "baseline"}} {
+	for _, args := range [][]string{{"init", "--quiet", "--template="}, {"config", "user.name", "Noodle Fixture"}, {"config", "user.email", "fixture@example.invalid"}, {"-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "baseline"}} {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = target
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -116,7 +116,7 @@ func openShellRuntimeFixture(t *testing.T) (*OpenShellRuntime, *managedFixture, 
 }
 func TestOpenShellRuntimeReturnsArtifactsAfterOriginalStop(t *testing.T) {
 	r, f, target := openShellRuntimeFixture(t)
-	h, err := r.Dispatch(t.Context(), DispatchRequest{Name: "formal", Provider: "codex", Model: "fixture", Prompt: "produce result", SystemPrompt: "test", Runtime: "openshell", WorktreePath: target})
+	h, err := r.Dispatch(t.Context(), DispatchRequest{Name: "formal", Provider: "codex", Model: "fixture", Prompt: "produce result", SystemPrompt: "test", Runtime: "openshell", WorktreePath: target, AllowPrimaryCheckout: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,6 +133,9 @@ func TestOpenShellRuntimeReturnsArtifactsAfterOriginalStop(t *testing.T) {
 		t.Fatalf("returned artifact: %s %v", data, err)
 	}
 	s := h.(*openShellSession)
+	if s.receipt.CandidateHead == "" || s.receipt.CandidateHead == s.receipt.Baseline.Head {
+		t.Fatal("returned changes were not committed for native review")
+	}
 	if s.worker.Record().Boundary != OpenShellBoundaryStopped {
 		t.Fatal("delivery preceded original stopped boundary")
 	}
@@ -179,5 +182,43 @@ func TestOpenShellRuntimeRecoveryStopsOnlyOnExplicitRequest(t *testing.T) {
 	}
 	if _, err = f.owner.Release("a"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOpenShellRecoveryRetainsUncertainDelivery(t *testing.T) {
+	for _, phase := range []string{"delivery-in-progress", "delivery-unknown", "publishing"} {
+		t.Run(phase, func(t *testing.T) {
+			r, f, _ := openShellRuntimeFixture(t)
+			c, err := f.owner.Acquire(t.Context(), "a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			record := custodyCreate(t, c, "pending-delivery")
+			if err = c.StopSandbox(t.Context(), record.Worker.Identity.Sandbox); err != nil {
+				t.Fatal(err)
+			}
+			dir := filepath.Join(r.config.RuntimeDir, "sessions", record.Task.SessionID)
+			if err = os.MkdirAll(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			b, _ := json.Marshal(openShellDispatchReceipt{Version: 1, ContextID: "a", OrderID: record.Task.OrderID, AttemptID: record.Task.AttemptID, SessionID: record.Task.SessionID, Phase: phase})
+			if err = os.WriteFile(filepath.Join(dir, "openshell-dispatch.json"), b, 0600); err != nil {
+				t.Fatal(err)
+			}
+			recovered, err := r.Recover(t.Context())
+			if err != nil || len(recovered) != 1 {
+				t.Fatalf("recovery=%v %v", recovered, err)
+			}
+			h := recovered[0].SessionHandle
+			_ = h.Terminate()
+			select {
+			case <-h.Done():
+				t.Fatal("VM stop settled unknown local delivery")
+			case <-time.After(20 * time.Millisecond):
+			}
+			if r.CapacityAvailable() {
+				t.Fatal("uncertain publication allowed another attempt")
+			}
+		})
 	}
 }

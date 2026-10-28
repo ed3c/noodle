@@ -25,6 +25,9 @@ func TestRemoteHarnessPiKeepsGuestSessionIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if strings.Contains(plan.prompt, root) || !strings.Contains(plan.prompt, "/sandbox/repo") {
+				t.Fatal("remote prompt leaked host worktree location or omitted guest directory")
+			}
 			if err := os.MkdirAll(filepath.Join(plan.GuestSessionDir, "pi"), 0700); err != nil {
 				t.Fatal(err)
 			}
