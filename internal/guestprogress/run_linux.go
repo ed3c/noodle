@@ -28,6 +28,15 @@ type controlCall struct {
 // Run is a dedicated process entry point, not an embeddable daemon component:
 // subreaper ancestry and the single waiter belong exclusively to this process.
 func Run(cfg Config) (int, error) {
+	return runWithOperations(cfg, supervisorOperations{writeJSON: writeJSON, signalChildren: signalOwnedChildren})
+}
+
+type supervisorOperations struct {
+	writeJSON      func(string, string, any) error
+	signalChildren func(unix.Signal) error
+}
+
+func runWithOperations(cfg Config, ops supervisorOperations) (int, error) {
 	if !cfg.Identity.valid() || len(cfg.Token) != 64 || digest([]byte(cfg.Token)) != cfg.Identity.TokenSHA256 || len(cfg.Argv) == 0 || !filepath.IsAbs(cfg.Argv[0]) || cfg.Grace <= 0 || cfg.Grace > time.Minute {
 		return -1, fmt.Errorf("progress launch binding invalid")
 	}
@@ -55,7 +64,7 @@ func Run(cfg Config) (int, error) {
 	if err := privateDirectory(cfg.Directory); err != nil {
 		return -1, err
 	}
-	if err := writeJSON(cfg.Directory, "identity.json", cfg.Identity); err != nil {
+	if err := ops.writeJSON(cfg.Directory, "identity.json", cfg.Identity); err != nil {
 		return -1, err
 	}
 	listener, err := net.Listen("unix", filepath.Join(cfg.Directory, "control.sock"))
@@ -89,20 +98,36 @@ func Run(cfg Config) (int, error) {
 	}
 	defer cmd.Process.Release()
 	leader := cmd.Process.Pid
-	supervisorStart, err := processStart(os.Getpid())
-	if err != nil {
-		return -1, err
-	}
-	harnessStart, err := processStart(leader)
-	if err != nil {
-		return -1, err
-	}
-	if err = writeJSON(cfg.Directory, "process.json", processBinding{Identity: cfg.Identity, SupervisorPID: os.Getpid(), SupervisorStart: supervisorStart, HarnessPID: leader, HarnessStart: harnessStart}); err != nil {
-		return -1, err
-	}
 	result := Receipt{Schema: 1, Identity: cfg.Identity, Status: "draining", ExitCode: -1, Archives: []Archive{}}
 	waiters := []chan Receipt{}
 	var stopping time.Time
+	var failure error
+	// A post-launch failure never releases the subreaper. Keep its control
+	// socket and sole waiter until every owned descendant has been reaped.
+	recordFailure := func(cause error) {
+		if failure != nil {
+			return
+		}
+		failure = cause
+		result.Error = cause.Error()
+		result.Status = "unknown"
+		stopping = time.Now()
+		failure = errors.Join(failure, ops.writeJSON(cfg.Directory, "failure.json", result))
+		fmt.Fprintln(os.Stderr, failure)
+	}
+	supervisorStart, err := processStart(os.Getpid())
+	if err != nil {
+		recordFailure(err)
+	}
+	harnessStart, err := processStart(leader)
+	if err != nil {
+		recordFailure(err)
+	}
+	if failure == nil {
+		if err = ops.writeJSON(cfg.Directory, "process.json", processBinding{Identity: cfg.Identity, SupervisorPID: os.Getpid(), SupervisorStart: supervisorStart, HarnessPID: leader, HarnessStart: harnessStart}); err != nil {
+			recordFailure(err)
+		}
+	}
 	leaderExited := false
 	tick := time.NewTicker(20 * time.Millisecond)
 	defer tick.Stop()
@@ -119,7 +144,8 @@ func Run(cfg Config) (int, error) {
 				break
 			}
 			if e != nil {
-				return -1, e
+				recordFailure(e)
+				break
 			}
 			if pid == 0 {
 				break
@@ -138,7 +164,7 @@ func Run(cfg Config) (int, error) {
 		}
 		if allReaped {
 			if !leaderExited {
-				return -1, fmt.Errorf("original harness exit was not observed")
+				recordFailure(fmt.Errorf("original harness exit was not observed"))
 			}
 			result.ChildrenReaped = true
 			break
@@ -148,8 +174,8 @@ func Run(cfg Config) (int, error) {
 			if time.Since(stopping) >= cfg.Grace {
 				signal = unix.SIGKILL
 			}
-			if err = signalOwnedChildren(signal); err != nil {
-				return -1, err
+			if err = ops.signalChildren(signal); err != nil {
+				recordFailure(err)
 			}
 		}
 		select {
@@ -168,14 +194,21 @@ func Run(cfg Config) (int, error) {
 			if result.RequestID == "" {
 				result.RequestID = call.request.RequestID
 				// Token never appears in durable/public receipts.
-				if err = writeJSON(cfg.Directory, "stop.json", result); err != nil {
-					return -1, err
+				if err = ops.writeJSON(cfg.Directory, "stop.json", result); err != nil {
+					recordFailure(err)
 				}
 				stopping = time.Now()
 			}
 			waiters = append(waiters, call.reply)
 		case <-tick.C:
 		}
+	}
+	if failure != nil {
+		failure = errors.Join(failure, ops.writeJSON(cfg.Directory, "failure.json", result))
+		for _, reply := range waiters {
+			reply <- result
+		}
+		return -1, failure
 	}
 	for _, spec := range []struct {
 		root, name string
@@ -185,7 +218,7 @@ func Run(cfg Config) (int, error) {
 		if e != nil {
 			result.Status = "unknown"
 			result.Error = e.Error()
-			e = errors.Join(e, writeJSON(cfg.Directory, "failure.json", result))
+			e = errors.Join(e, ops.writeJSON(cfg.Directory, "failure.json", result))
 			for _, reply := range waiters {
 				reply <- result
 			}
@@ -194,7 +227,7 @@ func Run(cfg Config) (int, error) {
 		result.Archives = append(result.Archives, archive)
 	}
 	result.Status = "archived"
-	if err = writeJSON(cfg.Directory, "result.json", result); err != nil {
+	if err = ops.writeJSON(cfg.Directory, "result.json", result); err != nil {
 		return -1, err
 	}
 	for _, reply := range waiters {

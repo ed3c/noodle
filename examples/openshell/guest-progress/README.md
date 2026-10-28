@@ -37,7 +37,20 @@ receipts and removed from the harness environment. A completed same-ID stop
 reads the existing receipt without signaling again. Natural completion may
 produce an archive with no stop UUID; it is reported as natural completion, not
 a newly admitted stop. Errors or unkillable descendants produce no successful
-archive receipt. The Host must retain the VM/lease on any unresolved outcome.
+archive receipt. Post-launch metadata, stop-intent, signaling or waiter failures
+keep the same subreaper and listener alive until its children are reaped; a
+permanent inability to signal keeps that owner resident. The Host must retain
+the VM/lease on any unresolved outcome.
+
+The harness and supervisor currently share a Linux UID. Directory modes and
+the token prevent accidental cross-session control; they do not make guest
+JSON an independent attestation against malicious same-UID code. A consumer
+must observe both original supervisor Exec and stop-purpose Exec outcomes,
+validate the frozen command and downloaded archive bytes, and retain custody
+on ambiguous exits. A control helper's exit code or `result.json` alone is
+never proof of descendant drain. Protection from a harness deliberately
+modifying or killing its supervisor needs a separate OS-enforced identity;
+this slice does not claim that stronger isolation.
 
 ## Pinned native source checks
 
@@ -67,15 +80,17 @@ profiles and services are not modified by this slice.
 On macOS, run the platform-neutral protocol/archive tests; Linux Run explicitly
 refuses. The Linux fixture launches only disposable native test processes, no
 LLM or network client. It includes a detached writer ignoring TERM, verifies
-ECHILD before archives, preserves the writer's data, checks archive hashes,
-rejects a wrong token and checks same-ID stop readback. Run the same fixture
+ECHILD before archives, preserves the writer's data, checks exact progress/transcript contents and archive hashes,
+rejects a wrong token and checks same-ID stop readback. Additional Linux cases
+inject process/stop persistence and signaling failures, proving the original
+owner stays alive until the owned descendants are reaped. Run the same fixture
 inside an isolated OpenShell sandbox to exercise the real syscall broker.
 
 ```sh
 GOMAXPROCS=2 go test -race -p 1 ./internal/guestprogress ./cmd/noodle-progress
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go test -c -o guestprogress.test ./internal/guestprogress
 # Inside the isolated Linux/OpenShell environment:
-./guestprogress.test -test.run=TestStopReapsEscapedWriterBeforeArchiving -test.v -test.timeout=40s
+./guestprogress.test -test.run='Test(StopReapsEscapedWriterBeforeArchiving|PostLaunchFailureRetainsOwnerUntilReaped)' -test.v -test.timeout=40s
 ```
 
 Pending integration: separate original/stop-purpose custody receipts, frozen

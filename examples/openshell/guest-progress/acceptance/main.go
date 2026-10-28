@@ -301,7 +301,7 @@ func (o *owner) execute(ctx context.Context) error {
 	if o.worker.Record().Boundary != rt.OpenShellBoundaryReady {
 		return fmt.Errorf("fixture VM changed around upload")
 	}
-	command := rt.OpenShellCommand{RequestID: uuid(), Workdir: "/tmp", Env: map[string]string{}, Argv: []string{"/tmp/" + filepath.Base(o.cfg.Fixture), "-test.run=TestStopReapsEscapedWriterBeforeArchiving", "-test.v", "-test.timeout=40s"}}
+	command := rt.OpenShellCommand{RequestID: uuid(), Workdir: "/tmp", Env: map[string]string{}, Argv: []string{"/tmp/" + filepath.Base(o.cfg.Fixture), "-test.run=Test(StopReapsEscapedWriterBeforeArchiving|PostLaunchFailureRetainsOwnerUntilReaped)", "-test.v", "-test.timeout=40s"}}
 	op, cancel = context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	o.execAttempted = true

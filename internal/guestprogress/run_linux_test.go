@@ -3,6 +3,8 @@
 package guestprogress
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -16,6 +18,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // The helper is a separate process so its subreaper and Wait4 never capture
@@ -34,13 +38,32 @@ func TestGuestProgressProcess(t *testing.T) {
 			os.Exit(91)
 		}
 		_ = os.Setenv("NOODLE_PROGRESS_TEST_CHILD", "harness")
-		code, err := Run(cfg)
+		fault := os.Getenv("NOODLE_PROGRESS_TEST_FAULT")
+		ops := supervisorOperations{writeJSON: writeJSON, signalChildren: signalOwnedChildren}
+		if fault != "" {
+			ops.writeJSON = func(directory, name string, value any) error {
+				if name == fault {
+					return fmt.Errorf("injected persistence failure: %s", name)
+				}
+				return writeJSON(directory, name, value)
+			}
+			ops.signalChildren = func(signal unix.Signal) error {
+				if _, err := os.Stat(filepath.Join(root, "release-signal")); err != nil {
+					return syscall.EPERM
+				}
+				return signalOwnedChildren(signal)
+			}
+		}
+		code, err := runWithOperations(cfg, ops)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(92)
 		}
 		os.Exit(code)
 	case "harness":
+		if err := os.WriteFile(filepath.Join(root, "session", "transcript.json"), []byte(`{"progress":"saved"}`), 0600); err != nil {
+			os.Exit(96)
+		}
 		command := exec.Command(os.Args[0], "-test.run=^TestGuestProgressProcess$")
 		command.Env = replaceTestMode(os.Environ(), "writer")
 		command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -157,6 +180,7 @@ func TestStopReapsEscapedWriterBeforeArchiving(t *testing.T) {
 	if result.ExitCode != 143 || !result.ChildrenReaped {
 		t.Fatalf("exit evidence: %+v", result)
 	}
+	archived := map[string]map[string][]byte{}
 	for _, archive := range result.Archives {
 		file, err := os.Open(filepath.Join(cfg.Directory, archive.Name))
 		if err != nil {
@@ -164,13 +188,36 @@ func TestStopReapsEscapedWriterBeforeArchiving(t *testing.T) {
 		}
 		data, err := io.ReadAll(file)
 		_ = file.Close()
-		if err != nil || digest(data) != archive.SHA256 {
-			t.Fatal("archive digest differs")
+		if err != nil || digest(data) != archive.SHA256 || int64(len(data)) != archive.Bytes {
+			t.Fatal("archive digest or size differs")
 		}
+		entries := map[string][]byte{}
+		reader := tar.NewReader(bytes.NewReader(data))
+		for {
+			header, readErr := reader.Next()
+			if readErr == io.EOF {
+				break
+			}
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			contents, readErr := io.ReadAll(reader)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			entries[header.Name] = contents
+		}
+		archived[archive.Name] = entries
 	}
 	before, err := os.ReadFile(filepath.Join(root, "repo", "progress.txt"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(before) == 0 || !bytes.Equal(archived["noodle-result.tar"]["progress.txt"], before) {
+		t.Fatal("archive omitted or changed the final guest progress")
+	}
+	if string(archived["noodle-session.tar"]["transcript.json"]) != `{"progress":"saved"}` {
+		t.Fatal("archive omitted or changed the session transcript")
 	}
 	pidBytes, err := os.ReadFile(filepath.Join(root, "escaped-pid"))
 	if err != nil {
@@ -195,4 +242,113 @@ func TestStopReapsEscapedWriterBeforeArchiving(t *testing.T) {
 	}
 	data, _ := json.Marshal(result)
 	t.Logf("native Linux progress proof: %s", data)
+}
+
+func TestPostLaunchFailureRetainsOwnerUntilReaped(t *testing.T) {
+	for _, fault := range []string{"process.json", "stop.json", "signal"} {
+		t.Run(fault, func(t *testing.T) {
+			root, err := os.MkdirTemp("", "ngp-f-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if t.Failed() {
+					t.Logf("preserved fixture: %s", root)
+				} else {
+					_ = os.RemoveAll(root)
+				}
+			})
+			for _, name := range []string{"repo", "session"} {
+				if err := os.Mkdir(filepath.Join(root, name), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			identity, token := fixtureIdentity()
+			cfg := Config{Directory: filepath.Join(root, "control"), Repository: filepath.Join(root, "repo"), SessionDirectory: filepath.Join(root, "session"), Identity: identity, Token: token, Argv: []string{os.Args[0], "-test.run=^TestGuestProgressProcess$"}, Grace: 100 * time.Millisecond}
+			if err := writeJSON(root, "config.json", cfg); err != nil {
+				t.Fatal(err)
+			}
+			output, err := os.Create(filepath.Join(root, "supervisor.log"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer output.Close()
+			command := exec.Command(os.Args[0], "-test.run=^TestGuestProgressProcess$")
+			command.Env = append(replaceTestMode(os.Environ(), "supervisor"), "NOODLE_PROGRESS_TEST_ROOT="+root, "NOODLE_PROGRESS_TEST_FAULT="+fault)
+			command.Stdout, command.Stderr = output, output
+			if err := command.Start(); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() { done <- command.Wait() }()
+			joined := false
+			t.Cleanup(func() {
+				if !joined {
+					_ = os.WriteFile(filepath.Join(root, "release-signal"), nil, 0600)
+					select {
+					case <-done:
+					case <-time.After(5 * time.Second):
+						_ = command.Process.Kill()
+						<-done
+					}
+				}
+			})
+			waitFixtureFile(t, filepath.Join(root, "repo", "progress.txt"))
+			if fault != "process.json" {
+				waitFixtureFile(t, filepath.Join(cfg.Directory, "process.json"))
+				ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+				_, err := Stop(ctx, cfg.Directory, Request{Schema: 1, Identity: identity, Token: token, RequestID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"})
+				cancel()
+				if err == nil {
+					t.Fatal("failed drain reported complete")
+				}
+			}
+			waitFixtureFile(t, filepath.Join(cfg.Directory, "failure.json"))
+			select {
+			case err := <-done:
+				joined = true
+				t.Fatalf("owner exited with live descendants: %v", err)
+			default:
+			}
+			var failure Receipt
+			if err := readJSON(filepath.Join(cfg.Directory, "failure.json"), &failure); err != nil {
+				t.Fatal(err)
+			}
+			if failure.ChildrenReaped || failure.Status != "unknown" {
+				t.Fatal("failure claimed a completed drain")
+			}
+			if _, err := os.Stat(filepath.Join(cfg.Directory, "result.json")); !os.IsNotExist(err) {
+				t.Fatal("failure published success")
+			}
+			if err := os.WriteFile(filepath.Join(root, "release-signal"), nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-done:
+				joined = true
+				if err == nil {
+					t.Fatal("post-launch failure reported success")
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("owner failed to finish after descendant drain")
+			}
+			if err := readJSON(filepath.Join(cfg.Directory, "failure.json"), &failure); err != nil {
+				t.Fatal(err)
+			}
+			if !failure.ChildrenReaped || failure.Error == "" {
+				t.Fatal("final failure omitted drain evidence")
+			}
+			pidBytes, err := os.ReadFile(filepath.Join(root, "escaped-pid"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			pid, err := strconv.Atoi(string(pidBytes))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := syscall.Kill(pid, 0); err != syscall.ESRCH {
+				t.Fatalf("descendant survived: %v", err)
+			}
+		})
+	}
 }
