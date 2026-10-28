@@ -89,7 +89,7 @@ func (r *OpenShellRuntime) ReadCompletedSession(ctx context.Context, b Completed
 	})
 }
 func (r *OpenShellRuntime) readCompletedSession(ctx context.Context, b CompletedSessionBinding, observe func(context.Context, OpenShellIdentity) (OpenShellCompletedObservation, error)) (CompletedSessionReadback, error) {
-	result, err := r.readSettledSession(ctx, b, observe, false)
+	result, err := r.readSettledSession(ctx, b, observe, false, nil)
 	return result.completed, err
 }
 
@@ -100,7 +100,7 @@ type settledSessionEvidence struct {
 	status          SessionStatus
 }
 
-func (r *OpenShellRuntime) readSettledSession(ctx context.Context, b CompletedSessionBinding, observe func(context.Context, OpenShellIdentity) (OpenShellCompletedObservation, error), progress bool) (result settledSessionEvidence, err error) {
+func (r *OpenShellRuntime) readSettledSession(ctx context.Context, b CompletedSessionBinding, observe func(context.Context, OpenShellIdentity) (OpenShellCompletedObservation, error), progress bool, retained func(context.Context, openShellDispatchReceipt, string) error) (result settledSessionEvidence, err error) {
 	if b.SessionID == "" || filepath.Base(b.SessionID) != b.SessionID || b.SessionID == "." || b.SessionID == ".." || b.OrderID == "" || b.Provider == "" || b.Model == "" || b.StageIndex < 0 || b.RetryCount < 0 || !filepath.IsAbs(b.WorktreePath) {
 		return result, fmt.Errorf("session readback binding incomplete")
 	}
@@ -161,7 +161,7 @@ func (r *OpenShellRuntime) readSettledSession(ctx context.Context, b CompletedSe
 	if spawn.SessionID != b.SessionID || spawn.Provider != b.Provider || spawn.Model != b.Model || spawn.Runtime != "openshell" || spawn.WorktreePath != b.WorktreePath || spawn.OrderID != b.OrderID || spawn.StageIndex != strconv.Itoa(b.StageIndex) || spawn.RetryCount != b.RetryCount {
 		return result, fmt.Errorf("original OpenShell spawn binding differs")
 	}
-	var meta struct {
+	type terminalMetadata struct {
 		SessionID   string `json:"session_id"`
 		Status      string `json:"status"`
 		Alive       *bool  `json:"alive"`
@@ -170,11 +170,17 @@ func (r *OpenShellRuntime) readSettledSession(ctx context.Context, b CompletedSe
 		Runtime     string `json:"runtime"`
 		ExitPending bool   `json:"exit_pending"`
 	}
+	var meta terminalMetadata
 	if err = read("meta.json", &meta); err != nil {
 		return result, err
 	}
 	if meta.SessionID != b.SessionID || meta.Status != "exited" || meta.Alive == nil || *meta.Alive || meta.ExitPending || meta.Provider != b.Provider || meta.Model != b.Model || meta.Runtime != "openshell" {
 		return result, fmt.Errorf("original OpenShell terminal metadata differs")
+	}
+	// Cleanup observes stable terminal identity, not the monitor's derived clock
+	// and counters. Normal session readback retains its full snapshot contract.
+	if retained != nil {
+		delete(sources, "meta.json")
 	}
 	var delivery workspaceartifacts.Result
 	if err = read("delivery/result.json", &delivery); err != nil {
@@ -198,12 +204,21 @@ func (r *OpenShellRuntime) readSettledSession(ctx context.Context, b CompletedSe
 	if publication.Phase != "published" || publication.Parent != receipt.Baseline.Head || publication.ObservedHead != publishedHead || publication.Error != "" {
 		return result, fmt.Errorf("OpenShell candidate publication differs")
 	}
-	head, err := sessionReadbackHead(ctx, b.WorktreePath)
-	if err != nil {
-		return result, err
+	verifyLocal := func() error {
+		if retained != nil {
+			return retained(ctx, receipt, publishedHead)
+		}
+		head, err := sessionReadbackHead(ctx, b.WorktreePath)
+		if err != nil {
+			return err
+		}
+		if head != publishedHead {
+			return fmt.Errorf("OpenShell candidate HEAD drifted")
+		}
+		return nil
 	}
-	if head != publishedHead {
-		return result, fmt.Errorf("OpenShell candidate HEAD drifted")
+	if err = verifyLocal(); err != nil {
+		return result, err
 	}
 	identity := receipt.Worker.Identity
 	if identity.OrderID != b.OrderID || identity.SessionID != b.SessionID || identity.AttemptID != receipt.AttemptID || receipt.Worker.Boundary != OpenShellBoundaryStopped {
@@ -274,15 +289,20 @@ func (r *OpenShellRuntime) readSettledSession(ctx context.Context, b CompletedSe
 		return result, err
 	}
 	maps.Copy(sources, instructionSources)
+	if retained != nil {
+		var afterMeta terminalMetadata
+		if _, err = ReadSessionReadbackFile(filepath.Join(dir, "meta.json"), &afterMeta); err != nil {
+			return result, err
+		}
+		if !reflect.DeepEqual(meta, afterMeta) {
+			return result, fmt.Errorf("OpenShell cleanup terminal metadata identity changed")
+		}
+	}
 	if err = VerifySessionReadbackFiles(sources); err != nil {
 		return result, err
 	}
-	after, err := sessionReadbackHead(ctx, b.WorktreePath)
-	if err != nil {
+	if err = verifyLocal(); err != nil {
 		return result, err
-	}
-	if after != head {
-		return result, fmt.Errorf("OpenShell candidate HEAD changed during readback")
 	}
 	if instructions != nil {
 		afterInstructions, afterSources, e := r.instructionReadback(ctx, dir, b, spawn.InstructionBundle, original.Exec.Command)

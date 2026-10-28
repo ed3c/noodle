@@ -367,6 +367,13 @@ func TestOpenShellRuntimeStopPreservesProgressAfterBothNativeExits(t *testing.T)
 	if _, err := r.ReadCompletedSession(t.Context(), binding); err == nil {
 		t.Fatal("interrupted progress accepted as successful candidate")
 	}
+	cleanup, cleanupErr := r.ReadCleanupSession(t.Context(), binding, target, StatusCancelled)
+	if cleanupErr != nil || cleanup.OutcomeStatus != StatusCancelled || cleanup.PublishedHead != receipt.ProgressHead {
+		t.Fatalf("cleanup lost saved interrupted outcome: %+v %v", cleanup, cleanupErr)
+	}
+	if _, err := r.ReadCleanupSession(t.Context(), binding, target, StatusCompleted); err == nil {
+		t.Fatal("cleanup promoted interrupted progress to completion")
+	}
 	session.custody.mu.Lock()
 	originalResult := session.custody.state.Records[0].ProgressStop.Result
 	session.custody.state.Records[0].ProgressStop.Result.ExitObserved = false

@@ -22,7 +22,7 @@ type SavedProgressReadback struct {
 func (r *OpenShellRuntime) ReadSavedProgress(ctx context.Context, b CompletedSessionBinding) (SavedProgressReadback, error) {
 	result, err := r.readSettledSession(ctx, b, func(ctx context.Context, identity OpenShellIdentity) (OpenShellCompletedObservation, error) {
 		return r.config.Gateway.ObserveSavedProgress(ctx, r.config.ContextID, identity)
-	}, true)
+	}, true, nil)
 	if err != nil {
 		return SavedProgressReadback{}, err
 	}
