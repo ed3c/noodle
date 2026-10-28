@@ -97,7 +97,7 @@ func openShellTestTLS(t *testing.T) (OpenShellTLS, *tls.Config) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: k}
+		return tls.Certificate{Certificate: [][]byte{der, caDER}, PrivateKey: k}
 	}
 	return OpenShellTLS{RootCAs: roots, Certificate: cert(2, x509.ExtKeyUsageClientAuth), ServerName: "gateway.test"}, &tls.Config{
 		MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert(3, x509.ExtKeyUsageServerAuth)},

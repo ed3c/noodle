@@ -192,6 +192,11 @@ func residentIdentity(spec ResidentSpec, contextID string) (string, string, erro
 	if spec.Transport != "network" || (spec.Sharing != "shared" && spec.Sharing != "context") {
 		return "", "", errors.New("resident transport/sharing unsupported; stdio requires its original Session owner")
 	}
+	for _, arg := range spec.Argv {
+		if strings.ContainsRune(arg, 0) {
+			return "", "", errors.New("resident argument contains NUL")
+		}
+	}
 	dir, err := filepath.EvalSymlinks(spec.Directory)
 	if err != nil {
 		return "", "", err
@@ -384,6 +389,11 @@ func (r *Residents) acquire(spec ResidentSpec, contextID string, budget *Budget,
 func (r *Residents) Release(id, contextID string) (Resident, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.release(id, contextID)
+}
+
+// release is called under r.mu, including by an original generation capability.
+func (r *Residents) release(id, contextID string) (Resident, error) {
 	v := r.records[id]
 	if v == nil {
 		return Resident{}, errors.New("resident identity not found")

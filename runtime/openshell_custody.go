@@ -19,6 +19,8 @@ import (
 	"github.com/poteto/noodle/internal/filex"
 	"github.com/poteto/noodle/internal/lockfile"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -73,25 +75,30 @@ type OpenShellCustodyRecord struct {
 }
 
 type OpenShellCustodyState struct {
-	Version int
-	Binding OpenShellCustodyBinding
-	Blocked string
-	Records []OpenShellCustodyRecord
+	Version         int
+	Binding         OpenShellCustodyBinding
+	Blocked         string
+	Records         []OpenShellCustodyRecord
+	PendingRetained []OpenShellRetainedSandbox
 }
 
 // OpenShellCustody serializes local admission and native lifecycle operations.
 // Close releases only local streams/lock, and never stops remote compute.
 type OpenShellCustody struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	mu       sync.Mutex
-	state    OpenShellCustodyState
-	lock     *lockfile.Lock
-	conn     *grpc.ClientConn
-	client   pb.OpenShellClient
-	fault    error
-	closed   bool
-	quiesced bool
+	ctx             context.Context
+	cancel          context.CancelFunc
+	mu              sync.Mutex
+	state           OpenShellCustodyState
+	lock            *lockfile.Lock
+	conn            *grpc.ClientConn
+	client          pb.OpenShellClient
+	fault           error
+	closed          bool
+	quiesced        bool
+	initialized     bool
+	managed         bool // immutable after construction; only gateway owner may close
+	retryReadback   bool
+	residentRunning func() error
 }
 
 // OpenOpenShellCustody returns a non-nil owner on an inventory/binding block.
@@ -112,6 +119,17 @@ func OpenOpenShellCustody(ctx context.Context, binding OpenShellCustodyBinding, 
 
 // The native connection is already authenticated and belongs to this owner.
 func openOpenShellCustody(ctx context.Context, binding OpenShellCustodyBinding, conn *grpc.ClientConn, retained []OpenShellRetainedSandbox) (*OpenShellCustody, error) {
+	c, err := reserveOpenShellCustody(binding, conn, retained)
+	if err != nil {
+		return c, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c, c.initialize(ctx)
+}
+
+// Reserve local control and the retained source before any native RPC.
+func reserveOpenShellCustody(binding OpenShellCustodyBinding, conn *grpc.ClientConn, retained []OpenShellRetainedSandbox) (*OpenShellCustody, error) {
 	fail := func(err error) (*OpenShellCustody, error) { _ = conn.Close(); return nil, err }
 	if err := os.MkdirAll(binding.StateRoot, 0700); err != nil {
 		return fail(err)
@@ -153,31 +171,8 @@ func openOpenShellCustody(ctx context.Context, binding OpenShellCustodyBinding, 
 			return c, c.block("retained initialization supplied for existing custody")
 		}
 	} else if os.IsNotExist(err) {
-		c.state = OpenShellCustodyState{Version: openShellCustodyVersion, Binding: binding}
+		c.state = OpenShellCustodyState{Version: openShellCustodyVersion, Binding: binding, PendingRetained: slices.Clone(retained)}
 		// Bind the owner before any inventory failure, including an empty inventory.
-		if err := c.save(); err != nil {
-			return c, err
-		}
-		seen := map[string]bool{}
-		for _, ref := range retained {
-			if ref.Name == "" || ref.SandboxID == "" || ref.Workspace != binding.Workspace || seen[ref.Name] {
-				return c, c.block("invalid retained sandbox receipt")
-			}
-			seen[ref.Name] = true
-			response, err := c.client.GetSandbox(ctx, &pb.GetSandboxRequest{Name: ref.Name, WorkspaceScope: c.scope()})
-			if err != nil {
-				return c, c.block(fmt.Sprintf("read retained sandbox %s: %v", ref.Name, err))
-			}
-			s := response.GetSandbox()
-			if !sameOpenShellSandbox(s, ref.Name, ref.SandboxID, binding.Workspace) || s.GetStatus().GetPhase() != pb.SandboxPhase_SANDBOX_PHASE_STOPPED || s.GetSpec() == nil {
-				return c, c.block("retained sandbox identity/Stopped/spec evidence conflicts")
-			}
-			spec, err := openShellBytes(s.GetSpec())
-			if err != nil {
-				return c, c.block(err.Error())
-			}
-			c.state.Records = append(c.state.Records, OpenShellCustodyRecord{Name: ref.Name, Retained: true, Spec: spec, MainProcessInstanceID: s.GetStatus().GetMainProcessInstanceId(), Stopped: openShellStoppedObservation(s), Worker: OpenShellWorkerRecord{Identity: OpenShellIdentity{Sandbox: c.ref(ref.SandboxID), SandboxName: ref.Name, ConfigSource: binding.ConfigSource}}})
-		}
 		if err := c.save(); err != nil {
 			return c, err
 		}
@@ -185,10 +180,110 @@ func openOpenShellCustody(ctx context.Context, binding OpenShellCustodyBinding, 
 		_ = c.Close()
 		return nil, err
 	}
-	if err := c.audit(ctx); err != nil {
-		return c, err
+	if err := c.validateLedger(); err != nil {
+		return c, c.block(err.Error())
 	}
 	return c, nil
+}
+
+// Validate only local ledger structure here; native identity is audited after
+// the original child starts. Corrupt receipts never justify a service spawn.
+func (c *OpenShellCustody) validateLedger() error {
+	names, ids := map[string]bool{}, map[string]bool{}
+	for _, r := range c.state.Records {
+		if r.Name == "" || names[r.Name] {
+			return fmt.Errorf("invalid or duplicate custody ledger name")
+		}
+		names[r.Name] = true
+		if r.Retained || r.CreateAcknowledged {
+			id := r.Worker.Identity.Sandbox
+			if id.SandboxID == "" || ids[id.SandboxID] || id.Gateway != c.state.Binding.Gateway || id.Workspace != c.state.Binding.Workspace || r.Worker.Identity.SandboxName != r.Name || r.Worker.Identity.ConfigSource != c.state.Binding.ConfigSource {
+				return fmt.Errorf("custody ledger native identity/binding invalid")
+			}
+			ids[id.SandboxID] = true
+			if err := proto.Unmarshal(r.Spec, &pb.SandboxSpec{}); err != nil {
+				return fmt.Errorf("custody ledger specification invalid: %w", err)
+			}
+		}
+		if !r.Retained {
+			var intent pb.CreateSandboxRequest
+			if err := proto.Unmarshal(r.CreateIntent, &intent); err != nil {
+				return fmt.Errorf("custody ledger create intent invalid: %w", err)
+			}
+			if r.CreateRequestID == "" || intent.GetName() != r.Name || intent.GetRequestId() != r.CreateRequestID || intent.GetWorkspaceScope().GetWorkspace() != c.state.Binding.Workspace {
+				return fmt.Errorf("custody ledger create intent binding invalid")
+			}
+		}
+	}
+	for _, ref := range c.state.PendingRetained {
+		if ref.Name == "" || ref.SandboxID == "" || ref.Workspace != c.state.Binding.Workspace || names[ref.Name] || ids[ref.SandboxID] {
+			return fmt.Errorf("invalid retained sandbox receipt")
+		}
+		names[ref.Name], ids[ref.SandboxID] = true, true
+	}
+	return nil
+}
+
+// Called under mu. Initialization never replays VM effects. A partial retained
+// read keeps its durable source, so a later explicit read cannot accept empty state.
+func (c *OpenShellCustody) initialize(ctx context.Context) (err error) {
+	c.initialized = true
+	defer func() {
+		if err != nil {
+			c.initialized = false
+		}
+	}()
+	if err = c.available(); err != nil {
+		return err
+	}
+	records := slices.Clone(c.state.Records)
+	for _, ref := range c.state.PendingRetained {
+		response, readErr := c.client.GetSandbox(ctx, &pb.GetSandboxRequest{Name: ref.Name, WorkspaceScope: c.scope()})
+		if readErr != nil {
+			return c.readFailure(fmt.Sprintf("read retained sandbox %s", ref.Name), readErr)
+		}
+		s := response.GetSandbox()
+		if !sameOpenShellSandbox(s, ref.Name, ref.SandboxID, c.state.Binding.Workspace) || s.GetStatus().GetPhase() != pb.SandboxPhase_SANDBOX_PHASE_STOPPED || s.GetSpec() == nil {
+			return c.block("retained sandbox identity/Stopped/spec evidence conflicts")
+		}
+		spec, err := openShellBytes(s.GetSpec())
+		if err != nil {
+			return c.block(err.Error())
+		}
+		records = append(records, OpenShellCustodyRecord{Name: ref.Name, Retained: true, Spec: spec, MainProcessInstanceID: s.GetStatus().GetMainProcessInstanceId(), Stopped: openShellStoppedObservation(s), Worker: OpenShellWorkerRecord{Identity: OpenShellIdentity{Sandbox: c.ref(ref.SandboxID), SandboxName: ref.Name, ConfigSource: c.state.Binding.ConfigSource}}})
+	}
+	if len(c.state.PendingRetained) != 0 {
+		c.state.Records = records
+		c.state.PendingRetained = nil
+		if err := c.save(); err != nil {
+			return err
+		}
+	}
+	if err := c.audit(ctx); err != nil {
+		return err
+	}
+	// List is not fresh canonical identity evidence for historical records.
+	if c.managed {
+		for i := range c.state.Records {
+			if _, err := c.read(ctx, &c.state.Records[i]); err != nil {
+				return err
+			}
+		}
+	}
+	return ctx.Err()
+}
+
+func (c *OpenShellCustody) readFailure(reason string, cause error) error {
+	if c.retryReadback {
+		// Unknown transport failures cannot prove external drift. They do revoke
+		// usable custody until explicit initialization succeeds. Native NotFound
+		// confirms a missing bound identity and remains a permanent conflict.
+		c.initialized = false
+		if status.Code(cause) != codes.NotFound {
+			return fmt.Errorf("openshell readback unavailable: %s: %w", reason, cause)
+		}
+	}
+	return c.block(fmt.Sprintf("%s: %v", reason, cause))
 }
 
 func (c *OpenShellCustody) scope() *dm.WorkspaceSelector {
@@ -226,6 +321,17 @@ func (c *OpenShellCustody) available() error {
 	if c.closed {
 		return fmt.Errorf("openshell custody closed")
 	}
+	if c.managed {
+		if c.residentRunning == nil {
+			return fmt.Errorf("openshell original resident generation unavailable")
+		}
+		if err := c.residentRunning(); err != nil {
+			return err
+		}
+	}
+	if !c.initialized {
+		return fmt.Errorf("openshell custody native initialization incomplete")
+	}
 	if c.fault != nil {
 		return c.fault
 	}
@@ -241,6 +347,7 @@ func (c *OpenShellCustody) Snapshot() OpenShellCustodyState {
 	defer c.mu.Unlock()
 	state := c.state
 	state.Records = slices.Clone(state.Records)
+	state.PendingRetained = slices.Clone(state.PendingRetained)
 	for i := range state.Records {
 		r := &state.Records[i]
 		r.Spec = slices.Clone(r.Spec)
@@ -259,6 +366,13 @@ func (c *OpenShellCustody) Snapshot() OpenShellCustodyState {
 	return state
 }
 func (c *OpenShellCustody) Close() error {
+	if c.managed {
+		return fmt.Errorf("openshell custody belongs to gateway owner; close original owner")
+	}
+	return c.closeLocal()
+}
+
+func (c *OpenShellCustody) closeLocal() error {
 	// Cancel before taking mu: an outstanding native call may hold it. Closing
 	// the connection also interrupts unary RPCs; cancellation releases output
 	// backpressure on exec streams without implying a remote stop.
@@ -290,7 +404,7 @@ func (c *OpenShellCustody) audit(ctx context.Context) error {
 	for {
 		response, err := c.client.ListSandboxes(ctx, &pb.ListSandboxesRequest{WorkspaceScope: &dm.WorkspaceSelector{Selection: &dm.WorkspaceSelector_AllWorkspaces{AllWorkspaces: &dm.AllWorkspaces{}}}, PageSize: 100, PageToken: token})
 		if err != nil {
-			return c.block(fmt.Sprintf("inventory unavailable: %v", err))
+			return c.readFailure("inventory unavailable", err)
 		}
 		for _, s := range response.GetSandboxes() {
 			name := s.GetMetadata().GetName()
@@ -354,7 +468,7 @@ func (c *OpenShellCustody) matches(r *OpenShellCustodyRecord, s *pb.Sandbox) err
 func (c *OpenShellCustody) read(ctx context.Context, r *OpenShellCustodyRecord) (*pb.Sandbox, error) {
 	response, err := c.client.GetSandbox(ctx, &pb.GetSandboxRequest{Name: r.Name, WorkspaceScope: c.scope()})
 	if err != nil {
-		return nil, c.block(fmt.Sprintf("read sandbox %s: %v", r.Name, err))
+		return nil, c.readFailure(fmt.Sprintf("read sandbox %s", r.Name), err)
 	}
 	s := response.GetSandbox()
 	if err := c.matches(r, s); err != nil {

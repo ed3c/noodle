@@ -13,7 +13,13 @@ import (
 // seals only this instance's mutations; it is not an external name-based lock
 // and is never reused as a cached PASS. A busy VM leaves normal Stop available.
 func (c *OpenShellCustody) Quiesce(ctx context.Context) error {
-	c.mu.Lock()
+	if c.managed {
+		if !c.mu.TryLock() {
+			return fmt.Errorf("openshell custody operation in progress")
+		}
+	} else {
+		c.mu.Lock()
+	}
 	defer c.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err

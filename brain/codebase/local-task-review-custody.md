@@ -67,3 +67,24 @@ Sibling prefixes, symlinks and traversal never expand a scope. Issue atom
 contracts retain their own exact-file semantics. Frozen task inputs stay intact;
 an older Host must use the existing safe runtime successor before directory
 review effects. New Soodles admission checks this capability before dispatch.
+
+Accepted control HEAD is frozen: even a later documentation commit changes the
+source-bound acceptance subject. Record follow-up notes in the next work unit;
+matching runtime bytes alone cannot preserve acceptance of a changed HEAD.
+
+The on-demand OpenShell gateway owner reserves canonical custody before asking
+Residents to spawn. Retained initialization sources survive failed startup and
+readback. Native readiness follows only the original live child capability;
+health, matching names and PIDs cannot reconstruct it after Host restart.
+Transient native reads retain obligations; confirmed configuration or inventory
+conflicts remain blocked. Only Residents' confirmed local exit permits owner
+Close, independently of remote VM settlement. The TCP/mTLS tests require the
+managed helper itself to serve; in-process coverage is supplementary.
+
+A successful quiesce can seal dispatch before the release guard receives its
+result. If delivery times out, retain the original lease and permit a fresh
+native release check. Dispatch readiness is not release eligibility; successful
+readback of sealed custody must not reopen dispatch or erase initialization.
+The managed-child TLS fixture transfers the issuing CA, not the client leaf,
+to its trust pool. Installed macOS VM-driver probes also require a short Unix
+socket path; validate the prepared path before starting the original child.
