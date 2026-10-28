@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash"
+	"strings"
 )
 
 // ReadCleanHead observes raw committed bytes without git status/diff, filters,
@@ -79,4 +80,37 @@ func matchesRawBlob(data []byte, expected string) bool {
 	fmt.Fprintf(digest, "blob %d\x00", len(data))
 	digest.Write(data)
 	return hex.EncodeToString(digest.Sum(nil)) == expected
+}
+
+// CleanIdentity binds the raw clean checkout to its attached integration branch.
+// It is an observation, and never refreshes the index or executes Git hooks.
+type CleanIdentity struct{ Head, Tree, Branch string }
+
+func ReadCleanIdentity(ctx context.Context, target string) (CleanIdentity, error) {
+	var result CleanIdentity
+	root, err := repositoryRoot(ctx, target)
+	if err != nil {
+		return result, err
+	}
+	result.Head, err = ReadCleanHead(ctx, root)
+	if err != nil {
+		return result, err
+	}
+	tree, err := git(ctx, root, nil, "--no-lazy-fetch", "--no-replace-objects", "rev-parse", result.Head+"^{tree}")
+	if err != nil {
+		return result, err
+	}
+	branch, err := git(ctx, root, nil, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		return result, err
+	}
+	head, err := git(ctx, root, nil, "--no-lazy-fetch", "--no-replace-objects", "rev-parse", "HEAD")
+	if err != nil {
+		return result, err
+	}
+	if strings.TrimSpace(string(head)) != result.Head {
+		return result, fmt.Errorf("checkout HEAD changed during identity observation")
+	}
+	result.Tree, result.Branch = strings.TrimSpace(string(tree)), strings.TrimSpace(string(branch))
+	return result, nil
 }

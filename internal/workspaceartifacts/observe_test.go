@@ -100,6 +100,8 @@ func TestReadCleanHeadIgnoresInheritedGitSelection(t *testing.T) {
 	testGit(t, other, "add", ".")
 	testGit(t, other, "commit", "--quiet", "-m", "different")
 	expected := strings.TrimSpace(string(testGit(t, root, "rev-parse", "HEAD")))
+	expectedTree := strings.TrimSpace(string(testGit(t, root, "rev-parse", "HEAD^{tree}")))
+	expectedBranch := strings.TrimSpace(string(testGit(t, root, "symbolic-ref", "--short", "HEAD")))
 	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
 	t.Setenv("GIT_WORK_TREE", other)
 	t.Setenv("GIT_INDEX_FILE", filepath.Join(other, ".git", "index"))
@@ -109,6 +111,10 @@ func TestReadCleanHeadIgnoresInheritedGitSelection(t *testing.T) {
 	head, err := ReadCleanHead(t.Context(), root)
 	if err != nil || head != expected {
 		t.Fatalf("environment replaced original target: %q %v", head, err)
+	}
+	identity, identityErr := ReadCleanIdentity(t.Context(), root)
+	if identityErr != nil || identity.Head != expected || identity.Tree != expectedTree || identity.Branch != expectedBranch {
+		t.Fatalf("environment replaced clean integration identity: %+v %v", identity, identityErr)
 	}
 	put(t, root, "file.txt", []byte("original target drift"), 0644)
 	if _, err = ReadCleanHead(t.Context(), root); err == nil {

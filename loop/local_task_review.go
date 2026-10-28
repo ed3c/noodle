@@ -163,6 +163,12 @@ func (l *Loop) validateLocalTaskFiles(c localTaskCandidate, root string) error {
 			}
 		}
 	}
+	return validateLocalTaskFileBytes(c, root)
+}
+
+// Raw candidate bytes can be checked after safe Git plumbing has established a
+// clean checkout, without invoking normal project diff filters or fsmonitor.
+func validateLocalTaskFileBytes(c localTaskCandidate, root string) error {
 	for name, expected := range c.Files {
 		if name == "." || name == ".." || filepath.IsAbs(name) || filepath.Clean(name) != name || strings.HasPrefix(name, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("local task candidate path invalid")
