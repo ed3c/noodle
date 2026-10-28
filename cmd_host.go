@@ -51,6 +51,7 @@ type hostReceipt struct {
 	HostDir          string             `json:"host_dir"`
 	CleanupCompleted bool               `json:"cleanup_completed,omitempty"`
 	TerminalCause    loop.TerminalCause `json:"terminal_cause,omitempty"`
+	AdmissionRefusal string             `json:"admission_refusal"`
 }
 
 type hostResponse struct {
@@ -332,8 +333,8 @@ func callHost(ctx context.Context, req hostRequest) hostResponse {
 	}
 	if requestBinding != nil && req.Operation != "status" && req.Operation != "cleanup" {
 		requestBinding.Status = "pending"
-		if response.Status == "busy" {
-			requestBinding.Status = "busy"
+		if response.Status == "busy" || response.Status == "deferred" {
+			requestBinding.Status = response.Status
 		}
 		if response.Status == "ok" {
 			requestBinding.Status = "accepted"
@@ -640,7 +641,7 @@ func (h *noodleHost) finish(c *hostContext, runErr error) {
 		}
 	}
 	c.cancel()
-	if runErr != nil {
+	if runErr != nil || (h.blocked && c.receipt.AdmissionRefusal != "") {
 		c.receipt.ContextState = "failed"
 		c.failed = true
 	} else {
@@ -694,7 +695,7 @@ func offlineHostStatus(dir string, req hostRequest, dialErr error) hostResponse 
 			continue
 		}
 		if r.ContextState == "detached" {
-			return hostResponse{r, "ok", ""}
+			return hostReceiptResult(r)
 		}
 		return hostResponse{r, "unknown_effect", "host is unavailable; the persisted context was not detached"}
 	}
@@ -730,7 +731,7 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 				if req.BinarySHA256 != r.BinarySHA256 || (req.BinarySHA256 != h.binarySHA && req.RequestID == "" && req.ContextID == "") {
 					return hostError("binary_mismatch", errors.New("historical readback requires the original binary and exact context or request identity"))
 				}
-				return hostResponse{r, "ok", ""}
+				return hostReceiptResult(r)
 			}
 			if req.BinarySHA256 != h.binarySHA {
 				return hostError("binary_mismatch", errors.New("client and host binaries differ"))
@@ -739,7 +740,7 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 				return hostResponse{r, "unknown_effect", "prior context is unresolved; no replay was attempted"}
 			}
 			if req.Operation == "status" || r.ContextState == "detached" {
-				return hostResponse{r, "ok", ""}
+				return hostReceiptResult(r)
 			}
 			if c == nil {
 				return hostResponse{r, "stale_context", "context is no longer owned by this host"}
@@ -795,7 +796,7 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 		if h.blocked || (c != nil && c.failed) || (c == nil && r.ContextState != "detached") {
 			return hostResponse{r, "unknown_effect", "original request has an unresolved context"}
 		}
-		return hostResponse{r, "ok", ""}
+		return hostReceiptResult(r)
 	}
 	if h.blocked {
 		return hostError("unknown_effect", errors.New("prior active or failed context requires readback; attach refused"))
@@ -900,7 +901,7 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 	if err != nil {
 		return hostError("refused", err)
 	}
-	r := hostReceipt{1, hostProtocol, os.Getpid(), h.instanceID, id, req.ProjectDir, "active", cfg.Mode, req.ConfigPath, req.ConfigSHA256, h.binaryPath, h.binarySHA, req.RequestID, h.dir, req.CleanupCompleted, ""}
+	r := hostReceipt{1, hostProtocol, os.Getpid(), h.instanceID, id, req.ProjectDir, "active", cfg.Mode, req.ConfigPath, req.ConfigSHA256, h.binaryPath, h.binarySHA, req.RequestID, h.dir, req.CleanupCompleted, "", ""}
 	source := config.RuntimeSource{Path: req.ConfigPath, SHA256: req.ConfigSHA256}
 	created, err := config.SaveRuntimeSource(req.ProjectDir, source)
 	failBeforeRuntime := func(cause error) hostResponse {
@@ -939,6 +940,9 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 	keepLock = true
 	if c.openShell {
 		if _, err = h.openShell.Acquire(ctx, id); err != nil {
+			if response, settled := h.finishOpenShellDeferral(c, err); settled {
+				return response
+			}
 			h.finish(c, err)
 			return hostResponse{c.receipt, "unknown_effect", fmt.Sprintf("OpenShell gateway acquisition failed; original custody retained: %v", err)}
 		}

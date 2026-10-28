@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 
+	"github.com/poteto/noodle/internal/admission"
 	loopruntime "github.com/poteto/noodle/runtime"
 )
 
@@ -71,4 +73,34 @@ func (h *noodleHost) releaseOpenShell(contextID string) error {
 		}
 	}
 	return nil
+}
+
+// A pressure refusal precedes resident creation. Only fresh original-owner
+// evidence of no lease permits releasing this never-started context.
+func (h *noodleHost) finishOpenShellDeferral(c *hostContext, cause error) (hostResponse, bool) {
+	if !errors.Is(cause, admission.ErrDeferred) {
+		return hostResponse{}, false
+	}
+	records, err := h.residents.Snapshot()
+	if err != nil {
+		return hostResponse{}, false
+	}
+	for _, record := range records {
+		if slices.Contains(record.Contexts, c.receipt.ContextID) {
+			return hostResponse{}, false
+		}
+	}
+	c.receipt.AdmissionRefusal = cause.Error()
+	h.finish(c, nil)
+	if h.blocked || c.failed {
+		return hostResponse{c.receipt, "unknown_effect", "pre-start refusal cleanup or receipt persistence failed"}, true
+	}
+	return hostReceiptResult(c.receipt), true
+}
+
+func hostReceiptResult(receipt hostReceipt) hostResponse {
+	if receipt.AdmissionRefusal != "" {
+		return hostResponse{receipt, "deferred", receipt.AdmissionRefusal}
+	}
+	return hostResponse{receipt, "ok", ""}
 }
