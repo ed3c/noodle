@@ -693,6 +693,138 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaises(Refused):
             decode('{"request":1,"request":2}')
 
+    def test_explicit_existing_host_is_forwarded_only_on_enter(self):
+        script = self.root / 'soodles.py'
+        script.write_text('# offline transport fixture\n')
+        legacy = PinnedCLI(reference(Path(sys.executable).resolve()), reference(script), (reference(script),),
+                           'e' * 40, {'PATH': '/usr/bin:/bin'}, 30)
+        pinned = replace(legacy, require_existing_instance='a' * 32)
+        request = save(self.root / 'request.json', {'fixture_only': True})
+        for name, cli, verb, capture in (
+                ('legacy', legacy, 'enter', None),
+                ('pinned', pinned, 'enter', None),
+                ('inspect', pinned, 'inspect', None),
+                ('capture', pinned, 'inspect', self.root / 'capture')):
+            with self.subTest(operation=name):
+                expected = [cli.python['path'], '-B', cli.entrypoint['path'], 'loop', verb,
+                            '--request-file', request['path']]
+                if verb == 'inspect':
+                    expected += ['--include-result']
+                    if capture is not None:
+                        expected += ['--capture-output', str(capture)]
+                elif cli.require_existing_instance is not None:
+                    expected += ['--require-existing-instance', 'a' * 32]
+
+                def run(argv, **kwargs):
+                    self.assertEqual(argv, expected)
+                    kwargs['stdout'].write(json.dumps({'owner': 'soodles.loop', 'status': 'pending',
+                                                      'request': request}).encode())
+                    return subprocess.CompletedProcess(argv, 0)
+
+                evidence = self.root / name
+                with patch('soodles_bridge.subprocess.run', side_effect=run) as invoked:
+                    cli.invoke(verb, request, evidence, capture=capture)
+                self.assertEqual(invoked.call_count, 1)
+                self.assertEqual(decode((evidence / 'intent.json').read_bytes())['argv'], expected)
+
+    def test_invalid_explicit_host_refuses_before_any_process(self):
+        script = self.root / 'soodles.py'
+        script.write_text('# offline transport fixture\n')
+        cli = PinnedCLI(reference(Path(sys.executable).resolve()), reference(script), (reference(script),),
+                        'e' * 40, {'PATH': '/usr/bin:/bin'}, 30)
+        request = save(self.root / 'request.json', {'fixture_only': True})
+        for instance in ('', ' ', ' host', 'host\n', '\x00', False, 12, {}):
+            with self.subTest(instance=instance), patch('soodles_bridge.subprocess.run') as invoked:
+                with self.assertRaisesRegex(Refused, 'required original Host instance is invalid'):
+                    replace(cli, require_existing_instance=instance).invoke('enter', request, self.root / 'never')
+                invoked.assert_not_called()
+                self.assertFalse((self.root / 'never').exists())
+
+    def test_legacy_cli_successor_without_optional_host_still_reconciles(self):
+        script = self.root / 'soodles.py'
+        script.write_text('# offline transport fixture\n')
+        # Frozen configurations predate require_existing_instance; keep that field absent.
+        legacy = {'python': reference(Path(sys.executable).resolve()), 'entrypoint': reference(script),
+                  'sources': [reference(script)], 'source_commit': 'a' * 40,
+                  'environment': {'PATH': '/usr/bin:/bin'}, 'timeout_s': 30}
+        successor = {**legacy, 'source_commit': 'b' * 40}
+        scripted = ScriptedCLI(self)
+
+        def invoke(cli, verb, request, evidence, *, capture=None):
+            value, ref = scripted.invoke(verb, request, evidence, capture=capture)
+            intent = decode((evidence / 'intent.json').read_bytes())
+            intent.update(source_commit=cli.source_commit, python=cli.python, sources=cli.sources,
+                          argv=[cli.python['path'], '-B', cli.entrypoint['path'], 'loop', verb])
+            (evidence / 'intent.json').write_text(json.dumps(intent))
+            return value, ref
+
+        def unresolved_review(*_):
+            raise UnknownEffect('offline fixture preserved review refusal')
+
+        with patch.object(PinnedCLI, 'invoke', invoke):
+            bridge = SoodlesOwnerBridge(PinnedCLI(**legacy), self.root / 'bridge', [self.template],
+                                        review=unresolved_review)
+            gate = SharedGate(self.root / 'journal.json', bridge, initial_paid_spent_usd='0')
+            with self.assertRaises(UnknownEffect):
+                gate.execute(self.call)
+            journal = gate.journal.read_bytes()
+            directory = bridge.root / self.call.fingerprint()
+            request = reference(directory / 'request.json')
+            scripted.accepted = True
+            cli = PinnedCLI(**successor)
+            _, fresh = cli.invoke('inspect', request, self.root / 'fresh')
+            packet = save(self.root / 'successor.json', {
+                'schema': 1, 'kind': 'captured-original-call-cli-successor',
+                'call_sha256': self.call.fingerprint(), 'request': request,
+                'original_intent': reference(directory / 'operation-0000/intent.json'),
+                'predecessor_config': save(self.root / 'old-config.json', {'cli': legacy}),
+                'successor_config': save(self.root / 'new-config.json', {'cli': successor}),
+                'failure': save(self.root / 'refusal.json',
+                                {'owner': 'soodles.loop', 'status': 'refused', 'effects': []})})
+            reopened = SoodlesOwnerBridge(cli, bridge.root, [self.template], review=self.fail, reopen=True)
+            enters = [verb for verb, _ in scripted.calls].count('enter')
+            result, _ = reopened.reconcile_call(self.call, fresh, cli_successor=packet)
+            self.assertTrue(result.settled)
+            self.assertEqual(gate.journal.read_bytes(), journal)
+            self.assertEqual([verb for verb, _ in scripted.calls].count('enter'), enters)
+
+    def test_missing_wrong_or_unknown_host_closes_gate_without_fallback(self):
+        script = self.root / 'soodles.py'
+        script.write_text('# offline transport fixture\n')
+        cli = PinnedCLI(reference(Path(sys.executable).resolve()), reference(script), (reference(script),),
+                        'e' * 40, {'PATH': '/usr/bin:/bin'}, 30, require_existing_instance='a' * 32)
+        for reason in ('missing-host', 'wrong-instance', 'unknown', 'unsupported-cli', 'lost-response'):
+            with self.subTest(reason=reason):
+                root = self.root / reason
+                bridge = SoodlesOwnerBridge(cli, root, [self.template], review=self.fail)
+                gate = SharedGate(self.root / (reason + '-journal.json'), bridge, initial_paid_spent_usd='0')
+
+                def run(argv, **kwargs):
+                    self.assertEqual(argv[-2:], ['--require-existing-instance', 'a' * 32])
+                    if reason == 'lost-response':
+                        raise TimeoutError('offline fixture lost response')
+                    if reason != 'unsupported-cli':
+                        kwargs['stdout'].write(json.dumps({'owner': 'soodles.loop',
+                            'status': 'unknown' if reason == 'unknown' else 'refused',
+                            'effects': [], 'problem': {'field': 'task.host.attach', 'value': reason}}).encode())
+                    else:
+                        kwargs['stderr'].write(b'unrecognized arguments: --require-existing-instance')
+                    return subprocess.CompletedProcess(argv, 2)
+
+                with patch('soodles_bridge.subprocess.run', side_effect=run) as invoked:
+                    with self.assertRaises(UnknownEffect):
+                        gate.execute(self.call)
+                    for fallback in (self.call, replace(self.call, run_id='native-fallback'),
+                                     replace(self.call, group='pi', provider='pi', model=MODELS['pi'])):
+                        with self.assertRaises(UnknownEffect):
+                            gate.execute(fallback)
+                    self.assertEqual(invoked.call_count, 1)
+                self.assertTrue(gate.state['blocked'])
+                directory = root / self.call.fingerprint() / 'operation-0000'
+                self.assertTrue((directory / 'unknown.json').is_file())
+                self.assertEqual(decode((directory / 'intent.json').read_bytes())['argv'][-2:],
+                                 ['--require-existing-instance', 'a' * 32])
+
 
 if __name__ == '__main__':
     unittest.main()

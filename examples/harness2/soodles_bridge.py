@@ -100,6 +100,7 @@ class PinnedCLI:
     source_commit: str
     environment: dict
     timeout_s: float
+    require_existing_instance: str | None = None
 
     def verify(self):
         require(re.fullmatch(r"[0-9a-f]{40}", self.source_commit), "Soodles source commit is invalid")
@@ -110,6 +111,10 @@ class PinnedCLI:
                         any(word in k.upper() for word in ("TOKEN", "SECRET", "PASSWORD", "API_KEY"))
                         for k in self.environment), "CLI environment contains an unbound injection or secret")
         require(self.timeout_s > 0, "CLI operation timeout is invalid")
+        if self.require_existing_instance is not None:
+            instance = self.require_existing_instance
+            require(isinstance(instance, str) and bool(instance) and instance.strip() == instance
+                    and "\x00" not in instance, "required original Host instance is invalid")
 
     def invoke(self, verb, request, evidence, *, capture=None):
         # At most three new reads of this same request. Never retry enter,
@@ -137,6 +142,8 @@ class PinnedCLI:
                 argv += ["--capture-output", str(capture)]
         else:
             require(capture is None, "capture cannot advance an owner")
+            if self.require_existing_instance is not None:
+                argv += ["--require-existing-instance", self.require_existing_instance]
         evidence = Path(evidence)
         evidence.mkdir()  # no overwrite/retry of an original operation
         save(evidence / "intent.json", {"source_commit": self.source_commit,
@@ -659,7 +666,7 @@ class SoodlesOwnerBridge:
         original_cli = decode(read_ref(proof["original_intent"]))
         if cli_successor is not None:
             from cli_successor import verify_cli_successor
-            require(canonical(verify_cli_successor(call, proof)) == canonical(asdict(self.cli)),
+            require(canonical(asdict(PinnedCLI(**verify_cli_successor(call, proof)))) == canonical(asdict(self.cli)),
                     'selected CLI successor differs from the current transport')
         else:
             require(all(original_cli.get(key) == value for key, value in {

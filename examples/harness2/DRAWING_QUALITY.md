@@ -118,3 +118,10 @@ scores or original artifacts. Oracle expectations are not projected.
 Formal unseen tasks are not enrolled. A completed quality UNKNOWN blocks quality
 acceptance; an interrupted or invalid checker execution additionally blocks
 further dispatch and replay until that execution is resolved.
+
+For the independent follow-up, bind `cli.require_existing_instance` to the exact
+native Host instance receipt and set its dedicated `NOODLE_HOST_DIR`. Every
+`loop enter` forwards the native `--require-existing-instance` constraint;
+readback/capture remain effect-free inspect operations. Missing, changed,
+unsupported or unknown admission cannot fall back to another Host. Frozen older
+configurations without this field keep their original semantics and evidence.
