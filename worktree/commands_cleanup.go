@@ -1,14 +1,16 @@
 package worktree
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // CleanupOpts holds optional parameters for Cleanup.
 type CleanupOpts struct {
 	ExplicitDelete bool
-	// Force removes the worktree even when unmerged commits exist.
+	// Force permits discarding unmerged commits; uncommitted changes are retained.
 	Force bool
 }
 
@@ -18,6 +20,14 @@ func (a *App) Cleanup(name string, opts ...CleanupOpts) error {
 	if len(opts) > 0 {
 		o = opts[0]
 	}
+	return a.cleanupAtPath(name, a.resolveWorktreePath(name), o)
+}
+
+func (a *App) cleanupAtPath(name, wtPath string, o CleanupOpts) error {
+	// Do not re-resolve a discovered candidate to a different same-name worktree.
+	if canonicalPath(a.resolveWorktreePath(name)) != canonicalPath(wtPath) {
+		return fmt.Errorf("cleanup candidate path changed for %s: %s", name, wtPath)
+	}
 	retained, err := a.retainsTaskWorktree(name)
 	if err != nil {
 		return err
@@ -25,90 +35,144 @@ func (a *App) Cleanup(name string, opts ...CleanupOpts) error {
 	if retained && !o.ExplicitDelete {
 		return fmt.Errorf("bound task worktree retained; only explicit cleanup --delete may remove %s", name)
 	}
-	wtPath := a.resolveWorktreePath(name)
-	cleanupBranch := a.resolveBranchName(name)
-
-	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
-		if !o.Force {
-			if err := a.ensureNoUnmergedCommits(name, cleanupBranch); err != nil {
-				return err
-			}
+	_, statErr := os.Stat(wtPath)
+	missing := os.IsNotExist(statErr)
+	if statErr != nil && !missing {
+		return fmt.Errorf("stat worktree %s: %w", wtPath, statErr)
+	}
+	branch := a.resolveBranchName(name)
+	head := ""
+	if !missing {
+		branch, head, err = a.cleanupCandidate(wtPath)
+		if err != nil {
+			return err
 		}
-
-		a.info("Worktree directory already removed, cleaning up refs...")
-		warnings := a.cleanupWorktreeAndBranch("", cleanupBranch, true)
-		for _, warning := range warnings {
-			a.warnf("WARNING: %s\n", warning)
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
 		}
-		a.printf("Done. Cleaned up refs for %s.\n", name)
-		return nil
+		if IsCWDInsideWorktree(canonicalPath(cwd), canonicalPath(wtPath)) {
+			return fmt.Errorf("shell CWD is inside the worktree (%s)", cwd)
+		}
+		dirty, err := a.gitOutput("-C", wtPath, "status", "--porcelain", "--untracked-files=all")
+		if err != nil {
+			return fmt.Errorf("read worktree status %s: %w", wtPath, err)
+		}
+		if dirty != "" {
+			return fmt.Errorf("worktree %s has uncommitted changes", wtPath)
+		}
+	} else {
+		if a.branchExists(name) && a.branchExists("noodle/"+name) {
+			return fmt.Errorf("cleanup branch ambiguous for missing worktree %s", name)
+		}
+		head, err = a.gitOutput("rev-parse", "--verify", "refs/heads/"+branch)
+		if err != nil {
+			return fmt.Errorf("read cleanup branch %s: %w", branch, err)
+		}
 	}
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	if IsCWDInsideWorktree(cwd, wtPath) {
-		return fmt.Errorf(
-			"shell CWD is inside the worktree (%s).\n  Run first:  cd %s\n  Then retry",
-			cwd, a.Root,
-		)
-	}
-
 	if !o.Force {
-		if err := a.ensureNoUnmergedCommits(name, cleanupBranch); err != nil {
+		if err := a.ensureNoUnmergedCommits(name, head); err != nil {
 			return err
 		}
 	}
-
-	warnings := a.cleanupWorktreeAndBranch(wtPath, cleanupBranch, true)
-	for _, warning := range warnings {
-		a.warnf("WARNING: %s\n", warning)
+	if !missing {
+		currentBranch, currentHead, err := a.cleanupCandidate(wtPath)
+		if err != nil {
+			return err
+		}
+		if currentBranch != branch || currentHead != head {
+			return fmt.Errorf("cleanup candidate changed for %s", name)
+		}
+	} else {
+		wtPath = ""
+	}
+	failures := a.cleanupWorktreeAndBranch(wtPath, branch, true, head)
+	if len(failures) > 0 {
+		return fmt.Errorf("cleanup %s: %s", name, strings.Join(failures, "; "))
 	}
 	a.printf("Done. %s removed.\n", name)
 	return nil
 }
 
-func (a *App) ensureNoUnmergedCommits(name, branch string) error {
-	commits := a.countUnmergedCommits(name)
-	if commits <= 0 {
+func (a *App) cleanupCandidate(path string) (branch, head string, err error) {
+	branch, err = a.gitOutput("-C", path, "symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		return "", "", fmt.Errorf("read cleanup candidate branch at %s: %w", path, err)
+	}
+	if branch == "" {
+		return "", "", fmt.Errorf("cleanup candidate branch unavailable at %s", path)
+	}
+	head, err = a.gitOutput("-C", path, "rev-parse", "HEAD")
+	if err != nil {
+		return "", "", fmt.Errorf("read cleanup candidate HEAD at %s: %w", path, err)
+	}
+	return branch, head, nil
+}
+
+func (a *App) cleanupCherryStatus(revision string) (unmerged, equivalent int, err error) {
+	out, err := a.gitOutput("cherry", a.integrationBranch(), revision)
+	if err != nil {
+		return 0, 0, fmt.Errorf("assess cleanup candidate %s: %w", revision, err)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "+") {
+			unmerged++
+		} else if strings.HasPrefix(line, "-") {
+			equivalent++
+		}
+	}
+	return unmerged, equivalent, nil
+}
+
+func (a *App) ensureNoUnmergedCommits(name, head string) error {
+	commits, _, err := a.cleanupCherryStatus(head)
+	if err != nil {
+		return err
+	}
+	if commits == 0 {
 		return nil
 	}
-	base := a.integrationBranch()
-	out, _ := a.gitOutput("log", fmt.Sprintf("%s..%s", base, branch), "--oneline")
-	a.warnf("WARNING: %s has %d unmerged commit(s):\n%s\n", name, commits, out)
 	return fmt.Errorf(
-		"use '%s cleanup %s --force' to discard, or '%s merge %s' to keep",
-		a.cmdName(), name, a.cmdName(), name,
+		"%s has %d unmerged commit(s); use '%s cleanup %s --force' to discard, or '%s merge %s' to keep",
+		name, commits, a.cmdName(), name, a.cmdName(), name,
 	)
 }
 
-func (a *App) cleanupWorktreeAndBranch(wtPath, branch string, allowForceDelete bool) []string {
-	warnings := []string{}
+func (a *App) cleanupWorktreeAndBranch(wtPath, branch string, allowForceDelete bool, expectedHead ...string) []string {
+	if allowForceDelete && (len(expectedHead) != 1 || expectedHead[0] == "") {
+		return []string{"cleanup candidate HEAD is missing"}
+	}
 	if wtPath != "" {
 		a.info("Removing worktree...")
-		if a.git("worktree", "remove", wtPath).Run() != nil {
-			if err := a.git("worktree", "remove", "--force", wtPath).Run(); err != nil {
-				warnings = append(warnings, fmt.Sprintf("failed to remove worktree %s: %v", wtPath, err))
-			}
+		if err := a.gitRunWithDetails("worktree", "remove", wtPath); err != nil {
+			return []string{fmt.Sprintf("failed to remove worktree %s: %v", wtPath, err)}
 		}
+	}
+	// Release stale registrations before deleting refs for a missing directory.
+	if err := a.gitRunWithDetails("worktree", "prune"); err != nil {
+		return []string{fmt.Sprintf("failed to prune worktrees: %v", err)}
 	}
 
 	a.info(fmt.Sprintf("Deleting branch %s...", branch))
-	if err := a.git("branch", "-d", branch).Run(); err != nil {
-		if allowForceDelete {
-			if err := a.git("branch", "-D", branch).Run(); err != nil {
-				warnings = append(warnings, fmt.Sprintf("failed to delete branch %s: %v", branch, err))
-			}
-		} else {
-			warnings = append(warnings, fmt.Sprintf("failed to delete branch %s: %v", branch, err))
+	if allowForceDelete {
+		registrations, err := a.cleanupWorktreeRegistrations()
+		if err != nil {
+			return []string{err.Error()}
 		}
+		for _, r := range registrations {
+			if r.branch == "refs/heads/"+branch {
+				return []string{fmt.Sprintf("cleanup branch still registered at %s", r.path)}
+			}
+		}
+		// Compare-and-delete: a concurrent writer may have advanced this ref
+		// after the clean/safety checks, even after worktree removal.
+		if err := a.gitRunWithDetails("update-ref", "--no-deref", "-d", "refs/heads/"+branch, expectedHead[0]); err != nil {
+			return []string{fmt.Sprintf("failed to delete branch %s: %v", branch, err)}
+		}
+	} else if err := a.gitRunWithDetails("branch", "-d", "--", branch); err != nil {
+		return []string{fmt.Sprintf("failed to delete branch %s: %v", branch, err)}
 	}
-
-	if err := a.git("worktree", "prune").Run(); err != nil {
-		warnings = append(warnings, fmt.Sprintf("failed to prune worktrees: %v", err))
-	}
-	return warnings
+	return nil
 }
 
 func (a *App) cleanRemote(branch string) {
@@ -170,18 +234,34 @@ func (a *App) Prune() error {
 
 	removed := 0
 	skipped := 0
-	warnings := []string{}
+	var failures []error
 	for _, e := range entries {
 		if !IsRealWorktree(e.Path) {
 			skipped++
-			warnings = append(warnings, fmt.Sprintf("worktree path missing for %s: %s", e.Name, e.Path))
+			failures = append(failures, fmt.Errorf("worktree path missing for %s: %s", e.Name, e.Path))
 			continue
 		}
 
-		commits, equivalent, statusErr := a.cherryStatus(e.Name)
+		retained, retentionErr := a.retainsTaskWorktree(e.Name)
+		if retentionErr != nil {
+			skipped++
+			failures = append(failures, fmt.Errorf("read retention for %s: %w", e.Name, retentionErr))
+			continue
+		}
+		if retained {
+			skipped++
+			continue
+		}
+		_, head, candidateErr := a.cleanupCandidate(e.Path)
+		if candidateErr != nil {
+			skipped++
+			failures = append(failures, candidateErr)
+			continue
+		}
+		commits, equivalent, statusErr := a.cleanupCherryStatus(head)
 		if statusErr != nil {
 			skipped++
-			warnings = append(warnings, fmt.Sprintf("failed to assess %s against %s: %v", e.Name, base, statusErr))
+			failures = append(failures, fmt.Errorf("failed to assess %s against %s: %w", e.Name, base, statusErr))
 			continue
 		}
 		if commits > 0 {
@@ -193,7 +273,7 @@ func (a *App) Prune() error {
 		clean, cleanErr := a.isWorktreeClean(e.Path)
 		if cleanErr != nil {
 			skipped++
-			warnings = append(warnings, fmt.Sprintf("failed to read worktree status %s: %v", e.Name, cleanErr))
+			failures = append(failures, fmt.Errorf("failed to read worktree status %s: %w", e.Name, cleanErr))
 			continue
 		}
 		if !clean {
@@ -207,20 +287,17 @@ func (a *App) Prune() error {
 		} else {
 			a.info(fmt.Sprintf("%s — no commits ahead of %s, pruning", e.Name, base))
 		}
-		if err := a.Cleanup(e.Name); err != nil {
+		if err := a.cleanupAtPath(e.Name, e.Path, CleanupOpts{}); err != nil {
 			skipped++
-			warnings = append(warnings, fmt.Sprintf("failed to prune %s: %v", e.Name, err))
+			failures = append(failures, fmt.Errorf("failed to prune %s: %w", e.Name, err))
 			continue
 		}
 		removed++
 	}
 
-	if err := a.git("worktree", "prune").Run(); err != nil {
-		warnings = append(warnings, fmt.Sprintf("failed to prune worktree metadata: %v", err))
-	}
-	for _, warning := range warnings {
-		a.warnf("WARNING: %s\n", warning)
+	if err := a.gitRunWithDetails("worktree", "prune"); err != nil {
+		failures = append(failures, fmt.Errorf("failed to prune worktree metadata: %w", err))
 	}
 	a.printf("\nPrune complete. removed=%d skipped=%d\n", removed, skipped)
-	return nil
+	return errors.Join(failures...)
 }
