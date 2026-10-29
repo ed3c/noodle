@@ -12,6 +12,7 @@ import (
 	"github.com/poteto/noodle/internal/dispatch"
 	"github.com/poteto/noodle/internal/mode"
 	"github.com/poteto/noodle/internal/reducer"
+	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/mise"
 )
 
@@ -67,7 +68,7 @@ func (l *Loop) handlePromotionResult(result mergeResult, brief mise.Brief, err e
 	l.logger.Info("orders-next promoted")
 	l.schedulePromoted = true
 	l.lastPromotionError = ""
-	if err := l.recordInitialAdmissions(result.InitialIDs); err != nil {
+	if err := l.recordInitialAdmissions(result.InitialIDs, result.Orders); err != nil {
 		return l.classifySystemHard("orders.initial_admission", "record initial admission", err)
 	}
 	if err := l.writeOrdersState(result.Orders); err != nil {
@@ -117,24 +118,40 @@ func (l *Loop) handlePromotionResult(result mergeResult, brief mise.Brief, err e
 	return nil
 }
 
-func (l *Loop) recordInitialAdmissions(ids []string) error {
+func (l *Loop) recordInitialAdmissions(ids []string, promoted OrdersFile) error {
 	if len(ids) == 0 {
 		return nil
 	}
 	if l.effectLedger == nil {
 		return fmt.Errorf("missing canonical effect ledger; owner: Noodle canonical checkpoint")
 	}
+	sources := make(map[string]Order, len(promoted.Orders))
+	for _, order := range promoted.Orders {
+		if _, exists := sources[order.ID]; exists {
+			return fmt.Errorf("initial admission source order is ambiguous: %s", order.ID)
+		}
+		sources[order.ID] = order
+	}
+	for _, id := range ids {
+		if _, exists := sources[id]; !exists {
+			return fmt.Errorf("initial admission source order missing: %s", id)
+		}
+	}
 	for _, id := range ids {
 		effectID := initialAdmissionEffectID(id)
 		binding := map[string]string{"order_id": id, "initial_revision": l.orderRevision}
 		if l.retainTaskData(id) {
 			binding["task_data_retention"] = taskDataRetention
-			order, ok := l.canonical.Orders[id]
-			if ok && len(order.Stages) == 1 {
-				stage := order.Stages[0]
+			// Promotion has not created the canonical order yet. Freeze policy
+			// from this exact validated incoming order, before the durable receipt.
+			order := sources[id]
+			if len(order.Stages) == 1 {
+				incoming := order.Stages[0]
+				stage := state.StageNode{StageIndex: 0, TaskKey: strings.TrimSpace(incoming.TaskKey), Skill: incoming.Skill, Provider: strings.TrimSpace(incoming.Provider), Runtime: incoming.Runtime, Prompt: strings.TrimSpace(incoming.Prompt)}
+				node := state.OrderNode{OrderID: id, Stages: []state.StageNode{stage}}
 				// Only the original local-task flow has an outer acceptance owner.
 				// Other admissions retain their existing policy until that flow exists.
-				if stage.Runtime == "openshell" && l.isAdmittedLocalTask(order, stage) {
+				if stage.Runtime == "openshell" && l.isAdmittedLocalTask(node, stage) {
 					binding["task_data_retention"] = reducer.TaskDataAfterClosure
 				}
 			}

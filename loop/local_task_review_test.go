@@ -73,7 +73,7 @@ func localTaskReviewFixtureRoute(t *testing.T, scope, name, runtimeName, provide
 	if err := l.parkPendingReview(cook, "supervised mode requires merge approval"); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.recordInitialAdmissions([]string{cook.orderID}); err != nil {
+	if err := l.recordInitialAdmissions([]string{cook.orderID}, OrdersFile{Orders: []Order{{ID: cook.orderID, Stages: []Stage{cook.stage}}}}); err != nil {
 		t.Fatal(err)
 	}
 	b, err := l.captureRequestChanges(l.cooks.pendingReview[cook.orderID])

@@ -150,7 +150,7 @@ func TestAdmissionRecoveryRefusalGates(t *testing.T) {
 			})
 		}},
 		{"admitted", func(t *testing.T, tc *testLoopContext) {
-			if err := tc.loop.recordInitialAdmissions([]string{"B"}); err != nil {
+			if err := tc.loop.recordInitialAdmissions([]string{"B"}, OrdersFile{Orders: []Order{{ID: "B"}}}); err != nil {
 				t.Fatal(err)
 			}
 			if err := tc.loop.persistCanonicalCheckpoint(); err != nil {

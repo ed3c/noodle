@@ -252,7 +252,7 @@ func TestInitialAdmissionRecoveryBeforeProposalRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Real durable checkpoint and projection write; interrupt before proposal deletion.
-	if err := l.recordInitialAdmissions(r.InitialIDs); err != nil {
+	if err := l.recordInitialAdmissions(r.InitialIDs, r.Orders); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.writeOrdersState(r.Orders); err != nil {

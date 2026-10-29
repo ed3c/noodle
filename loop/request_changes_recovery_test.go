@@ -92,7 +92,7 @@ func newRequestChangesRecoveryOutcome(t *testing.T, outcome event.StageOutcome) 
 	if err := l.parkPendingReview(cook, "typed blocked"); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.recordInitialAdmissions([]string{cook.orderID}); err != nil {
+	if err := l.recordInitialAdmissions([]string{cook.orderID}, OrdersFile{Orders: []Order{{ID: cook.orderID, Stages: []Stage{cook.stage}}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.controlRequestChanges(cook.orderID, "correction"); err != nil {
