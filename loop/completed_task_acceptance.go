@@ -60,7 +60,7 @@ func (l *Loop) validateCompletedAcceptance(order state.OrderNode, acceptance loo
 	return nil
 }
 
-func (l *Loop) acceptCompletedTask(request completedTaskAcceptanceRequest) error {
+func (l *Loop) acceptCompletedTask(ctx context.Context, request completedTaskAcceptanceRequest) error {
 	if err := l.checkQuiescent(); err != nil {
 		return err
 	}
@@ -78,7 +78,7 @@ func (l *Loop) acceptCompletedTask(request completedTaskAcceptanceRequest) error
 	if err := l.validateCompletedAcceptance(order, acceptance); err != nil {
 		return err
 	}
-	if err := l.observeCleanupSessions(); err != nil {
+	if err := l.observeCleanupSessions(ctx); err != nil {
 		return err
 	}
 	path := l.executionClosurePath(order.OrderID)

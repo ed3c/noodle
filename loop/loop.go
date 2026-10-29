@@ -409,14 +409,16 @@ func (l *Loop) Run(ctx context.Context) error {
 		case request := <-l.releaseRequests:
 			err := request.ctx.Err()
 			if err == nil {
+				// Once admitted, work belongs to this Run lifecycle. A caller's
+				// lost response cannot cancel cleanup or hand off its custody.
 				if request.failureClosure != nil {
-					err = l.closeFailedTask(*request.failureClosure)
+					err = l.closeFailedTask(ctx, *request.failureClosure)
 				} else if request.deliveryAcceptance != nil {
-					err = l.acceptCompletedTask(*request.deliveryAcceptance)
+					err = l.acceptCompletedTask(ctx, *request.deliveryAcceptance)
 				} else if request.automatic {
-					err = l.cleanupAutomatic()
+					err = l.cleanupAutomatic(ctx)
 				} else if request.cleanup {
-					err = l.cleanupCompleted(request.apply)
+					err = l.cleanupCompleted(ctx, request.apply)
 				} else {
 					err = l.releaseIfQuiescent()
 				}
@@ -442,7 +444,7 @@ func (l *Loop) Run(ctx context.Context) error {
 				return err
 			}
 			if l.cleanupUnknown == nil {
-				if err := l.cleanupAutomatic(); err == nil {
+				if err := l.cleanupAutomatic(ctx); err == nil {
 					l.terminalCause = TerminalAutoCompleted
 					return nil
 				} else if !errors.Is(err, ErrReleaseBusy) {

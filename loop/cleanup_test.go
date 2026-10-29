@@ -62,7 +62,7 @@ func TestCleanupRetainedCompletionAndRefusals(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			l := completedCleanupFixture(t)
 			tc.change(l)
-			err := l.cleanupCompleted(false)
+			err := l.cleanupCompleted(t.Context(), false)
 			if (err == nil) != tc.allowed {
 				t.Fatalf("cleanup allowed=%v err=%v", tc.allowed, err)
 			}
@@ -77,7 +77,7 @@ func TestCleanupRefusesConcurrentControlProducer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lock.Close()
-	if err = l.cleanupCompleted(false); !errors.Is(err, ErrReleaseBusy) {
+	if err = l.cleanupCompleted(t.Context(), false); !errors.Is(err, ErrReleaseBusy) {
 		t.Fatalf("control producer ignored: %v", err)
 	}
 }
@@ -109,17 +109,17 @@ func TestCleanupRequestInspectDoesNotEndActor(t *testing.T) {
 
 func TestCleanupAutomaticPolicyRetainsManualHoldAndPending(t *testing.T) {
 	l := completedCleanupFixture(t)
-	if err := l.cleanupAutomatic(); !errors.Is(err, ErrReleaseBusy) {
+	if err := l.cleanupAutomatic(t.Context()); !errors.Is(err, ErrReleaseBusy) {
 		t.Fatalf("legacy auto cleanup: %v", err)
 	}
 	l.deps.CleanupCompleted = true
-	if err := l.cleanupAutomatic(); !errors.Is(err, ErrReleaseBusy) {
+	if err := l.cleanupAutomatic(t.Context()); !errors.Is(err, ErrReleaseBusy) {
 		t.Fatalf("manual hold lost: %v", err)
 	}
 	l.canonical.Mode = state.RunModeSupervised
 	for _, held := range []State{StatePaused, StateDraining} {
 		l.state = held
-		if err := l.cleanupAutomatic(); !errors.Is(err, ErrReleaseBusy) {
+		if err := l.cleanupAutomatic(t.Context()); !errors.Is(err, ErrReleaseBusy) {
 			t.Fatalf("dispatch hold %s lost: %v", held, err)
 		}
 	}
@@ -128,7 +128,7 @@ func TestCleanupAutomaticPolicyRetainsManualHoldAndPending(t *testing.T) {
 	o.Status = state.OrderPending
 	o.Stages[0].Status = state.StagePending
 	l.canonical.Orders["done"] = o
-	if err := l.cleanupAutomatic(); !errors.Is(err, ErrReleaseBusy) {
+	if err := l.cleanupAutomatic(t.Context()); !errors.Is(err, ErrReleaseBusy) {
 		t.Fatalf("pending task lost: %v", err)
 	}
 }
@@ -140,20 +140,20 @@ func TestCleanupUnknownRequiresSuccessfulReadbackBeforeApply(t *testing.T) {
 	if err := os.Remove(filepath.Join(l.runtimeDir, "sessions")); err != nil {
 		t.Fatal(err)
 	}
-	unknown := l.cleanupAutomatic()
+	unknown := l.cleanupAutomatic(t.Context())
 	if unknown == nil || errors.Is(unknown, ErrReleaseBusy) {
 		t.Fatalf("missing readback treated as busy: %v", unknown)
 	}
 	if err := os.Mkdir(filepath.Join(l.runtimeDir, "sessions"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.cleanupAutomatic(); err != unknown {
+	if err := l.cleanupAutomatic(t.Context()); err != unknown {
 		t.Fatalf("unknown automatically retried: %v", err)
 	}
-	if err := l.cleanupCompleted(false); err != nil {
+	if err := l.cleanupCompleted(t.Context(), false); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.cleanupAutomatic(); err != nil {
+	if err := l.cleanupAutomatic(t.Context()); err != nil {
 		t.Fatalf("readback did not permit completion: %v", err)
 	}
 }
@@ -161,7 +161,7 @@ func TestCleanupUnknownRequiresSuccessfulReadbackBeforeApply(t *testing.T) {
 func TestCleanupLocalTaskKeepsUnacceptedCompletionForRecovery(t *testing.T) {
 	l, cook, _ := localTaskCompletedFixture(t)
 	before := recoverySessionBytes(t, l, cook.session.ID())
-	if err := l.checkCompletedTasks(); !errors.Is(err, ErrReleaseBusy) {
+	if err := l.checkCompletedTasks(t.Context()); !errors.Is(err, ErrReleaseBusy) {
 		t.Fatalf("unaccepted dirty completion released: %v", err)
 	}
 	if !recoveryJSONEqual(before, recoverySessionBytes(t, l, cook.session.ID())) {
@@ -183,7 +183,7 @@ func TestCleanupLocalTaskRecognizesOriginalAcceptedMerge(t *testing.T) {
 	if err := l.checkCompletedLocalTask(order, order.Stages[0]); err != nil {
 		t.Fatalf("accepted native merge rejected: %v", err)
 	}
-	if err := l.checkCompletedTasks(); err != nil {
+	if err := l.checkCompletedTasks(t.Context()); err != nil {
 		t.Fatalf("accepted native merge left unresolved cleanup custody: %v", err)
 	}
 	order.Stages[0].Extra[localTaskMergeKey] = []byte(`{"head":"invalid"}`)
@@ -240,7 +240,7 @@ func TestCleanupAutomaticRunEventReleasesCompletedAfterManualHold(t *testing.T) 
 		}
 	case <-ctx.Done():
 		<-result
-		t.Fatalf("completed context did not release through the existing control event: %v; canonical=%+v", l.cleanupAutomatic(), l.canonical)
+		t.Fatalf("completed context did not release through the existing control event: %v; canonical=%+v", l.cleanupAutomatic(t.Context()), l.canonical)
 	}
 	if len(rt.calls) != 0 {
 		t.Fatal("cleanup dispatched new work")

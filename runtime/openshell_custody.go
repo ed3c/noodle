@@ -457,6 +457,10 @@ func (c *OpenShellCustody) closeLocal() error {
 // audit requests ALL workspaces and every page. A List/Get followed by a
 // mutation is observational only: invisible changes between reads are possible.
 func (c *OpenShellCustody) audit(ctx context.Context) error {
+	return c.auditWithClient(ctx, c.client)
+}
+
+func (c *OpenShellCustody) auditWithClient(ctx context.Context, client pb.OpenShellClient) error {
 	if err := c.available(); err != nil {
 		return err
 	}
@@ -469,7 +473,7 @@ func (c *OpenShellCustody) audit(ctx context.Context) error {
 	tokens := map[string]bool{}
 	token := ""
 	for {
-		response, err := c.client.ListSandboxes(ctx, &pb.ListSandboxesRequest{WorkspaceScope: &dm.WorkspaceSelector{Selection: &dm.WorkspaceSelector_AllWorkspaces{AllWorkspaces: &dm.AllWorkspaces{}}}, PageSize: 100, PageToken: token})
+		response, err := client.ListSandboxes(ctx, &pb.ListSandboxesRequest{WorkspaceScope: &dm.WorkspaceSelector{Selection: &dm.WorkspaceSelector_AllWorkspaces{AllWorkspaces: &dm.AllWorkspaces{}}}, PageSize: 100, PageToken: token})
 		if err != nil {
 			return c.readFailure("inventory unavailable", err)
 		}
@@ -542,10 +546,14 @@ func (c *OpenShellCustody) matches(r *OpenShellCustodyRecord, s *pb.Sandbox) err
 	return nil
 }
 func (c *OpenShellCustody) read(ctx context.Context, r *OpenShellCustodyRecord) (*pb.Sandbox, error) {
+	return c.readWithClient(ctx, r, c.client)
+}
+
+func (c *OpenShellCustody) readWithClient(ctx context.Context, r *OpenShellCustodyRecord, client pb.OpenShellClient) (*pb.Sandbox, error) {
 	if r.Retirement != nil {
 		return nil, fmt.Errorf("sandbox retirement has started; fresh worker readback unavailable")
 	}
-	response, err := c.client.GetSandbox(ctx, &pb.GetSandboxRequest{Name: r.Name, WorkspaceScope: c.scope()})
+	response, err := client.GetSandbox(ctx, &pb.GetSandboxRequest{Name: r.Name, WorkspaceScope: c.scope()})
 	if err != nil {
 		return nil, c.readFailure(fmt.Sprintf("read sandbox %s", r.Name), err)
 	}

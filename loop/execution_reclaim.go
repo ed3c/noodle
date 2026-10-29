@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/poteto/noodle/internal/filex"
 	"github.com/poteto/noodle/internal/reducer"
@@ -96,20 +95,31 @@ func (l *Loop) failedExecutionClosure(order state.OrderNode) (loopruntime.Sessio
 
 // Invoked only after completion/closure, session readback and quiescence checks.
 // Never changes the task's result, retries a worker or touches retained history.
-func (l *Loop) reclaimExecutionCopies() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+func (l *Loop) reclaimExecutionCopies(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	for id, order := range l.canonical.Orders {
 		if !reducer.ReclaimableTaskData(l.effectLedger.All(), id) {
 			continue
 		}
-		authority, err := l.retainExecutionClosure(order)
+		var authority loopruntime.SessionReadbackFileRef
+		err := l.cleanupPhase(ctx, "closure_readback", id, "", func() error {
+			var readErr error
+			authority, readErr = l.retainExecutionClosure(order)
+			return readErr
+		})
 		if err != nil {
 			return err
 		}
 		receiptPath := filepath.Join(l.runtimeDir, "execution-closures", recoveryDigest([]byte(id))+".reclaimed.json")
 		if _, err := os.Lstat(receiptPath); err == nil {
-			existing, _, err := loopruntime.ReadExecutionReclamationReceipt(receiptPath, id, authority)
+			var existing loopruntime.ExecutionReclamationReceipt
+			err := l.cleanupPhase(ctx, "reclamation_readback", id, "", func() error {
+				var readErr error
+				existing, _, readErr = loopruntime.ReadExecutionReclamationReceipt(receiptPath, id, authority)
+				return readErr
+			})
 			if err != nil {
 				return err
 			}
@@ -118,7 +128,7 @@ func (l *Loop) reclaimExecutionCopies() error {
 				return fmt.Errorf("original worktree absence readback capability unavailable")
 			}
 			for name, head := range existing.Worktrees {
-				if err := observer.ObserveSettledExecutionAbsent(name, head); err != nil {
+				if err := l.cleanupPhase(ctx, "worktree_absence", id, "", func() error { return observer.ObserveSettledExecutionAbsent(name, head) }); err != nil {
 					return err
 				}
 			}
@@ -130,6 +140,9 @@ func (l *Loop) reclaimExecutionCopies() error {
 		heads := map[string]string{}
 		for index, stage := range order.Stages {
 			for retry, attempt := range stage.Attempts {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				if stage.Runtime != "openshell" {
 					return fmt.Errorf("execution reclamation unavailable for runtime %q", stage.Runtime)
 				}
@@ -156,12 +169,21 @@ func (l *Loop) reclaimExecutionCopies() error {
 					return fmt.Errorf("execution worktree identity missing")
 				}
 				binding := loopruntime.CompletedSessionBinding{OrderID: id, SessionID: attempt.SessionID, WorktreePath: filepath.Join(project, ".worktrees", attempt.WorktreeName), Provider: stage.Provider, Model: stage.Model, StageIndex: index, RetryCount: retry}
-				observed, err := reclaimer.ReclaimCleanupSession(ctx, binding, project, outcome, "original task owner closed execution; retained authority binds outcome", authority)
+				var observed loopruntime.CleanupSessionReadback
+				err = l.cleanupPhase(ctx, "runtime_reclamation", id, attempt.SessionID, func() error {
+					var reclaimErr error
+					observed, reclaimErr = reclaimer.ReclaimCleanupSession(ctx, binding, project, outcome, "original task owner closed execution; retained authority binds outcome", authority)
+					return reclaimErr
+				})
 				if err != nil {
 					return fmt.Errorf("reclaim session %s: %w", attempt.SessionID, err)
 				}
 				custodyPath := filepath.Join(l.runtimeDir, "execution-closures", recoveryDigest([]byte(id)), recoveryDigest([]byte(attempt.SessionID))+"-custody.json")
-				observed, err = loopruntime.RetainReclamationCustody(observed, custodyPath)
+				err = l.cleanupPhase(ctx, "retain_custody", id, attempt.SessionID, func() error {
+					var retainErr error
+					observed, retainErr = loopruntime.RetainReclamationCustody(observed, custodyPath)
+					return retainErr
+				})
 				if err != nil {
 					return err
 				}
@@ -174,7 +196,7 @@ func (l *Loop) reclaimExecutionCopies() error {
 			if !ok {
 				return fmt.Errorf("original worktree reclamation capability unavailable")
 			}
-			if err := remover.RemoveSettledExecutionCopy(name, head); err != nil {
+			if err := l.cleanupPhase(ctx, "worktree_reclamation", id, "", func() error { return remover.RemoveSettledExecutionCopy(name, head) }); err != nil {
 				return err
 			}
 			receipt.Worktrees[name] = head
@@ -183,7 +205,7 @@ func (l *Loop) reclaimExecutionCopies() error {
 		if err != nil {
 			return err
 		}
-		if err := filex.WriteFileAtomicDurable(receiptPath, raw); err != nil {
+		if err := l.cleanupPhase(ctx, "persist_reclamation", id, "", func() error { return filex.WriteFileAtomicDurable(receiptPath, raw) }); err != nil {
 			return err
 		}
 	}

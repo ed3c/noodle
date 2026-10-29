@@ -6,13 +6,16 @@ import (
 )
 
 // The original context lease owns retirement, just as it owns completion reads.
-func (o *OpenShellGateway) Retire(ctx context.Context, contextID string, id OpenShellIdentity, closure SessionReadbackFileRef) error {
+func (o *OpenShellGateway) Retire(ctx context.Context, contextID string, id OpenShellIdentity, closure SessionReadbackFileRef) (err error) {
 	if !o.mu.TryLock() {
 		return fmt.Errorf("openshell gateway operation in progress")
 	}
 	defer o.mu.Unlock()
 	custody, generation, err := o.completionOwner(contextID)
 	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := custody.Retire(ctx, id, closure); err != nil {
@@ -28,13 +31,16 @@ func (o *OpenShellGateway) Retire(ctx context.Context, contextID string, id Open
 	return nil
 }
 
-func (o *OpenShellGateway) ObserveCleanup(ctx context.Context, contextID string, id OpenShellIdentity, progress bool) (OpenShellCompletedObservation, error) {
+func (o *OpenShellGateway) ObserveCleanup(ctx context.Context, contextID string, id OpenShellIdentity, progress bool) (observed OpenShellCompletedObservation, err error) {
 	if !o.mu.TryLock() {
 		return OpenShellCompletedObservation{}, fmt.Errorf("openshell gateway operation in progress")
 	}
 	defer o.mu.Unlock()
 	custody, _, err := o.completionOwner(contextID)
 	if err != nil {
+		return OpenShellCompletedObservation{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return OpenShellCompletedObservation{}, err
 	}
 	for _, record := range custody.Snapshot().Records {

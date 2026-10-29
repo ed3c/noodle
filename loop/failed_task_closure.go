@@ -38,7 +38,7 @@ func (l *Loop) CloseFailedTask(ctx context.Context, orderID, sessionID, reason s
 	}
 }
 
-func (l *Loop) closeFailedTask(request failedTaskClosureRequest) error {
+func (l *Loop) closeFailedTask(ctx context.Context, request failedTaskClosureRequest) error {
 	if strings.TrimSpace(request.Reason) == "" || len(request.Reason) > 4096 || !cleanupSessionName(request.SessionID) {
 		return fmt.Errorf("failed task closure reason or session missing")
 	}
@@ -69,7 +69,7 @@ func (l *Loop) closeFailedTask(request failedTaskClosureRequest) error {
 	}
 	// Fresh original transport/publication/stop evidence is mandatory. A failed
 	// status, timeout or incomplete download is insufficient diagnostic custody.
-	if err := l.observeCleanupSessions(); err != nil {
+	if err := l.observeCleanupSessions(ctx); err != nil {
 		return err
 	}
 	order.Status = state.OrderFailed

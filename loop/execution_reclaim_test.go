@@ -32,7 +32,7 @@ func TestExecutionReclamationFollowsOriginalClosureAndRuntimeEvidence(t *testing
 	for _, variant := range []string{"closed", "runtime-error", "worktree-error"} {
 		t.Run(variant, func(t *testing.T) {
 			l, cook, request := failedClosureFixture(t)
-			if err := l.closeFailedTask(request); err != nil {
+			if err := l.closeFailedTask(t.Context(), request); err != nil {
 				t.Fatal(err)
 			}
 			sequence := []string{}
@@ -65,7 +65,7 @@ func TestExecutionReclamationFollowsOriginalClosureAndRuntimeEvidence(t *testing
 				}
 				return nil
 			}}
-			err := l.cleanupCompleted(true)
+			err := l.cleanupCompleted(t.Context(), true)
 			if (err == nil) != (variant == "closed") {
 				t.Fatalf("unexpected reclamation result: %v", err)
 			}

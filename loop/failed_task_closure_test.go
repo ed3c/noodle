@@ -32,10 +32,10 @@ func failedClosureFixture(t *testing.T) (*Loop, *cookHandle, failedTaskClosureRe
 
 func TestOriginalFailureClosureDoesNotPromoteFailureToSuccess(t *testing.T) {
 	l, cook, request := failedClosureFixture(t)
-	if err := l.checkCompletedTasks(); err == nil {
+	if err := l.checkCompletedTasks(t.Context()); err == nil {
 		t.Fatal("unclosed failure was eligible")
 	}
-	if err := l.closeFailedTask(request); err != nil {
+	if err := l.closeFailedTask(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
 	order := l.canonical.Orders[cook.orderID]
@@ -48,7 +48,7 @@ func TestOriginalFailureClosureDoesNotPromoteFailureToSuccess(t *testing.T) {
 	if _, err := l.failedExecutionClosure(order); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.checkCompletedTasks(); err != nil {
+	if err := l.checkCompletedTasks(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.dispatchControlCommand(ControlCommand{Action: "requeue", OrderID: cook.orderID}); err == nil {
@@ -78,7 +78,7 @@ func TestFailureClosureRefusesUnknownOrChangedEvidence(t *testing.T) {
 			case "retained-policy":
 				l.effectLedger = nil
 			}
-			if err := l.closeFailedTask(request); err == nil {
+			if err := l.closeFailedTask(t.Context(), request); err == nil {
 				t.Fatal("closure without original settled evidence accepted")
 			}
 			if _, err := os.Lstat(l.executionClosurePath(cook.orderID)); !os.IsNotExist(err) {
@@ -90,7 +90,7 @@ func TestFailureClosureRefusesUnknownOrChangedEvidence(t *testing.T) {
 
 func TestFailureClosureDetectsLaterMutation(t *testing.T) {
 	l, cook, request := failedClosureFixture(t)
-	if err := l.closeFailedTask(request); err != nil {
+	if err := l.closeFailedTask(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
 	order := l.canonical.Orders[cook.orderID]

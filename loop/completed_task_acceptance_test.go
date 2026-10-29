@@ -52,28 +52,28 @@ func completedAcceptanceFixture(t *testing.T) (*Loop, completedTaskAcceptanceReq
 
 func TestCompletedMergeWaitsForOriginalOuterAcceptance(t *testing.T) {
 	l, request := completedAcceptanceFixture(t)
-	if err := l.checkCompletedTasks(); !errors.Is(err, ErrReleaseBusy) {
+	if err := l.checkCompletedTasks(t.Context()); !errors.Is(err, ErrReleaseBusy) {
 		t.Fatalf("merge alone released: %v", err)
 	}
 	if _, err := os.Stat(l.executionClosurePath(request.OrderID)); !os.IsNotExist(err) {
 		t.Fatal("inspection manufactured acceptance")
 	}
-	if err := l.acceptCompletedTask(request); err != nil {
+	if err := l.acceptCompletedTask(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.checkCompletedTasks(); err != nil {
+	if err := l.checkCompletedTasks(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.dispatchControlCommand(ControlCommand{Action: "requeue", OrderID: request.OrderID}); err == nil {
 		t.Fatal("accepted closed task requeued")
 	}
-	if err := l.acceptCompletedTask(request); err == nil {
+	if err := l.acceptCompletedTask(t.Context(), request); err == nil {
 		t.Fatal("duplicate acceptance replayed")
 	}
 	if err := os.WriteFile(request.Acceptance.Path, []byte(`{}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.checkCompletedTasks(); err == nil {
+	if err := l.checkCompletedTasks(t.Context()); err == nil {
 		t.Fatal("changed acceptance remained eligible")
 	}
 }
@@ -110,7 +110,7 @@ func TestOuterAcceptanceRejectsUnresolvedOrForeignEvidence(t *testing.T) {
 				t.Fatal(err)
 			}
 			request.Acceptance = ref
-			if err := l.acceptCompletedTask(request); err == nil {
+			if err := l.acceptCompletedTask(t.Context(), request); err == nil {
 				t.Fatal("invalid outer acceptance accepted")
 			}
 			if _, err := os.Stat(l.executionClosurePath(request.OrderID)); !os.IsNotExist(err) {

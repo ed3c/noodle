@@ -110,7 +110,7 @@ func TestCleanupObservesEveryOriginalOpenShellAttempt(t *testing.T) {
 				order.Stages[0].Attempts[0].Status = state.AttemptRunning
 			}
 			l.canonical.Orders["done"] = order
-			err := l.cleanupCompleted(false)
+			err := l.cleanupCompleted(t.Context(), false)
 			if variant != "all-settled" {
 				if err == nil {
 					t.Fatal("unsafe cleanup accepted")

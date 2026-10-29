@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,15 +13,15 @@ import (
 	"github.com/poteto/noodle/internal/state"
 )
 
-func (l *Loop) cleanupAutomatic() error {
+func (l *Loop) cleanupAutomatic(ctx context.Context) error {
 	if !l.deps.CleanupCompleted || l.effectiveMode() == state.RunModeManual || l.state == StatePaused || l.state == StateDraining {
 		return fmt.Errorf("%w: automatic cleanup disabled or dispatch hold retained", ErrReleaseBusy)
 	}
-	return l.cleanupCompleted(true)
+	return l.cleanupCompleted(ctx, true)
 }
 
 // Called only by Run: new Cycle work cannot race the completion decision.
-func (l *Loop) cleanupCompleted(apply bool) (err error) {
+func (l *Loop) cleanupCompleted(ctx context.Context, apply bool) (err error) {
 	if apply && l.cleanupUnknown != nil {
 		return l.cleanupUnknown
 	}
@@ -38,23 +39,26 @@ func (l *Loop) cleanupCompleted(apply bool) (err error) {
 		return fmt.Errorf("control custody is unresolved: %w", err)
 	}
 	defer lock.Close()
-	if err := l.checkQuiescent(); err != nil {
+	if err := l.cleanupPhase(ctx, "quiescence", "", "", l.checkQuiescent); err != nil {
 		return err
 	}
-	if err := l.checkCompletedTasks(); err != nil {
+	if err := l.cleanupPhase(ctx, "completion_readback", "", "", func() error { return l.checkCompletedTasks(ctx) }); err != nil {
 		return err
 	}
 	if !apply {
 		l.cleanupUnknown = nil
 		return nil
 	}
-	if err := l.reclaimExecutionCopies(); err != nil {
+	if err := l.reclaimExecutionCopies(ctx); err != nil {
 		return err
 	}
-	return l.finishRelease()
+	return l.cleanupPhase(ctx, "release", "", "", l.finishRelease)
 }
 
-func (l *Loop) checkCompletedTasks() error {
+func (l *Loop) checkCompletedTasks(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if !l.canonicalLoaded || l.effectLedger == nil {
 		return fmt.Errorf("native completion evidence is unavailable")
 	}
@@ -66,6 +70,9 @@ func (l *Loop) checkCompletedTasks() error {
 	}
 	completed := 0
 	for id, order := range l.canonical.Orders {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if id == scheduleOrderID {
 			for _, stage := range order.Stages {
 				if stage.Status != state.StagePending || len(stage.Attempts) != 0 {
@@ -109,10 +116,33 @@ func (l *Loop) checkCompletedTasks() error {
 	if err := validateAdmissionSnapshot(snapshot); err != nil {
 		return fmt.Errorf("completion evidence is unresolved: %w", err)
 	}
-	if err := l.observeCleanupSessions(); err != nil {
+	if err := l.observeCleanupSessions(ctx); err != nil {
 		return fmt.Errorf("original session readback is unresolved: %w", err)
 	}
 	return nil
+}
+
+// Local work keeps the Run actor's cancellation and custody. A caller losing
+// its response does not cancel this phase or hand the owner to another actor.
+func (l *Loop) cleanupPhase(ctx context.Context, phase, order, session string, run func() error) (err error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	started := time.Now()
+	if l.logger != nil {
+		l.logger.Info("cleanup phase started", "phase", phase, "order", order, "session", session)
+		defer func() {
+			if err != nil {
+				l.logger.Error("cleanup phase failed", "phase", phase, "order", order, "session", session, "elapsed", time.Since(started), "error", err)
+			} else {
+				l.logger.Info("cleanup phase completed", "phase", phase, "order", order, "session", session, "elapsed", time.Since(started))
+			}
+		}()
+	}
+	if err = run(); err == nil {
+		err = ctx.Err()
+	}
+	return err
 }
 
 func (l *Loop) checkCompletedLocalTask(order state.OrderNode, stage state.StageNode) error {

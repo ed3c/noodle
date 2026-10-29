@@ -70,7 +70,20 @@ func readOpenShellClosure(ref SessionReadbackFileRef, id OpenShellIdentity) (Ope
 // Retire deletes through the original native driver, never local VM paths. The
 // public API is name-based; dedicated-owner custody cannot lock external clients.
 func (c *OpenShellCustody) Retire(ctx context.Context, id OpenShellIdentity, closureRef SessionReadbackFileRef) error {
-	closure, err := readOpenShellClosure(closureRef, id)
+	return c.retire(ctx, id, closureRef, func(_ context.Context, ref SessionReadbackFileRef, identity OpenShellIdentity) (OpenShellClosure, error) {
+		return readOpenShellClosure(ref, identity)
+	}, func(context.Context) error { return c.save() })
+}
+
+// Local verification and persistence stay on the actor context. Keep these
+// operations explicit so their durable boundary can be exercised independently
+// of native transport, without replacing the original custody or client.
+func (c *OpenShellCustody) retire(ctx context.Context, id OpenShellIdentity, closureRef SessionReadbackFileRef,
+	verify func(context.Context, SessionReadbackFileRef, OpenShellIdentity) (OpenShellClosure, error), persist func(context.Context) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	closure, err := verify(ctx, closureRef, id)
 	if err != nil {
 		return err
 	}
@@ -103,13 +116,14 @@ func (c *OpenShellCustody) Retire(ctx context.Context, id OpenShellIdentity, clo
 	if r.Worker.Identity != id {
 		return fmt.Errorf("retirement task identity differs")
 	}
-	if err := c.audit(ctx); err != nil {
+	client := retirementRPCClient{OpenShellClient: c.client, identity: id}
+	if err := c.auditWithClient(ctx, client); err != nil {
 		return err
 	}
-	if _, err := c.read(ctx, r); err != nil {
+	if _, err := c.readWithClient(ctx, r, client); err != nil {
 		return err
 	}
-	if _, err := readOpenShellClosure(closureRef, id); err != nil {
+	if _, err := verify(ctx, closureRef, id); err != nil {
 		return err
 	}
 	if closure.ExecutionBasis == openShellNotStarted {
@@ -120,15 +134,21 @@ func (c *OpenShellCustody) Retire(ctx context.Context, id OpenShellIdentity, clo
 			return fmt.Errorf("not-started worker changed before retirement intent")
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	requestID, err := openShellUUID()
 	if err != nil {
 		return err
 	}
 	r.Retirement = &OpenShellRetirement{Closure: closureRef, Observation: observed, RequestID: requestID}
-	if err := c.save(); err != nil {
+	if err := persist(ctx); err != nil {
 		return err
 	}
-	response, err := c.client.DeleteSandbox(ctx, &pb.DeleteSandboxRequest{Name: r.Name, WorkspaceScope: c.scope(), RequestId: requestID})
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("native retirement intent persisted without acknowledgement; replay prohibited: %w", err)
+	}
+	response, err := client.DeleteSandbox(ctx, &pb.DeleteSandboxRequest{Name: r.Name, WorkspaceScope: c.scope(), RequestId: requestID})
 	if err != nil {
 		return fmt.Errorf("native retirement acknowledgement unresolved; replay prohibited: %w", err)
 	}
@@ -137,7 +157,7 @@ func (c *OpenShellCustody) Retire(ctx context.Context, id OpenShellIdentity, clo
 		return c.block("native retirement acknowledgement identity or outcome differs")
 	}
 	r.Retirement.Acknowledged = true
-	if err := c.save(); err != nil {
+	if err := persist(ctx); err != nil {
 		r.Retirement.Acknowledged = false
 		return err
 	}
@@ -147,6 +167,9 @@ func (c *OpenShellCustody) Retire(ctx context.Context, id OpenShellIdentity, clo
 // Called under custody mutex. Only an acknowledged original deletion plus fresh
 // native absence proves retirement. ACCEPTED alone does not release disk custody.
 func (c *OpenShellCustody) observeRetirement(ctx context.Context, r *OpenShellCustodyRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := validateRetirement(*r); err != nil {
 		return err
 	}
@@ -160,7 +183,8 @@ func (c *OpenShellCustody) observeRetirement(ctx context.Context, r *OpenShellCu
 	if !v.Acknowledged {
 		return fmt.Errorf("native retirement acknowledgement unresolved; replay prohibited")
 	}
-	response, err := c.client.GetSandbox(ctx, &pb.GetSandboxRequest{Name: r.Name, WorkspaceScope: c.scope()})
+	client := retirementRPCClient{OpenShellClient: c.client, identity: r.Worker.Identity}
+	response, err := client.GetSandbox(ctx, &pb.GetSandboxRequest{Name: r.Name, WorkspaceScope: c.scope()})
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
