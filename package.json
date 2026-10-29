@@ -18,6 +18,8 @@
     "vet": "go vet ./...",
     "lint:arch": "sh scripts/lint-arch.sh",
     "check": "pnpm run build && pnpm run test && pnpm run vet && pnpm run lint:arch && pnpm run fixtures:loop && pnpm run fixtures:hash",
+    "check:drawing-quality": "node --test examples/harness2/drawing-facts.test.mjs examples/harness2/drawing-visual.test.mjs examples/harness2/drawing-quality.test.mjs",
+    "quality:drawing": "node examples/harness2/drawing-quality.mjs",
     "count:loc": "go run ./scripts/repo-size-charts.go",
     "reset": "go run . reset",
     "start": "go run . start",

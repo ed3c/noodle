@@ -34,6 +34,7 @@
 - [[codebase/failed-target-auto-repair-for-requeued-orders]]
 - [[codebase/fixture-directories]]
 - [[codebase/harness2-original-owner-bridge]]
+- [[codebase/harness2-drawing-quality]]
 - [[codebase/loop-test-overlap-matrix]]
 - [[codebase/local-task-review-custody]]
 - [[codebase/merge-recovery-synthetic-cooks-must-preserve-task-key]]

@@ -5,6 +5,10 @@ owner-delegation seams. `soodles_bridge.py` supplies an explicit Soodles CLI dri
 original-request and completion verification. Offline controls do not run models, start
 services/VMs, certify improvement, or authorize adopting an optimized candidate.
 
+The new fixed drawing quality checker and clarified experiment boundary are in
+[DRAWING_QUALITY.md](DRAWING_QUALITY.md). Disclosed failures are regressions, not
+new heldout evidence; the original frozen experiment remains unchanged.
+
 The first increment supports the existing `AGENTS.md` and `skills/<name>/SKILL.md` paths in
 a frozen baseline. New/deleted files, scripts, plugins, hooks, subagents and execution/model
 configuration are refused. Harness configuration edits need a later explicit owner mapping;
