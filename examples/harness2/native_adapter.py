@@ -45,7 +45,7 @@ class InstructionSurface:
 
 class NoodleAdapter:
     def __init__(self, *, route: Route, gate: SharedGate, tasks: dict[str, Task],
-                 base: Path, runs_root: Path, always_on_max: int):
+                 base: Path, runs_root: Path, always_on_max: int, training_feedback=None):
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", route.group) or not tasks:
             raise Refused("experiment group or task set is invalid")
         if any(not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", key) for key in tasks):
@@ -75,6 +75,11 @@ class NoodleAdapter:
         self._read_harness(self._base)
         self._source_refs = {key: tree_ref(value.source) for key, value in self._tasks.items()}
         self._results = {}
+        self._calls = {}
+        self._training_feedback = training_feedback
+        self._feedback_blocked = False
+        if training_feedback is not None:
+            training_feedback.bind_tasks(self._source_refs, self._baseline_ref, output)
 
     def tasks(self, split="all"):
         if split != "all":
@@ -117,15 +122,24 @@ class NoodleAdapter:
         return reference
 
     def execute(self, task_id, harness_dir, run_id, *, timeout=None):
+        self.check_feedback_ready()
         harness = Path(harness_dir) if harness_dir is not None else self.base_harness()
         inputs = {"task_id": task_id, "prompt": self.task_prompt(task_id),
                   "source": tree_ref(self.task_files(task_id)), "harness": self._read_harness(harness),
                   "effort": self.route.effort, "timeout_s": timeout if timeout is not None else self.route.timeout_s}
-        result = self.gate.execute(OwnerCall(self.route.group, run_id, "solver",
-                                  self.route.provider, self.route.model, inputs,
-                                  self.route.paid_reservation_usd))
+        call = OwnerCall(self.route.group, run_id, "solver",
+                         self.route.provider, self.route.model, inputs,
+                         self.route.paid_reservation_usd)
+        result = self.gate.execute(call)
         self._results[str(Path(result.run_dir))] = result
+        self._calls[str(Path(result.run_dir))] = call
         return Path(result.run_dir)
+
+    def check_feedback_ready(self):
+        if self._feedback_blocked:
+            raise Refused("training quality feedback is unresolved; owner dispatch is blocked")
+        if self._training_feedback is not None:
+            self._training_feedback.check_ready()
 
     def _result(self, run_dir):
         result = self._results.get(str(Path(run_dir)))
@@ -142,7 +156,7 @@ class NoodleAdapter:
             return False
 
     def trajectory(self, run_dir, *, obs_trunc):
-        self._result(run_dir)
+        result = self._result(run_dir)
         # The original bridge projects one classified public event per JSON line.
         # Bound individual text observations while retaining every event and field.
         def clip(value):
@@ -154,8 +168,20 @@ class NoodleAdapter:
                 return {key: clip(item) for key, item in value.items()}
             return value
 
-        events = (Path(run_dir) / "trajectory.md").read_text().splitlines()
-        return "\n".join(json.dumps(clip(json.loads(event)), ensure_ascii=False) for event in events)
+        events = [clip(json.loads(event)) for event in
+                  (Path(run_dir) / "trajectory.md").read_text().splitlines()]
+        if self._training_feedback is not None:
+            try:
+                event = self._training_feedback(result, self._calls[str(Path(run_dir))],
+                                                self.deliverable_files(run_dir), self.gate)
+            except Exception:
+                # Upstream catches trajectory errors and may fall back. Close dispatch
+                # here as well, without changing its core or original owner evidence.
+                self._feedback_blocked = True
+                raise
+            if event is not None:
+                events.append(event)
+        return "\n".join(json.dumps(event, ensure_ascii=False) for event in events)
 
     def deliverable_files(self, run_dir):
         self._result(run_dir)
@@ -191,6 +217,7 @@ class OwnerProposer(Proposer):
         route = self.adapter.route
         run_id = self.experiment_id + "/" + label
         try:
+            self.adapter.check_feedback_ready()
             result = self.adapter.gate.execute(OwnerCall(route.group, run_id, role,
                                               route.provider, route.model, inputs,
                                               route.paid_reservation_usd))
@@ -216,10 +243,12 @@ def run_native_task(adapter, task_id, *, experiment_id):
     """Actual pinned core; this does not certify improvement or hidden acceptance."""
     if adapter.gate.owner is None:
         raise Refused("original-owner bridge is not implemented")
+    adapter.check_feedback_ready()
     proposer = OwnerProposer(adapter, experiment_id=experiment_id)
     result = schedule.run_task(task_id, 1, adapter=adapter, prop=proposer,
                                selector_prop=proposer, runs_root=adapter.spec.runs_root,
                                modes=("seq",), library=None, libraries=None)
+    adapter.check_feedback_ready()
     return {"native_result": result.to_dict(), "owner_journal": str(adapter.gate.journal),
             "owner_blocked": adapter.gate.state["blocked"],
             "paid_blocked": adapter.gate.state["paid_blocked"],

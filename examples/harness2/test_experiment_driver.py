@@ -166,7 +166,7 @@ class PublicBundleTests(unittest.TestCase):
             self.assertEqual(calls, [])
             config['groups'][1]['route']['model'] = 'openrouter/deepseek/deepseek-v4.1-flash-1017'
             original = copy.deepcopy(config)
-            for variant in ('empty', 'three', 'duplicate-provider', 'duplicate-group', 'foreign-provider', 'empty-group', 'pi-no-billing'):
+            for variant in ('empty', 'three', 'duplicate-provider', 'duplicate-group', 'foreign-provider', 'empty-group', 'pi-no-billing', 'unequal-feedback'):
                 with self.subTest(variant=variant):
                     bad = copy.deepcopy(original)
                     bad['output_root'] = str(self.root / ('invalid-' + variant))
@@ -180,6 +180,7 @@ class PublicBundleTests(unittest.TestCase):
                     elif variant == 'foreign-provider': pi['route']['provider'] = 'foreign'
                     elif variant == 'empty-group': codex['route']['group'] = ''
                     elif variant == 'pi-no-billing': bad['groups'] = [pi]; del bad['billing']
+                    elif variant == 'unequal-feedback': codex['training_feedback'] = {}
                     with (patch('experiment_driver.SoodlesOwnerBridge', side_effect=AssertionError('owner constructed before validation')),
                           patch('experiment_driver.ReadOnlyOpenRouter', side_effect=AssertionError('paid client constructed before validation')),
                           self.assertRaises(Refused)):

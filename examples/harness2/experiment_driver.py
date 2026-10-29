@@ -175,6 +175,9 @@ def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_obser
             'experiment groups or providers are duplicated')
     require(all(route.model == MODELS[route.provider] and route.effort == 'low' for route in routes),
             'experiment model selection differs')
+    feedback_enabled = ['training_feedback' in group for group in group_configs]
+    require(not any(feedback_enabled) or all(feedback_enabled),
+            'training quality feedback differs between model groups')
     paid = any(route.provider == 'pi' for route in routes)
     billing_config = config.get('billing') if paid else None
     require(not paid or billing_config is not None, 'Pi execution has no original paid-key supplier')
@@ -199,6 +202,7 @@ def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_obser
     gate = SharedGate(output / 'owner-journal.json', bridge,
                       initial_paid_spent_usd=config['initial_paid_spent_usd'])
     groups, adapters, started = [], [], time.monotonic()
+    quality_checker = None
     for group, route in zip(group_configs, routes):
         bundle = FrozenAcceptedSource(**decode(read_ref(group['task_bundle'])))
         public_tree(bundle.source)
@@ -208,10 +212,20 @@ def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_obser
         read_ref(provenance['owner_acceptance'])
         read_ref(provenance['candidate'])
         public_tree(group['baseline'])
+        feedback_options = {}
+        if 'training_feedback' in group:
+            from drawing_feedback import DrawingFeedback
+            feedback_options['training_feedback'] = DrawingFeedback(
+                group['training_feedback'], output / 'quality-feedback' / route.group)
+            fixed = {key: feedback_options['training_feedback'].config[key]
+                     for key in ('node', 'engine', 'timeout_s')}
+            require(quality_checker is None or quality_checker == fixed,
+                    'model groups use different fixed quality checkers')
+            quality_checker = fixed
         adapter = NoodleAdapter(route=route, gate=gate,
             tasks={bundle.task_id: Task(bundle.prompt, Path(bundle.source['path']))},
             base=Path(group['baseline']['path']), runs_root=output / route.group,
-            always_on_max=group['always_on_max'])
+            always_on_max=group['always_on_max'], **feedback_options)
         adapters.append((route, bundle, adapter))
     cli.verify()
     reconciliation_id = None

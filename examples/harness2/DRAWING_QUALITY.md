@@ -93,3 +93,28 @@ and sealed final tests separate. A known failure takes precedence over unknown
 checks. Full original owner/input/geometry/portability/independence evidence is
 still required; this checker does not turn a receipt or process completion into
 complete benchmark acceptance.
+
+## Explicit training feedback
+
+Each experiment group may opt into `training_feedback` with the exact fields:
+
+```text
+scope: training
+node: FileRef of the executable
+engine: FileRefs of drawing-quality.mjs, drawing-visual.mjs, drawing-facts.mjs (in order)
+timeout_s: finite positive timeout
+allowlist:
+  - task_id: the explicit training task
+    source: its frozen TreeRef
+    source_files: independent input FileRefs within that tree
+    source_facts: independent evaluator FileRef outside editable instructions
+```
+
+Both groups must opt in together and use the same Node, checker and timeout.
+Only settled original runs with exactly matching `drawing.html` bytes receive
+feedback. The adapter appends bounded findings, text locations and a report
+reference to the proposer trajectory, without changing owner receipts, native
+scores or original artifacts. Oracle expectations are not projected.
+Formal unseen tasks are not enrolled. A completed quality UNKNOWN blocks quality
+acceptance; an interrupted or invalid checker execution additionally blocks
+further dispatch and replay until that execution is resolved.
