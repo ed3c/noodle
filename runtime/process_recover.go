@@ -64,6 +64,26 @@ func (p *processRuntime) Recover(_ context.Context) ([]RecoveredSession, error) 
 		if err := json.Unmarshal(meta["status"], &status); err != nil {
 			return nil, fmt.Errorf("parse session %s status: %w", sessionID, err)
 		}
+		if raw, exists := meta["runtime"]; exists {
+			var runtimeName string
+			if err := json.Unmarshal(raw, &runtimeName); err != nil {
+				return nil, fmt.Errorf("parse session %s runtime: %w", sessionID, err)
+			}
+			if runtimeName == "openshell" {
+				binding, err := maintainedRecoveryBinding(sessionDir)
+				if err != nil {
+					return nil, err
+				}
+				if binding != nil {
+					if _, err := os.Lstat(filepath.Join(sessionDir, "process.json")); err == nil {
+						return nil, fmt.Errorf("session %s has conflicting process and maintained native ownership", sessionID)
+					} else if !os.IsNotExist(err) {
+						return nil, fmt.Errorf("session %s process ownership inspection failed: %w", sessionID, err)
+					}
+					continue
+				}
+			}
+		}
 		record, err := procx.ReadProcessRecord(filepath.Join(sessionDir, "process.json"))
 		if err != nil {
 			return nil, fmt.Errorf("session %s process identity requires original owner readback: %w", sessionID, err)

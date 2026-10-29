@@ -227,6 +227,17 @@ func TestProgressMaintenanceStopsOnceAndRestoresOriginalArchives(t *testing.T) {
 	if readback.ProgressHead != d.ProgressHead || !readback.StopAcknowledged || readback.NativePhase != "Stopped" {
 		t.Fatalf("maintenance native readback differs: %+v", readback)
 	}
+	beforeRecovery, err := os.ReadFile(filepath.Join(f.root, "events"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered, err := r.Recover(t.Context()); err != nil || len(recovered) != 0 {
+		t.Fatalf("maintained history did not recover through its native owner: %v %v", recovered, err)
+	}
+	afterRecovery, err := os.ReadFile(filepath.Join(f.root, "events"))
+	if err != nil || !strings.Contains(string(afterRecovery[len(beforeRecovery):]), "get\n") || strings.Contains(string(afterRecovery[len(beforeRecovery):]), "stop\n") {
+		t.Fatal("native recovery skipped fresh readback or repeated Stop")
+	}
 	for _, kind := range []string{"missing-plan-intent", "foreign-session-reservation"} {
 		t.Run(kind, func(t *testing.T) {
 			name := filepath.Join(filepath.Dir(ref.Path), "stop-intent.json")
@@ -246,10 +257,11 @@ func TestProgressMaintenanceStopsOnceAndRestoresOriginalArchives(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, readErr := r.ReadSavedProgress(t.Context(), CompletedSessionBinding{OrderID: d.OrderID, SessionID: d.SessionID, WorktreePath: d.Target, Provider: "codex", Model: "fixture", StageIndex: 0, RetryCount: 0})
+			_, recoverErr := r.Recover(t.Context())
 			if err := os.WriteFile(name, original, 0600); err != nil {
 				t.Fatal(err)
 			}
-			if readErr == nil {
+			if readErr == nil || recoverErr == nil {
 				t.Fatal("maintenance runtime accepted an incomplete Stop chain")
 			}
 		})

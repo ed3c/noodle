@@ -548,6 +548,19 @@ func (r *OpenShellRuntime) Recover(ctx context.Context) ([]RecoveredSession, err
 			return nil, fmt.Errorf("openshell saved dispatch version unsupported")
 		}
 		if receipt.Phase == "settled" {
+			if receipt.Maintenance != nil {
+				binding, err := maintainedRecoveryBinding(filepath.Dir(path))
+				if err != nil {
+					return nil, err
+				}
+				if binding == nil {
+					return nil, fmt.Errorf("maintained native recovery binding disappeared")
+				}
+				observed, err := r.ReadMaintainedProgress(ctx, *binding)
+				if err != nil || !observed {
+					return nil, errors.Join(err, fmt.Errorf("maintained native recovery requires fresh stopped readback"))
+				}
+			}
 			continue
 		}
 		if receipt.ContextID != r.config.ContextID {

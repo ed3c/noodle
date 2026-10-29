@@ -3,6 +3,9 @@ package loop
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/poteto/noodle/internal/state"
@@ -12,6 +15,21 @@ import (
 type maintainedRuntime struct {
 	*savedRuntime
 	read func(loopruntime.CompletedSessionBinding) (bool, error)
+}
+
+func TestMaintainedHistoryCannotLoseItsNativeRecoveryOwner(t *testing.T) {
+	l, _, session, _ := savedProgressFixture(t)
+	file := filepath.Join(l.runtimeDir, "sessions", session, "openshell-dispatch.json")
+	if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte(`{"Version":1}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	delete(l.deps.Runtimes, "openshell")
+	if err := l.recoverAdoptedSessions(t.Context()); err == nil || !strings.Contains(err.Error(), "registered native recovery owner") {
+		t.Fatalf("native history admitted without its recovery owner: %v", err)
+	}
 }
 
 func (r *maintainedRuntime) ReadMaintainedProgress(_ context.Context, b loopruntime.CompletedSessionBinding) (bool, error) {

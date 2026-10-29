@@ -177,6 +177,13 @@ func (l *Loop) recoverAdoptedSessions(ctx context.Context) error {
 	for _, o := range orders.Orders {
 		orderMap[o.ID] = o
 	}
+	nativeHistory, err := filepath.Glob(filepath.Join(l.runtimeDir, "sessions", "*", "openshell-dispatch.json"))
+	if err != nil {
+		return err
+	}
+	if len(nativeHistory) != 0 && l.deps.Runtimes["openshell"] == nil {
+		return fmt.Errorf("OpenShell session history requires its registered native recovery owner")
+	}
 
 	for _, rt := range l.deps.Runtimes {
 		recovered, err := rt.Recover(ctx)
