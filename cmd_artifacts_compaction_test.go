@@ -149,7 +149,7 @@ func newArtifactCommandFixture(t *testing.T) *artifactCommandFixture {
 	}
 	f.host = hostReceipt{Schema: 1, Protocol: hostProtocol, HostPID: os.Getpid(), HostInstanceID: "original-host", ContextID: "original-context", ProjectDir: f.project, ContextState: "active", Mode: "supervised", ConfigPath: configPath, ConfigSHA256: configRef.SHA256, BinaryPath: binary, BinarySHA256: binaryRef.SHA256, RequestID: "original-request", HostDir: hostDir, CleanupCompleted: true}
 	artifactCommandJSON(t, filepath.Join(hostDir, "receipts.json"), []hostReceipt{f.host})
-	artifactCommandJSON(t, f.original, hostRequestBinding{Schema: 1, Operation: "attach", Status: "ok", ProjectDir: f.project, RequestID: f.host.RequestID, HostDir: hostDir, BinarySHA256: binaryRef.SHA256, ConfigPath: configPath, ConfigSHA256: configRef.SHA256, Mode: f.host.Mode, EnvironmentSHA256: strings.Repeat("e", 64), CleanupCompleted: true})
+	artifactCommandJSON(t, f.original, hostRequestBinding{Schema: 1, Operation: "attach", Status: "accepted", ProjectDir: f.project, RequestID: f.host.RequestID, HostDir: hostDir, BinarySHA256: binaryRef.SHA256, ConfigPath: configPath, ConfigSHA256: configRef.SHA256, Mode: f.host.Mode, EnvironmentSHA256: strings.Repeat("e", 64), CleanupCompleted: true})
 	originalRead := artifactNativeRead
 	t.Cleanup(func() { artifactNativeRead = originalRead })
 	artifactNativeRead = func(_ context.Context, gotBinary, project, directory, request, operation string) ([]byte, error) {
@@ -271,6 +271,28 @@ func TestArtifactCompactionCommandRegisteredAndReadOnlyCLI(t *testing.T) {
 	}
 	if _, err := artifactOriginalCLI(t.Context(), "unused", "unused", "unused", "unused", "attach"); err == nil {
 		t.Fatal("original CLI admitted mutation")
+	}
+}
+
+func TestArtifactCompactionRequiresAcceptedOriginalHostRequest(t *testing.T) {
+	f := newArtifactCommandFixture(t)
+	var binding hostRequestBinding
+	ref, err := artifactCompactionFile(f.original, &binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := artifactCompactionHost(ref); err != nil {
+		t.Fatalf("original accepted request rejected: %v", err)
+	}
+	for _, status := range []string{"pending", "busy", "ok"} {
+		binding.Status = status
+		ref = artifactCommandJSON(t, f.original, binding)
+		if _, _, _, err := artifactCompactionHost(ref); err == nil {
+			t.Fatalf("unaccepted original request admitted: %s", status)
+		}
+	}
+	if len(f.calls) != 0 {
+		t.Fatal("request validation invoked native readback")
 	}
 }
 

@@ -108,7 +108,7 @@ func artifactCompactionHost(request loopruntime.SessionReadbackFileRef) (binding
 	if err != nil {
 		return binding, receipt, nil, err
 	}
-	if actual != request || binding.Schema != 1 || binding.Operation != "attach" || binding.Status != "ok" || !binding.CleanupCompleted || binding.RequestID == "" || binding.EnvironmentSHA256 == "" || !filepath.IsAbs(binding.HostDir) || !filepath.IsAbs(binding.ProjectDir) || !filepath.IsAbs(binding.ConfigPath) {
+	if actual != request || binding.Schema != 1 || binding.Operation != "attach" || binding.Status != "accepted" || !binding.CleanupCompleted || binding.RequestID == "" || binding.EnvironmentSHA256 == "" || !filepath.IsAbs(binding.HostDir) || !filepath.IsAbs(binding.ProjectDir) || !filepath.IsAbs(binding.ConfigPath) {
 		return binding, receipt, nil, fmt.Errorf("artifact continuation original Host request is incomplete")
 	}
 	refs = map[string]loopruntime.SessionReadbackFileRef{"original_request": request}
