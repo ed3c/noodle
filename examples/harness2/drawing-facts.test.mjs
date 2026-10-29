@@ -166,6 +166,13 @@ test('legitimate TBD is PASS with absent or null source values', async () => {
   assert.equal((await check(html,{values:{V1:'14 px'}})).status,'FAIL');
 });
 
+test('an explicitly required source-unknown dimension cannot disappear from the table', async () => {
+  const html=sheet([row('W1','480 px')],'W1');
+  const result=await check(html,{values:{W1:'480 px',V1:null}});
+  assert.equal(result.status,'FAIL');
+  assert.ok(result.findings.some(f=>f.kind==='missing-source-definition' && f.code==='V1'));
+});
+
 test('TBD dependency makes a formula UNKNOWN, not false PASS', async () => {
   const result=(await check(sheet([row('V1','[TBD]'),row('MH','100vh−2·V1')],'MH|V1')));
   assert.equal(result.status,'UNKNOWN');

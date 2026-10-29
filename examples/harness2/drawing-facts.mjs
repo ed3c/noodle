@@ -417,7 +417,7 @@ export function checkDrawingFacts(observation, sourceFacts = {}) {
       qs.forEach(q=>compare(q,expected,'source-mismatch',{...evidence,source:source[code]}));
     }
   }
-  for (const [code,value] of Object.entries(source)) if (!known.has(code) && value != null) add(partialTables ? 'UNKNOWN':'FAIL','missing-source-definition',{code,source:value});
+  for (const [code,value] of Object.entries(source)) if (!known.has(code)) add(partialTables ? 'UNKNOWN':'FAIL','missing-source-definition',{code,source:value});
   for (const t of observation.texts) for (const clause of t.text.split(/[;|]/)) {
     const claim=clause.trim().match(/\b([A-Z][A-Z0-9]*)\s*(?:[=:]\s*(.+)|\s+(\[TBD\]|[+−-]?(?:\d|\.).*))$/);
     if (!claim || !known.has(claim[1])) continue;

@@ -57,6 +57,8 @@ The independent evaluator supplies a JSON object, never worker-authored metadata
 ```
 
 Codes must correspond to independently established source facts for that case.
+Every explicit key, including a null value, requires a table definition; a
+source-unknown dimension cannot be silently omitted.
 Literal numeric definitions without source evidence block with UNKNOWN even if
 the page is internally consistent. A derived value can be checked through
 source-backed leaf values. A legitimate `[TBD]` is allowed when the source has
