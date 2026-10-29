@@ -125,6 +125,9 @@ func (l *Loop) recordInitialAdmissions(ids []string, promoted OrdersFile) error 
 	if l.effectLedger == nil {
 		return fmt.Errorf("missing canonical effect ledger; owner: Noodle canonical checkpoint")
 	}
+	// Freeze the same provider/model defaults used by dispatch without changing
+	// the validated promotion's stage definitions through shared slices.
+	promoted, _ = ApplyOrderRoutingDefaults(cloneOrdersFile(promoted), l.registry, l.config)
 	sources := make(map[string]Order, len(promoted.Orders))
 	for _, order := range promoted.Orders {
 		if _, exists := sources[order.ID]; exists {

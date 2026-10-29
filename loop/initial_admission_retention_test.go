@@ -13,19 +13,23 @@ func TestFreshPromotionFreezesOriginalLocalTaskRetention(t *testing.T) {
 		name, runtime, provider, task string
 		admitted, multi               bool
 		want                          string
+		defaultProvider               string
 	}{
-		{"codex", "openshell", "codex", "local-task", true, false, reducer.TaskDataAfterClosure},
-		{"pi", "openshell", "pi", "local-task", true, false, reducer.TaskDataAfterClosure},
-		{"process", "process", "codex", "local-task", true, false, taskDataRetention},
-		{"other-task", "openshell", "codex", "execute", true, false, taskDataRetention},
-		{"multi-stage", "openshell", "codex", "local-task", true, true, taskDataRetention},
-		{"unadmitted", "openshell", "codex", "local-task", false, false, ""},
+		{"codex", "openshell", "codex", "local-task", true, false, reducer.TaskDataAfterClosure, ""},
+		{"pi", "openshell", "pi", "local-task", true, false, reducer.TaskDataAfterClosure, ""},
+		{"codex-omitted-with", "openshell", "", "local-task", true, false, reducer.TaskDataAfterClosure, "codex"},
+		{"pi-omitted-with", "openshell", "", "local-task", true, false, reducer.TaskDataAfterClosure, "pi"},
+		{"process", "process", "codex", "local-task", true, false, taskDataRetention, ""},
+		{"other-task", "openshell", "codex", "execute", true, false, taskDataRetention, ""},
+		{"multi-stage", "openshell", "codex", "local-task", true, true, taskDataRetention, ""},
+		{"unadmitted", "openshell", "codex", "local-task", false, false, "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := initialLoop(t)
 			l := fixture.loop
 			id := "fresh-local-task"
 			l.config.Agents.Codex.RequireTypedOutcome = false
+			l.config.Routing.Defaults.Provider = tc.defaultProvider
 			if tc.admitted {
 				l.config.Runtime.AdmittedOrders = []string{id}
 			}
