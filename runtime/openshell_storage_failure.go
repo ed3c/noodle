@@ -8,23 +8,25 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"time"
 
 	dm "github.com/NVIDIA/OpenShell/sdk/go/proto/datamodelv1"
 	pb "github.com/NVIDIA/OpenShell/sdk/go/proto/openshellv1"
+	"github.com/poteto/noodle/dispatcher"
 	"github.com/poteto/noodle/internal/lockfile"
 	"google.golang.org/protobuf/proto"
 )
 
 // StorageFailureStopPlan explicitly abandons workspace return, not original
-// execution debt. Originals contains independent before-images of all six refs.
+// execution debt. Originals contains independent before-images of all source refs.
 // NativeImplementation is opaque reviewed source evidence, not a disk attestation.
 type StorageFailureStopPlan struct {
-	Schema                                                             int
-	Profile, Dispatch, Custody, Failure, NativeImplementation, Request SessionReadbackFileRef
-	SessionDirectory, ContextID, HostInstance                          string
-	HostPID                                                            int
-	Originals                                                          map[string]SessionReadbackFileRef
+	Schema                                                                    int
+	Profile, Dispatch, Custody, Failure, NativeImplementation, Request, Spawn SessionReadbackFileRef
+	SessionDirectory, ContextID, HostInstance                                 string
+	HostPID                                                                   int
+	Originals                                                                 map[string]SessionReadbackFileRef
 }
 
 // StorageFailureExecution retains uncertainty without exposing command/env data.
@@ -71,7 +73,7 @@ type storageFailureInputs struct {
 }
 
 func (p StorageFailureStopPlan) sources() map[string]SessionReadbackFileRef {
-	return map[string]SessionReadbackFileRef{"profile": p.Profile, "dispatch": p.Dispatch, "custody": p.Custody, "failure": p.Failure, "native_implementation": p.NativeImplementation, "request": p.Request}
+	return map[string]SessionReadbackFileRef{"profile": p.Profile, "dispatch": p.Dispatch, "custody": p.Custody, "failure": p.Failure, "native_implementation": p.NativeImplementation, "request": p.Request, "spawn": p.Spawn}
 }
 
 // ValidateStorageFailureStop checks live sources immediately before an effect.
@@ -118,7 +120,7 @@ func readStorageFailureInputs(p StorageFailureStopPlan, profile OpenShellProfile
 			}
 		}
 	}
-	if p.Profile.Path != profile.SourcePath || p.Profile.SHA256 != profile.sourceFiles[profile.SourcePath] || p.Dispatch.Path != filepath.Join(dir, "openshell-dispatch.json") || p.Failure.Path != filepath.Join(dir, "progress-stop-output.log") || p.Custody.Path != filepath.Join(profile.Gateway.Binding.StateRoot, "owner.json") {
+	if p.Profile.Path != profile.SourcePath || p.Profile.SHA256 != profile.sourceFiles[profile.SourcePath] || p.Dispatch.Path != filepath.Join(dir, "openshell-dispatch.json") || p.Failure.Path != filepath.Join(dir, "progress-stop-output.log") || p.Custody.Path != filepath.Join(profile.Gateway.Binding.StateRoot, "owner.json") || p.Spawn.Path != filepath.Join(dir, "spawn.json") {
 		return fail("original source paths differ")
 	}
 	if err := VerifyOpenShellProfile(profile); err != nil {
@@ -226,15 +228,35 @@ func readStorageFailureInputs(p StorageFailureStopPlan, profile OpenShellProfile
 	if err := proto.Unmarshal(r.CreateIntent, &create); err != nil || create.GetSpec() == nil {
 		return fail("original create specification is missing")
 	}
-	base, _, _ := unwrapOpenShellProgress(r.Exec.Command)
-	boundRoute := false
-	for _, route := range profile.Routes {
-		if len(base.Argv) != 0 && base.Argv[0] == route.Binary && proto.Equal(create.GetSpec(), route.Spec) {
-			boundRoute = true
-		}
+	var spawn struct {
+		SessionID         string                           `json:"session_id"`
+		OrderID           string                           `json:"order_id"`
+		Provider          string                           `json:"provider"`
+		Model             string                           `json:"model"`
+		Runtime           string                           `json:"runtime"`
+		WorktreePath      string                           `json:"worktree_path"`
+		InstructionBundle *dispatcher.InstructionBundleRef `json:"instruction_bundle"`
 	}
-	if !boundRoute {
+	if err := read("spawn", &spawn); err != nil {
+		return in, err
+	}
+	route, ok := profile.Routes[spawn.Provider]
+	if spawn.SessionID != d.SessionID || spawn.OrderID != d.OrderID || spawn.Runtime != "openshell" || spawn.Model == "" || spawn.WorktreePath != d.Target || !ok || !proto.Equal(create.GetSpec(), route.Spec) {
 		return fail("original create policy differs from the admitted route")
+	}
+	base, _, err := unwrapOpenShellProgress(r.Exec.Command)
+	if err != nil {
+		return in, err
+	}
+	if spawn.InstructionBundle == nil {
+		if len(base.Argv) == 0 || base.Argv[0] != route.Binary {
+			return fail("original bare harness command differs")
+		}
+	} else {
+		prefix, err := openShellInstructionCommandPrefix(profile, spawn.Provider, d.OrderID, spawn.InstructionBundle.SHA256)
+		if err != nil || !filepath.IsAbs(spawn.InstructionBundle.Path) || len(base.Argv) < len(prefix) || !slices.Equal(base.Argv[:len(prefix)], prefix) {
+			return fail("original instruction verifier command differs")
+		}
 	}
 	failure, err := os.ReadFile(p.Originals["failure"].Path)
 	if err != nil {

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path"
@@ -59,9 +60,8 @@ func (r *OpenShellRuntime) instructionReadback(ctx context.Context, dir string, 
 	if mapping.OriginalManifest != *ref || p == nil || p.Directory != directory || p.GuestDirectory != guest || p.ManifestSHA256 != ref.SHA256 || !reflect.DeepEqual(p.Manifest, manifest) {
 		return nil, nil, fmt.Errorf("original instruction mapping differs from transported inputs")
 	}
-	route, ok := r.config.Profile.Routes[b.Provider]
-	prefix := []string{r.config.Profile.InstructionVerifier, "--directory", guest, "--sha256", ref.SHA256, "--order-id", b.OrderID, "--", route.Binary}
-	if !ok || prefix[0] == "" || len(command.Argv) < len(prefix) || !slices.Equal(command.Argv[:len(prefix)], prefix) {
+	prefix, prefixErr := openShellInstructionCommandPrefix(r.config.Profile, b.Provider, b.OrderID, ref.SHA256)
+	if prefixErr != nil || len(command.Argv) < len(prefix) || !slices.Equal(command.Argv[:len(prefix)], prefix) {
 		return nil, nil, fmt.Errorf("original native command did not bind the instruction verifier")
 	}
 	manifestRef, err := ReadSessionReadbackFile(filepath.Join(directory, instructionbundle.ManifestName), nil)
@@ -84,4 +84,17 @@ func (r *OpenShellRuntime) instructionReadback(ctx context.Context, dir string, 
 		return nil, nil, fmt.Errorf("original harness input lacks the bound guest instruction mapping")
 	}
 	return &CompletedInstructionEvidence{Directory: directory, GuestDirectory: guest, Manifest: manifestRef}, map[string]SessionReadbackFileRef{"instruction_mapping": mappingRef, "instruction_manifest": manifestRef, "instruction_input": inputRef}, nil
+}
+
+// Prefix identity is independent of successful payload verification. Normal
+// completion still verifies every transported file and mapping above; an
+// explicit failed-compute Stop only identifies its original recorded command.
+func openShellInstructionCommandPrefix(profile OpenShellProfile, provider, orderID, manifestSHA string) ([]string, error) {
+	route, ok := profile.Routes[provider]
+	decoded, err := hex.DecodeString(manifestSHA)
+	if !ok || route.Binary == "" || profile.InstructionVerifier == "" || orderID == "" || err != nil || len(decoded) != 32 || strings.ToLower(manifestSHA) != manifestSHA {
+		return nil, fmt.Errorf("original instruction command identity is incomplete")
+	}
+	guest := path.Join("/sandbox", "instructions-"+manifestSHA)
+	return []string{profile.InstructionVerifier, "--directory", guest, "--sha256", manifestSHA, "--order-id", orderID, "--", route.Binary}, nil
 }

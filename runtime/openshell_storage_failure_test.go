@@ -3,7 +3,9 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -16,6 +18,8 @@ import (
 
 	dm "github.com/NVIDIA/OpenShell/sdk/go/proto/datamodelv1"
 	pb "github.com/NVIDIA/OpenShell/sdk/go/proto/openshellv1"
+	"github.com/poteto/noodle/dispatcher"
+	"github.com/poteto/noodle/internal/instructionbundle"
 	"github.com/poteto/noodle/internal/lockfile"
 	"github.com/poteto/noodle/internal/workspaceartifacts"
 	"google.golang.org/grpc/codes"
@@ -143,6 +147,7 @@ func newStorageFailureFixture(t *testing.T, history int) *storageFailureFixture 
 	p.Failure = storageFailureWrite(t, filepath.Join(directory, "progress-stop-output.log"), []byte("progress helper could not be executed\n"))
 	p.NativeImplementation = storageFailureWrite(t, filepath.Join(root, "reviewed-native-source.md"), []byte("Reviewed pinned native Stop preserves the backing disk; not a live disk attestation.\n"))
 	p.Request = storageFailureWrite(t, filepath.Join(root, "request.json"), map[string]any{"schema": 1, "operation": "attach", "request_id": "original-request", "required_host_instance_id": p.HostInstance, "project_dir": project, "config_path": filepath.Join(root, "config.toml"), "config_sha256": "config-digest", "binary_sha256": "binary-digest", "status": "accepted"})
+	p.Spawn = storageFailureWrite(t, filepath.Join(directory, "spawn.json"), map[string]any{"session_id": "storage-session", "order_id": "order", "provider": "codex", "model": "fixture", "runtime": "openshell", "worktree_path": dispatch.Target})
 	f := &storageFailureFixture{plan: p, profile: profile, state: state, dispatch: dispatch, gateway: g, server: server}
 	f.freeze(t)
 	return f
@@ -559,5 +564,123 @@ func TestStorageFailureSerializesWithOriginalProgressMaintenance(t *testing.T) {
 	defer f.gateway.mu.Unlock()
 	if f.gateway.stops != 0 {
 		t.Fatal("busy maintenance owner allowed a native stop")
+	}
+}
+
+func TestStorageFailureStopBindsOriginalInstructionVerifier(t *testing.T) {
+	for _, kind := range []string{"original-verifier", "missing-bundle", "changed-command", "changed-transported-file", "changed-mapping"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newStorageFailureFixture(t, 0)
+			var cfg openShellProfileFile
+			data, err := os.ReadFile(f.plan.Profile.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = json.Unmarshal(data, &cfg); err != nil {
+				t.Fatal(err)
+			}
+			cfg.InstructionVerifier = "/sandbox/payload/noodle-instructions"
+			verifier := filepath.Join(f.profile.PayloadDirectory, "noodle-instructions")
+			if err = os.WriteFile(verifier, []byte("fixture verifier"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			writeProfileFixture(t, f.plan.Profile.Path, cfg)
+			f.profile, err = LoadOpenShellProfile(f.plan.Profile.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.plan.Profile, err = ReadSessionReadbackFile(f.plan.Profile.Path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.dispatch.ProfileSHA256, err = OpenShellDispatchSHA256(f.profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ref := runtimeInstructionRef(t)
+			var manifest map[string]any
+			data, err = os.ReadFile(ref.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = json.Unmarshal(data, &manifest); err != nil {
+				t.Fatal(err)
+			}
+			manifest["order_id"] = "order"
+			data, err = json.Marshal(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sum := sha256.Sum256(data)
+			bundlePath := filepath.Join(filepath.Dir(ref.Path), "bundle-order.json")
+			if err = os.WriteFile(bundlePath, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			ref = &dispatcher.InstructionBundleRef{Path: bundlePath, SHA256: hex.EncodeToString(sum[:])}
+			prepared, err := instructionbundle.Prepare(t.Context(), *ref, "order", f.plan.SessionDirectory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mappingPath := filepath.Join(f.plan.SessionDirectory, "instruction-mapping.json")
+			storageFailureWrite(t, mappingPath, map[string]any{"original_manifest": ref, "prepared": prepared})
+			storageFailureWrite(t, filepath.Join(f.plan.SessionDirectory, "input.txt"), []byte("original task\n"+prepared.PromptSection()))
+			base, _, err := unwrapOpenShellProgress(f.state.Records[0].Exec.Command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			base.Argv = []string{f.profile.InstructionVerifier, "--directory", prepared.GuestDirectory, "--sha256", ref.SHA256, "--order-id", "order", "--", f.profile.Routes["codex"].Binary}
+			if kind == "changed-command" {
+				base.Argv[4] = strings.Repeat("f", 64)
+			}
+			command, err := wrapOpenShellProgress(base, f.profile.ProgressSupervisor, "storage-session", strings.Repeat("a", 64))
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.state.Records[0].Exec.Command = command
+			f.state.Records[0].Exec.Result.RequestID = command.RequestID
+			control, err := progressStopCommand(command, f.state.Records[0].ProgressStop.Command.RequestID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.state.Records[0].ProgressStop.Command = control
+			var spawnRef *dispatcher.InstructionBundleRef = ref
+			if kind == "missing-bundle" {
+				spawnRef = nil
+			}
+			f.plan.Spawn = storageFailureWrite(t, f.plan.Spawn.Path, map[string]any{"session_id": "storage-session", "order_id": "order", "provider": "codex", "model": "fixture", "runtime": "openshell", "worktree_path": f.dispatch.Target, "instruction_bundle": spawnRef})
+			if kind == "changed-transported-file" {
+				storageFailureWrite(t, filepath.Join(prepared.Directory, "skills/main/SKILL.md"), []byte("changed"))
+			}
+			if kind == "changed-mapping" {
+				storageFailureWrite(t, mappingPath, map[string]any{"prepared": prepared})
+			}
+			f.freeze(t)
+			if err = os.Remove(ref.Path); err != nil {
+				t.Fatal(err)
+			}
+			_, err = StopStorageFailure(t.Context(), f.ref, f.profile)
+			canStop := kind == "original-verifier" || kind == "changed-transported-file" || kind == "changed-mapping"
+			if canStop != (err == nil) {
+				t.Fatalf("instruction verifier boundary %s: %v", kind, err)
+			}
+			_, stops, _ := f.gateway.counts()
+			if (canStop && stops != 1) || (!canStop && stops != 0) {
+				t.Fatalf("invalid instruction binding reached native stop: %d", stops)
+			}
+			if canStop {
+				if err = os.RemoveAll(prepared.Directory); err != nil {
+					t.Fatal(err)
+				}
+				if err = os.Remove(mappingPath); err != nil {
+					t.Fatal(err)
+				}
+				if err = os.Remove(filepath.Join(f.plan.SessionDirectory, "input.txt")); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = ValidateStorageFailureStopReceipt(f.ref, f.profile); err != nil {
+					t.Fatalf("historical compute stop depended on live instruction files: %v", err)
+				}
+			}
+		})
 	}
 }

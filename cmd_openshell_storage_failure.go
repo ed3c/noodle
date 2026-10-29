@@ -360,7 +360,7 @@ func prepareStorageFailure(request, session, output, implementation, launcher, l
 	if err = storageFailureHostIdentity(observed, p, binding, currentRows); err != nil {
 		return zero, err
 	}
-	for key, path := range map[string]string{"request": request, "config": binding.ConfigPath, "profile": profile.SourcePath, "dispatch": filepath.Join(p.SessionDirectory, "openshell-dispatch.json"), "custody": filepath.Join(profile.Gateway.Binding.StateRoot, "owner.json"), "failure": filepath.Join(p.SessionDirectory, "progress-stop-output.log"), "native-implementation": implementation, "host-history": historyPath, "launcher": launcher, "launcher-call": launcherCall} {
+	for key, path := range map[string]string{"request": request, "config": binding.ConfigPath, "profile": profile.SourcePath, "dispatch": filepath.Join(p.SessionDirectory, "openshell-dispatch.json"), "custody": filepath.Join(profile.Gateway.Binding.StateRoot, "owner.json"), "failure": filepath.Join(p.SessionDirectory, "progress-stop-output.log"), "native-implementation": implementation, "host-history": historyPath, "launcher": launcher, "launcher-call": launcherCall, "spawn": filepath.Join(p.SessionDirectory, "spawn.json")} {
 		ref, readErr := loopruntime.ReadSessionReadbackFile(path, nil)
 		if readErr != nil {
 			return zero, readErr
@@ -368,6 +368,7 @@ func prepareStorageFailure(request, session, output, implementation, launcher, l
 		r.Originals[key] = ref
 	}
 	p.Profile, p.Dispatch, p.Custody, p.Failure, p.NativeImplementation = r.Originals["profile"], r.Originals["dispatch"], r.Originals["custody"], r.Originals["failure"], r.Originals["native-implementation"]
+	p.Spawn = r.Originals["spawn"]
 	var dispatch struct{ OrderID string }
 	if err = storageFailureRef(p.Dispatch, &dispatch); err != nil {
 		return zero, err
@@ -391,7 +392,7 @@ func prepareStorageFailure(request, session, output, implementation, launcher, l
 		if err = writeMaintenanceExclusive(filepath.Join(output, "original-"+key), bytes); err != nil {
 			return zero, err
 		}
-		if key == "profile" || key == "dispatch" || key == "custody" || key == "failure" || key == "native-implementation" || key == "request" {
+		if key == "profile" || key == "dispatch" || key == "custody" || key == "failure" || key == "native-implementation" || key == "request" || key == "spawn" {
 			copyRef, readErr := loopruntime.ReadSessionReadbackFile(filepath.Join(output, "original-"+key), nil)
 			if readErr != nil {
 				return zero, readErr
