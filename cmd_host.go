@@ -456,18 +456,8 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 		return err
 	}
 	h.residents.BindBudget(budget)
-	stored, err := os.ReadFile(filepath.Join(dir, "receipts.json"))
-	if err == nil {
-		if err = json.Unmarshal(stored, &h.receipts); err != nil {
-			return fmt.Errorf("read host receipts: %w", err)
-		}
-	} else if !os.IsNotExist(err) {
+	if err := h.loadReceipts(); err != nil {
 		return err
-	}
-	for _, receipt := range h.receipts {
-		if receipt.ContextState != "detached" {
-			h.blocked = true
-		}
 	}
 	socket := filepath.Join(dir, "host.sock")
 	if err = os.Remove(socket); err != nil && !os.IsNotExist(err) {

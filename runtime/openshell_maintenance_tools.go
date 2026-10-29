@@ -62,31 +62,53 @@ func maintenanceTool(ref SessionReadbackFileRef) (maintenanceToolCall, error) {
 }
 
 func ValidateProgressMaintenanceLauncher(p ProgressMaintenance) error {
-	call, err := maintenanceTool(p.LauncherCall)
+	return validateOriginalHostLauncher(p.Launcher, p.LauncherCall, p.LauncherSession)
+}
+
+type OriginalHostLifetime struct {
+	Launcher        SessionReadbackFileRef `json:"launcher"`
+	LauncherCall    SessionReadbackFileRef `json:"launcher_call"`
+	WaitCall        SessionReadbackFileRef `json:"wait_call"`
+	WaitResult      SessionReadbackFileRef `json:"wait_result"`
+	LauncherSession int                    `json:"launcher_session"`
+	ObservedAt      time.Time              `json:"observed_at"`
+}
+
+func validateOriginalHostLauncher(intent, launchCall SessionReadbackFileRef, executionSession int) error {
+	call, err := maintenanceTool(launchCall)
 	if err != nil {
 		return err
 	}
 	var session int
 	var output string
-	if json.Unmarshal(call.Result["session_id"], &session) != nil || session != p.LauncherSession || session <= 0 || len(call.Result["exit_code"]) != 0 || json.Unmarshal(call.Result["output"], &output) != nil || strings.Count(call.Input, "tools.exec_command(") != 1 {
+	if json.Unmarshal(call.Result["session_id"], &session) != nil || session != executionSession || session <= 0 || len(call.Result["exit_code"]) != 0 || json.Unmarshal(call.Result["output"], &output) != nil || strings.Count(call.Input, "tools.exec_command(") != 1 {
 		return fmt.Errorf("original launcher did not return this execution session")
 	}
 	var identity struct{ Intent, Launcher string }
-	if json.Unmarshal([]byte(output), &identity) != nil || identity.Intent != p.Launcher.Path || identity.Launcher != filepath.Dir(p.Launcher.Path) {
+	if json.Unmarshal([]byte(output), &identity) != nil || identity.Intent != intent.Path || identity.Launcher != filepath.Dir(intent.Path) {
 		return fmt.Errorf("original launcher return does not identify this intent")
 	}
-	return maintenanceVerify(p.Launcher, nil)
+	return maintenanceVerify(intent, nil)
 }
 
 func maintenanceWait(p ProgressMaintenance, exit ProgressMaintenanceExit, released time.Time) error {
-	if err := ValidateProgressMaintenanceLauncher(p); err != nil {
+	return ValidateOriginalHostLifetime(OriginalHostLifetime{Launcher: p.Launcher, LauncherCall: p.LauncherCall, WaitCall: exit.WaitCall, WaitResult: exit.WaitResult, LauncherSession: p.LauncherSession, ObservedAt: exit.ObservedAt}, released)
+}
+
+// ValidateOriginalHostLifetime binds the authentic launch/wait call pairs. Each
+// consumer separately decides which exit codes and resource states are valid.
+func ValidateOriginalHostLifetime(lifetime OriginalHostLifetime, released time.Time) error {
+	if released.IsZero() || lifetime.ObservedAt.IsZero() {
+		return fmt.Errorf("original Host lifetime timestamps are missing")
+	}
+	if err := validateOriginalHostLauncher(lifetime.Launcher, lifetime.LauncherCall, lifetime.LauncherSession); err != nil {
 		return err
 	}
-	call, err := maintenanceTool(exit.WaitCall)
+	call, err := maintenanceTool(lifetime.WaitCall)
 	if err != nil {
 		return err
 	}
-	launch, err := maintenanceTool(p.LauncherCall)
+	launch, err := maintenanceTool(lifetime.LauncherCall)
 	if err != nil {
 		return err
 	}
@@ -99,11 +121,11 @@ func maintenanceWait(p ProgressMaintenance, exit ProgressMaintenanceExit, releas
 	var args struct {
 		SessionID int `json:"session_id"`
 	}
-	if !strings.HasPrefix(input, prefix) || !strings.HasSuffix(input, suffix) || json.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(input, prefix), suffix)), &args) != nil || args.SessionID != p.LauncherSession || call.Started.Before(released) || exit.ObservedAt.Before(call.Returned) {
+	if !strings.HasPrefix(input, prefix) || !strings.HasSuffix(input, suffix) || json.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(input, prefix), suffix)), &args) != nil || args.SessionID != lifetime.LauncherSession || call.Started.Before(released) || lifetime.ObservedAt.Before(call.Returned) {
 		return fmt.Errorf("original launcher wait call is not bound to this released execution")
 	}
 	var result map[string]json.RawMessage
-	if err := maintenanceVerify(exit.WaitResult, &result); err != nil {
+	if err := maintenanceVerify(lifetime.WaitResult, &result); err != nil {
 		return err
 	}
 	if !reflect.DeepEqual(result, call.Result) {
