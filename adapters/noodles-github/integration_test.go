@@ -122,7 +122,7 @@ func (r *scriptedRuntime) Dispatch(_ context.Context, request loopruntime.Dispat
 		if err := os.WriteFile(filepath.Join(runtimeDir, "mise.json"), miseData, 0o600); err != nil {
 			return nil, err
 		}
-		if err := scheduleTargetOrder(r.projectDir); err != nil {
+		if err := scheduleTargetOrder(r.projectDir, testPolicy()); err != nil {
 			r.scheduleErr = err
 			return nil, err
 		}

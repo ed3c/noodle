@@ -155,7 +155,7 @@ func landAuthorization(comments []Comment, policy Policy, subject, body, base st
 		}
 		d := receipt.Declaration
 		baseMatches := base == "" || d.BaseSHA == base
-		if receipt.Sender == policy.RepositoryDispatchSender && d.SourceRepository == sourceRepository && d.Target == targetRepository && d.Subject == subject && d.SubjectBodySHA256 == hex.EncodeToString(digest[:]) && baseMatches && d.Runtime == contract.Runtime && d.Evidence == contract.Evidence && reflect.DeepEqual(d.WriteBoundary, contract.WriteBoundary) {
+		if sourceAdmitted(policy, d.SourceRepository, receipt.Sender) && d.Target == targetRepository && d.Subject == subject && d.SubjectBodySHA256 == hex.EncodeToString(digest[:]) && baseMatches && d.Runtime == contract.Runtime && d.Evidence == contract.Evidence && reflect.DeepEqual(d.WriteBoundary, contract.WriteBoundary) {
 			matches = append(matches, receipt)
 		}
 	}
