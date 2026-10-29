@@ -23,7 +23,7 @@ func validHostTaskAcceptanceReceipt(receipt hostReceipt) bool {
 		return receipt.TerminalCause == ""
 	case "detached":
 		return receipt.TerminalCause == loop.TerminalExplicitCleanup ||
-			(receipt.TerminalCause == loop.TerminalAutoCompleted && receipt.CleanupCompleted && receipt.Mode != "manual")
+			(receipt.TerminalCause == loop.TerminalAutoCompleted && receipt.CleanupCompleted)
 	}
 	return false
 }

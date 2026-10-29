@@ -17,8 +17,13 @@ import (
 
 func automaticTaskAcceptanceFixture(t *testing.T) (*noodleHost, hostRequest, *taskAcceptanceHostRuntime, string) {
 	t.Helper()
+	return cleanupTaskAcceptanceFixture(t, "auto")
+}
+
+func cleanupTaskAcceptanceFixture(t *testing.T, mode string) (*noodleHost, hostRequest, *taskAcceptanceHostRuntime, string) {
+	t.Helper()
 	h, req, rt, path, _ := hostTaskAcceptanceFixture(t)
-	req.Mode, req.CleanupCompleted = "auto", true
+	req.Mode, req.CleanupCompleted = mode, true
 	var binding hostRequestBinding
 	if _, err := loopruntime.ReadSessionReadbackFile(path, &binding); err != nil {
 		t.Fatal(err)
@@ -69,7 +74,7 @@ func TestHostTaskAcceptanceACKSurvivesAutomaticDetach(t *testing.T) {
 }
 
 func TestHostTaskAcceptanceReceiptVerificationKeepsIdentityExact(t *testing.T) {
-	for _, variant := range []string{"completed", "pid", "binary", "instance", "context", "request", "config", "cleanup-policy", "failed", "migration", "missing-cause", "duplicate"} {
+	for _, variant := range []string{"completed", "pid", "binary", "instance", "context", "request", "config", "mode", "cleanup-policy", "failed", "migration", "missing-cause", "duplicate"} {
 		t.Run(variant, func(t *testing.T) {
 			h, req, _, path := automaticTaskAcceptanceFixture(t)
 			bound, err := originalHostTaskAcceptanceClient(req.ProjectDir, path, req.ReadbackOrderID, req.ReadbackSessionID, "task_delivery_accept")
@@ -92,6 +97,8 @@ func TestHostTaskAcceptanceReceiptVerificationKeepsIdentityExact(t *testing.T) {
 				h.receipts[0].RequestID = "replacement"
 			case "config":
 				h.receipts[0].ConfigSHA256 = "replacement"
+			case "mode":
+				h.receipts[0].Mode = "manual"
 			case "cleanup-policy":
 				h.receipts[0].CleanupCompleted = false
 			case "failed":
@@ -122,9 +129,15 @@ func TestHostTaskAcceptanceReceiptVerificationKeepsIdentityExact(t *testing.T) {
 }
 
 func TestHostTaskAcceptanceReadbackRequiresOriginalHost(t *testing.T) {
-	for _, variant := range []string{"detached", "active", "missing-host", "replacement", "evidence-drift", "failed", "migration", "missing-receipt"} {
+	for _, variant := range []string{"detached", "detached-manual", "detached-supervised", "active", "missing-host", "replacement", "evidence-drift", "failed", "migration", "missing-receipt"} {
 		t.Run(variant, func(t *testing.T) {
-			h, req, rt, path := automaticTaskAcceptanceFixture(t)
+			mode := "auto"
+			if variant == "detached-manual" {
+				mode = "manual"
+			} else if variant == "detached-supervised" {
+				mode = "supervised"
+			}
+			h, req, rt, path := cleanupTaskAcceptanceFixture(t, mode)
 			prepareTaskReclamationFixture(t, h, &req)
 			accepted := h.taskAcceptance(t.Context(), req)
 			if accepted.Status != "accepted" {
@@ -161,7 +174,7 @@ func TestHostTaskAcceptanceReadbackRequiresOriginalHost(t *testing.T) {
 				serveTaskAcceptanceOnce(t, h, nil)
 			}
 			got, err := callHostTaskAcceptanceReadback(t.Context(), req.ProjectDir, path, req.ReadbackOrderID, req.ReadbackSessionID, req.TaskAcceptance.Path, req.TaskAcceptance.SHA256)
-			if variant == "detached" || variant == "active" {
+			if variant == "detached" || variant == "detached-manual" || variant == "detached-supervised" || variant == "active" {
 				if err != nil || got.Status != "reclaimed" || got.ClosureReceipt == nil || *got.ClosureReceipt != *accepted.ClosureReceipt || len(got.Effects) != 0 {
 					t.Fatalf("readback: %+v %v", got, err)
 				}
