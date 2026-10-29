@@ -140,6 +140,15 @@ acceptance, fixed hidden evaluation, efficiency claims and adoption remain unfin
 The GET-only billing implementation and execution entry are described in
 [BILLING_AND_RUNNER.md](BILLING_AND_RUNNER.md).
 
+An already captured call can explicitly select a corrected Soodles transport through
+`resume_experiment(..., cli_successor=FileRef)`. The supervisor packet binds the original
+call/request/intent, preserved effect-free outer refusal, and complete predecessor and
+successor configurations. Only CLI source/entrypoint may differ; Python, environment,
+timeout, experiment inputs and output namespace stay fixed. Both source closures remain
+verified. Reconciliation only reads the same captured call and still requires its original
+Host identity and integrated acceptance; it never repeats enter or dispatch. Omission of
+the packet retains the original strict transport comparison.
+
 The first control attempt exposed the missing native prompt surface (retained failure, no
 model effects); the correction added the explicit surface above. A later negative fixture
 incorrectly recreated an existing rejected-script directory on the second repair, which

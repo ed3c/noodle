@@ -551,6 +551,9 @@ def verify_call_reconciliation(call, proof):
     require(decode(read_ref(proof["call"])) == asdict(call), "retained original call differs")
     for ref in binding["inputs"]:
         read_ref(ref)
+    if proof.get('cli_successor') is not None:
+        from cli_successor import verify_cli_successor
+        verify_cli_successor(call, proof)
     return host_identity(original)
 
 
@@ -624,7 +627,7 @@ class SoodlesOwnerBridge:
 
         return self._follow(call, template, directory, request, binding_ref, instructions_ref, result_dir, before)
 
-    def reconcile_call(self, call: OwnerCall, fresh_observation: dict, *, admission_continuation=None):
+    def reconcile_call(self, call: OwnerCall, fresh_observation: dict, *, admission_continuation=None, cli_successor=None):
         """Read only the same original call; never prepare, enter or redispatch."""
         require(self.templates, "original call template is missing")
         directory = self.root / call.fingerprint()
@@ -650,11 +653,18 @@ class SoodlesOwnerBridge:
             "original_receipt": reference(directory / "operation-0000/receipt.json")}
         if admission_continuation is not None:
             proof["admission_continuation"] = admission_continuation
+        if cli_successor is not None:
+            proof['cli_successor'] = cli_successor
         expected_host = verify_call_reconciliation(call, proof)
         original_cli = decode(read_ref(proof["original_intent"]))
-        require(all(original_cli.get(key) == value for key, value in {
-            "source_commit": self.cli.source_commit, "python": self.cli.python,
-            "sources": list(self.cli.sources)}.items()), "original Soodles transport source differs")
+        if cli_successor is not None:
+            from cli_successor import verify_cli_successor
+            require(canonical(verify_cli_successor(call, proof)) == canonical(asdict(self.cli)),
+                    'selected CLI successor differs from the current transport')
+        else:
+            require(all(original_cli.get(key) == value for key, value in {
+                "source_commit": self.cli.source_commit, "python": self.cli.python,
+                "sources": list(self.cli.sources)}.items()), "original Soodles transport source differs")
         self.cli.verify()
         fresh = decode(read_ref(fresh_observation))
         if frozen:

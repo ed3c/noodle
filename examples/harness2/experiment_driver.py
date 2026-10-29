@@ -126,10 +126,10 @@ def prepare_editable_harness(*, destination: Path, agents: dict, skill_bases: di
     return tree_ref(destination)
 
 
-def resume_experiment(config: dict, review_callback, call_ref: dict, fresh_observation: dict, *, admission_continuation=None):
+def resume_experiment(config: dict, review_callback, call_ref: dict, fresh_observation: dict, *, admission_continuation=None, cli_successor=None):
     """Reconcile this original call, then continue the same native namespaces."""
     return _run_experiment(config, review_callback, call_ref=call_ref, fresh_observation=fresh_observation,
-                           admission_continuation=admission_continuation)
+                           admission_continuation=admission_continuation, cli_successor=cli_successor)
 
 
 def continue_unstarted_group(config: dict, review_callback, group: str):
@@ -141,7 +141,7 @@ def run_experiment(config: dict, review_callback):
     return _run_experiment(config, review_callback)
 
 
-def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_observation=None, continue_group=None, admission_continuation=None):
+def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_observation=None, continue_group=None, admission_continuation=None, cli_successor=None):
     """Run actual pinned k=1/seq; Session supplies original Soodles semantic review.
 
     Calling this function authorizes its configured owner calls. Importing/preparing
@@ -149,6 +149,8 @@ def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_obser
     """
     require(admission_continuation is None or (call_ref is not None and fresh_observation is not None),
             "capacity continuation requires the same original call and fresh observation")
+    require(cli_successor is None or (call_ref is not None and fresh_observation is not None),
+            'CLI successor requires the same original call and fresh observation')
     import reproduce
     pin = config['upstream']
     receipt = decode(read_ref(pin['prepared_receipt']))
@@ -242,7 +244,8 @@ def _run_experiment(config: dict, review_callback, *, call_ref=None, fresh_obser
             require(not any(row['provider'] == 'pi' and row['state'] == 'settled' and row['result']['cost_usd'] is None
                             for row in rows), 'prior paid call still needs same-call billing settlement')
             billing.expected_usage = money(config['initial_paid_spent_usd']) + sum(known)
-        result, proof = bridge.reconcile_call(call, fresh_observation, admission_continuation=admission_continuation)
+        result, proof = bridge.reconcile_call(call, fresh_observation, admission_continuation=admission_continuation,
+                                            **({'cli_successor': cli_successor} if cli_successor is not None else {}))
         gate.reconcile_original_call(call, result, proof)
     for route, bundle, adapter in adapters:
         group_started = time.monotonic()
