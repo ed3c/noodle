@@ -147,7 +147,13 @@ func TestNativeCodexCompletesAndResumesSameThreadWithoutMCP(t *testing.T) {
 
 func TestNativeCodexUnsubscribeACKDoesNotReleaseLoadedThread(t *testing.T) {
 	read := make(chan struct{}, 1)
+	ackRequested := make(chan struct{})
+	releaseACK := make(chan struct{})
+	fixtureDone := make(chan struct{})
+	t.Cleanup(func() { close(fixtureDone) })
 	d, req := nativeDispatcherFixture(t, func(conn *websocket.Conn) {
+		ackWritten := false
+		postACKReads := 0
 		for {
 			var call struct {
 				ID     json.RawMessage
@@ -169,18 +175,34 @@ func TestNativeCodexUnsubscribeACKDoesNotReleaseLoadedThread(t *testing.T) {
 			case "thread/list", "thread/backgroundTerminals/list", "mcpServerStatus/list":
 				result = map[string]any{"data": []any{}}
 			case "thread/unsubscribe":
+				close(ackRequested)
+				select {
+				case <-releaseACK:
+				case <-fixtureDone:
+					return
+				}
 				result = map[string]any{"status": "unsubscribed"}
 			case "thread/loaded/list":
 				result = map[string]any{"data": []string{nativeTestThread}}
-				select {
-				case read <- struct{}{}:
-				default:
-				}
 			default:
 				return
 			}
 			if conn.WriteJSON(map[string]any{"id": call.ID, "result": result}) != nil {
 				return
+			}
+			if call.Method == "thread/unsubscribe" {
+				ackWritten = true
+			}
+			if call.Method == "thread/loaded/list" && ackWritten {
+				postACKReads++
+				// A second fresh read proves the consumer processed the first
+				// post-ACK loaded response and kept its original admission.
+				if postACKReads >= 2 {
+					select {
+					case read <- struct{}{}:
+					default:
+					}
+				}
 			}
 		}
 	})
@@ -196,6 +218,19 @@ func TestNativeCodexUnsubscribeACKDoesNotReleaseLoadedThread(t *testing.T) {
 		native.completion.Wait()
 	})
 	select {
+	case <-ackRequested:
+	case <-ctx.Done():
+		t.Fatal("native unsubscribe request not observed")
+	}
+	// A pre-ACK loaded observation cannot certify the post-ACK guard. The
+	// fixture has reached unsubscribe but has not sent its ACK yet.
+	select {
+	case <-read:
+		t.Fatal("pre-ACK loaded read satisfied the post-ACK control")
+	default:
+	}
+	close(releaseACK)
+	select {
 	case <-read:
 	case <-ctx.Done():
 		t.Fatal("no native post-ACK readback")
@@ -208,7 +243,11 @@ func TestNativeCodexUnsubscribeACKDoesNotReleaseLoadedThread(t *testing.T) {
 	native := session.(*nativeCodexSession)
 	native.nativeMu.Lock()
 	claimedUnload := len(native.record.UnloadReadback) != 0
+	ackObserved := native.record.UnsubscribeIntent && validateNativeUnsubscribeACK(native.record.UnsubscribeACK) == nil
 	native.nativeMu.Unlock()
+	if !ackObserved {
+		t.Fatal("post-ACK readback lacks the original unsubscribe ACK")
+	}
 	if claimedUnload {
 		t.Fatal("loaded thread acquired an unload receipt")
 	}
