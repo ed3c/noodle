@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 )
 
+var ErrReleaseBusy = errors.New("loop has unfinished work")
+
 type TerminalCause string
 
 const (
@@ -16,18 +18,22 @@ const (
 	TerminalMigrationDetach TerminalCause = "migration-detach"
 )
 
+// TerminalCause is read only after Run returns. Empty means no recorded cause.
+func (l *Loop) TerminalCause() TerminalCause { return l.terminalCause }
+
+// HostContinuation is captured by the Run actor at its final quiescent boundary.
 type HostContinuation struct {
 	Mode          string `json:"mode"`
 	DispatchState State  `json:"dispatch_state"`
 }
 
-func (l *Loop) TerminalCause() TerminalCause { return l.terminalCause }
-
-var ErrReleaseBusy = errors.New("loop has unfinished work")
-
 type releaseRequest struct {
-	ctx   context.Context
-	reply chan error
+	continuation *HostContinuation
+	ctx          context.Context
+	reply        chan error
+	cleanup      bool
+	automatic    bool
+	apply        bool
 }
 
 func (l *Loop) Ready() <-chan struct{} { return l.runReady }
@@ -38,7 +44,20 @@ func (l *Loop) FinishOnce() error { return l.releaseIfQuiescent() }
 
 // Release asks the Run actor to stop only after its workers and inputs settle.
 func (l *Loop) Release(ctx context.Context) error {
-	request := releaseRequest{ctx: ctx, reply: make(chan error, 1)}
+	return l.requestRelease(ctx, false, true, false, nil)
+}
+
+// Cleanup requires completed task evidence; Release also permits held migration.
+func (l *Loop) Cleanup(ctx context.Context, apply bool) error {
+	return l.requestRelease(ctx, true, apply, false, nil)
+}
+
+func (l *Loop) CleanupAutomatic(ctx context.Context) error {
+	return l.requestRelease(ctx, true, true, true, nil)
+}
+
+func (l *Loop) requestRelease(ctx context.Context, cleanup, apply, automatic bool, continuation *HostContinuation) error {
+	request := releaseRequest{ctx: ctx, reply: make(chan error, 1), cleanup: cleanup, apply: apply, automatic: automatic, continuation: continuation}
 	select {
 	case l.releaseRequests <- request:
 	case <-l.runDone:
@@ -55,6 +74,13 @@ func (l *Loop) Release(ctx context.Context) error {
 }
 
 func (l *Loop) releaseIfQuiescent() error {
+	if err := l.checkQuiescent(); err != nil {
+		return err
+	}
+	return l.finishRelease()
+}
+
+func (l *Loop) checkQuiescent() error {
 	if l.resourceUnknown != nil {
 		return l.resourceUnknown
 	}
@@ -85,6 +111,10 @@ func (l *Loop) releaseIfQuiescent() error {
 			return fmt.Errorf("%w: %s is pending", ErrReleaseBusy, name)
 		}
 	}
+	return nil
+}
+
+func (l *Loop) finishRelease() error {
 	if err := l.flushState(); err != nil {
 		return err
 	}
@@ -93,4 +123,21 @@ func (l *Loop) releaseIfQuiescent() error {
 	}
 	l.watcherWG.Wait()
 	return nil
+}
+
+func (l *Loop) ReleaseForSwitch(ctx context.Context) (HostContinuation, error) {
+	var saved HostContinuation
+	err := l.requestRelease(ctx, false, true, false, &saved)
+	if err != nil {
+		return HostContinuation{}, err
+	}
+	return saved, nil
+}
+
+func (l *Loop) HostRoundBoundary() (HostContinuation, bool) {
+	saved := l.hostRound.Load()
+	if saved == nil {
+		return HostContinuation{}, false
+	}
+	return *saved, true
 }

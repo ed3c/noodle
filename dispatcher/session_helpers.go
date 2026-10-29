@@ -14,7 +14,8 @@ func nowUTC() time.Time {
 
 const sessionHeartbeatTTLSeconds = 30
 
-func eventFromCanonical(sessionID string, canonical parse.CanonicalEvent) (event.Event, bool) {
+// FormatEventLines projects one canonical event into log and broadcast records.
+func FormatEventLines(sessionID string, canonical parse.CanonicalEvent) []event.Event {
 	timestamp := canonical.Timestamp
 	if timestamp.IsZero() {
 		timestamp = nowUTC()
@@ -28,30 +29,7 @@ func eventFromCanonical(sessionID string, canonical parse.CanonicalEvent) (event
 		return payload
 	}
 
-	switch canonical.Type {
-	case parse.EventInit:
-		return event.Event{
-			Type:      event.EventSpawned,
-			Payload:   makePayload(map[string]any{"message": canonical.Message, "provider": canonical.Provider}),
-			Timestamp: timestamp,
-			SessionID: sessionID,
-		}, true
-	case parse.EventAction:
-		action := parse.ParseActionMessage(canonical.Message)
-		payload := map[string]any{"message": canonical.Message}
-		if action.Tool != "" {
-			payload["tool"] = action.Tool
-		}
-		if action.Summary != "" {
-			payload["summary"] = action.Summary
-		}
-		return event.Event{
-			Type:      event.EventAction,
-			Payload:   makePayload(payload),
-			Timestamp: timestamp,
-			SessionID: sessionID,
-		}, true
-	case parse.EventResult:
+	costEvent := func() event.Event {
 		return event.Event{
 			Type: event.EventCost,
 			Payload: makePayload(map[string]any{
@@ -61,27 +39,55 @@ func eventFromCanonical(sessionID string, canonical parse.CanonicalEvent) (event
 			}),
 			Timestamp: timestamp,
 			SessionID: sessionID,
-		}, true
+		}
+	}
+
+	switch canonical.Type {
+	case parse.EventInit:
+		return []event.Event{{
+			Type:      event.EventSpawned,
+			Payload:   makePayload(map[string]any{"message": canonical.Message, "provider": canonical.Provider}),
+			Timestamp: timestamp,
+			SessionID: sessionID,
+		}}
+	case parse.EventAction:
+		action := parse.ParseActionMessage(canonical.Message)
+		payload := map[string]any{"message": canonical.Message}
+		if action.Tool != "" {
+			payload["tool"] = action.Tool
+		}
+		if action.Summary != "" {
+			payload["summary"] = action.Summary
+		}
+		actionEvent := event.Event{
+			Type:      event.EventAction,
+			Payload:   makePayload(payload),
+			Timestamp: timestamp,
+			SessionID: sessionID,
+		}
+		if canonical.CostUSD != 0 || canonical.TokensIn != 0 || canonical.TokensOut != 0 {
+			// Snapshot consumers clear the current action on cost records. Write
+			// usage first so a non-terminal action remains visible afterward.
+			return []event.Event{costEvent(), actionEvent}
+		}
+		return []event.Event{actionEvent}
+	case parse.EventResult:
+		return []event.Event{costEvent()}
 	case parse.EventError:
-		return event.Event{
+		return []event.Event{{
 			Type:      event.EventAction,
 			Payload:   makePayload(map[string]any{"message": canonical.Message, "tool": "Error", "summary": canonical.Message}),
 			Timestamp: timestamp,
 			SessionID: sessionID,
-		}, true
+		}}
 	case parse.EventComplete:
-		return event.Event{
+		return []event.Event{{
 			Type:      event.EventExited,
 			Payload:   makePayload(map[string]any{"message": canonical.Message, "outcome": "completed"}),
 			Timestamp: timestamp,
 			SessionID: sessionID,
-		}, true
+		}}
 	default:
-		return event.Event{}, false
+		return nil
 	}
-}
-
-// FormatEventLine converts a canonical event into an event.Event for sink broadcasting.
-func FormatEventLine(sessionID string, ce parse.CanonicalEvent) (event.Event, bool) {
-	return eventFromCanonical(sessionID, ce)
 }

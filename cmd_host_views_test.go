@@ -42,6 +42,9 @@ func TestHostViewsImportOfflineAndInspect(t *testing.T) {
 	if got := run("host", "views", "inspect"); !strings.Contains(got, `"id":"original"`) {
 		t.Fatalf("inspect: %s", got)
 	}
+	if got := run("host", "views", "inspect", "--run-id", "original"); !strings.Contains(got, `"id":"original"`) || strings.Contains(got, `"detail"`) {
+		t.Fatal("selected imported run not expanded", got)
+	}
 	for _, name := range []string{"host.sock", "host.lock", "receipts.json"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
 			t.Fatalf("offline import touched Host lifecycle %s", name)

@@ -29,6 +29,34 @@ function resources(value: unknown) {
   });
 }
 
+export function parseDetailRef(value: unknown) {
+  const ref = record(value);
+  if (
+    typeof ref.sha256 !== "string" ||
+    !/^[a-f0-9]{64}$/.test(ref.sha256) ||
+    typeof ref.bytes !== "number" ||
+    !Number.isSafeInteger(ref.bytes) ||
+    ref.bytes < 1 ||
+    ref.bytes > 32 * 1024 * 1024 ||
+    typeof ref.tracked !== "number" ||
+    !Number.isSafeInteger(ref.tracked) ||
+    ref.tracked < 0 ||
+    typeof ref.selected !== "number" ||
+    !Number.isSafeInteger(ref.selected) ||
+    ref.selected < 0
+  ) {
+    throw new Error("Invalid detail reference");
+  }
+  return {
+    sha256: ref.sha256,
+    bytes: ref.bytes,
+    tracked: ref.tracked,
+    selected: ref.selected,
+    artifact_ids: array(ref.artifact_ids, text),
+  };
+}
+export type DetailRef = ReturnType<typeof parseDetailRef>;
+
 export function parseLoopView(value: unknown) {
   const root = record(value);
   if (root.schema_version !== 1 && root.schema_version !== 2) {
@@ -41,6 +69,7 @@ export function parseLoopView(value: unknown) {
       const run = record(rawRun);
       return {
         id: text(run.id),
+        ...(run.detail === undefined ? {} : { detail: parseDetailRef(run.detail) }),
         repository: text(run.repository),
         mode: text(run.mode),
         status: text(run.status),
@@ -114,4 +143,31 @@ export async function fetchLoopView(previous?: LoopViewResponse, signal?: AbortS
     view: parseLoopView(await response.json()),
     etag: response.headers.get("ETag"),
   };
+}
+
+export async function fetchLoopRun(expected: LoopRun, signal?: AbortSignal): Promise<LoopRun> {
+  if (!expected.detail) {
+    throw new Error("Selected run detail reference missing");
+  }
+  const response = await fetch(
+    `/api/loops/runs/${encodeURIComponent(expected.id)}?ref=${expected.detail.sha256}`,
+    { signal },
+  );
+  if (!response.ok) {
+    throw new Error(`Run detail unavailable (${response.status})`);
+  }
+  const raw = record(await response.json());
+  const source = parseDetailRef(raw.projection_source);
+  const view = parseLoopView(raw);
+  if (
+    source.sha256 !== expected.detail.sha256 ||
+    source.bytes !== expected.detail.bytes ||
+    view.runs.length !== 1 ||
+    view.runs[0]?.id !== expected.id ||
+    view.runs[0]?.repository !== expected.repository ||
+    view.runs[0]?.mode !== expected.mode
+  ) {
+    throw new Error("Selected run version changed");
+  }
+  return view.runs[0];
 }

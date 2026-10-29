@@ -83,3 +83,44 @@ Source, camera and full-overlay controls do not dispatch runtime effects.
 This local UI revision has not been copied to medium-compiler: cloud changes are paused
 by the user. Cloud byte-equality and cloud interaction acceptance remain pending for the
 next explicitly resumed cloud delivery.
+
+## Bounded projection storage and details
+
+The display registry now stores a summary and immutable SHA-256 references to each
+complete run body and repository index. Each document remains limited to 32 MiB;
+the combined retained bodies may exceed that limit. Graph metadata itself is still
+bounded. An over-limit document is refused, never truncated. Import still performs
+the original whole-graph merge and reference validation; this change does not make
+import memory usage independent of accumulated history.
+
+The graph and run catalogue read only the summary. Repository navigation fetches
+100 index entries at a time from the selected version. Path search covers the
+complete selected tracked/selected index before pagination. Run details are loaded
+when selected. Cards and notes use an explicit run selector; their content search
+and counts cover that selected run, not all historical runs. Missing or changed
+details remain visibly unknown instead of becoming empty lists.
+
+The run detail endpoint retains the original Host enrichment, including current
+canonical attempts, prompts and review feedback. Its `projection_source` identifies
+the imported immutable body; it is not a digest of the later Host observations.
+Saved review selections resolve artifact metadata from their original projection
+version, then check the original source bytes. A new current graph does not rewrite
+old selection receipts or substitute current artifact rows.
+
+Existing registries require an explicit offline cutover with the matching display
+reader and importer version:
+
+```sh
+NOODLE_HOST_DIR=/path/to/display-registry noodle host views migrate
+NOODLE_HOST_DIR=/path/to/display-registry noodle host views inspect
+NOODLE_HOST_DIR=/path/to/display-registry noodle host views inspect --run-id RUN
+NOODLE_HOST_DIR=/path/to/display-registry noodle host views inspect --repository-id REPO
+```
+
+`migrate` uses the existing display lock and preserves the exact original bytes,
+legacy review version, immutable details and prepared/completed migration receipts.
+It does not start, stop or contact Host. Reads never migrate implicitly. A missing
+completion receipt blocks later reads/imports and requires inspection; retries do
+not silently complete an uncertain migration. Detail files and old graph versions
+are retained, with no automatic deletion. Deploying this code does not authorize
+migrating a live registry or replacing its active Host.

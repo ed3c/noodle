@@ -79,7 +79,7 @@ func recoverUnstarted(project, requestFile string) (hostResponse, error) {
 		return fail(errors.New("original receipt missing"))
 	}
 	original := receipts[index]
-	if original.ProjectDir != project || original.ConfigSHA256 != binding.ConfigSHA256 || original.BinarySHA256 != binding.BinarySHA256 || original.Mode != binding.Mode || original.HostDir != binding.HostDir {
+	if original.ProjectDir != project || original.ConfigSHA256 != binding.ConfigSHA256 || original.ConfigPath != binding.ConfigPath || original.BinarySHA256 != binding.BinarySHA256 || original.Mode != binding.Mode || original.HostDir != binding.HostDir {
 		return fail(errors.New("original request/receipt binding differs"))
 	}
 	if original.ContextState == "detached" {
@@ -91,7 +91,7 @@ func recoverUnstarted(project, requestFile string) (hostResponse, error) {
 	if original.HostPID <= 0 || procx.IsPIDAlive(original.HostPID) {
 		return fail(errors.New("original Host process is still alive or identity is unknown"))
 	}
-	cfg, err := readHostConfig(project)
+	cfg, err := readHostRequestConfig(hostRequest{ProjectDir: project, ConfigPath: binding.ConfigPath})
 	if err != nil {
 		return fail(err)
 	}

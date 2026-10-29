@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/poteto/noodle/dispatcher"
 	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/procx"
 )
@@ -38,10 +40,17 @@ func hostRecoveryPreflight(runtimeDir string) error {
 			return fmt.Errorf("session %s has unknown metadata; owner readback required", entry.Name())
 		}
 		var meta struct {
-			Status string `json:"status"`
+			Status  string `json:"status"`
+			Runtime string `json:"runtime"`
 		}
 		if err := json.Unmarshal(data, &meta); err != nil {
 			return fmt.Errorf("session %s has invalid metadata; owner readback required", entry.Name())
+		}
+		if meta.Runtime == dispatcher.CodexNativeRuntime {
+			if _, err := dispatcher.ReadReleasedNativeSession(context.Background(), runtimeDir, entry.Name()); err != nil {
+				return fmt.Errorf("session %s native owner readback: %w", entry.Name(), err)
+			}
+			continue
 		}
 		switch strings.ToLower(meta.Status) {
 		case "completed", "failed", "cancelled", "killed", "exited":

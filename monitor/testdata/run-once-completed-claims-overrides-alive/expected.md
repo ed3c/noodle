@@ -14,7 +14,7 @@ source_hash: b6210d549ce4ed189bd9ee6062809da2c781e8a2a16c29fda5145edfb16bb465
       "returned_meta_count": 1,
       "ticket_count": 0,
       "status_by_session": {
-        "cook-stuck-complete": "exited"
+        "cook-stuck-complete": "running"
       },
       "action_by_session": {
         "cook-stuck-complete": "turn complete"

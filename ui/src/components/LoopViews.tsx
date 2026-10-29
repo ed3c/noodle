@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchLoopView } from "~/client/loop-views";
+import { fetchLoopView, fetchLoopRun } from "~/client/loop-views";
 import type { LoopRun, LoopView, LoopViewResponse } from "~/client/loop-views";
 import "./loop-views.css";
 
@@ -189,6 +189,33 @@ function RunDetail({ run }: { run: LoopRun }) {
   );
 }
 
+export function useLoopRun(summary: LoopRun | undefined) {
+  return useQuery({
+    queryKey: ["loop-run", summary?.id, summary?.detail?.sha256],
+    queryFn: ({ signal }) => {
+      if (!summary) {
+        throw new Error("Run missing");
+      }
+      return fetchLoopRun(summary, signal);
+    },
+    enabled: Boolean(summary?.detail),
+    retry: false,
+    refetchInterval: 3000,
+    refetchIntervalInBackground: false,
+  });
+}
+function SelectedRun({ summary }: { summary: LoopRun }) {
+  const query = useLoopRun(summary);
+  const run = summary.detail ? query.data : summary;
+  return (
+    <>
+      {query.isError && <p role="alert">{query.error.message}。目前明細未知；保留上次成功讀回。</p>}
+      {!run && !query.isError && <p role="status">讀取選定任務明細…</p>}
+      {run && <RunDetail run={run} />}
+    </>
+  );
+}
+
 export function LoopViewsContent({ view }: { view: LoopView }) {
   const [selected, setSelected] = useState<string>();
   const run = view.runs.find((item) => item.id === selected) ?? view.runs[0];
@@ -215,7 +242,8 @@ export function LoopViewsContent({ view }: { view: LoopView }) {
               </button>
             ))}
           </nav>
-          {run && <RunDetail run={run} />}
+          {run &&
+            (run.detail ? <SelectedRun key={run.id} summary={run} /> : <RunDetail run={run} />)}
         </div>
       )}
     </>

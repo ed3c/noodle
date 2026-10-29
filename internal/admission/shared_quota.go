@@ -15,7 +15,7 @@ import (
 	"github.com/poteto/noodle/internal/lockfile"
 )
 
-// Schema 2 binds inclusive Swap ceilings to one admission policy.
+// Schema 2 binds inclusive Swap ceilings and warning admission to one policy.
 // Older Hosts reject it rather than sharing allocations under different rules.
 const sharedQuotaSchema = 2
 
@@ -121,13 +121,16 @@ func (q *sharedQuota) access(maximum int, write bool, apply func(*quotaState) er
 	return nil
 }
 
-func (q *sharedQuota) acquire(context string, maximum int, now time.Time, limited, resident bool, residentKey string, retiring bool) (string, error) {
+func (q *sharedQuota) acquire(context string, maximum int, now time.Time, limited, resident bool, residentKey string, retiring, exclusive bool) (string, error) {
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return "", err
 	}
 	id := hex.EncodeToString(nonce[:])
 	err := q.update(maximum, func(s *quotaState) error {
+		if exclusive && len(s.Leases) != 0 {
+			return ErrDeferred
+		}
 		for _, lease := range s.Leases {
 			if lease.Exclusive {
 				return ErrDeferred
@@ -153,7 +156,7 @@ func (q *sharedQuota) acquire(context string, maximum int, now time.Time, limite
 		if len(s.Leases) >= s.Maximum || (limited && window <= s.LastStart) {
 			return ErrDeferred
 		}
-		s.Leases[id] = quotaLease{Owner: q.owner, Context: context, Resident: resident, ResidentKey: residentKey}
+		s.Leases[id] = quotaLease{Owner: q.owner, Context: context, Resident: resident, ResidentKey: residentKey, Exclusive: exclusive}
 		if limited {
 			s.LastStart = window
 		}

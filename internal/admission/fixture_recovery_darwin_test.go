@@ -158,6 +158,15 @@ func TestFixtureRecoveryLegacyOrphan(t *testing.T) {
 				t.Fatal(err)
 			}
 			waited = true
+			priorPath := m.path
+			successor, err := OpenFixtureRecovery(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = successor.Inherit(filepath.Dir(priorPath)); err != nil {
+				t.Fatal(err)
+			}
+			m = successor
 			deadline = time.Now().Add(5 * time.Second)
 			var final FixtureReclamation
 			for {
@@ -184,6 +193,9 @@ func TestFixtureRecoveryLegacyOrphan(t *testing.T) {
 			}
 			if len(final.Actions) != want || final.Evidence == nil {
 				t.Fatalf("recovery evidence/actions: %+v", final)
+			}
+			if final.OriginJournal != priorPath {
+				t.Fatal("original owner journal provenance missing", final)
 			}
 			for _, a := range final.Actions {
 				if a.Result != "sent" || a.IntentAt == "" || a.ResultAt == "" {

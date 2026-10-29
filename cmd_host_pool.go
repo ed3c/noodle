@@ -27,7 +27,6 @@ type hostGeneration struct {
 	Process   procx.ProcessRecord `json:"process"`
 	Error     string              `json:"error,omitempty"`
 }
-
 type hostVersionRequest struct {
 	MaintenanceState string `json:"maintenance_previous_state,omitempty"`
 	ID               string `json:"id"`
@@ -37,12 +36,11 @@ type hostVersionRequest struct {
 	Generation       string `json:"generation,omitempty"`
 	Error            string `json:"error,omitempty"`
 }
-
 type hostTaskOwner struct {
 	MaintenanceHold       string                 `json:"maintenance_hold,omitempty"`
-	ExecutionProfile      json.RawMessage        `json:"execution_profile,omitempty"`
+	ExecutionProfile      *hostExecutionProfile  `json:"execution_profile,omitempty"`
 	ControllerOnly        bool                   `json:"controller_only,omitempty"`
-	ContextInputs         json.RawMessage        `json:"context_inputs,omitempty"`
+	ContextInputs         *hostContextInputs     `json:"context_inputs,omitempty"`
 	RebuildError          string                 `json:"rebuild_error,omitempty"`
 	LastAdmission         *hostResponse          `json:"last_admission,omitempty"`
 	RoundState            *loop.HostContinuation `json:"round_state,omitempty"`
@@ -55,12 +53,38 @@ type hostTaskOwner struct {
 	Previous              []hostReceipt          `json:"previous,omitempty"`
 }
 
+func historicalHostContext(owner hostTaskOwner, id string) bool {
+	if id == "" {
+		return false
+	}
+	if id == owner.Current.ContextID || id == owner.Original.ContextID {
+		return true
+	}
+	for _, previous := range owner.Previous {
+		if id == previous.ContextID {
+			return true
+		}
+	}
+	return false
+}
+
 type hostPool struct {
 	Schema      int                       `json:"schema"`
 	Active      string                    `json:"active"`
 	Generations map[string]hostGeneration `json:"generations"`
 	Owners      map[string]hostTaskOwner  `json:"owners"`
 	Queue       []hostVersionRequest      `json:"queue"`
+}
+type rollingCarry struct {
+	request hostRequest
+}
+type hostRolling struct {
+	root       string
+	generation string
+	retiring   bool
+	carry      map[string]rollingCarry
+	fence      *lockfile.Lock
+	failure    string
 }
 
 func readHostPool(root string) (hostPool, error) {
@@ -82,7 +106,6 @@ func readHostPool(root string) (hostPool, error) {
 	}
 	return p, nil
 }
-
 func updateHostPool(root string, apply func(*hostPool) error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -106,7 +129,6 @@ func updateHostPool(root string, apply func(*hostPool) error) error {
 	}
 	return filex.WriteFileAtomicDurable(filepath.Join(root, "pool.json"), data)
 }
-
 func validPoolID(id string) bool {
 	if len(id) != 32 {
 		return false
@@ -137,7 +159,6 @@ func nativeHostRPC(ctx context.Context, dir string, req hostRequest) (json.RawMe
 	err = json.NewDecoder(io.LimitReader(conn, 4<<20)).Decode(&raw)
 	return raw, err
 }
-
 func publishPoolSocket(root, dir string) error {
 	if pending, err := hostMaintenancePending(root); err != nil || pending {
 		return err
@@ -163,10 +184,26 @@ func publishPoolSocket(root, dir string) error {
 	return filex.SyncDir(root)
 }
 
+func repairPoolSocket(root, generation string) error {
+	expected := filepath.Join(root, "g", generation, "host.sock")
+	current, err := os.Readlink(filepath.Join(root, "host.sock"))
+	if err == nil && current == expected {
+		return nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return updateHostPool(root, func(p *hostPool) error {
+		if p.Active != generation {
+			return errors.New("selected Host changed before entry publication")
+		}
+		return publishPoolSocket(root, p.Generations[generation].Directory)
+	})
+}
 func generationLive(g hostGeneration) bool { return g.State != "exited" && g.State != "failed" }
 
-// The confirmed maintenance owner launches one generation. Historical version
-// queue entries remain metadata; this function never consumes them.
+// The existing Host actor owns both the version queue and activation. No
+// additional resident coordinator or connection carrier is created.
 func launchHostGeneration(ctx context.Context, root, binary, digest string) (hostGeneration, error) {
 	data, err := os.ReadFile(binary)
 	if err != nil || hostDigest(data) != digest {
@@ -251,4 +288,43 @@ func launchHostGeneration(ctx context.Context, root, binary, digest string) (hos
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+}
+
+func ensureRollingHost(ctx context.Context, binary, root string) error {
+	lock, err := lockfile.TryLock(filepath.Join(root, "launch.lock"))
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if p, err := readHostPool(root); err == nil && p.Active != "" {
+		if _, err = nativeHostRPC(ctx, p.Generations[p.Active].Directory, hostRequest{Operation: "resources"}); err != nil {
+			return errors.New("selected Host unavailable; original generation readback required")
+		}
+		return nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	// Shared fencing prevents an old unpooled launcher from starting a second,
+	// independently budgeted Host during or after the one-time maintenance.
+	fence, err := lockfile.TryLockShared(filepath.Join(root, "host.lock"))
+	if err != nil {
+		return fmt.Errorf("initial maintenance required: %w", err)
+	}
+	defer fence.Close()
+	if conn, dialErr := net.DialTimeout("unix", filepath.Join(root, "host.sock"), 100*time.Millisecond); dialErr == nil {
+		conn.Close()
+		return errors.New("legacy Host still owns the entry; complete initial maintenance first")
+	}
+	data, err := os.ReadFile(binary)
+	if err != nil {
+		return err
+	}
+	g, err := launchHostGeneration(ctx, root, binary, hostDigest(data))
+	if err != nil {
+		return err
+	}
+	if err = updateHostPool(root, func(p *hostPool) error { p.Active = g.ID; g.State = "active"; p.Generations[g.ID] = g; return nil }); err != nil {
+		return err
+	}
+	return publishPoolSocket(root, g.Directory)
 }

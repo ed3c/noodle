@@ -2,6 +2,7 @@ package loop
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,21 +10,36 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/poteto/noodle/dispatcher"
 	"github.com/poteto/noodle/event"
 	"github.com/poteto/noodle/internal/state"
+	"github.com/poteto/noodle/worktree"
 )
 
-// Local tasks use native process completion, not an Issue stage_message.
+// Local tasks use the selected runtime's completion evidence, not an Issue stage_message.
 func (l *Loop) isAdmittedLocalTask(order state.OrderNode, stage state.StageNode) bool {
 	var prompt struct {
-		Kind       string   `json:"kind"`
-		Goal       string   `json:"goal"`
-		WritePaths []string `json:"write_paths"`
+		Kind       string        `json:"kind"`
+		Goal       string        `json:"goal"`
+		WritePaths []string      `json:"write_paths"`
+		Role       *taskRoleFile `json:"task_role"`
 	}
-	return slices.Contains(l.config.Runtime.Process.AdmittedOrders, order.OrderID) &&
+	admitted := l.config.Runtime.AdmittedOrders
+	if len(admitted) == 0 && (stage.Runtime == "process" || stage.Runtime == dispatcher.CodexNativeRuntime) {
+		admitted = l.config.Runtime.Process.AdmittedOrders
+	}
+	return slices.Contains(admitted, order.OrderID) &&
 		len(order.Stages) == 1 && stage.StageIndex == 0 && stage.TaskKey == "local-task" && stage.Skill == "local-task" &&
-		stage.Provider == "codex" && stage.Runtime == "process" && !l.config.Agents.Codex.RequireTypedOutcome &&
-		json.Unmarshal([]byte(stage.Prompt), &prompt) == nil && prompt.Kind == "local_task" && prompt.Goal != "" && len(prompt.WritePaths) > 0
+		l.localTaskRoute(stage) &&
+		json.Unmarshal([]byte(stage.Prompt), &prompt) == nil && prompt.Kind == "local_task" && prompt.Goal != "" && (len(prompt.WritePaths) > 0 || prompt.Role != nil)
+}
+
+func (l *Loop) localTaskRoute(stage state.StageNode) bool {
+	if stage.Provider == "codex" && l.config.Agents.Codex.RequireTypedOutcome {
+		return false
+	}
+	return ((stage.Runtime == "process" || stage.Runtime == dispatcher.CodexNativeRuntime) && stage.Provider == "codex") ||
+		(stage.Runtime == "openshell" && (stage.Provider == "codex" || stage.Provider == "pi"))
 }
 
 func (l *Loop) validateLocalTaskSession(order state.OrderNode, stage state.StageNode, b requestChangesBinding) error {
@@ -50,20 +66,31 @@ func (l *Loop) validateLocalTaskSession(order state.OrderNode, stage state.Stage
 		return fmt.Errorf("local task has unexpected stage_message")
 	}
 	dir := filepath.Join(l.runtimeDir, "sessions", b.SessionID)
-	var meta struct {
-		SessionID string `json:"session_id"`
-		Status    string `json:"status"`
-		Alive     *bool  `json:"alive"`
-		Provider  string `json:"provider"`
-		Model     string `json:"model"`
-		Runtime   string `json:"runtime"`
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "meta.json"))
-	if err != nil {
-		return err
-	}
-	if json.Unmarshal(data, &meta) != nil || meta.SessionID != b.SessionID || meta.Status != "exited" || meta.Alive == nil || *meta.Alive || meta.Provider != stage.Provider || meta.Model != stage.Model || meta.Runtime != stage.Runtime {
-		return fmt.Errorf("local task terminal metadata differs")
+	var data []byte
+	if stage.Runtime == dispatcher.CodexNativeRuntime {
+		record, readErr := dispatcher.ReadReleasedNativeSession(context.Background(), l.runtimeDir, b.SessionID)
+		if readErr != nil {
+			return readErr
+		}
+		if record.Terminal != "completed" || record.Worktree != b.WorktreePath || record.OrderID != order.OrderID || record.TaskKey != stage.TaskKey || record.Model != stage.Model {
+			return fmt.Errorf("local task native terminal binding differs")
+		}
+	} else {
+		var meta struct {
+			SessionID string `json:"session_id"`
+			Status    string `json:"status"`
+			Alive     *bool  `json:"alive"`
+			Provider  string `json:"provider"`
+			Model     string `json:"model"`
+			Runtime   string `json:"runtime"`
+		}
+		data, err = os.ReadFile(filepath.Join(dir, "meta.json"))
+		if err != nil {
+			return err
+		}
+		if json.Unmarshal(data, &meta) != nil || meta.SessionID != b.SessionID || meta.Status != "exited" || meta.Alive == nil || *meta.Alive || meta.Provider != stage.Provider || meta.Model != stage.Model || meta.Runtime != stage.Runtime {
+			return fmt.Errorf("local task terminal metadata differs")
+		}
 	}
 	var spawn struct {
 		SessionID    string          `json:"session_id"`
@@ -74,12 +101,23 @@ func (l *Loop) validateLocalTaskSession(order state.OrderNode, stage state.Stage
 		Model        string          `json:"model"`
 		Runtime      string          `json:"runtime"`
 		Skill        string          `json:"skill"`
+		TaskRole     string          `json:"task_role"`
 	}
 	data, err = os.ReadFile(filepath.Join(dir, "spawn.json"))
 	if err != nil {
 		return err
 	}
-	if json.Unmarshal(data, &spawn) != nil || spawn.SessionID != b.SessionID || spawn.WorktreePath != b.WorktreePath || spawn.RetryCount != b.Attempt || len(spawn.Sync) != 0 || spawn.Provider != stage.Provider || spawn.Model != stage.Model || spawn.Runtime != stage.Runtime || spawn.Skill != stage.Skill {
+	// The saved predecessor role survives editing the next role's prompt.
+	originalPrompt, err := json.Marshal(map[string]any{"kind": "local_task", "task_role": b.TaskRole})
+	if err != nil {
+		return err
+	}
+	roleKey, roleSkill, err := l.taskRole(dispatchCandidate{OrderID: order.OrderID, StageIndex: stage.StageIndex,
+		Stage: Stage{TaskKey: stage.TaskKey, Skill: stage.Skill, Provider: stage.Provider, Runtime: stage.Runtime, Prompt: string(originalPrompt)}})
+	if err != nil {
+		return err
+	}
+	if json.Unmarshal(data, &spawn) != nil || spawn.TaskRole != roleKey || spawn.SessionID != b.SessionID || spawn.WorktreePath != b.WorktreePath || spawn.RetryCount != b.Attempt || len(spawn.Sync) != 0 || spawn.Provider != stage.Provider || spawn.Model != stage.Model || spawn.Runtime != stage.Runtime || spawn.Skill != roleSkill {
 		return fmt.Errorf("local task spawn definition differs")
 	}
 	return nil
@@ -104,7 +142,11 @@ func (l *Loop) validateLocalTaskCandidate(c localTaskCandidate, order state.Orde
 	if c.Schema != 1 || c.OrderID != order.OrderID || c.SessionID != b.SessionID || c.AttemptID != b.AttemptID || c.Worktree != b.WorktreePath || c.Head != b.Head || c.SpawnSHA256 != b.Files["spawn.json"] {
 		return fmt.Errorf("local task candidate custody differs")
 	}
-	index, err := boundGitCommand(l.deps.Execution, b.WorktreePath, "-C", b.WorktreePath, "ls-files", "--stage", "-z").Output()
+	physical, err := l.taskWorktreePhysical(b.WorktreePath)
+	if err != nil {
+		return err
+	}
+	index, err := boundGitCommand(l.deps.Execution, physical, "-C", physical, "ls-files", "--stage", "-z").Output()
 	if err != nil {
 		return err
 	}
@@ -117,15 +159,16 @@ func (l *Loop) validateLocalTaskCandidate(c localTaskCandidate, order state.Orde
 	if err := json.Unmarshal([]byte(order.Stages[0].Prompt), &prompt); err != nil {
 		return err
 	}
-	if len(c.Files) < len(prompt.WritePaths) {
-		return fmt.Errorf("local task candidate files missing")
+	names, err := l.localTaskScopeFiles(physical, prompt.WritePaths)
+	if err != nil {
+		return err
 	}
-	for _, name := range prompt.WritePaths {
+	for name := range names {
 		if _, ok := c.Files[name]; !ok {
 			return fmt.Errorf("local task candidate admitted file missing")
 		}
 	}
-	return l.validateLocalTaskFiles(c, b.WorktreePath)
+	return l.validateLocalTaskFiles(c, physical)
 }
 
 func (l *Loop) validateLocalTaskFiles(c localTaskCandidate, root string) error {
@@ -142,6 +185,12 @@ func (l *Loop) validateLocalTaskFiles(c localTaskCandidate, root string) error {
 			}
 		}
 	}
+	return validateLocalTaskFileBytes(c, root)
+}
+
+// Raw candidate bytes can be checked after safe Git plumbing has established a
+// clean checkout, without invoking normal project diff filters or fsmonitor.
+func validateLocalTaskFileBytes(c localTaskCandidate, root string) error {
 	for name, expected := range c.Files {
 		if name == "." || name == ".." || filepath.IsAbs(name) || filepath.Clean(name) != name || strings.HasPrefix(name, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("local task candidate path invalid")
@@ -281,15 +330,20 @@ func (l *Loop) controlRecoverLocalTaskReview(cmd ControlCommand) error {
 }
 
 func (l *Loop) localTaskWorktreeDigest(stage state.StageNode, root string) (string, error) {
+	physical, err := l.taskWorktreePhysical(root)
+	if err != nil {
+		return "", err
+	}
+	root = physical
 	var prompt struct {
 		WritePaths []string `json:"write_paths"`
 	}
 	if err := json.Unmarshal([]byte(stage.Prompt), &prompt); err != nil {
 		return "", err
 	}
-	names := map[string]bool{}
-	for _, name := range prompt.WritePaths {
-		names[name] = true
+	names, err := l.localTaskScopeFiles(root, prompt.WritePaths)
+	if err != nil {
+		return "", err
 	}
 	for _, args := range [][]string{{"diff", "--name-only", "--no-renames", "-z", "HEAD", "--"}, {"ls-files", "--others", "--exclude-standard", "-z"}} {
 		data, err := boundGitCommand(l.deps.Execution, root, append([]string{"-C", root}, args...)...).Output()
@@ -357,6 +411,9 @@ func (l *Loop) localTaskRevisionForDispatch(cand dispatchCandidate, attempt int)
 	if err := decodeStoppedReview(raw, &receipt); err != nil {
 		return false, err
 	}
+	if attempt > receipt.Binding.Attempt+1 {
+		return l.localTaskSavedRevisionForDispatch(cand, attempt, order, receipt)
+	}
 	if stage.Status != state.StagePending || attempt != len(stage.Attempts) || attempt != receipt.Binding.Attempt+1 || cand.Stage.Prompt != stage.Prompt || cand.StageIndex != 0 {
 		return false, fmt.Errorf("local task revision dispatch custody differs")
 	}
@@ -367,4 +424,57 @@ func (l *Loop) localTaskRevisionForDispatch(cand dispatchCandidate, attempt int)
 		return false, err
 	}
 	return true, nil
+}
+
+// A consumed review grant remains history when a later revision is stopped.
+// Only the new, durable saved-progress offer can authorize its successor.
+func (l *Loop) localTaskSavedRevisionForDispatch(cand dispatchCandidate, attempt int, order state.OrderNode, receipt requestChangesRequeued) (bool, error) {
+	stage := order.Stages[0]
+	refuse := fmt.Errorf("local task saved revision dispatch custody differs")
+	if order.Status != state.OrderActive || stage.Status != state.StageReview || stage.Runtime != "openshell" || cand.StageIndex != 0 || cand.Stage.Prompt != stage.Prompt || attempt != len(stage.Attempts) || attempt < 2 || receipt.Binding.Attempt < 0 || receipt.Binding.Attempt >= attempt-1 {
+		return false, refuse
+	}
+	prior := stage.Attempts[receipt.Binding.Attempt]
+	if prior.AttemptID != receipt.Binding.AttemptID || prior.SessionID != receipt.Binding.SessionID || prior.AttemptID != dispatchAttemptID(order.OrderID, 0, receipt.Binding.Attempt) {
+		return false, refuse
+	}
+	var grants []savedProgressAttempt
+	if err := json.Unmarshal(stage.Extra[savedProgressAttemptsKey], &grants); err != nil || len(grants) == 0 {
+		return false, refuse
+	}
+	grant := grants[len(grants)-1]
+	predecessor := stage.Attempts[attempt-1]
+	review, ok := l.canonical.PendingReviews[order.OrderID]
+	if !ok || review.OrderID != order.OrderID || review.StageIndex != 0 || review.SessionID != predecessor.SessionID || review.WorktreeName != predecessor.WorktreeName || review.WorktreePath != l.worktreePath(predecessor.WorktreeName) || review.Prompt != stage.Prompt || review.Runtime != stage.Runtime || review.Provider != stage.Provider || review.Model != stage.Model || review.Skill != stage.Skill || review.TaskKey != stage.TaskKey || !slices.Equal(review.Plan, order.Plan) {
+		return false, refuse
+	}
+	if (predecessor.Status != state.AttemptCancelled && predecessor.Status != state.AttemptFailed) || predecessor.AttemptID != dispatchAttemptID(order.OrderID, 0, attempt-1) || predecessor.WorktreeName != cookBaseName(order.OrderID, 0, stage.TaskKey) || grant.SessionID != predecessor.SessionID || grant.NextAttemptID != dispatchAttemptID(order.OrderID, 0, attempt) || len(grant.Version) != 64 || strings.Trim(grant.Version, "0123456789abcdef") != "" || grant.CommandID != "saved-progress-"+grant.Version || grant.ProgressHead == "" {
+		return false, refuse
+	}
+	head, err := recoveryGitWithExecution(l.deps.Execution, review.WorktreePath, "rev-parse", "HEAD")
+	if err != nil {
+		return false, err
+	}
+	if head != grant.ProgressHead {
+		return false, refuse
+	}
+	return true, nil
+}
+
+func (l *Loop) taskWorktreePhysical(logical string) (string, error) {
+	physical, err := filepath.EvalSymlinks(logical)
+	if err != nil {
+		return "", err
+	}
+	if physical == logical {
+		return physical, nil
+	}
+	if l.deps.Execution == nil {
+		return "", fmt.Errorf("original worktree execution owner unavailable")
+	}
+	custody, err := worktree.ReadCustody(context.Background(), l.deps.Execution, logical)
+	if err != nil {
+		return "", err
+	}
+	return custody.Physical, nil
 }

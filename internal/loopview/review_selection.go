@@ -111,7 +111,7 @@ func SaveReviewSelection(dir, version, run, kind, target string) (ReviewReadback
 		return ReviewReadback{}, err
 	}
 	defer lock.Close()
-	view, err := Load(dir)
+	view, err := LoadSummary(dir)
 	if err != nil {
 		return ReviewReadback{}, err
 	}
@@ -122,7 +122,7 @@ func SaveReviewSelection(dir, version, run, kind, target string) (ReviewReadback
 		if json.Unmarshal(data, &prior) != nil || prior.Version != 1 || prior.ID != key || reviewID(prior) != key {
 			return ReviewReadback{}, fmt.Errorf("selection receipt changed")
 		}
-		return readReview(view, prior), nil
+		return readStoredReview(dir, view, prior), nil
 	} else if !os.IsNotExist(readErr) {
 		return ReviewReadback{}, readErr
 	}
@@ -160,7 +160,7 @@ func SaveReviewSelection(dir, version, run, kind, target string) (ReviewReadback
 			return ReviewReadback{}, err
 		}
 	}
-	return readReview(view, s), nil
+	return readStoredReview(dir, view, s), nil
 }
 func readReview(view View, s ReviewSelection) ReviewReadback {
 	result := ReviewReadback{Selection: s, Status: "current", Sources: []ArtifactResult{}, Effects: []string{}}
@@ -206,7 +206,7 @@ func readReview(view View, s ReviewSelection) ReviewReadback {
 
 // InspectReviewSelections reads explicit references; it neither consumes nor dispatches them.
 func InspectReviewSelections(dir, requestPath, id string) ([]ReviewReadback, error) {
-	view, err := Load(dir)
+	view, err := LoadSummary(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -239,10 +239,34 @@ func InspectReviewSelections(dir, requestPath, id string) ([]ReviewReadback, err
 		if s.Request.Source == nil || s.Request.Source.Path != requestPath {
 			continue
 		}
-		result = append(result, readReview(view, s))
+		result = append(result, readStoredReview(dir, view, s))
 	}
 	if id != "" && len(result) != 1 {
 		return nil, fmt.Errorf("selection not found for original request")
 	}
 	return result, nil
+}
+
+// A saved selection resolves sources from its original graph, not today's registry.
+func readStoredReview(dir string, current View, s ReviewSelection) ReviewReadback {
+	original, err := LoadVersion(dir, s.GraphVersion)
+	if os.IsNotExist(err) {
+		raw, e := boundedRead(filepath.Join(dir, "loop-view-legacy-versions", s.GraphVersion+".json"))
+		if e == nil {
+			original, err = Decode(raw)
+			if err == nil && ReviewVersion(original) != s.GraphVersion {
+				err = fmt.Errorf("legacy projection version changed")
+			}
+		} else {
+			err = e
+		}
+	}
+	if err != nil {
+		return ReviewReadback{Selection: s, Status: "unknown", Sources: []ArtifactResult{}, Effects: []string{}, Problem: "original projection unavailable: " + err.Error()}
+	}
+	result := readReview(original, s)
+	if ReviewVersion(current) != s.GraphVersion && result.Status == "current" {
+		result.Status = "stale"
+	}
+	return result
 }

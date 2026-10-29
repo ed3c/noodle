@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/poteto/noodle/event"
 	"github.com/poteto/noodle/internal/filex"
-	"github.com/poteto/noodle/internal/procx"
 	"github.com/poteto/noodle/internal/reducer"
 	"github.com/poteto/noodle/internal/state"
 )
@@ -201,6 +199,9 @@ func (l *Loop) controlRecoverLocalTaskMerge(cmd ControlCommand) error {
 		return fmt.Errorf("local task original order differs")
 	}
 	stage := order.Stages[0]
+	if stage.Runtime == "openshell" {
+		return fmt.Errorf("OpenShell merge restoration is unavailable; preserve the original candidate and inspect its owner")
+	}
 	if len(stage.Attempts) == 0 {
 		return fmt.Errorf("local task original attempt missing")
 	}
@@ -227,7 +228,7 @@ func (l *Loop) controlRecoverLocalTaskMerge(cmd ControlCommand) error {
 	if err := l.validateLocalTaskSession(order, stage, b); err != nil {
 		return err
 	}
-	for _, name := range recoverySessionFiles {
+	for _, name := range recoveryFiles(stage.Runtime) {
 		raw, err := os.ReadFile(filepath.Join(l.runtimeDir, "sessions", b.SessionID, name))
 		if err != nil {
 			return err
@@ -237,23 +238,8 @@ func (l *Loop) controlRecoverLocalTaskMerge(cmd ControlCommand) error {
 	if b.Files["spawn.json"] != c.SpawnSHA256 {
 		return fmt.Errorf("local task original spawn changed")
 	}
-	var process struct {
-		SessionID string `json:"session_id"`
-		PID       int    `json:"pid"`
-	}
-	raw, err := os.ReadFile(filepath.Join(l.runtimeDir, "sessions", b.SessionID, "process.json"))
-	if err != nil {
+	if err := l.recoverySessionExit(order.OrderID, stage, b); err != nil {
 		return err
-	}
-	if json.Unmarshal(raw, &process) != nil || process.SessionID != b.SessionID || process.PID <= 1 {
-		return fmt.Errorf("local task original process differs")
-	}
-	absent, err := procx.ProcessGroupAbsent(process.PID)
-	if err != nil {
-		return err
-	}
-	if !absent {
-		return fmt.Errorf("local task original process is live")
 	}
 	var prompt struct {
 		WritePaths []string `json:"write_paths"`
@@ -262,7 +248,7 @@ func (l *Loop) controlRecoverLocalTaskMerge(cmd ControlCommand) error {
 		return err
 	}
 	for name := range c.Files {
-		if !slices.Contains(prompt.WritePaths, name) {
+		if !localTaskPathAllowed(prompt.WritePaths, name) {
 			return fmt.Errorf("local task restoration exceeds admitted paths")
 		}
 	}

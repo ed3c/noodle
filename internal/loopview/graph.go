@@ -67,6 +67,7 @@ type RepositoryObservation struct {
 	Gap          *string `json:"gap"`
 }
 type Repository struct {
+	Detail        *DetailRef             `json:"detail,omitempty"`
 	Observation   *RepositoryObservation `json:"observation,omitempty"`
 	ID            string                 `json:"id"`
 	Label         string                 `json:"label"`
@@ -373,6 +374,11 @@ func validateGraph(view View) error {
 		}
 	}
 	for _, r := range g.Repositories {
+		if r.Detail != nil {
+			if err := refsExist(r.Detail.ArtifactIDs, artifacts); err != nil {
+				return err
+			}
+		}
 		if o := r.Observation; o != nil {
 			sameRevision := o.Revision == nil && r.Revision == nil || o.Revision != nil && r.Revision != nil && *o.Revision == *r.Revision
 			if o.Scope != "display_readback" || o.ObservedAt == "" || !sameRevision || !oneOf(o.Status, "observed", "unknown") {

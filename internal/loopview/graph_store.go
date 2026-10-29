@@ -120,6 +120,18 @@ func Metadata(view View) View {
 }
 
 func validateImport(view View) error {
+	for _, run := range view.Runs {
+		if run.Detail != nil {
+			return fmt.Errorf("imported run contains stored detail reference")
+		}
+	}
+	if view.Graph != nil {
+		for _, repo := range view.Graph.Repositories {
+			if repo.Detail != nil {
+				return fmt.Errorf("imported repository contains stored detail reference")
+			}
+		}
+	}
 	data, err := json.Marshal(view)
 	if err != nil {
 		return err

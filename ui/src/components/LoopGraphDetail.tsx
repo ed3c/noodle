@@ -7,11 +7,19 @@ import type { GraphSelection } from "./LoopGraphCanvas";
 import { findingSymbol } from "~/client/loop-graph-presentation";
 import { LoopGraphComparison } from "./LoopGraphComparison";
 
-function FileContent({ selection }: { selection: Extract<GraphSelection, { kind: "file" }> }) {
+function FileContent({
+  selection,
+  graph,
+}: {
+  selection: Extract<GraphSelection, { kind: "file" }>;
+  graph: LoopGraph;
+}) {
+  const digest = graph.repositories.find((repo) => repo.id === selection.repository)?.detail
+    ?.sha256;
   const { entry } = selection;
   const query = useQuery({
-    queryKey: ["loop-git-file", selection.repository, entry.id, entry.git_blob],
-    queryFn: ({ signal }) => fetchGraphFile(selection.repository, entry, signal),
+    queryKey: ["loop-git-file", selection.repository, entry.id, entry.git_blob, digest],
+    queryFn: ({ signal }) => fetchGraphFile(selection.repository, entry, { signal, digest }),
     enabled: entry.git_blob !== null,
     retry: false,
     staleTime: Infinity,
@@ -211,7 +219,7 @@ export function LoopGraphDetail({
         </div>
       )}
       {selection.kind === "file" && inputs.length === 0 ? (
-        <FileContent selection={selection} />
+        <FileContent selection={selection} graph={graph} />
       ) : (
         <LoopGraphComparison
           key={`${selection.kind}:${selection.id}`}

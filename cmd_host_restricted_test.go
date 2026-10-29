@@ -79,7 +79,15 @@ func TestRestrictedRecoveryRequiresNativePauseThenCheckpoint(t *testing.T) {
 func TestRestrictedImportRetainsHistoryAndHoldsAllWork(t *testing.T) {
 	root := t.TempDir()
 	oldID, newSource := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	old := hostPool{Schema: 1, Active: oldID, Generations: map[string]hostGeneration{oldID: {ID: oldID, Directory: filepath.Join(root, "g", oldID), State: "active"}}, Owners: map[string]hostTaskOwner{"historical": {State: "ready", Original: hostReceipt{RequestID: "historical"}, RebuildError: "existing gap", ExecutionProfile: json.RawMessage(`{"future":{"unknown":true}}`), ContextInputs: json.RawMessage(`{"opaque":[1,2,3]}`)}}, Queue: []hostVersionRequest{{ID: "old-request", State: "queued", Binary: "/original", SHA: "unchanged"}}}
+	var profile hostExecutionProfile
+	var inputs hostContextInputs
+	if err := json.Unmarshal([]byte(`{"future":{"unknown":true}}`), &profile); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(`{"opaque":[1,2,3]}`), &inputs); err != nil {
+		t.Fatal(err)
+	}
+	old := hostPool{Schema: 1, Active: oldID, Generations: map[string]hostGeneration{oldID: {ID: oldID, Directory: filepath.Join(root, "g", oldID), State: "active"}}, Owners: map[string]hostTaskOwner{"historical": {State: "ready", Original: hostReceipt{RequestID: "historical"}, RebuildError: "existing gap", ExecutionProfile: &profile, ContextInputs: &inputs}}, Queue: []hostVersionRequest{{ID: "old-request", State: "queued", Binary: "/original", SHA: "unchanged"}}}
 	r := hostReceipt{RequestID: "new-request", ContextID: "context", HostInstanceID: newSource, ProjectDir: "/original/project", Mode: "manual", ConfigSHA256: "config", BinarySHA256: "binary"}
 	detached := r
 	detached.ContextState = "detached"
@@ -100,7 +108,11 @@ func TestRestrictedImportRetainsHistoryAndHoldsAllWork(t *testing.T) {
 	if p.Owners["historical"].RebuildError != "existing gap" || p.Owners["historical"].MaintenanceHold != "epoch" || p.Owners[r.RequestID].Original != r || p.Owners[r.RequestID].MaintenanceHold != "epoch" {
 		t.Fatal("historical work was altered or resumed", p)
 	}
-	if !bytes.Equal(p.Owners["historical"].ExecutionProfile, old.Owners["historical"].ExecutionProfile) || !bytes.Equal(p.Owners["historical"].ContextInputs, old.Owners["historical"].ContextInputs) {
+	profileBefore, _ := json.Marshal(old.Owners["historical"].ExecutionProfile)
+	profileAfter, _ := json.Marshal(p.Owners["historical"].ExecutionProfile)
+	inputsBefore, _ := json.Marshal(old.Owners["historical"].ContextInputs)
+	inputsAfter, _ := json.Marshal(p.Owners["historical"].ContextInputs)
+	if !bytes.Equal(profileBefore, profileAfter) || !bytes.Equal(inputsBefore, inputsAfter) {
 		t.Fatal("opaque execution metadata changed")
 	}
 	if p.Queue[0].State != "maintenance-held" || p.Queue[0].MaintenanceState != "queued" || old.Queue[0].State != "queued" || old.Owners["historical"].MaintenanceHold != "" {
@@ -156,6 +168,44 @@ func TestRestrictedCaptureUnknownPhaseDoesNotCreateControlIntent(t *testing.T) {
 	}
 	if _, err = os.Stat(filepath.Join(root, "original", "pause.json")); !os.IsNotExist(err) {
 		t.Fatal("unknown pause intent was reconstructed", err)
+	}
+}
+
+func TestRestrictedHeldOwnerRefusesExplicitAndAutomaticRebuild(t *testing.T) {
+	root := t.TempDir()
+	id := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	req := hostTestRequest(t, t.TempDir())
+	r := hostReceipt{RequestID: req.RequestID, ProjectDir: req.ProjectDir, Mode: req.Mode, ConfigSHA256: req.ConfigSHA256, BinarySHA256: "old", HostInstanceID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", ContextID: "original", ContextState: "detached", TerminalCause: loop.TerminalMigrationDetach}
+	if err := updateHostPool(root, func(p *hostPool) error {
+		p.Active = id
+		p.Generations[id] = hostGeneration{ID: id, Directory: filepath.Join(root, "g", id)}
+		p.Owners[req.RequestID] = hostTaskOwner{Original: r, Current: r, State: "ready", MaintenanceHold: "epoch", RoundState: &loop.HostContinuation{Mode: "manual", DispatchState: loop.StatePaused}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := &noodleHost{instanceID: id, rolling: &hostRolling{root: root}}
+	req.AdmissionSHA = "old"
+	req.RoundSource = r.HostInstanceID
+	req.RoundState = &loop.HostContinuation{Mode: "manual", DispatchState: loop.StatePaused}
+	for _, got := range []hostResponse{h.rebuildRollingContext(context.Background(), req), h.rollingRound(context.Background(), req)} {
+		if got.Status != "busy" {
+			t.Fatal("held original task accepted", got)
+		}
+	}
+	p, err := readHostPool(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := json.Marshal(p)
+	h.rebuildReleasedRounds(context.Background(), p)
+	after, err := readHostPool(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(after)
+	if !bytes.Equal(before, raw) {
+		t.Fatal("automatic rebuild changed held work")
 	}
 }
 

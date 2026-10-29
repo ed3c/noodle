@@ -1,4 +1,4 @@
-import { parseLoopView } from "./loop-views";
+import { parseLoopView, parseDetailRef } from "./loop-views";
 import { layoutGraph } from "./loop-graph-layout.mjs";
 
 function object(value: unknown): Record<string, unknown> {
@@ -194,6 +194,7 @@ export function parseLoopGraph(value: unknown) {
       const repo = object(raw);
       return {
         id: id(repo.id),
+        ...(repo.detail === undefined ? {} : { detail: parseDetailRef(repo.detail) }),
         label: text(repo.label),
         root: text(repo.root),
         observation: repositoryObservation(repo.observation, nullable(repo.revision, text)),
@@ -425,10 +426,11 @@ export async function fetchArtifact(expected: Artifact, signal?: AbortSignal) {
 export async function fetchGraphFile(
   repository: string,
   expected: LoopGraph["repositories"][number]["tracked_files"][number],
-  signal?: AbortSignal,
+  options: { signal?: AbortSignal; digest?: string } = {},
 ) {
+  const { signal, digest } = options;
   const response = await fetch(
-    `/api/loops/repositories/${encodeURIComponent(repository)}/files/${encodeURIComponent(expected.id)}`,
+    `/api/loops/repositories/${encodeURIComponent(repository)}/files/${encodeURIComponent(expected.id)}${digest ? `?ref=${digest}` : ""}`,
     { signal },
   );
   const raw = object(await response.json());
@@ -471,4 +473,41 @@ export async function submitReviewSelection({
   const raw = object(await response.json());
   const selection = object(raw.selection);
   return { id: id(selection.id), status: text(raw.status) };
+}
+
+export async function fetchRepositoryFiles(
+  repo: LoopGraph["repositories"][number],
+  options: { section: string; search: string; offset: number },
+  signal?: AbortSignal,
+) {
+  const { section, search, offset } = options;
+  if (!repo.detail) {
+    throw new Error("Repository detail reference missing");
+  }
+  const query = new URLSearchParams({
+    ref: repo.detail.sha256,
+    section,
+    search,
+    offset: String(offset),
+    limit: "100",
+  });
+  const response = await fetch(
+    `/api/loops/repositories/${encodeURIComponent(repo.id)}/files?${query}`,
+    { signal },
+  );
+  if (!response.ok) {
+    throw new Error(`Repository index unavailable (${response.status})`);
+  }
+  const raw = object(await response.json());
+  const ref = parseDetailRef(raw.ref);
+  if (
+    ref.sha256 !== repo.detail.sha256 ||
+    ref.bytes !== repo.detail.bytes ||
+    raw.repository_id !== repo.id ||
+    raw.revision !== repo.revision ||
+    raw.offset !== offset
+  ) {
+    throw new Error("Selected repository index changed");
+  }
+  return { files: list(raw.files, file), total: number(raw.total), offset: number(raw.offset) };
 }

@@ -73,13 +73,13 @@ func TestSharedQuotaOldRoundRetainsServiceStartPriority(t *testing.T) {
 	}
 	*nowNext = nowNext.Add(PollInterval)
 	next.Observe(Sample{At: *nowNext, Pressure: Normal}, nil)
-	if _, err = next.tryAcquire("new", true, "service"); !errors.Is(err, ErrDeferred) {
+	if _, err = next.tryAcquire("new", true, "service", ""); !errors.Is(err, ErrDeferred) {
 		t.Fatal("new service could strand the still-running old round")
 	}
 	old.HoldForSwitch()
 	*nowOld = nowNext.Add(PollInterval)
 	old.Observe(Sample{At: *nowOld, Pressure: Normal}, nil)
-	service, err := old.tryAcquire("old", true, "service")
+	service, err := old.tryAcquire("old", true, "service", "")
 	if err != nil {
 		t.Fatal("old round lost its remaining service preparation:", err)
 	}
@@ -90,7 +90,7 @@ func TestSharedQuotaOldRoundRetainsServiceStartPriority(t *testing.T) {
 	worker.Release()
 	*nowNext = nowOld.Add(PollInterval)
 	next.Observe(Sample{At: *nowNext, Pressure: Normal}, nil)
-	newService, err := next.tryAcquire("new", true, "service")
+	newService, err := next.tryAcquire("new", true, "service", "")
 	if err != nil {
 		t.Fatal("new version did not proceed after the old round exited:", err)
 	}
@@ -122,16 +122,16 @@ func TestSharedQuotaResidentKeepsOneNativeOwnerAcrossVersions(t *testing.T) {
 	dir := t.TempDir()
 	old, _ := sharedTestBudget(t, dir, "old", 4)
 	next, now := sharedTestBudget(t, dir, "new", 4)
-	p, err := old.tryAcquire("old", true, "shared-service")
+	p, err := old.tryAcquire("old", true, "shared-service", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	*now = now.Add(PollInterval)
 	next.Observe(Sample{At: *now, Pressure: Normal}, nil)
-	if _, err = next.tryAcquire("new", true, "shared-service"); !errors.Is(err, ErrDeferred) {
+	if _, err = next.tryAcquire("new", true, "shared-service", ""); !errors.Is(err, ErrDeferred) {
 		t.Fatal("two generations launched the same shared service")
 	}
-	other, err := next.tryAcquire("new", true, "independent-service")
+	other, err := next.tryAcquire("new", true, "independent-service", "")
 	if err != nil {
 		t.Fatal("unrelated service was blocked by a different owner:", err)
 	}
@@ -139,7 +139,7 @@ func TestSharedQuotaResidentKeepsOneNativeOwnerAcrossVersions(t *testing.T) {
 	p.Release()
 	*now = now.Add(PollInterval)
 	next.Observe(Sample{At: *now, Pressure: Normal}, nil)
-	q, err := next.tryAcquire("new", true, "shared-service")
+	q, err := next.tryAcquire("new", true, "shared-service", "")
 	if err != nil {
 		t.Fatal("native exit did not permit the selected version's service:", err)
 	}
@@ -156,6 +156,53 @@ func TestSharedQuotaHelperProcess(t *testing.T) {
 	}
 }
 
+func TestSharedQuotaWarningGrantCannotBypassOtherGenerationOrSwapCeiling(t *testing.T) {
+	dir := t.TempDir()
+	old, nowOld := sharedTestBudget(t, dir, "old", 4)
+	next, nowNext := sharedTestBudget(t, dir, "new", 4)
+	for range 4 {
+		*nowNext = nowNext.Add(PollInterval)
+		next.Observe(Sample{At: *nowNext, Pressure: Warning}, nil)
+	}
+	for nowOld.Before(*nowNext) {
+		*nowOld = nowOld.Add(PollInterval)
+		old.Observe(Sample{At: *nowOld, Pressure: Normal}, nil)
+	}
+	worker, err := old.TryAcquire("old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = next.GrantWarning("new", "task"); err == nil {
+		t.Fatal("warning grant ignored another generation's live allocation")
+	}
+	worker.Release()
+	if _, err = next.GrantWarning("new", "task"); err != nil {
+		t.Fatal(err)
+	}
+	*nowNext = nowNext.Add(PollInterval)
+	next.Observe(Sample{At: *nowNext, Pressure: Warning}, nil)
+	permit, err := next.TryAcquireTask("new", "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	*nowOld = nowNext.Add(PollInterval)
+	old.Observe(Sample{At: *nowOld, Pressure: Normal}, nil)
+	if _, err = old.TryAcquire("old"); !errors.Is(err, ErrDeferred) {
+		t.Fatal("other generation bypassed the exclusive warning allocation")
+	}
+	permit.Release()
+	if next.WarningGrants()[0].Status != "consumed" {
+		t.Fatal("shared permit did not consume original permission")
+	}
+	*nowNext = nowOld.Add(PollInterval)
+	next.Observe(Sample{At: *nowNext, Pressure: Warning, SwapUsedBytes: DefaultSwapUsedLimit + 1}, nil)
+	if _, err = next.GrantWarning("new", "another-task"); err == nil {
+		t.Fatal("explicit warning grant exceeded the 15 GB capacity ceiling")
+	}
+	if next.Snapshot().Allocations != 0 {
+		t.Fatal("native exit did not return the shared allocation")
+	}
+}
 func TestSharedQuotaSurvivesOwnerProcessBoundary(t *testing.T) {
 	dir := t.TempDir()
 	b, _ := sharedTestBudget(t, dir, "parent", 1)

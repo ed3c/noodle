@@ -18,9 +18,9 @@ import (
 )
 
 const (
-	scannerInitialBuffer       = 64 * 1024
-	scannerMaxBuffer           = 64 << 20
-	heartbeatThrottleInterval  = 5 * time.Second
+	scannerInitialBuffer      = 64 * 1024
+	scannerMaxBuffer          = 64 << 20
+	heartbeatThrottleInterval = 5 * time.Second
 )
 
 // sessionBase contains the shared fields and methods for processSession and
@@ -370,21 +370,20 @@ func (s *sessionBase) consumeCanonicalLine(line []byte, hook canonicalLineHook) 
 
 	publishSpawned := !(ce.Type == parse.EventInit && s.promptLogged)
 
-	if s.eventWriter != nil && publishSpawned {
-		if record, ok := eventFromCanonical(s.id, ce); ok {
-			if err := s.eventWriter.Append(context.Background(), record); err != nil {
-				s.publish(SessionEvent{
-					Type:      "warning",
-					Message:   "event log append failed: " + err.Error(),
-					Timestamp: nowUTC(),
-				})
+	if publishSpawned {
+		for _, record := range FormatEventLines(s.id, ce) {
+			if s.eventWriter != nil {
+				if err := s.eventWriter.Append(context.Background(), record); err != nil {
+					s.publish(SessionEvent{
+						Type:      "warning",
+						Message:   "event log append failed: " + err.Error(),
+						Timestamp: nowUTC(),
+					})
+				}
 			}
-		}
-	}
-
-	if s.sink != nil && publishSpawned {
-		if ev, ok := FormatEventLine(s.id, ce); ok {
-			s.sink.PublishSessionEvent(s.id, ev)
+			if s.sink != nil {
+				s.sink.PublishSessionEvent(s.id, record)
+			}
 		}
 	}
 

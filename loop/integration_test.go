@@ -15,6 +15,7 @@ import (
 	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/internal/mode"
 	"github.com/poteto/noodle/internal/projection"
+	"github.com/poteto/noodle/internal/reducer"
 	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/internal/statever"
 	"github.com/poteto/noodle/mise"
@@ -530,9 +531,33 @@ func TestIntegrationMergeConflictResolution(t *testing.T) {
 	}
 
 	// Human resolves: fix merge error and approve.
+	var failedMerge reducer.EffectLedgerRecord
+	for _, record := range l.effectLedger.All() {
+		if record.Effect.Type == reducer.EffectMerge {
+			if record.Status != reducer.EffectLedgerFailed || record.Result == nil || !strings.Contains(record.Result.Error, "merge conflict") {
+				t.Fatalf("original conflict outcome was not retained: %+v", record)
+			}
+			failedMerge = record
+		}
+	}
+	if failedMerge.EffectID == "" {
+		t.Fatal("original merge effect missing")
+	}
 	env.wt.mergeErr = nil
 	if err := l.controlMerge("conflict-1"); err != nil {
 		t.Fatalf("controlMerge: %v", err)
+	}
+	completedMerges := 0
+	for _, record := range l.effectLedger.All() {
+		if record.EffectID == failedMerge.EffectID && !reflect.DeepEqual(record, failedMerge) {
+			t.Fatal("retry replaced original merge failure evidence")
+		}
+		if record.Effect.Type == reducer.EffectMerge && record.Status == reducer.EffectLedgerDone {
+			completedMerges++
+		}
+	}
+	if completedMerges != 1 {
+		t.Fatalf("completed merge effects = %d, want one retry", completedMerges)
 	}
 
 	// Verify order advanced past stage 0 (merged), stage 1 still pending.

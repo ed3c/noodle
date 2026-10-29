@@ -64,6 +64,10 @@ type Budget struct {
 	sharedError                            string
 	pendingSharedReturns                   map[string]bool
 	unresolvedResidents                    int
+	warningStable                          int
+	warningGrants                          map[warningTask]WarningGrant
+	gatewayWarnings                        map[warningTask]GatewayWarningGrant
+	residentScopes                         map[string]int
 	switching                              bool
 	mu                                     sync.Mutex
 	maximum, active, limit, credit, stable int
@@ -103,6 +107,7 @@ type allocation struct {
 	budget   *Budget
 	refs     int
 	resident bool
+	scope    string
 }
 type Permit struct {
 	parent              *Permit
@@ -144,6 +149,18 @@ func (b *Budget) Unregister(id string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.contexts, id)
+	for task, grant := range b.warningGrants {
+		if task.context == id && grant.Status == "available" {
+			grant.Status = "revoked"
+			b.warningGrants[task] = grant
+		}
+	}
+	for task, grant := range b.gatewayWarnings {
+		if task.context == id && grant.Status == "available" {
+			grant.Status = "revoked"
+			b.gatewayWarnings[task] = grant
+		}
+	}
 	delete(b.waited, id)
 	b.removeWaiter(id)
 }
@@ -179,6 +196,8 @@ func (b *Budget) Observe(s Sample, err error) {
 	for id := range b.pendingSharedReturns {
 		b.returnSharedAllocation(id)
 	}
+	previousWarningStable := b.warningStable
+	b.warningStable = 0
 	b.credit = 0
 	b.rateValid = false
 	b.sampleError = nil
@@ -225,6 +244,9 @@ func (b *Budget) Observe(s Sample, err error) {
 	}
 	b.rateValid = true
 	b.rate = float64(s.Swapouts-previous.Swapouts) / s.At.Sub(previous.At).Seconds()
+	if s.Pressure == Warning && b.rate == 0 {
+		b.warningStable = previousWarningStable + 1
+	}
 	pressureAllowsAdmission := s.Pressure == Normal || s.Pressure == Warning
 	if !pressureAllowsAdmission || s.SwapUsedBytes >= b.swapUsedLimit {
 		b.reason = "memory_pressure"
@@ -252,9 +274,11 @@ func (b *Budget) stale() bool {
 	return b.previous == nil || b.now().Sub(b.previous.At) > MaxSampleAge || b.now().Before(b.previous.At)
 }
 
-func (b *Budget) TryAcquire(id string) (*Permit, error) { return b.tryAcquire(id, false, "") }
-
-func (b *Budget) tryAcquire(id string, resident bool, residentKey string) (*Permit, error) {
+func (b *Budget) TryAcquire(id string) (*Permit, error) { return b.tryAcquire(id, false, "", "") }
+func (b *Budget) TryAcquireTask(id, order string) (*Permit, error) {
+	return b.tryAcquire(id, false, "", order)
+}
+func (b *Budget) tryAcquire(id string, resident bool, residentKey, order string) (*Permit, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if len(b.pendingSharedReturns) != 0 || !b.contexts[id] || b.unresolvedResidents != 0 || (b.switching && (!resident || b.shared == nil || !b.shared.workerContext(id))) {
@@ -272,13 +296,15 @@ func (b *Budget) tryAcquire(id string, resident bool, residentKey string) (*Perm
 		b.waiters = b.waiters[1:]
 		delete(b.waited, first)
 	}
-	if b.stale() || b.active >= b.limit || (!b.unsupported && b.credit == 0) || len(b.waiters) == 0 || b.waiters[0] != id {
+	exception := !resident && b.warningAvailable(id, order)
+	exception = exception || b.gatewayWarningAvailable(id, order, resident, residentKey)
+	if !exception && (b.stale() || b.active >= b.limit || (!b.unsupported && b.credit == 0) || len(b.waiters) == 0 || b.waiters[0] != id) {
 		return nil, ErrDeferred
 	}
 	sharedID := ""
 	if b.shared != nil {
 		var err error
-		sharedID, err = b.shared.acquire(id, b.maximum, b.now(), !b.unsupported, resident, residentKey, b.switching)
+		sharedID, err = b.shared.acquire(id, b.maximum, b.now(), !b.unsupported, resident, residentKey, b.switching, exception)
 		if err != nil {
 			var uncertain *quotaWriteUncertain
 			if errors.As(err, &uncertain) {
@@ -292,15 +318,24 @@ func (b *Budget) tryAcquire(id string, resident bool, residentKey string) (*Perm
 		b.sharedError = ""
 	}
 	b.active++
+	b.consumeWarningGrant(id, order)
 	if resident {
 		b.residents++
+		if b.residentScopes == nil {
+			b.residentScopes = make(map[string]int)
+		}
+		b.residentScopes[residentKey]++
+		b.markGatewayStarted(id, residentKey)
+	} else if grant, ok := b.gatewayWarnings[warningTask{id, order}]; ok && b.gatewayWarningStatus(grant).Status == "available" {
+		grant.Status = "consumed"
+		b.gatewayWarnings[warningTask{id, order}] = grant
 	}
 	if !b.unsupported {
 		b.credit = 0
 	}
 	b.removeWaiter(id)
 	delete(b.waited, id)
-	return &Permit{allocation: &allocation{budget: b, refs: 1, sharedID: sharedID, resident: resident}}, nil
+	return &Permit{allocation: &allocation{budget: b, refs: 1, sharedID: sharedID, resident: resident, scope: residentKey}}, nil
 }
 
 func (p *Permit) Release() {
@@ -323,6 +358,7 @@ func (p *Permit) Release() {
 			b.active--
 			if p.allocation.resident {
 				b.residents--
+				b.residentScopes[p.allocation.scope]--
 			}
 		}
 	})
@@ -415,7 +451,11 @@ func (b *Budget) Snapshot() Snapshot {
 }
 
 func (b *Budget) TryAcquireResident(id string) (*Permit, error) {
-	return b.tryAcquire(id, true, "")
+	return b.tryAcquire(id, true, "", "")
+}
+
+func (b *Budget) TryAcquireScopedResident(id, scope string) (*Permit, error) {
+	return b.tryAcquire(id, true, scope, "")
 }
 
 // Only an unreturned reservation or a joined worker may enter this return set.

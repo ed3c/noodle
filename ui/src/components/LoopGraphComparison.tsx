@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchArtifact } from "~/client/loop-graph";
 import type { Artifact, LoopGraph } from "~/client/loop-graph";
+import { ReviewGraph } from "./ReviewGraph";
 
 function useContent(artifact: Artifact | undefined) {
   return useQuery({
@@ -204,6 +205,9 @@ export function LoopGraphComparison({
               <p role="alert">
                 {side.query.data.status}: {side.query.data.error}
               </p>
+            )}
+            {typeof side.query.data?.content === "string" && (
+              <ReviewGraph content={side.query.data.content} />
             )}
             <pre
               ref={side.own}

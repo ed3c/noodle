@@ -4,7 +4,6 @@ package main
 
 import (
 	"errors"
-
 	"github.com/poteto/noodle/internal/lockfile"
 )
 

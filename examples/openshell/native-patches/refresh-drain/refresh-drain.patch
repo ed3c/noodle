@@ -1,0 +1,538 @@
+--- a/crates/openshell-server/src/credentials.rs
++++ b/crates/openshell-server/src/credentials.rs
+@@ -137,6 +137,7 @@
+ 
+ #[derive(Debug, Clone)]
+ pub struct CredentialRuntime {
++    pub(crate) refresh_lifecycle: Arc<crate::provider_refresh_shutdown::RefreshLifecycle>,
+     registry: CredentialDriverRegistry,
+     drivers: BTreeMap<String, Arc<dyn CredentialDriver>>,
+     _driver_processes: Vec<Arc<ManagedCredentialDriverProcess>>,
+@@ -178,6 +179,7 @@
+             .map(|name| negotiate_builtin_credential_driver(name))
+             .collect::<CoreResult<Vec<_>>>()?;
+         Ok(Self {
++            refresh_lifecycle: Arc::default(),
+             registry,
+             drivers,
+             _driver_processes: Vec::new(),
+@@ -247,6 +249,7 @@
+         }
+ 
+         Ok(Self {
++            refresh_lifecycle: Arc::default(),
+             registry,
+             drivers,
+             _driver_processes: driver_processes,
+--- a/crates/openshell-server/src/grpc/provider.rs
++++ b/crates/openshell-server/src/grpc/provider.rs
+@@ -4814,6 +4814,7 @@
+     state: &Arc<ServerState>,
+     request: Request<ConfigureProviderRefreshRequest>,
+ ) -> Result<Response<ConfigureProviderRefreshResponse>, Status> {
++    let _refresh_lifetime = state.credentials.refresh_lifecycle.admit()?;
+     let principal = super::extract_principal(&request)?;
+     let replay_facts = super::mutation_replay::ordinary::Facts::from_request(&request);
+     let request = request.into_inner();
+@@ -5312,6 +5313,7 @@
+     state: &Arc<ServerState>,
+     request: Request<DeleteProviderRefreshRequest>,
+ ) -> Result<Response<DeleteProviderRefreshResponse>, Status> {
++    let _refresh_lifetime = state.credentials.refresh_lifecycle.admit()?;
+     let principal = super::extract_principal(&request)?;
+     let request = request.into_inner();
+     let authz = authorize_workspace(
+@@ -5396,6 +5398,7 @@
+     state: &Arc<ServerState>,
+     request: Request<DeleteProviderRequest>,
+ ) -> Result<Response<DeleteProviderResponse>, Status> {
++    let _refresh_lifetime = state.credentials.refresh_lifecycle.admit()?;
+     let principal = super::extract_principal(&request)?;
+     let req = request.into_inner();
+     let authz = authorize_workspace(
+@@ -17372,4 +17375,55 @@
+             "handle_delete_provider_profile should reject non-members"
+         );
+     }
++
++    #[tokio::test]
++    async fn refresh_shutdown_refuses_configuration_and_deletion_without_effects() {
++        let state = test_server_state().await;
++        let provider = create_openai_provider(&state, "shutdown-provider").await;
++        state.credentials.refresh_lifecycle.close_admission();
++        let configure = handle_configure_provider_refresh(
++            &state,
++            authed_request(ConfigureProviderRefreshRequest {
++                workspace_scope: Some(default_workspace_selector()),
++                provider: "shutdown-provider".into(),
++                credential_key: "OPENAI_API_KEY".into(),
++                strategy: ProviderCredentialRefreshStrategy::Oauth2RefreshToken as i32,
++                ..Default::default()
++            }),
++        )
++        .await
++        .unwrap_err();
++        assert_eq!(configure.code(), Code::Unavailable);
++        let delete_refresh = handle_delete_provider_refresh(
++            &state,
++            authed_request(DeleteProviderRefreshRequest {
++                workspace_scope: Some(default_workspace_selector()),
++                provider: "shutdown-provider".into(),
++                credential_key: "OPENAI_API_KEY".into(),
++                allow_missing: true,
++                ..Default::default()
++            }),
++        )
++        .await
++        .unwrap_err();
++        assert_eq!(delete_refresh.code(), Code::Unavailable);
++        let delete_provider =
++            handle_delete_provider(&state, delete_provider_request("shutdown-provider"))
++                .await
++                .unwrap_err();
++        assert_eq!(delete_provider.code(), Code::Unavailable);
++        assert!(
++            crate::provider_refresh::list_all_refresh_states(&state.store)
++                .await
++                .unwrap()
++                .is_empty()
++        );
++        let preserved = state
++            .store
++            .get_message_by_name::<Provider>("default", "shutdown-provider")
++            .await
++            .unwrap()
++            .unwrap();
++        assert_eq!(preserved.object_id(), provider.object_id());
++    }
+ }
+--- a/crates/openshell-server/src/lib.rs
++++ b/crates/openshell-server/src/lib.rs
+@@ -38,6 +38,7 @@
+ pub(crate) mod policy_store;
+ mod provider_profile_sources;
+ mod provider_refresh;
++mod provider_refresh_shutdown;
+ mod readiness;
+ mod reflection;
+ mod sandbox_index;
+@@ -1013,12 +1014,48 @@
+     ssh_sessions::spawn_session_reaper(store.clone(), Duration::from_hours(1));
+     supervisor_session::spawn_relay_reaper(state.clone(), Duration::from_secs(30));
+     provider_profile_sources::spawn_refresh(state.clone());
+-    provider_refresh::spawn_refresh_worker(state.clone(), Duration::from_mins(1));
++    let (refresh_shutdown_tx, refresh_shutdown_rx) = watch::channel(false);
++    let refresh_worker = provider_refresh::spawn_refresh_worker(
++        state.clone(),
++        Duration::from_mins(1),
++        refresh_shutdown_rx,
++    );
+ 
+     shutdown_signal().await;
+     info!("Shutdown signal received; stopping gateway");
++    shutdown_gateway(
++        &state,
++        shutdown_tx,
++        refresh_shutdown_tx,
++        refresh_worker,
++        listener_task,
++        membership_worker,
++    )
++    .await
++}
++
++async fn shutdown_gateway(
++    state: &Arc<ServerState>,
++    shutdown_tx: watch::Sender<bool>,
++    refresh_shutdown_tx: watch::Sender<bool>,
++    refresh_worker: tokio::task::JoinHandle<()>,
++    listener_task: tokio::task::JoinHandle<()>,
++    membership_worker: Option<tokio::task::JoinHandle<()>>,
++) -> Result<()> {
+     state.gateway_shutting_down.store(true, Ordering::Release);
+     state.supervisor_sessions.close_admission();
++    state.credentials.refresh_lifecycle.close_admission();
++    let _ = refresh_shutdown_tx.send(true);
++
++    // Keep credentials and the runtime alive until every admitted exchange has
++    // finished its persistence path, including callers whose RPC disconnected.
++    let refresh_worker_result = refresh_worker.await;
++    state.credentials.refresh_lifecycle.drain().await;
++    if let Err(err) = refresh_worker_result {
++        warn!(error = %err, "Provider refresh worker failed during shutdown");
++    }
++    // Other service watchers can release resources used by credential commits.
++    // Their shutdown starts only after the refresh barrier has completed.
+     let _ = shutdown_tx.send(true);
+ 
+     if let Err(err) = listener_task.await {
+--- a/crates/openshell-server/src/provider_refresh.rs
++++ b/crates/openshell-server/src/provider_refresh.rs
+@@ -1006,6 +1006,7 @@
+     snapshot: StoredProviderCredentialRefreshState,
+     trigger: RefreshTrigger,
+ ) -> Result<StoredProviderCredentialRefreshState, Status> {
++    let lifetime = credentials.refresh_lifecycle.admit()?;
+     let admission = REFRESH_ADMISSIONS
+         .try_acquire()
+         .map_err(|_| Status::resource_exhausted("credential refresh queue is full"))?;
+@@ -1016,6 +1017,7 @@
+     // A disconnected RPC must not cancel minting after an upstream rotates its
+     // refresh token. Spawn before any externally observable refresh side effect.
+     tokio::spawn(async move {
++        let _lifetime = lifetime;
+         let _admission = admission;
+         let _local = tokio::time::timeout(Duration::from_secs(40), lock.lock_owned())
+             .await
+@@ -2226,7 +2228,11 @@
+     None
+ }
+ 
+-pub fn spawn_refresh_worker(state: std::sync::Arc<crate::ServerState>, interval: Duration) {
++pub fn spawn_refresh_worker(
++    state: std::sync::Arc<crate::ServerState>,
++    interval: Duration,
++    mut shutdown: tokio::sync::watch::Receiver<bool>,
++) -> tokio::task::JoinHandle<()> {
+     info!(
+         interval_seconds = interval.as_secs(),
+         "provider credential refresh worker started"
+@@ -2235,7 +2241,19 @@
+         let mut ticker = tokio::time::interval(interval);
+         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+         loop {
+-            ticker.tick().await;
++            if *shutdown.borrow() {
++                return;
++            }
++            tokio::select! {
++                biased;
++                changed = shutdown.changed() => {
++                    if changed.is_err() || *shutdown.borrow() {
++                        return;
++                    }
++                    continue;
++                }
++                _ = ticker.tick() => {}
++            }
+             match Box::pin(run_refresh_worker_tick(
+                 state.store.as_ref(),
+                 Some(&state.credentials),
+@@ -2257,7 +2275,7 @@
+                 }
+             }
+         }
+-    });
++    })
+ }
+ 
+ /// Returns the `(workspace, provider)` pairs whose provider records changed.
+@@ -2457,7 +2475,7 @@
+         validate_secret_material_references,
+     };
+     use crate::credentials::CredentialRuntime;
+-    use crate::persistence::{current_time_ms, test_store};
++    use crate::persistence::{Store, current_time_ms, test_store};
+     use crate::storage_proto::StoredProviderCredentialRefreshStateV2 as StoredProviderCredentialRefreshState;
+ 
+     fn proto_duration(seconds: i64) -> prost_types::Duration {
+@@ -5340,4 +5358,223 @@
+ 20A24Fi3HGQmXc7NyuLDODTJsWBICuOemCnRkvcxIlxb+ec7jp+XRmzDwKkzSnVN
+ pM2zFU8SeVkvHKlEuoHaP0s=
+ -----END PRIVATE KEY-----";
+-}
++
++    async fn shutdown_refresh_fixture(store: &Store, issuer: &MockServer, name: &str) -> Provider {
++        Mock::given(method("POST"))
++            .and(body_string_contains("refresh_token=old-shutdown-grant"))
++            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
++                "access_token": "shutdown-access-token",
++                "refresh_token": "shutdown-replacement-grant",
++                "expires_in": 3600
++            })))
++            .expect(1)
++            .mount(issuer)
++            .await;
++        let provider = provider(name, "outlook");
++        store.put_message(&provider).await.unwrap();
++        let state = new_refresh_state(
++            &provider,
++            "default",
++            "MS_GRAPH_ACCESS_TOKEN",
++            NewRefreshStateConfig {
++                strategy: ProviderCredentialRefreshStrategy::Oauth2RefreshToken,
++                material: HashMap::from([
++                    ("client_id".to_string(), "shutdown-client".to_string()),
++                    (
++                        "refresh_token".to_string(),
++                        "old-shutdown-grant".to_string(),
++                    ),
++                ]),
++                secret_material_keys: vec!["refresh_token".to_string()],
++                expires_at_ms: 0,
++                token_url: format!("{}/token", issuer.uri()),
++                scopes: Vec::new(),
++                refresh_before: None,
++                max_lifetime: None,
++                additional_output_keys: HashMap::new(),
++            },
++        )
++        .unwrap();
++        put_refresh_state(store, &state).await.unwrap();
++        provider
++    }
++
++    async fn assert_shutdown_grant_committed(
++        store: &Store,
++        credentials: &CredentialRuntime,
++        provider: &Provider,
++    ) {
++        let saved = get_refresh_state(
++            store,
++            "default",
++            provider.object_id(),
++            "MS_GRAPH_ACCESS_TOKEN",
++        )
++        .await
++        .unwrap()
++        .unwrap();
++        assert_eq!(saved.status, "refreshed");
++        let material = credentials
++            .resolve_refresh_material(
++                refresh_material_scope(&saved),
++                &saved.secret_material_handles,
++            )
++            .await
++            .unwrap();
++        assert_eq!(
++            material.get("refresh_token").map(String::as_str),
++            Some("shutdown-replacement-grant")
++        );
++    }
++
++    #[tokio::test]
++    async fn refresh_shutdown_drains_disconnected_mint_through_rotated_grant_commit() {
++        use std::time::Duration;
++        let issuer = MockServer::start().await;
++        let store = test_store().await;
++        let provider = shutdown_refresh_fixture(&store, &issuer, "shutdown-manual").await;
++        let credentials = test_credentials();
++        let (storing, release_store) = credentials.gate_next_store();
++        let caller_store = store.clone();
++        let caller_credentials = credentials.clone();
++        let caller = tokio::spawn(async move {
++            refresh_provider_credential(
++                &caller_store,
++                "default",
++                &caller_credentials,
++                None,
++                "shutdown-manual",
++                "MS_GRAPH_ACCESS_TOKEN",
++            )
++            .await
++        });
++        tokio::time::timeout(Duration::from_secs(10), storing)
++            .await
++            .unwrap()
++            .unwrap();
++        // The issuer has rotated. Disconnect the original RPC at the credential
++        // storage barrier; its detached mint must remain tracked by shutdown.
++        caller.abort();
++        assert!(caller.await.unwrap_err().is_cancelled());
++        credentials.refresh_lifecycle.close_admission();
++        let drain = credentials.refresh_lifecycle.drain();
++        tokio::pin!(drain);
++        assert!(
++            std::future::poll_fn(|cx| {
++                use std::future::Future;
++                std::task::Poll::Ready(drain.as_mut().poll(cx).is_pending())
++            })
++            .await
++        );
++        release_store.send(()).unwrap();
++        tokio::time::timeout(Duration::from_secs(10), drain)
++            .await
++            .unwrap();
++        assert_shutdown_grant_committed(&store, &credentials, &provider).await;
++        let err = refresh_provider_credential(
++            &store,
++            "default",
++            &credentials,
++            None,
++            "shutdown-manual",
++            "MS_GRAPH_ACCESS_TOKEN",
++        )
++        .await
++        .unwrap_err();
++        assert_eq!(err.code(), tonic::Code::Unavailable);
++        let snapshot = get_refresh_state(
++            &store,
++            "default",
++            provider.object_id(),
++            "MS_GRAPH_ACCESS_TOKEN",
++        )
++        .await
++        .unwrap()
++        .unwrap();
++        let err = super::refresh_from_snapshot(&store, &credentials, None, snapshot)
++            .await
++            .unwrap_err();
++        assert_eq!(err.code(), tonic::Code::Unavailable);
++        issuer.verify().await;
++    }
++
++    #[tokio::test]
++    async fn refresh_shutdown_joins_active_tick_without_cancelling_its_mint() {
++        use std::time::Duration;
++        let server = crate::grpc::test_support::test_server_state().await;
++        let issuer = MockServer::start().await;
++        let provider = shutdown_refresh_fixture(&server.store, &issuer, "shutdown-ticker").await;
++        let (storing, release_store) = server.credentials.gate_next_store();
++        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
++        let mut worker =
++            super::spawn_refresh_worker(server.clone(), Duration::from_secs(60), shutdown_rx);
++        tokio::time::timeout(Duration::from_secs(10), storing)
++            .await
++            .unwrap()
++            .unwrap();
++        server.credentials.refresh_lifecycle.close_admission();
++        shutdown_tx.send_replace(true);
++        assert!(
++            std::future::poll_fn(|cx| {
++                use std::future::Future;
++                std::task::Poll::Ready(std::pin::Pin::new(&mut worker).poll(cx).is_pending())
++            })
++            .await
++        );
++        release_store.send(()).unwrap();
++        tokio::time::timeout(Duration::from_secs(10), worker)
++            .await
++            .unwrap()
++            .unwrap();
++        server.credentials.refresh_lifecycle.drain().await;
++        assert_shutdown_grant_committed(&server.store, &server.credentials, &provider).await;
++        issuer.verify().await;
++    }
++
++    #[tokio::test]
++    async fn refresh_shutdown_gateway_waits_before_global_teardown_and_return() {
++        use std::time::Duration;
++        let server = crate::grpc::test_support::test_server_state().await;
++        let issuer = MockServer::start().await;
++        let provider =
++            shutdown_refresh_fixture(&server.store, &issuer, "shutdown-production").await;
++        let (storing, release_store) = server.credentials.gate_next_store();
++        let (refresh_tx, refresh_rx) = tokio::sync::watch::channel(false);
++        let worker =
++            super::spawn_refresh_worker(server.clone(), Duration::from_secs(60), refresh_rx);
++        tokio::time::timeout(Duration::from_secs(10), storing)
++            .await
++            .unwrap()
++            .unwrap();
++        let (global_tx, global_rx) = tokio::sync::watch::channel(false);
++        let mut listener_rx = global_rx.clone();
++        let listener = tokio::spawn(async move {
++            listener_rx.wait_for(|closing| *closing).await.unwrap();
++        });
++        // This is the exact cleanup function called by run_server after TERM,
++        // not a copy of its ordering or a test-only shutdown implementation.
++        let shutdown =
++            crate::shutdown_gateway(&server, global_tx, refresh_tx, worker, listener, None);
++        tokio::pin!(shutdown);
++        assert!(
++            std::future::poll_fn(|cx| {
++                use std::future::Future;
++                std::task::Poll::Ready(shutdown.as_mut().poll(cx).is_pending())
++            })
++            .await
++        );
++        assert!(
++            !*global_rx.borrow(),
++            "commit dependencies must remain running"
++        );
++        assert!(server.credentials.refresh_lifecycle.admit().is_err());
++        release_store.send(()).unwrap();
++        tokio::time::timeout(Duration::from_secs(10), shutdown)
++            .await
++            .unwrap()
++            .unwrap();
++        assert!(*global_rx.borrow());
++        assert_shutdown_grant_committed(&server.store, &server.credentials, &provider).await;
++        issuer.verify().await;
++    }
++}
+--- /dev/null
++++ b/crates/openshell-server/src/provider_refresh_shutdown.rs
+@@ -0,0 +1,72 @@
++// SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++// SPDX-License-Identifier: Apache-2.0
++
++//! Original gateway lifetime for provider refresh operations.
++
++use std::sync::{
++    Arc,
++    atomic::{AtomicBool, Ordering},
++};
++use tokio::sync::{OwnedRwLockReadGuard, RwLock};
++use tonic::Status;
++
++#[derive(Debug, Default)]
++pub(crate) struct RefreshLifecycle {
++    admission_closed: AtomicBool,
++    lifetimes: Arc<RwLock<()>>,
++}
++
++impl RefreshLifecycle {
++    pub(crate) fn admit(&self) -> Result<OwnedRwLockReadGuard<()>, Status> {
++        // As with supervisor sessions, tracking precedes the admission check.
++        // Shutdown either waits for this operation or prevents its admission.
++        let lifetime = Arc::clone(&self.lifetimes)
++            .try_read_owned()
++            .map_err(|_| Status::unavailable("gateway refresh admission closed"))?;
++        if self.admission_closed.load(Ordering::Acquire) {
++            return Err(Status::unavailable("gateway refresh admission closed"));
++        }
++        Ok(lifetime)
++    }
++
++    pub(crate) fn close_admission(&self) {
++        self.admission_closed.store(true, Ordering::Release);
++    }
++
++    pub(crate) async fn drain(&self) {
++        self.close_admission();
++        // No timeout: aborting a mint after issuer rotation can discard the
++        // only replacement grant before credential storage commits it.
++        let _closed = self.lifetimes.write().await;
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[tokio::test]
++    async fn refresh_shutdown_waits_for_admitted_operations_and_stays_closed() {
++        let lifecycle = RefreshLifecycle::default();
++        let admitted = lifecycle.admit().unwrap();
++        lifecycle.close_admission();
++        assert_eq!(
++            lifecycle.admit().unwrap_err().code(),
++            tonic::Code::Unavailable
++        );
++        let drain = lifecycle.drain();
++        tokio::pin!(drain);
++        assert!(
++            std::future::poll_fn(|cx| {
++                use std::future::Future;
++                std::task::Poll::Ready(drain.as_mut().poll(cx).is_pending())
++            })
++            .await
++        );
++        drop(admitted);
++        drain.await;
++        assert!(lifecycle.admit().is_err());
++        // Another gateway's lifetime is independent of this closed owner.
++        assert!(RefreshLifecycle::default().admit().is_ok());
++    }
++}

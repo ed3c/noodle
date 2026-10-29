@@ -37,6 +37,8 @@ func TestMain(m *testing.M) {
 // its path. Uses sync.Once so the build runs at most once per process.
 func buildNoodle(t *testing.T) string {
 	t.Helper()
+	// Smoke fixtures own their Host lock independently of the user's live Host.
+	t.Setenv("NOODLE_HOST_DIR", t.TempDir())
 	noodleBinaryOnce.Do(func() {
 		root := repoRoot(t)
 

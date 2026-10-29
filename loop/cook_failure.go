@@ -35,9 +35,9 @@ func (l *Loop) recordStageFailure(cook *cookHandle, reason string, orderClass Or
 	})
 }
 
-// cleanupCookWorktree removes the cook's worktree if it has a non-empty name.
+// Bound task data outlives worker resources and requires an explicit deletion.
 func (l *Loop) cleanupCookWorktree(cook *cookHandle) {
-	if strings.TrimSpace(cook.worktreeName) != "" {
+	if !l.retainTaskData(cook.orderID) && strings.TrimSpace(cook.worktreeName) != "" {
 		_ = l.deps.Worktree.Cleanup(cook.worktreeName, worktree.CleanupOpts{Force: true})
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -16,6 +17,26 @@ import (
 	"github.com/poteto/noodle/mise"
 	loopruntime "github.com/poteto/noodle/runtime"
 )
+
+func TestCanonicalProjectionSyncPreservesTerminalHistoryOnly(t *testing.T) {
+	l := completedCleanupFixture(t)
+	done := l.canonical.Orders["done"]
+	done.Metadata = map[string]string{"original": "retained"}
+	l.canonical.Orders["done"] = done
+	cancelled := done
+	cancelled.OrderID, cancelled.Status = "cancelled", state.OrderCancelled
+	l.canonical.Orders["cancelled"] = cancelled
+	removed := done
+	removed.OrderID, removed.Status = "removed-pending", state.OrderPending
+	l.canonical.Orders["removed-pending"] = removed
+	l.syncCanonicalStateFromOrders(OrdersFile{Orders: []Order{scheduleOrder(config.DefaultConfig(), "changed scheduler input")}})
+	if !reflect.DeepEqual(l.canonical.Orders["done"], done) || !reflect.DeepEqual(l.canonical.Orders["cancelled"], cancelled) {
+		t.Fatal("projection update changed terminal custody")
+	}
+	if _, exists := l.canonical.Orders["removed-pending"]; exists {
+		t.Fatal("projection removal revived pending work")
+	}
+}
 
 func TestLoadOrBootstrapCanonicalFromLegacyState(t *testing.T) {
 	projectDir := t.TempDir()

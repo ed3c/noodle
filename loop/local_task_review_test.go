@@ -11,11 +11,26 @@ import (
 )
 
 func localTaskReviewFixture(t *testing.T) (*Loop, *cookHandle, ControlCommand) {
+	return localTaskReviewFixturePaths(t, "candidate.txt", "candidate.txt")
+}
+
+func localTaskReviewFixturePaths(t *testing.T, scope, name string) (*Loop, *cookHandle, ControlCommand) {
+	return localTaskReviewFixtureRoute(t, scope, name, "process", "codex")
+}
+
+func localTaskReviewFixtureRoute(t *testing.T, scope, name, runtimeName, provider string) (*Loop, *cookHandle, ControlCommand) {
 	t.Helper()
 	l, _, cook := newTypedOutcomeTestLoop(t)
 	l.config.Agents.Codex.RequireTypedOutcome = false
-	l.config.Runtime.Process.AdmittedOrders = []string{cook.orderID}
-	cook.stage = Stage{TaskKey: "local-task", Skill: "local-task", Provider: "codex", Model: "gpt-5.4", Runtime: "process", Prompt: `{"kind":"local_task","goal":"fix candidate","write_paths":["candidate.txt"]}`}
+	l.config.Runtime.AdmittedOrders = []string{cook.orderID}
+	prompt, err := json.Marshal(map[string]any{"kind": "local_task", "goal": "fix candidate", "write_paths": []string{scope}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cook.stage = Stage{TaskKey: "local-task", Skill: "local-task", Provider: provider, Model: "selected-model", Runtime: runtimeName, Prompt: string(prompt)}
+	if runtimeName == "process" {
+		cook.stage.Model = "gpt-5.4"
+	}
 	cook.worktreeName = cookBaseName(cook.orderID, 0, "local-task")
 	cook.worktreePath = l.worktreePath(cook.worktreeName)
 	if err := writeOrdersAtomic(l.deps.OrdersFile, OrdersFile{Orders: []Order{{ID: cook.orderID, Status: OrderStatusActive, Stages: []Stage{cook.stage}}}}); err != nil {
@@ -28,7 +43,14 @@ func localTaskReviewFixture(t *testing.T) (*Loop, *cookHandle, ControlCommand) {
 	runGitInRepo(t, l.projectDir, "add", ".gitignore")
 	runGitInRepo(t, l.projectDir, "commit", "-m", "base")
 	runGitInRepo(t, l.projectDir, "worktree", "add", "-b", cook.worktreeName, cook.worktreePath)
-	requestChangesWrite(t, filepath.Join(cook.worktreePath, "candidate.txt"), []byte("reviewed candidate\n"))
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(cook.worktreePath, name)), 0700); err != nil {
+		t.Fatal(err)
+	}
+	requestChangesWrite(t, filepath.Join(cook.worktreePath, name), []byte("reviewed candidate\n"))
+	if runtimeName == "openshell" {
+		runGitInRepo(t, cook.worktreePath, "add", "--", name)
+		runGitInRepo(t, cook.worktreePath, "commit", "-m", "Publish returned candidate")
+	}
 	dir := filepath.Join(l.runtimeDir, "sessions", cook.session.ID())
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -36,9 +58,18 @@ func localTaskReviewFixture(t *testing.T) (*Loop, *cookHandle, ControlCommand) {
 	for name, data := range map[string]string{"events.ndjson": "", "prompt.txt": cook.stage.Prompt} {
 		requestChangesWrite(t, filepath.Join(dir, name), []byte(data))
 	}
-	recoveryWriteJSON(t, filepath.Join(dir, "spawn.json"), map[string]any{"session_id": cook.session.ID(), "worktree_path": cook.worktreePath, "retry_count": 0, "skill": "local-task", "provider": "codex", "model": "gpt-5.4", "runtime": "process"})
-	recoveryWriteJSON(t, filepath.Join(dir, "meta.json"), map[string]any{"session_id": cook.session.ID(), "status": "exited", "alive": false, "provider": "codex", "model": "gpt-5.4", "runtime": "process"})
-	recoveryWriteJSON(t, filepath.Join(dir, "process.json"), map[string]any{"session_id": cook.session.ID(), "pid": 99999999})
+	recoveryWriteJSON(t, filepath.Join(dir, "spawn.json"), map[string]any{"session_id": cook.session.ID(), "worktree_path": cook.worktreePath, "retry_count": 0, "skill": "local-task", "provider": provider, "model": cook.stage.Model, "runtime": runtimeName})
+	recoveryWriteJSON(t, filepath.Join(dir, "meta.json"), map[string]any{"session_id": cook.session.ID(), "status": "exited", "alive": false, "provider": provider, "model": cook.stage.Model, "runtime": runtimeName})
+	if runtimeName == "openshell" {
+		if err := os.MkdirAll(filepath.Join(dir, "delivery"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range recoveryFiles(runtimeName)[4:] {
+			recoveryWriteJSON(t, filepath.Join(dir, name), map[string]any{"fixture": "runtime reader supplies original completion"})
+		}
+	} else {
+		recoveryWriteJSON(t, filepath.Join(dir, "process.json"), map[string]any{"session_id": cook.session.ID(), "pid": 99999999})
+	}
 	if err := l.parkPendingReview(cook, "supervised mode requires merge approval"); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +85,7 @@ func localTaskReviewFixture(t *testing.T) (*Loop, *cookHandle, ControlCommand) {
 		t.Fatal(err)
 	}
 	source := filepath.Join(t.TempDir(), "candidate.json")
-	recoveryWriteJSON(t, source, map[string]any{"schema": 1, "order_id": cook.orderID, "session_id": b.SessionID, "attempt_id": b.AttemptID, "worktree": b.WorktreePath, "head": b.Head, "spawn_sha256": b.Files["spawn.json"], "index_sha256": recoveryDigest(index), "files": map[string]any{"candidate.txt": map[string]any{"sha256": recoveryDigest([]byte("reviewed candidate\n")), "executable": false}}})
+	recoveryWriteJSON(t, source, map[string]any{"schema": 1, "order_id": cook.orderID, "session_id": b.SessionID, "attempt_id": b.AttemptID, "worktree": b.WorktreePath, "head": b.Head, "spawn_sha256": b.Files["spawn.json"], "index_sha256": recoveryDigest(index), "files": map[string]any{name: map[string]any{"sha256": recoveryDigest([]byte("reviewed candidate\n")), "executable": false}}})
 	return l, cook, ControlCommand{ID: "recover-local", Action: "recover-local-task-review", OrderID: cook.orderID, Value: source, Target: recoveryDigest(recoveryRead(t, source)), Name: "original-review"}
 }
 
@@ -68,6 +99,9 @@ func TestLocalTaskRequestChangesPreservesDirtyCandidateAndRequeues(t *testing.T)
 	}
 	l = New(l.projectDir, "noodle", l.config, l.deps)
 	if err := l.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.controlPause(); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.controlEditItem(ControlCommand{OrderID: cook.orderID, Prompt: `{"kind":"local_task","goal":"fix candidate","write_paths":["candidate.txt"],"correction":"correct result"}`}); err != nil {
@@ -93,6 +127,12 @@ func TestLocalTaskRequestChangesPreservesDirtyCandidateAndRequeues(t *testing.T)
 	}
 	if string(recoveryRead(t, filepath.Join(cook.worktreePath, "candidate.txt"))) != "reviewed candidate\n" {
 		t.Fatal("candidate lost")
+	}
+	if err := l.controlMode("supervised"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, dispatch, _, err := l.buildCycleBrief(context.Background()); err != nil || dispatch || l.state != StatePaused {
+		t.Fatalf("outer review resumed a paused revision: %v", err)
 	}
 }
 
@@ -150,7 +190,7 @@ func TestLocalTaskRecoveryRejectsForeignOrChangedEvidence(t *testing.T) {
 			case "meta":
 				recoveryWriteJSON(t, filepath.Join(l.runtimeDir, "sessions", cook.session.ID(), "meta.json"), map[string]any{"status": "running", "alive": true})
 			case "scope":
-				l.config.Runtime.Process.AdmittedOrders = nil
+				l.config.Runtime.AdmittedOrders = nil
 			case "typed":
 				l.config.Agents.Codex.RequireTypedOutcome = true
 			}

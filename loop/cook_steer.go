@@ -20,7 +20,7 @@ func (l *Loop) killCook(name string) error {
 	}
 	for _, cook := range l.cooks.activeCooksByOrder {
 		if cook.worktreeName == name || cook.session.ID() == name {
-			return cook.session.ForceKill()
+			return stopOwnedCook(cook)
 		}
 	}
 	return fmt.Errorf("session not found")

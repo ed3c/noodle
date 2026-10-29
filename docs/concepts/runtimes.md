@@ -1,6 +1,6 @@
 # Runtimes
 
-A runtime is where an agent session executes. Noodle ships with two: local processes and [Sprites](https://sprites.dev) cloud sandboxes. The scheduling agent can pick a runtime per stage, or you can set a project-wide default. Custom runtime plugins are on the roadmap, so you'll be able to define your own.
+A runtime is where an agent session executes. Noodle supports local processes, a selected native Codex app-server runtime, and [Sprites](https://sprites.dev) cloud sandboxes. The scheduling agent can pick a runtime per stage, or you can set a project-wide default. Custom runtime plugins are on the roadmap, so you'll be able to define your own.
 
 ## Process
 
@@ -17,6 +17,97 @@ max_concurrent = 4
 ```
 
 `max_concurrent` defaults to 4. This caps how many local agent processes run simultaneously, independent of the global `max_concurrency` ceiling.
+
+## Native Codex app-server
+
+`codex-app-server` is an experimental foreground runtime. The original Noodle
+Host starts the selected Codex binary with `app-server` and owns its stdio
+connection through the existing process handle and attempt admission. It does
+not attach to a Desktop backend, start a daemon, or fall back to `codex exec`.
+The OS observation path currently requires POSIX `ps`.
+
+```toml
+[runtime]
+default = "codex-app-server"
+```
+
+Each attempt retains its native home, foreground process identity, thread and
+turn, role, worktree, raw notifications, unsubscribe intent and acknowledgement.
+Configured MCP servers retain the original Host configuration. MCP is not the
+control channel. Configured capabilities remain subject to Codex policy.
+
+The minimum automatic-release scope is a dedicated attempt owned by this
+runtime. Its control path is the native app-server connection owned by Noodle.
+Desktop MCP inventory, Session/PID binding, carrier takeover and reconnection
+are outside this scope and are not prerequisites for its acceptance. Existing
+Desktop resources remain untouched. This does not establish Desktop reclamation.
+
+An attempt that starts MCP servers must still account for those resources when
+claiming their release. An attempt without MCP servers has no MCP process-exit
+requirement. Neither case requires an MCP control channel. Unknown effects or
+unconfirmed exits remain unresolved; reducing scope does not turn them into
+release receipts.
+
+Native server requests, including command and file approvals, remain pending
+when the Host has no response capability. The runtime saves the original request
+without approving, denying or replaying it. Pending requests block new work,
+unsubscribe and quota return. Readback and explicit interruption remain available.
+Only a native resolution with the same request and thread identity removes the
+pending marker. The request and resolution remain in the attempt record.
+Resolution alone does not prove a terminal turn, unload or process exit.
+There is no new approval UI; an unresolved request requires the original owner
+readback or an explicit interruption.
+
+After the original turn completes, the connection stops admitting new work.
+Pending or unknown RPC effects block release. The runtime binds child threads
+from native activity events and ancestor readback. It checks each child's
+parent, worktree and original turn before acting. Normal completion waits for
+children and background terminals to finish. An explicit stop interrupts each
+known active child through its original thread and turn. Unknown descendants
+block release. After each child unloads, the runtime records the current
+foreground descendants and unsubscribes its own root thread. It keeps the native
+retention delay and waits for unload. No global delay override is installed.
+
+The runtime preserves the raw unsubscribe acknowledgement and validates its
+native status. Missing or unknown status blocks release. An acknowledgement
+does not return quota. After a complete empty `thread/loaded/list` response,
+the runtime saves that original response as `unload_readback` before closing
+the foreground process. A failure to save it blocks completion. This receipt
+proves the loaded-list observation, not process exit. The runtime
+also checks the original terminal, absence of loaded threads, foreground process
+exit, stderr drainage, and exit of the recorded descendants. Process observation
+uses parent and start identity, not executable names. This bounded observation
+does not prove coverage of a process that starts and detaches between snapshots.
+For MCP resources started by this attempt, that generation-coverage gap remains
+part of acceptance. It is not a requirement to discover all Desktop MCP
+generations. Minimum-path acceptance still requires original Host readback of
+automatic cleanup, quota return, pause/resume deduplication and same-thread
+recovery. An isolated Host acceptance used the actual Codex app-server with a
+localhost offline provider. It observed release, quota return, rolling generation
+exit, same-thread continuation, retained pause and control replay deduplication.
+A native local-task variant also retained candidate review after completion.
+The shared production Host completed its initial legacy maintenance on 2026-10-27
+(Taipei). The OpenShell task has a restored manual review context and an explicitly
+selected current Codex profile. Its original request, environment digest, thread,
+worker bytes and review remain bound. Two Medium tasks remain parked with missing
+original sources. Host activation does not establish their recovery or acceptance.
+The current local readback is recorded in Soodles
+`docs/handoffs/2026-10-26-swap-rolling-host/control-noodle-readback.md`.
+App SwapManager acceptance still requires the original App carrier's loaded MCP
+and Hooks evidence; the Noodle foreground release fixture does not supply it.
+
+A same-role continuation requires the predecessor's release receipt and the
+same native home, task and worktree. It resumes the exact original thread.
+New threads use the native default history mode. Existing threads retain their
+original history mode; this adapter does not migrate their history.
+If an interrupt receives an explicit rejection, the runtime saves that refusal
+and reads the exact original turn. A terminal readback can continue cleanup;
+a nonterminal or changed turn remains unresolved. The runtime does not retry
+the interrupt or record a refusal as an acknowledgement.
+No archive or unarchive operation is part of this completion path. Native JSON-RPC
+records remain verbatim. A restarted Host cannot reattach a lost stdio channel;
+recovery retains that attempt for readback without replay or inferred release.
+Existing Desktop threads and historical shared-server attempts are not migrated.
 
 ## Sprites
 

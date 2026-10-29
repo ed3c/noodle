@@ -65,6 +65,9 @@ func TestReleaseRunActorRejectsBusyAndJoinsIdle(t *testing.T) {
 	default:
 		t.Fatal("merge queue was not joined")
 	}
+	if l.TerminalCause() != TerminalMigrationDetach {
+		t.Fatalf("migration release lost cause: %q", l.TerminalCause())
+	}
 }
 
 func TestReleaseRefusesUnfinishedOwnerWork(t *testing.T) {
@@ -99,5 +102,35 @@ func TestReleaseRefusesUnfinishedOwnerWork(t *testing.T) {
 				t.Fatalf("unfinished work accepted: %v", err)
 			}
 		})
+	}
+}
+
+func TestHostSwitchCapturesAndRestoresCurrentModeAndPause(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Mode = "supervised"
+	cfg.Skills.Paths = []string{dir}
+	saved := HostContinuation{Mode: "manual", DispatchState: StatePaused}
+	l := New(dir, "noodle", cfg, Dependencies{Runtimes: map[string]loopruntime.Runtime{"process": newMockRuntime()}, Worktree: &fakeWorktree{}, Adapter: &fakeAdapterRunner{}, Mise: &fakeMise{}, Monitor: fakeMonitor{}, Registry: testLoopRegistry(), ModeOverride: state.RunModeSupervised, HostContinuation: &saved})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- l.Run(ctx) }()
+	select {
+	case <-l.Ready():
+	case err := <-result:
+		t.Fatalf("startup: %v", err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	got, err := l.ReleaseForSwitch(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != saved {
+		t.Fatalf("current mode/pause: %+v", got)
+	}
+	if err = <-result; err != nil {
+		t.Fatal(err)
 	}
 }

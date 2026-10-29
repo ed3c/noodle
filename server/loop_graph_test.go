@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -42,9 +43,9 @@ func TestLoopGraphReadOnlyBoundArtifactsAndIndex(t *testing.T) {
 	if w.Code != 200 || strings.Contains(w.Body.String(), "inert") {
 		t.Fatalf("metadata: %d %s", w.Code, w.Body.String())
 	}
-	w = call("GET", "/api/loops")
+	w = call("GET", "/api/loops/runs/run")
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "inert") {
-		t.Fatal("legacy body lost")
+		t.Fatal("selected run body lost")
 	}
 	w = call("GET", "/api/loops/artifacts/a")
 	var result loopview.ArtifactResult
@@ -84,5 +85,43 @@ func TestLoopGraphReadOnlyBoundArtifactsAndIndex(t *testing.T) {
 	}
 	if w = call("GET", "/api/loops/artifacts/a"); w.Code != 409 || !strings.Contains(w.Body.String(), `"content":null`) {
 		t.Fatalf("version drift: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRepositoryIndexSearchPrecedesPaginationAndBindsVersion(t *testing.T) {
+	dir := t.TempDir()
+	files := []loopview.IndexFile{}
+	for i := 0; i < 120; i++ {
+		files = append(files, loopview.IndexFile{ID: fmt.Sprintf("f%d", i), Path: fmt.Sprintf("file-%03d.txt", i), ArtifactIDs: []string{}, NodeIDs: []string{}})
+	}
+	graph := &loopview.Graph{Objects: []loopview.Object{}, Ports: []loopview.Port{}, Repositories: []loopview.Repository{{ID: "repo", Root: dir, IndexStatus: "unknown", TrackedFiles: files, SelectedFiles: []loopview.IndexFile{}, Gaps: []string{}}}, Nodes: []loopview.Node{}, Artifacts: []loopview.Artifact{}, Edges: []loopview.Edge{}, Findings: []loopview.Finding{}, Metrics: []loopview.Metric{}}
+	if _, _, err := loopview.Import(dir, loopview.View{SchemaVersion: 2, Runs: []loopview.Run{}, Graph: graph}); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := loopview.LoadSummary(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := summary.Graph.Repositories[0].Detail.SHA256
+	handler := LoopViewsHandler(dir, nil, nil)
+	call := func(path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		return w
+	}
+	metadata := call("/api/loops/graph")
+	if metadata.Code != 200 || strings.Contains(metadata.Body.String(), "file-119.txt") {
+		t.Fatal("metadata retained index", metadata.Body.String())
+	}
+	found := call("/api/loops/repositories/repo/files?ref=" + ref + "&section=tracked&search=119&limit=1")
+	if found.Code != 200 || !strings.Contains(found.Body.String(), `"total":1`) || !strings.Contains(found.Body.String(), "file-119.txt") {
+		t.Fatal("search limited to first page", found.Body.String())
+	}
+	next := call("/api/loops/repositories/repo/files?ref=" + ref + "&offset=100&limit=100")
+	if next.Code != 200 || !strings.Contains(next.Body.String(), `"total":120`) || !strings.Contains(next.Body.String(), "file-119.txt") {
+		t.Fatal("second page missing", next.Body.String())
+	}
+	if got := call("/api/loops/repositories/repo/files?ref=wrong"); got.Code != 409 {
+		t.Fatal("index version drift accepted")
 	}
 }

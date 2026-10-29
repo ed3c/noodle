@@ -23,7 +23,7 @@ func Bind(cfg Config, e *execution.Context) (Config, error) {
 		}
 		cfg.Skills.Paths[i] = resolved
 	}
-	for _, provider := range []*ProviderConfig{&cfg.Agents.Claude, &cfg.Agents.Codex} {
+	for _, provider := range []*ProviderConfig{&cfg.Agents.Claude, &cfg.Agents.Codex, &cfg.Agents.Pi} {
 		if provider.Path == "" {
 			continue
 		}
@@ -32,6 +32,13 @@ func Bind(cfg Config, e *execution.Context) (Config, error) {
 			return Config{}, fmt.Errorf("resolve agent path: %w", err)
 		}
 		provider.Path = resolved
+	}
+	if cfg.Runtime.OpenShell.Profile != "" {
+		resolved, err := e.ResolvePath(cfg.Runtime.OpenShell.Profile)
+		if err != nil {
+			return Config{}, fmt.Errorf("resolve OpenShell profile: %w", err)
+		}
+		cfg.Runtime.OpenShell.Profile = resolved
 	}
 	return cfg, nil
 }

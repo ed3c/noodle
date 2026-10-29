@@ -429,6 +429,12 @@ func (l *Loop) syncCanonicalStateFromOrders(orders OrdersFile) {
 		if _, ok := present[orderID]; ok {
 			continue
 		}
+		// The legacy projection omits these terminal orders. Its absence cannot
+		// revoke their canonical attempts, results, or completion evidence.
+		status := l.canonical.Orders[orderID].Status
+		if status == state.OrderCompleted || status == state.OrderCancelled {
+			continue
+		}
 		delete(l.canonical.Orders, orderID)
 		delete(l.canonical.PendingReviews, orderID)
 	}

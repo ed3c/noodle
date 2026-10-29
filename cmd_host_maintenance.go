@@ -166,8 +166,7 @@ func waitingPoolAdmission(root string, b hostRequestBinding, p hostPool) (string
 }
 
 // Exclude forwarded operations before the final empty-Host observation.
-func (g *hostMaintenanceGate) freeze() { g.mu.Lock(); g.closed = true; g.mu.Unlock() }
-
+func (g *hostMaintenanceGate) freeze()      { g.mu.Lock(); g.closed = true; g.mu.Unlock() }
 func (g *hostMaintenanceGate) Close() error { err := g.listener.Close(); <-g.done; return err }
 
 func publishMaintenanceSocket(root string) error {

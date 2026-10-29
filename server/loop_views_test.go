@@ -80,3 +80,46 @@ func TestLoopViewsReadOnlyUpdatesAndETag(t *testing.T) {
 		t.Fatal("broken registry concealed")
 	}
 }
+
+func TestLoopRunDetailEnrichesOnlySelectedRunAndRejectsWrongVersion(t *testing.T) {
+	dir := t.TempDir()
+	runs := []loopview.Run{}
+	for _, id := range []string{"first", "second"} {
+		runs = append(runs, loopview.Run{ID: id, Repository: "repo", Mode: "manual", Status: "prepared", Stages: []loopview.Stage{{ID: "stage", Kind: "original", Status: "observed", ConsumerStatus: "unknown", Prompt: "original body"}}, Cards: []loopview.Card{}, Notes: []loopview.Note{}, Breakpoints: []loopview.Breakpoint{}})
+	}
+	if _, _, err := loopview.Import(dir, loopview.View{SchemaVersion: 1, Runs: runs}); err != nil {
+		t.Fatal(err)
+	}
+	observed := []string{}
+	handler := LoopViewsHandler(dir, nil, func(_ context.Context, v *loopview.View) error {
+		for i := range v.Runs {
+			observed = append(observed, v.Runs[i].ID)
+			v.Runs[i].Stages[0].Prompt = "fresh canonical prompt"
+		}
+		return nil
+	})
+	call := func(path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		return w
+	}
+	catalog := call("/api/loops")
+	if catalog.Code != 200 || strings.Contains(catalog.Body.String(), "original body") || len(observed) != 0 {
+		t.Fatal("catalog expanded native bodies", catalog.Body.String())
+	}
+	var view loopview.View
+	if err := json.Unmarshal(catalog.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	selected := view.Runs[0]
+	detail := call("/api/loops/runs/first?ref=" + selected.Detail.SHA256)
+	if detail.Code != 200 || !strings.Contains(detail.Body.String(), "fresh canonical prompt") || len(observed) != 1 || observed[0] != "first" {
+		t.Fatal("selected native enrichment lost", detail.Body.String(), observed)
+	}
+	if got := call("/api/loops/runs/first?ref=changed"); got.Code != 409 || len(observed) != 1 {
+		t.Fatal("wrong selected version reached observer")
+	}
+	if got := call("/api/loops/runs/unknown"); got.Code != 404 {
+		t.Fatal("unregistered run read")
+	}
+}

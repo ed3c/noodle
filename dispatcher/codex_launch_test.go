@@ -12,7 +12,7 @@ import (
 // These are argv contract controls, not authenticated Agent execution receipts.
 func TestCodexProcessLaunchUsesHostPermissions(t *testing.T) {
 	d := NewProcessDispatcher(ProcessDispatcherConfig{})
-	cmd, err := d.buildCmd(DispatchRequest{Provider: "codex", Model: "test-model"}, "")
+	cmd, err := processCommandForTest(t, d, DispatchRequest{Provider: "codex", Model: "test-model"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestCodexProcessLaunchPreservesConfiguredArguments(t *testing.T) {
 			d := NewProcessDispatcher(ProcessDispatcherConfig{
 				ProviderConfigs: ProviderConfigs{Codex: ProviderConfig{Args: args}},
 			})
-			cmd, err := d.buildCmd(DispatchRequest{Provider: "codex", Model: "test-model"}, "")
+			cmd, err := processCommandForTest(t, d, DispatchRequest{Provider: "codex", Model: "test-model"}, "")
 			if err != nil {
 				t.Fatal(err)
 			}

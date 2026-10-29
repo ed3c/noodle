@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "sources": [
+    {
+      "name": "crapper",
+      "repository": "https://github.com/unclebob/crapper.git",
+      "revision": "6fd92c4c9bcc56efb64a2f8743d5a2993bcfd42d"
+    },
+    {
+      "name": "dryer",
+      "repository": "https://github.com/unclebob/dryer.git",
+      "revision": "66ff6d21a42c04afcad89c78a80066176d1294b0"
+    },
+    {
+      "name": "mutator",
+      "repository": "https://github.com/unclebob/mutator.git",
+      "revision": "a5a0cb803b66e0cdb8bf471b3b08af701d424a41"
+    },
+    {
+      "name": "ub-mode",
+      "repository": "https://github.com/unclebob/ub-mode.git",
+      "revision": "57a8bdd28e45ed41900ace0bafa2ff76dd9ed70f"
+    },
+    {
+      "name": "uml-viewer",
+      "repository": "https://github.com/unclebob/uml-viewer.git",
+      "revision": "f65dafe93b3cb1b4e6bb02dbe41503ed05bd9ebf"
+    }
+  ]
+}

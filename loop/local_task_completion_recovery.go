@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 
 	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/event"
@@ -203,7 +202,7 @@ func (l *Loop) captureLocalTaskCompletion(order state.OrderNode) (localTaskCompl
 			return p, err
 		}
 		for _, name := range bytes.Split(raw, []byte{0}) {
-			if len(name) > 0 && !slices.Contains(prompt.WritePaths, string(name)) {
+			if len(name) > 0 && !localTaskPathAllowed(prompt.WritePaths, string(name)) {
 				return p, fmt.Errorf("local task completion exceeds admitted paths: %s", name)
 			}
 		}

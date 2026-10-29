@@ -14,6 +14,8 @@ type Status struct {
 	Active         []string `json:"active,omitempty"`
 	LoopState      string   `json:"loop_state,omitempty"`
 	Mode           string   `json:"mode,omitempty"`
+	EffectiveMode  string   `json:"effective_mode,omitempty"`
+	ModeOverride   string   `json:"mode_override,omitempty"`
 	MaxConcurrency int      `json:"max_concurrency,omitempty"`
 	Warnings       []string `json:"warnings,omitempty"`
 }

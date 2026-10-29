@@ -12,7 +12,14 @@ function setup(customize?: (view: ReturnType<typeof graphFixture>) => void) {
   const view = graphFixture();
   customize?.(view);
   const fullView = structuredClone(view);
-  for (const run of view.runs) {
+  for (const [index, run] of view.runs.entries()) {
+    run.detail = {
+      sha256: String(index + 1).repeat(64),
+      bytes: 1024,
+      tracked: 0,
+      selected: 0,
+      artifact_ids: [],
+    };
     for (const stage of run.stages) {
       stage.prompt = "";
     }
@@ -25,8 +32,15 @@ function setup(customize?: (view: ReturnType<typeof graphFixture>) => void) {
   }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const fetch = vi.fn().mockImplementation((url: string) => {
-    if (url === "/api/loops") {
-      return Promise.resolve(Response.json(fullView));
+    if (url.startsWith("/api/loops/runs/")) {
+      const id = url.split("/runs/")[1]?.split("?")[0];
+      return Promise.resolve(
+        Response.json({
+          schema_version: 1,
+          runs: fullView.runs.filter((r) => r.id === id),
+          projection_source: view.runs.find((r) => r.id === id)?.detail,
+        }),
+      );
     }
     const artifact = view.graph.artifacts.find((a) => url.endsWith(`/${a.id}`));
     if (artifact) {
@@ -222,10 +236,10 @@ describe("source-backed DAG interactions", () => {
     expect(
       panorama.queryByRole("button", { name: /Original command refused/ }),
     ).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "全部卡片" }));
+    await userEvent.click(screen.getByRole("button", { name: "任務卡片" }));
     expect(await screen.findByText("Card org/two")).toBeVisible();
     expect(screen.queryByText("Card org/one")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "全部筆記" }));
+    await userEvent.click(screen.getByRole("button", { name: "任務筆記" }));
     expect(await screen.findByText("Note org/two")).toBeVisible();
     expect(screen.queryByText("Note org/one")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "量測" }));
@@ -297,14 +311,20 @@ describe("source-backed DAG interactions", () => {
     expect(fetch).not.toHaveBeenCalled();
     expect(screen.queryByText("original knowledge")).not.toBeInTheDocument();
     expect(screen.queryByText("original prompt")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "全部卡片" }));
+    await userEvent.click(screen.getByRole("button", { name: "任務卡片" }));
     expect(await screen.findByText("Card org/one")).toBeVisible();
-    expect(screen.getAllByText("original knowledge")).toHaveLength(2);
-    expect(fetch).toHaveBeenCalledWith("/api/loops", expect.anything());
-    expect(screen.getByText("Card org/two")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "全部筆記" }));
-    expect(screen.getByText("Note org/one")).toBeVisible();
-    expect(screen.getByText("Note org/two")).toBeVisible();
+    expect(screen.getAllByText("original knowledge")).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/loops/runs/run1?ref="),
+      expect.anything(),
+    );
+    await userEvent.selectOptions(screen.getByLabelText("任務範圍"), "run2");
+    expect(await screen.findByText("Card org/two")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "任務筆記" }));
+    await userEvent.selectOptions(screen.getByLabelText("任務範圍"), "run1");
+    expect(await screen.findByText("Note org/one")).toBeVisible();
+    await userEvent.selectOptions(screen.getByLabelText("任務範圍"), "run2");
+    expect(await screen.findByText("Note org/two")).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "量測" }));
     expect(screen.getByText("分子 2 / 分母 unknown")).toBeVisible();
     expect(screen.getByText("unknown · unknown ratio")).toBeVisible();
@@ -315,13 +335,16 @@ describe("source-backed DAG interactions", () => {
   it("keeps full-content failure unknown without changing the graph or reading artifacts", async () => {
     const { fetch } = setup();
     fetch.mockResolvedValueOnce(new Response(null, { status: 503 }));
-    await userEvent.click(screen.getByRole("button", { name: "全部筆記" }));
+    await userEvent.click(screen.getByRole("button", { name: "任務筆記" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("完整內容目前未知");
     expect(screen.queryByText("original note")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "關係圖" }));
     expect(screen.getByRole("button", { name: /紀錄 Invocation first/ })).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch).toHaveBeenCalledWith("/api/loops", expect.anything());
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/loops/runs/run1?ref="),
+      expect.anything(),
+    );
   });
   it("finds only the evidenced failure frontier and keeps later failures", () => {
     const { graph } = graphFixture();

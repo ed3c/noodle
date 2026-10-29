@@ -96,6 +96,12 @@ func TestResidentRestartPreservesLegacyFailure(t *testing.T) {
 		t.Fatalf("restart replaced prior errors: %+v %v", rows, err)
 	}
 }
+func advanceResidentFixtureSample(b *Budget) {
+	now := b.now().Add(PollInterval)
+	b.now = func() time.Time { return now }
+	b.Observe(Sample{At: now, Pressure: Normal, SwapUsedBytes: 0}, nil)
+}
+
 func residentFixture(t *testing.T) (*Residents, *Budget, ResidentSpec) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -108,9 +114,11 @@ func residentFixture(t *testing.T) (*Residents, *Budget, ResidentSpec) {
 	b := NewBudget(3)
 	b.Register("a")
 	b.Register("b")
-	now := time.Now()
+	// Lifecycle fixtures start with known, below-ceiling samples.
+	// Unsupported sampling is a real admission refusal under policy v2.
+	started := time.Now().Add(-3 * PollInterval)
 	for i := 0; i < 4; i++ {
-		b.Observe(Sample{At: now.Add(time.Duration(i-3) * time.Second), Pressure: Normal, SwapUsedBytes: 0, CPUs: 4, TotalMemoryBytes: 16 << 30}, nil)
+		b.Observe(Sample{At: started.Add(time.Duration(i) * PollInterval), Pressure: Normal, SwapUsedBytes: 0}, nil)
 	}
 	exe, err := os.Executable()
 	if err != nil {

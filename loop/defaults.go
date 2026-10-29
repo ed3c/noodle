@@ -28,7 +28,7 @@ func (w unavailableWorktree) HasUnmergedCommits(string) (bool, error)       { re
 
 func defaultDependencies(projectDir, runtimeDir, noodleBin string, cfg config.Config, logger *slog.Logger, sink dispatcher.SessionEventSink, executionContext *execution.Context) Dependencies {
 	resolver := skill.Resolver{SearchPaths: cfg.Skills.Paths}
-	local := dispatcher.NewProcessDispatcher(dispatcher.ProcessDispatcherConfig{
+	processConfig := dispatcher.ProcessDispatcherConfig{
 		ProjectDir:    projectDir,
 		Execution:     executionContext,
 		RuntimeDir:    runtimeDir,
@@ -37,6 +37,7 @@ func defaultDependencies(projectDir, runtimeDir, noodleBin string, cfg config.Co
 		RuntimeKind:   "process",
 		Sink:          sink,
 		ProviderConfigs: dispatcher.ProviderConfigs{
+			Pi: dispatcher.ProviderConfig{Path: cfg.Agents.Pi.Path, Args: cfg.Agents.Pi.Args},
 			Claude: dispatcher.ProviderConfig{
 				Path: cfg.Agents.Claude.Path,
 				Args: cfg.Agents.Claude.Args,
@@ -46,9 +47,13 @@ func defaultDependencies(projectDir, runtimeDir, noodleBin string, cfg config.Co
 				Args: cfg.Agents.Codex.Args,
 			},
 		},
-	})
+	}
+	local := dispatcher.NewProcessDispatcher(processConfig)
 	runtimes := map[string]loopruntime.Runtime{
 		"process": loopruntime.NewProcessRuntime(local, runtimeDir, cfg.Runtime.Process.MaxConcurrent),
+	}
+	if runtimeEnabled(cfg.AvailableRuntimes(), dispatcher.CodexNativeRuntime) {
+		runtimes[dispatcher.CodexNativeRuntime] = loopruntime.NewCodexNativeRuntime(processConfig)
 	}
 	if runtimeEnabled(cfg.AvailableRuntimes(), "sprites") {
 		spriteName := strings.TrimSpace(cfg.Runtime.Sprites.SpriteName)
@@ -72,7 +77,7 @@ func defaultDependencies(projectDir, runtimeDir, noodleBin string, cfg config.Co
 	}
 
 	wtApp, wtErr := worktree.NewAppWithExecution(executionContext)
-	if wtErr == nil && len(cfg.Runtime.Process.AdmittedOrders) > 0 {
+	if wtErr == nil && len(cfg.Runtime.AdmittedOrders) > 0 {
 		wtErr = bindContextIntegration(wtApp, runtimeDir)
 		if wtErr != nil {
 			wtApp = nil

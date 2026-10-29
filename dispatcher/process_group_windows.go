@@ -12,7 +12,7 @@ func configureChildProcess(cmd *exec.Cmd) {
 	// No process-group configuration required for Windows builds.
 }
 
-func terminateProcess(cmd *exec.Cmd) error {
+func terminateProcess(cmd *exec.Cmd, _ bool) error {
 	if cmd.Process == nil {
 		return nil
 	}
@@ -23,7 +23,7 @@ func terminateProcess(cmd *exec.Cmd) error {
 	return cmd.Process.Kill()
 }
 
-func forceKillProcess(cmd *exec.Cmd) error {
+func forceKillProcess(cmd *exec.Cmd, _ bool) error {
 	if cmd.Process == nil {
 		return nil
 	}

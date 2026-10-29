@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -17,14 +18,15 @@ import (
 )
 
 type fakeHostRuntime struct {
-	ready      chan struct{}
-	released   chan struct{}
-	busy       bool
-	cycles     int
-	runErr     error
-	cycleErr   error
-	shutdowns  int
-	releaseErr error
+	ready         chan struct{}
+	released      chan struct{}
+	busy          bool
+	cycles        int
+	runErr        error
+	cycleErr      error
+	shutdowns     int
+	releaseErr    error
+	terminalCause loop.TerminalCause
 }
 
 func (f *fakeHostRuntime) Run(ctx context.Context) error {
@@ -41,18 +43,35 @@ func (f *fakeHostRuntime) Run(ctx context.Context) error {
 }
 func (f *fakeHostRuntime) Ready() <-chan struct{} { return f.ready }
 func (f *fakeHostRuntime) Release(context.Context) error {
+	return f.release(loop.TerminalMigrationDetach)
+}
+func (f *fakeHostRuntime) release(cause loop.TerminalCause) error {
 	if f.releaseErr != nil {
 		return f.releaseErr
 	}
 	if f.busy {
 		return loop.ErrReleaseBusy
 	}
+	f.terminalCause = cause
 	close(f.released)
 	return nil
 }
-func (f *fakeHostRuntime) Cycle(context.Context) error { f.cycles++; return f.cycleErr }
-func (f *fakeHostRuntime) Shutdown()                   { f.shutdowns++ }
-func (f *fakeHostRuntime) FinishOnce() error           { return nil }
+func (f *fakeHostRuntime) CleanupAutomatic(context.Context) error {
+	return f.release(loop.TerminalAutoCompleted)
+}
+func (f *fakeHostRuntime) Cleanup(ctx context.Context, apply bool) error {
+	if f.busy {
+		return loop.ErrReleaseBusy
+	}
+	if !apply {
+		return f.releaseErr
+	}
+	return f.release(loop.TerminalExplicitCleanup)
+}
+func (f *fakeHostRuntime) Cycle(context.Context) error       { f.cycles++; return f.cycleErr }
+func (f *fakeHostRuntime) Shutdown()                         { f.shutdowns++ }
+func (f *fakeHostRuntime) FinishOnce() error                 { return nil }
+func (f *fakeHostRuntime) TerminalCause() loop.TerminalCause { return f.terminalCause }
 
 func hostTestRequest(t *testing.T, root string) hostRequest {
 	t.Helper()
@@ -118,11 +137,11 @@ func TestHostConcurrentContextsKeepPIDAndIsolateEnvironment(t *testing.T) {
 	}
 	detach.InstanceID = response.HostInstanceID
 	runtimes[0].busy = true
-	if got := h.handle(context.Background(), detach); got.Status != "busy" || h.testContext() == nil {
+	if got := h.handle(context.Background(), detach); got.Status != "busy" || h.testContext() == nil || got.TerminalCause != "" {
 		t.Fatalf("busy detach: %+v", got)
 	}
 	runtimes[0].busy = false
-	if got := h.handle(context.Background(), detach); got.ContextState != "detached" || got.Status != "ok" {
+	if got := h.handle(context.Background(), detach); got.ContextState != "detached" || got.Status != "ok" || got.TerminalCause != loop.TerminalMigrationDetach {
 		t.Fatalf("detach: %+v", got)
 	}
 	if os.Getenv("CONTEXT_SECRET") != "baseline" {
@@ -216,7 +235,7 @@ func TestHostRuntimeFailuresShutdownAndNeverReuseContext(t *testing.T) {
 			root := t.TempDir()
 			req := hostTestRequest(t, root)
 			req.Operation = op
-			rt := &fakeHostRuntime{ready: make(chan struct{}), released: make(chan struct{})}
+			rt := &fakeHostRuntime{ready: make(chan struct{}), released: make(chan struct{}), terminalCause: loop.TerminalAutoCompleted}
 			if op == "attach" {
 				rt.runErr = errors.New("startup failed")
 			} else {
@@ -227,14 +246,14 @@ func TestHostRuntimeFailuresShutdownAndNeverReuseContext(t *testing.T) {
 			if h.testContext() != nil {
 				defer h.testContext().lock.Close()
 			}
-			if response.Status != "failed" || !h.testContext().failed || rt.shutdowns != 1 || response.ContextState != "failed" {
+			if response.Status != "failed" || !h.testContext().failed || rt.shutdowns != 1 || response.ContextState != "failed" || response.TerminalCause != "" {
 				t.Fatalf("failure cleanup: %+v shutdowns=%d", response, rt.shutdowns)
 			}
 			if got := h.handle(context.Background(), req); got.Status != "unknown_effect" {
 				t.Fatalf("failed context replayed: %+v", got)
 			}
 			persisted, err := os.ReadFile(filepath.Join(h.dir, "receipts.json"))
-			if err != nil || !strings.Contains(string(persisted), `"context_state": "failed"`) {
+			if err != nil || !strings.Contains(string(persisted), `"context_state": "failed"`) || strings.Contains(string(persisted), `"terminal_cause"`) {
 				t.Fatalf("failed receipt missing: %s %v", persisted, err)
 			}
 		})
@@ -283,7 +302,7 @@ func TestHostHistoricalDetachSurvivesFailedOrUnpersistedContext(t *testing.T) {
 			first := hostTestRequest(t, t.TempDir())
 			first.Operation = "once"
 			detached := h.handle(context.Background(), first)
-			if detached.Status != "ok" || detached.ContextState != "detached" {
+			if detached.Status != "ok" || detached.ContextState != "detached" || detached.TerminalCause != "" {
 				t.Fatalf("first once: %+v", detached)
 			}
 			var persisted []hostReceipt
@@ -320,7 +339,7 @@ func TestHostHistoricalDetachSurvivesFailedOrUnpersistedContext(t *testing.T) {
 			lookup := hostRequest{Operation: "status", ProjectDir: second.ProjectDir, ContextID: unresolved.ContextID, InstanceID: unresolved.HostInstanceID, BinarySHA256: h.binarySHA}
 			for _, op := range []string{"status", "detach"} {
 				lookup.Operation = op
-				if got := h.handle(context.Background(), lookup); got.Status != "unknown_effect" {
+				if got := h.handle(context.Background(), lookup); got.Status != "unknown_effect" || got.TerminalCause != "" {
 					t.Fatalf("unresolved %s became successful: %+v", op, got)
 				}
 			}
@@ -413,7 +432,14 @@ func TestHostCapabilitiesPreservesProtocolContract(t *testing.T) {
 	if err := json.Unmarshal([]byte(output.String()), &value); err != nil {
 		t.Fatal(err)
 	}
-	if len(value) != 11 || value["schema"] != float64(1) || value["protocol"] != "noodle-host-v1" || value["resident_request_binding"] != float64(1) || value["native_consumer_leases"] != float64(1) || value["native_consumer_worktrees"] != float64(1) || value["stateless_fixture_recovery"] != float64(1) || value["shared_service_adapter"] != "stateless_fixtures_only" || value["restricted_host_maintenance"] != float64(1) || value["rolling_host_version"] != float64(1) || value["shared_worker_quota"] != float64(1) || value["worker_admission_policy"] != "swap-used-critical-guard-v2" {
+	wantForce, wantRolling := float64(1), float64(0)
+	if runtime.GOOS == "windows" {
+		wantForce = 0
+	}
+	if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
+		wantRolling = 1
+	}
+	if value["existing_instance_admission"] != float64(1) || value["openshell_warning_grant"] != float64(1) || value["task_warning_grant"] != float64(1) || value["safe_host_switch"] != float64(0) || value["rolling_host_version"] != wantRolling || value["shared_worker_quota"] != wantRolling || value["codex_native_runtime"] != wantForce || value["schema"] != float64(1) || value["protocol"] != "noodle-host-v1" || value["resident_request_binding"] != float64(1) || value["completed_context_cleanup"] != float64(1) || value["resident_force_after_grace"] != wantForce || value["local_task_interrupt_custody"] != float64(1) || value["external_task_config"] != float64(1) {
 		t.Fatalf("host protocol changed: %v", value)
 	}
 }

@@ -56,7 +56,7 @@ func (l *Loop) State() LoopState {
 func (l *Loop) buildLoopStateSnapshot() *LoopState {
 	projected := projection.SnapshotView{}
 	if bundle, err := projection.Project(l.canonical, mode.ModeState{
-		EffectiveMode: l.canonical.Mode,
+		EffectiveMode: l.effectiveMode(),
 		Epoch:         l.canonical.ModeEpoch,
 	}); err == nil {
 		projected = bundle.SnapshotView

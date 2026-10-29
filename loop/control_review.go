@@ -23,6 +23,9 @@ func (l *Loop) controlMerge(orderID string) error {
 		return err
 	}
 
+	if err := l.requireSettledMergeEffects(orderID, pending.stageIndex); err != nil {
+		return err
+	}
 	order := l.canonical.Orders[orderID]
 	localTask := len(order.Stages) == 1 && l.isAdmittedLocalTask(order, order.Stages[0])
 	if localTask && len(order.Stages[0].Extra[localTaskMergeKey]) == 0 {
@@ -31,11 +34,12 @@ func (l *Loop) controlMerge(orderID string) error {
 
 	// Merge the worktree.
 	cook := &cookHandle{
-		cookIdentity: pending.cookIdentity,
-		orderStatus:  OrderStatusActive,
-		worktreeName: pending.worktreeName,
-		worktreePath: pending.worktreePath,
-		session:      &adoptedSession{id: pending.sessionID, status: "completed"},
+		cookIdentity:   pending.cookIdentity,
+		orderStatus:    OrderStatusActive,
+		worktreeName:   pending.worktreeName,
+		worktreePath:   pending.worktreePath,
+		session:        &adoptedSession{id: pending.sessionID, status: "completed"},
+		retainWorktree: l.retainTaskData(orderID),
 	}
 	// Bound candidates must reach the exact HEAD/tree check under the merge lock.
 	// Branch-name or patch-equivalence previews cannot establish their completion.
@@ -116,7 +120,7 @@ func (l *Loop) controlReject(orderID string) error {
 		l.canonical.Orders[orderID] = node
 	}
 	delete(l.canonical.PendingReviews, orderID)
-	if strings.TrimSpace(pending.worktreeName) != "" {
+	if !l.retainTaskData(orderID) && strings.TrimSpace(pending.worktreeName) != "" {
 		_ = l.deps.Worktree.Cleanup(pending.worktreeName, worktree.CleanupOpts{Force: true})
 	}
 	if err := l.emitEventChecked(ingest.EventStageReviewRejected, map[string]any{

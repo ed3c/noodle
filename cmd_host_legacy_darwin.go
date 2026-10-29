@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 func legacyProcessIdentity(ctx context.Context, pid int, binary string) (string, error) {
@@ -68,3 +69,4 @@ func validateLegacyUnixFDs(raw string) error {
 	}
 	return nil
 }
+func signalEmptyLegacyHost(pid int) error { return syscall.Kill(pid, syscall.SIGTERM) }

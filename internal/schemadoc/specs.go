@@ -120,7 +120,9 @@ var schemaTargets = []targetSpec{
 		FieldDocs: map[string]FieldDoc{
 			"active[]":        {Description: "order IDs currently being cooked"},
 			"loop_state":      {Description: "current loop state (running, paused, draining, idle)"},
-			"mode":            {Type: "string (auto|supervised|manual)", Description: "current run mode governing schedule, dispatch, and merge gates"},
+			"mode":            {Type: "string (auto|supervised|manual)", Description: "run mode retained in the canonical checkpoint"},
+			"effective_mode":  {Type: "string (auto|supervised|manual)", Description: "run mode actually governing execution after the startup override"},
+			"mode_override":   {Type: "string (auto|supervised|manual)", Description: "explicit startup mode override; absent when none was supplied"},
 			"max_concurrency": {Type: "number", Description: "current max concurrency (may differ from config if overridden at runtime)"},
 			"warnings[]":      {Description: "operational warning message"},
 		},
