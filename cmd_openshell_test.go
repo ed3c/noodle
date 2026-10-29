@@ -40,7 +40,7 @@ func TestOpenShellRetainedRecoveryCLIInspectThenApply(t *testing.T) {
 	}
 	binding := profile.Gateway.Binding
 	binding.StateRoot = canonical
-	state := loopruntime.OpenShellCustodyState{Version: 3, Binding: binding, Blocked: "retained initialization supplied for existing custody", PendingRetained: refs}
+	state := loopruntime.OpenShellCustodyState{Version: 4, Binding: binding, Blocked: "retained initialization supplied for existing custody", PendingRetained: refs}
 	before, _ := json.Marshal(state)
 	path := filepath.Join(root, "owner.json")
 	if err = os.WriteFile(path, before, 0600); err != nil {

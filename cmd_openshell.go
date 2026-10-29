@@ -30,6 +30,7 @@ func newOpenShellCmd() *cobra.Command {
 	_ = recover.MarkFlagRequired("profile")
 	_ = recover.MarkFlagRequired("expected-owner-sha256")
 	root.AddCommand(recover)
+	root.AddCommand(newCustodyRetirementMigrationCmd())
 	root.AddCommand(newProgressMaintenanceCmd())
 	root.AddCommand(newStorageFailureCmd())
 	return root

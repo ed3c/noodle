@@ -22,6 +22,7 @@ const openShellObservationTimeout = 5 * time.Second
 // Task.AttemptID nor ExecAttemptID is a canonical scheduling-attempt identity.
 // The caller must separately bind its canonical attempt and published artifacts.
 type OpenShellCompletedObservation struct {
+	ExecutionBasis            string `json:"execution_basis"`
 	CommandSHA256             string `json:"command_sha256"`
 	ProgressStopCommandSHA256 string `json:"progress_stop_command_sha256"`
 	ProgressStopRequestID     string `json:"progress_stop_request_id"`
@@ -60,6 +61,14 @@ func (c *OpenShellCustody) ObserveSavedProgress(ctx context.Context, expected Op
 }
 
 func (c *OpenShellCustody) observeSettled(ctx context.Context, expected OpenShellIdentity, progress bool) (OpenShellCompletedObservation, error) {
+	validate := validateCompletedRecord
+	if progress {
+		validate = validateProgressRecord
+	}
+	return c.observeStopped(ctx, expected, validate)
+}
+
+func (c *OpenShellCustody) observeStopped(ctx context.Context, expected OpenShellIdentity, validate func(OpenShellCustodyRecord, OpenShellIdentity) error) (OpenShellCompletedObservation, error) {
 	if !c.mu.TryLock() {
 		return OpenShellCompletedObservation{}, fmt.Errorf("openshell custody operation in progress")
 	}
@@ -94,9 +103,8 @@ func (c *OpenShellCustody) observeSettled(ctx context.Context, expected OpenShel
 	if count != 1 {
 		return OpenShellCompletedObservation{}, fmt.Errorf("openshell original completion identity is missing or ambiguous")
 	}
-	validate := validateCompletedRecord
-	if progress {
-		validate = validateProgressRecord
+	if record.Retirement != nil {
+		return OpenShellCompletedObservation{}, fmt.Errorf("original worker is retiring; use explicit retirement readback")
 	}
 	if err := validate(record, expected); err != nil {
 		return OpenShellCompletedObservation{}, err
@@ -131,6 +139,9 @@ func (c *OpenShellCustody) observeSettled(ctx context.Context, expected OpenShel
 	}
 	if record.Stopped.ComputeInstanceID != "" && status.GetAgentPod() != "" && status.GetAgentPod() != record.Stopped.ComputeInstanceID {
 		return OpenShellCompletedObservation{}, fmt.Errorf("openshell completion compute instance differs from stopped history")
+	}
+	if record.Exec == nil {
+		return notStartedObservation(record), nil
 	}
 	commandSHA256, err := OpenShellCommandSHA256(record.Exec.Command)
 	if err != nil {
@@ -177,6 +188,19 @@ func validateProgressRecord(record OpenShellCustodyRecord, expected OpenShellIde
 }
 
 func validateStoppedRecord(record OpenShellCustodyRecord, expected OpenShellIdentity) error {
+	if err := validateClosedRecord(record, expected); err != nil {
+		return err
+	}
+	exec := record.Exec.Result
+	if exec.ExitCode != 0 || exec.InputError != "" || exec.StreamError != "" {
+		return fmt.Errorf("openshell completion native exec result is unsuccessful")
+	}
+	return nil
+}
+
+// Explicit failure closure needs a known native exit and same-ID Stop evidence;
+// it keeps the actual exit code and diagnostic errors without certifying success.
+func validateClosedRecord(record OpenShellCustodyRecord, expected OpenShellIdentity) error {
 	for _, value := range []string{expected.OrderID, expected.AttemptID, expected.SessionID, expected.Sandbox.Gateway, expected.Sandbox.Workspace, expected.Sandbox.SandboxID, expected.SandboxName, expected.ConfigSource} {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("openshell completion identity is incomplete")
@@ -192,11 +216,14 @@ func validateStoppedRecord(record OpenShellCustodyRecord, expected OpenShellIden
 		return fmt.Errorf("openshell completion original exec evidence is unavailable")
 	}
 	exec := record.Exec.Result
-	if !exec.StartAttempted || !exec.ExitObserved || exec.ExitCode != 0 || exec.RequestID != record.Exec.Command.RequestID || exec.InputError != "" || exec.StreamError != "" {
+	if !exec.StartAttempted || !exec.ExitObserved || exec.RequestID != record.Exec.Command.RequestID {
 		return fmt.Errorf("openshell completion native exec result is unresolved or unsuccessful")
 	}
 	if !record.StopAcknowledged || record.StopRequestID == "" || record.Worker.StopPending || record.Worker.StopError != "" {
 		return fmt.Errorf("openshell completion stop acknowledgement is unresolved")
+	}
+	if record.ProgressStop != nil && (!record.ProgressStop.Result.ExitObserved || record.ProgressStop.Result.RequestID != record.ProgressStop.Command.RequestID) {
+		return fmt.Errorf("closed progress control exit remains unresolved")
 	}
 	if record.Stopped == nil || record.MainProcessInstanceID == "" {
 		return fmt.Errorf("openshell completion stopped history or main process identity is unavailable")

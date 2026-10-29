@@ -14,27 +14,49 @@ import (
 )
 
 type CleanupSessionReadback struct {
-	OutcomeStatus SessionStatus            `json:"outcome_status"`
-	PublishedHead string                   `json:"published_head"`
-	Execution     CompletedSessionReadback `json:"execution"`
+	Diagnostic    *DiagnosticFailureReadback `json:"diagnostic"`
+	OutcomeStatus SessionStatus              `json:"outcome_status"`
+	PublishedHead string                     `json:"published_head"`
+	Execution     CompletedSessionReadback   `json:"execution"`
+	Retirement    *CleanupRetirementReadback `json:"retirement"`
+}
+
+type CleanupRetirementReadback struct {
+	ObservationBasis   string                 `json:"observation_basis"`
+	Closure            SessionReadbackFileRef `json:"closure"`
+	DeleteRequestID    string                 `json:"delete_request_id"`
+	DeleteAcknowledged bool                   `json:"delete_acknowledged"`
+	AbsenceObserved    bool                   `json:"absence_observed"`
 }
 
 // ReadCleanupSession borrows only this runtime's original custody. Historical
 // cancelled/failed progress remains that outcome; cleanup grants no retry or
 // acceptance authority. Normal session readback still requires its live worktree.
 func (r *OpenShellRuntime) ReadCleanupSession(ctx context.Context, b CompletedSessionBinding, repository string, expected SessionStatus) (CleanupSessionReadback, error) {
-	if !filepath.IsAbs(repository) || (expected != StatusCompleted && expected != StatusCancelled && expected != StatusFailed) {
+	if b.SessionID == "" || b.SessionID == "." || b.SessionID == ".." || filepath.Base(b.SessionID) != b.SessionID || !filepath.IsAbs(repository) || (expected != StatusCompleted && expected != StatusCancelled && expected != StatusFailed) {
 		return CleanupSessionReadback{}, fmt.Errorf("cleanup session outcome or repository missing")
+	}
+	if expected == StatusFailed {
+		var receipt openShellDispatchReceipt
+		if _, err := ReadSessionReadbackFile(filepath.Join(r.config.RuntimeDir, "sessions", b.SessionID, "openshell-dispatch.json"), &receipt); err != nil {
+			return CleanupSessionReadback{}, err
+		}
+		if receipt.CandidateHead == "" && receipt.ProgressHead == "" && receipt.Delivery == nil {
+			return r.readDiagnosticFailure(ctx, b, repository)
+		}
 	}
 	progress := expected != StatusCompleted
 	observe := func(ctx context.Context, id OpenShellIdentity) (OpenShellCompletedObservation, error) {
-		if progress {
-			return r.config.Gateway.ObserveSavedProgress(ctx, r.config.ContextID, id)
-		}
-		return r.config.Gateway.ObserveCompleted(ctx, r.config.ContextID, id)
+		return r.config.Gateway.ObserveCleanup(ctx, r.config.ContextID, id, progress)
 	}
 	retained := func(ctx context.Context, receipt openShellDispatchReceipt, head string) error {
 		if err := verifyCleanupProgressArchives(ctx, filepath.Join(r.config.RuntimeDir, "sessions", b.SessionID), receipt); err != nil {
+			return err
+		}
+		manifest := filepath.Join(filepath.Dir(receipt.Delivery.PatchPath), "compaction.json")
+		if _, err := os.Lstat(manifest); err == nil {
+			return workspaceartifacts.VerifyCompactedPublication(ctx, repository, receipt.Baseline, receipt.Delivery, head)
+		} else if !os.IsNotExist(err) {
 			return err
 		}
 		return workspaceartifacts.VerifyRetainedPublication(ctx, repository, receipt.Baseline, receipt.Delivery, head)
@@ -50,7 +72,18 @@ func (r *OpenShellRuntime) ReadCleanupSession(ctx context.Context, b CompletedSe
 	if progress {
 		head = result.progressHead
 	}
-	return CleanupSessionReadback{OutcomeStatus: result.status, PublishedHead: head, Execution: result.completed}, nil
+	readback := CleanupSessionReadback{OutcomeStatus: result.status, PublishedHead: head, Execution: result.completed}
+	for _, record := range r.config.Gateway.custody.Snapshot().Records {
+		if record.Worker.Identity.OrderID != b.OrderID || record.Worker.Identity.SessionID != b.SessionID || record.Worker.Identity.AttemptID != result.completed.NativeAttemptID || record.Retirement == nil {
+			continue
+		}
+		v := record.Retirement
+		if !v.Acknowledged || !v.Completed {
+			return CleanupSessionReadback{}, fmt.Errorf("native retirement completion remains unresolved")
+		}
+		readback.Retirement = &CleanupRetirementReadback{ObservationBasis: "historical_stopped_with_fresh_native_absence", Closure: v.Closure, DeleteRequestID: v.RequestID, DeleteAcknowledged: true, AbsenceObserved: true}
+	}
+	return readback, nil
 }
 
 // The original archives remain recoverable even after the candidate worktree is

@@ -30,6 +30,12 @@ func (c *OpenShellCustody) Quiesce(ctx context.Context) error {
 	var unsettled error
 	for i := range c.state.Records {
 		r := &c.state.Records[i]
+		if r.Retirement != nil {
+			if err := c.observeRetirement(ctx, r); err != nil {
+				return err
+			}
+			continue
+		}
 		s, err := c.read(ctx, r)
 		if err != nil {
 			return err

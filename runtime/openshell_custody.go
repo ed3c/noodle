@@ -24,7 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const openShellCustodyVersion = 3
+const openShellCustodyVersion = 4
 
 // OpenShellCustodyBinding identifies one dedicated gateway deployment. The
 // operator must assign exactly one state root per gateway. Its advisory local
@@ -57,7 +57,7 @@ type OpenShellStoppedObservation struct {
 }
 
 // Intent is retained even when the RPC was never sent. Unknown effects and all
-// names/UUIDs are permanent history; this API provides no reset, adopt or delete.
+// names/UUIDs are permanent history, including after acknowledged retirement.
 type OpenShellCustodyRecord struct {
 	Task                  OpenShellTask
 	Name                  string
@@ -73,14 +73,16 @@ type OpenShellCustodyRecord struct {
 	StopRequestID         string
 	StopAcknowledged      bool
 	Stopped               *OpenShellStoppedObservation
+	Retirement            *OpenShellRetirement
 }
 
 type OpenShellCustodyState struct {
-	Version         int
-	Binding         OpenShellCustodyBinding
-	Blocked         string
-	Records         []OpenShellCustodyRecord
-	PendingRetained []OpenShellRetainedSandbox
+	Version               int
+	MigrationBeforeSHA256 string
+	Binding               OpenShellCustodyBinding
+	Blocked               string
+	Records               []OpenShellCustodyRecord
+	PendingRetained       []OpenShellRetainedSandbox
 }
 
 // OpenShellCustody serializes local admission and native lifecycle operations.
@@ -169,6 +171,9 @@ func reserveOpenShellCustody(binding OpenShellCustodyBinding, conn *grpc.ClientC
 			c.state.Binding.StateRoot = root
 			return c, c.block("openshell custody configuration/owner binding changed")
 		}
+		if err := verifyCustodyMigration(c.state); err != nil {
+			return c, err
+		}
 		if err := verifyOpenShellRetainedRecovery(binding); err != nil {
 			return c, err
 		}
@@ -248,6 +253,9 @@ func (c *OpenShellCustody) validateLedger() error {
 				return fmt.Errorf("custody ledger specification invalid: %w", err)
 			}
 		}
+		if err := validateRetirement(r); err != nil {
+			return err
+		}
 		if !r.Retained {
 			var intent pb.CreateSandboxRequest
 			if err := proto.Unmarshal(r.CreateIntent, &intent); err != nil {
@@ -308,6 +316,12 @@ func (c *OpenShellCustody) initialize(ctx context.Context) (err error) {
 	// List is not fresh canonical identity evidence for historical records.
 	if c.managed {
 		for i := range c.state.Records {
+			if c.state.Records[i].Retirement != nil {
+				if err := c.observeRetirement(ctx, &c.state.Records[i]); err != nil {
+					return err
+				}
+				continue
+			}
 			if _, err := c.read(ctx, &c.state.Records[i]); err != nil {
 				return err
 			}
@@ -395,6 +409,10 @@ func (c *OpenShellCustody) Snapshot() OpenShellCustodyState {
 		r := &state.Records[i]
 		r.Spec = slices.Clone(r.Spec)
 		r.CreateIntent = slices.Clone(r.CreateIntent)
+		if r.Retirement != nil {
+			saved := *r.Retirement
+			r.Retirement = &saved
+		}
 		if r.Stopped != nil {
 			stopped := *r.Stopped
 			r.Stopped = &stopped
@@ -461,6 +479,9 @@ func (c *OpenShellCustody) audit(ctx context.Context) error {
 			if r == nil || seen[name] {
 				return c.block(fmt.Sprintf("unregistered or duplicate inventory sandbox %q", name))
 			}
+			if r.Retirement != nil && r.Retirement.Completed {
+				return c.block("retired sandbox name reappeared")
+			}
 			if err := c.matches(r, s); err != nil {
 				return err
 			}
@@ -479,6 +500,12 @@ func (c *OpenShellCustody) audit(ctx context.Context) error {
 		r := &c.state.Records[i]
 		if !r.Retained && !r.CreateAcknowledged {
 			return c.block(fmt.Sprintf("create %s acknowledgement unresolved; replay prohibited", r.Name))
+		}
+		if r.Retirement != nil {
+			if err := c.observeRetirement(ctx, r); err != nil {
+				return err
+			}
+			continue
 		}
 		if !seen[r.Name] {
 			return c.block(fmt.Sprintf("inventory sandbox %s missing", r.Name))
@@ -515,6 +542,9 @@ func (c *OpenShellCustody) matches(r *OpenShellCustodyRecord, s *pb.Sandbox) err
 	return nil
 }
 func (c *OpenShellCustody) read(ctx context.Context, r *OpenShellCustodyRecord) (*pb.Sandbox, error) {
+	if r.Retirement != nil {
+		return nil, fmt.Errorf("sandbox retirement has started; fresh worker readback unavailable")
+	}
 	response, err := c.client.GetSandbox(ctx, &pb.GetSandboxRequest{Name: r.Name, WorkspaceScope: c.scope()})
 	if err != nil {
 		return nil, c.readFailure(fmt.Sprintf("read sandbox %s", r.Name), err)
