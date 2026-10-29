@@ -75,6 +75,7 @@ func NewRootCmd() *cobra.Command {
 	root.Flags().BoolVar(&showVersion, "version", false, "Print noodle version")
 
 	root.AddCommand(
+		newArtifactsCompactionCmd(),
 		newHostCmd(&app),
 		newOpenShellCmd(),
 		newStartCmd(&app),
