@@ -99,3 +99,15 @@ Explicit request-changes/requeue preserves prior attempts and starts a new
 OpenShell session; process-only native continuation must not be inferred for it.
 Tests in `loop/local_task_openshell_test.go` exercise both harnesses and refusal
 without process.json. They do not prove Soodles outer-loop integration.
+
+An errored control ACK is not proof of an effect-free failure: the generic
+backend_recoverable classification also covers errors after Git writes. The
+exact OpenShell gateway-busy completion-read error originates before staging in
+controlMergeLocalTask. A retry must bind that original ACK, unchanged candidate,
+original stopped execution and absence of merge bindings/unresolved merge
+effects; it needs a distinct, persisted control ID and one explicit offer.
+Missing ACKs only read back. Never resend the original ID: native processed-ID
+deduplication can return ok without running the command again. Retain the failed
+ACK and keep successful retry ACK and integrated acceptance separate. Historical
+pending dispatch effects do not substitute for an unresolved merge effect; use
+the native merge-effect boundary and terminal runtime proof.
