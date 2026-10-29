@@ -48,6 +48,9 @@ func (l *Loop) cleanupCompleted(apply bool) (err error) {
 		l.cleanupUnknown = nil
 		return nil
 	}
+	if err := l.reclaimExecutionCopies(); err != nil {
+		return err
+	}
 	return l.finishRelease()
 }
 
@@ -71,17 +74,28 @@ func (l *Loop) checkCompletedTasks() error {
 			}
 			continue
 		}
-		if order.Status != state.OrderCompleted || len(order.Stages) == 0 {
+		closedFailure := order.Status == state.OrderFailed || order.Status == state.OrderCancelled
+		if closedFailure {
+			if _, err := l.failedExecutionClosure(order); err != nil {
+				return fmt.Errorf("%w: order %s requires explicit failure closure: %v", ErrReleaseBusy, id, err)
+			}
+		}
+		if (!closedFailure && order.Status != state.OrderCompleted) || len(order.Stages) == 0 {
 			return fmt.Errorf("%w: order %s is not completed", ErrReleaseBusy, id)
 		}
 		for _, stage := range order.Stages {
-			if (stage.Status != state.StageCompleted && stage.Status != state.StageSkipped) || stage.Merge != nil {
+			if ((!closedFailure && stage.Status != state.StageCompleted && stage.Status != state.StageSkipped) || (closedFailure && stage.Status != state.StageCompleted && stage.Status != state.StageSkipped && stage.Status != state.StageFailed && stage.Status != state.StageCancelled)) || stage.Merge != nil {
 				return fmt.Errorf("%w: order %s has unfinished stage custody", ErrReleaseBusy, id)
 			}
-			if stage.TaskKey == "local-task" || stage.Skill == "local-task" {
+			if !closedFailure && (stage.TaskKey == "local-task" || stage.Skill == "local-task") {
 				if err := l.checkCompletedLocalTask(order, stage); err != nil {
 					return err
 				}
+			}
+		}
+		if !closedFailure && reducer.ReclaimableTaskData(l.effectLedger.All(), id) {
+			if _, err := l.retainExecutionClosure(order); err != nil {
+				return fmt.Errorf("%w: order %s awaits original outer acceptance: %v", ErrReleaseBusy, id, err)
 			}
 		}
 		completed++

@@ -409,7 +409,11 @@ func (l *Loop) Run(ctx context.Context) error {
 		case request := <-l.releaseRequests:
 			err := request.ctx.Err()
 			if err == nil {
-				if request.automatic {
+				if request.failureClosure != nil {
+					err = l.closeFailedTask(*request.failureClosure)
+				} else if request.deliveryAcceptance != nil {
+					err = l.acceptCompletedTask(*request.deliveryAcceptance)
+				} else if request.automatic {
 					err = l.cleanupAutomatic()
 				} else if request.cleanup {
 					err = l.cleanupCompleted(request.apply)

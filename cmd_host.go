@@ -61,6 +61,9 @@ type hostResponse struct {
 }
 
 type hostRequest struct {
+	TaskAcceptance         loopruntime.SessionReadbackFileRef `json:"task_acceptance"`
+	FailureReason          string                             `json:"failure_reason"`
+	FailureDiagnostics     loopruntime.SessionReadbackFileRef `json:"failure_diagnostics"`
 	ExpectedVersion        string                             `json:"expected_version"`
 	ReadbackOrderID        string                             `json:"readback_order_id"`
 	ReadbackSessionID      string                             `json:"readback_session_id"`
@@ -98,7 +101,6 @@ type hostRuntime interface {
 	FinishOnce() error
 	TerminalCause() loop.TerminalCause
 }
-
 type hostContext struct {
 	receipt        hostReceipt
 	request        hostRequest
@@ -114,8 +116,8 @@ type hostContext struct {
 	openShell      bool
 	environmentSHA string
 }
-
 type noodleHost struct {
+	taskReadbacks    map[string]hostTaskAcceptanceReadbackOwner
 	dir              string
 	instanceID       string
 	binaryPath       string
@@ -142,12 +144,12 @@ func newHostCmd(app *App) *cobra.Command {
 	cmd.AddCommand(newHostContextsCmd())
 	task := &cobra.Command{Use: "task", Short: "Read native task dispatch capabilities"}
 	task.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 2, "runtime_admitted_orders": true, "config_key": "runtime.admitted_orders", "empty_unrestricted": true, "scope": "runtime_dispatch"})
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 2, "runtime_admitted_orders": true, "config_key": "runtime.admitted_orders", "empty_unrestricted": true, "scope": "runtime_dispatch", "native_execution_reclamation": 1})
 	}})
 	task.AddCommand(&cobra.Command{Use: "review-capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "local_task_review_recovery": true, "candidate_bound_merge": true, "local_task_merge_recovery": true, "local_task_completion_recovery": true, "local_task_completion_recovery_version": 2, "local_task_roles": 1, "local_task_directory_scope": 1, "openshell_local_task_review": 1, "openshell_instruction_materialization": 1, "openshell_saved_progress_attempt": 1, "openshell_progress_maintenance": 1})
 	}})
-	task.AddCommand(newHostSessionReadbackCmd(app), newHostSavedProgressCmd(app, false), newHostSavedProgressCmd(app, true))
+	task.AddCommand(newHostSessionReadbackCmd(app), newHostSavedProgressCmd(app, false), newHostSavedProgressCmd(app, true), newHostFailedTaskClosureCmd(app), newHostTaskAcceptanceCmd(app), newHostTaskAcceptanceReadbackCmd(app))
 	cmd.AddCommand(task)
 	cmd.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(hostCapabilities(runtime.GOOS))
@@ -575,6 +577,14 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 				}
 			}
 		case call := <-calls:
+			if result, handled := h.taskAcceptanceOperation(ctx, call.request); handled {
+				call.reply <- result
+				continue
+			}
+			if call.request.Operation == "task_failure_close" {
+				call.reply <- h.failedTaskClosure(ctx, call.request)
+				continue
+			}
 			if h.shutdown != nil && h.handleShutdownCall(call.request, call.reply) {
 				continue
 			}
@@ -914,6 +924,7 @@ func (h *noodleHost) attach(ctx context.Context, req hostRequest) hostResponse {
 		h.contexts = make(map[string]*hostContext)
 	}
 	h.contexts[id] = c
+	h.retainTaskAcceptanceReadbackOwner(id, e, environmentSHA)
 	if h.budget != nil {
 		h.budget.Register(id)
 	}

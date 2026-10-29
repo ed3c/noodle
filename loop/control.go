@@ -308,6 +308,20 @@ func (l *Loop) applyControlCommandOutcome(cmd ControlCommand) (ControlAck, error
 }
 
 func (l *Loop) dispatchControlCommand(cmd ControlCommand) error {
+	if cmd.OrderID != "" {
+		if _, err := os.Lstat(l.executionClosurePath(cmd.OrderID)); err == nil {
+			return fmt.Errorf("original task execution is explicitly closed; create a new task for further work")
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("original task closure is unresolved: %w", err)
+		}
+	}
+	if order, exists := l.canonical.Orders[cmd.OrderID]; exists {
+		for _, stage := range order.Stages {
+			if _, closed := stage.Extra[failedTaskClosureKey]; closed {
+				return fmt.Errorf("original failed task is explicitly closed; create a new task for further work")
+			}
+		}
+	}
 	switch stringx.Normalize(cmd.Action) {
 	case "pause":
 		return l.controlPause()

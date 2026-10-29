@@ -233,7 +233,7 @@ func TestHostTaskCapabilitiesOffline(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if len(result) != 5 || result["schema_version"] != float64(2) || result["runtime_admitted_orders"] != true || result["config_key"] != "runtime.admitted_orders" || result["scope"] != "runtime_dispatch" || result["empty_unrestricted"] != true {
+	if len(result) != 6 || result["schema_version"] != float64(2) || result["runtime_admitted_orders"] != true || result["config_key"] != "runtime.admitted_orders" || result["scope"] != "runtime_dispatch" || result["empty_unrestricted"] != true || result["native_execution_reclamation"] != float64(1) {
 		t.Fatal(result)
 	}
 }

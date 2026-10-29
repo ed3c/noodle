@@ -129,6 +129,15 @@ func (l *Loop) recordInitialAdmissions(ids []string) error {
 		binding := map[string]string{"order_id": id, "initial_revision": l.orderRevision}
 		if l.retainTaskData(id) {
 			binding["task_data_retention"] = taskDataRetention
+			order, ok := l.canonical.Orders[id]
+			if ok && len(order.Stages) == 1 {
+				stage := order.Stages[0]
+				// Only the original local-task flow has an outer acceptance owner.
+				// Other admissions retain their existing policy until that flow exists.
+				if stage.Runtime == "openshell" && l.isAdmittedLocalTask(order, stage) {
+					binding["task_data_retention"] = reducer.TaskDataAfterClosure
+				}
+			}
 		}
 		payload, err := json.Marshal(binding)
 		if err != nil {

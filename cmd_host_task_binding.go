@@ -19,7 +19,8 @@ type hostTaskClientBinding struct {
 	Executable, HostDir               string
 }
 
-// Resolve only the original active owner. Never attach, launch, or rewrite a request.
+// Resolve the original owner; only acceptance readback permits completed detachment.
+// Never attach, launch, or rewrite a request.
 func originalHostTaskClient(project, requestFile, orderID, sessionID, operation string) (bound hostTaskClientBinding, err error) {
 	project, err = filepath.EvalSymlinks(project)
 	if err != nil {
@@ -54,7 +55,11 @@ func originalHostTaskClient(project, requestFile, orderID, sessionID, operation 
 	count := 0
 	var original hostReceipt
 	for _, receipt := range receipts {
-		if hostReceiptMatches(req, receipt) && receipt.RequestID == binding.RequestID && receipt.HostDir == binding.HostDir && receipt.BinarySHA256 == binding.BinarySHA256 && receipt.ContextState == "active" {
+		stateMatches := receipt.ContextState == "active"
+		if operation == "task_delivery_acceptance_readback" {
+			stateMatches = validHostTaskAcceptanceReceipt(receipt)
+		}
+		if hostReceiptMatches(req, receipt) && receipt.RequestID == binding.RequestID && receipt.HostDir == binding.HostDir && receipt.BinarySHA256 == binding.BinarySHA256 && stateMatches {
 			original = receipt
 			count++
 		}

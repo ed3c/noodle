@@ -22,11 +22,13 @@ const (
 func (l *Loop) TerminalCause() TerminalCause { return l.terminalCause }
 
 type releaseRequest struct {
-	ctx       context.Context
-	reply     chan error
-	cleanup   bool
-	automatic bool
-	apply     bool
+	ctx                context.Context
+	reply              chan error
+	cleanup            bool
+	automatic          bool
+	failureClosure     *failedTaskClosureRequest
+	deliveryAcceptance *completedTaskAcceptanceRequest
+	apply              bool
 }
 
 func (l *Loop) Ready() <-chan struct{} { return l.runReady }
