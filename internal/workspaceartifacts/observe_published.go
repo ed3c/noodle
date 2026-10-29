@@ -19,18 +19,8 @@ func VerifyRetainedPublication(ctx context.Context, repository string, baseline 
 	if err != nil {
 		return err
 	}
-	raw, err := git(ctx, root, nil, "--no-lazy-fetch", "--no-replace-objects", "cat-file", "commit", head)
-	if err != nil {
+	if err := retainedParent(ctx, root, head, baseline.Head); err != nil {
 		return err
-	}
-	parents := []string{}
-	for _, line := range strings.Split(strings.SplitN(string(raw), "\n\n", 2)[0], "\n") {
-		if strings.HasPrefix(line, "parent ") {
-			parents = append(parents, strings.TrimPrefix(line, "parent "))
-		}
-	}
-	if len(parents) != 1 || parents[0] != baseline.Head {
-		return fmt.Errorf("retained publication parent differs")
 	}
 	before, beforeData, err := scanDirectory(baseline.Directory)
 	if err != nil {
@@ -116,4 +106,26 @@ func retainedTreeBytes(ctx context.Context, tree map[string]publicationTreeEntry
 		return fmt.Errorf("retained publication contains uncommitted entries")
 	}
 	return nil
+}
+
+func checkRetainedParent(raw []byte, parent string) error {
+	parents := []string{}
+	for _, line := range strings.Split(strings.SplitN(string(raw), "\n\n", 2)[0], "\n") {
+		if strings.HasPrefix(line, "parent ") {
+			parents = append(parents, strings.TrimPrefix(line, "parent "))
+		}
+	}
+	if len(parents) != 1 || parents[0] != parent {
+		return fmt.Errorf("retained publication parent differs")
+	}
+	return nil
+}
+
+// retainedParent reads the original commit, ignoring replacement refs/grafts.
+func retainedParent(ctx context.Context, root, head, parent string) error {
+	raw, err := git(ctx, root, nil, "--no-lazy-fetch", "--no-replace-objects", "cat-file", "commit", head)
+	if err != nil {
+		return err
+	}
+	return checkRetainedParent(raw, parent)
 }
