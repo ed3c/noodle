@@ -27,8 +27,8 @@ func (l *Loop) mergeCookWorktree(ctx context.Context, cook *cookHandle) error {
 			return fmt.Errorf("merge remote branch %s: %w", syncResult.Branch, err)
 		}
 	} else {
-		var opts worktree.MergeOpts
-		if cook.stage.TaskKey == "local-task" && slices.Contains(l.config.Runtime.Process.AdmittedOrders, cook.orderID) {
+		opts := worktree.MergeOpts{RetainWorktree: cook.retainWorktree}
+		if cook.stage.TaskKey == "local-task" && slices.Contains(l.config.Runtime.AdmittedOrders, cook.orderID) {
 			var binding localTaskMergeBinding
 			if json.Unmarshal(cook.stage.Extra[localTaskMergeKey], &binding) != nil || binding.Head == "" || binding.Tree == "" {
 				return fmt.Errorf("local task merge candidate binding missing")
@@ -156,9 +156,10 @@ func (l *Loop) handleMergeError(cook *cookHandle, err error) error {
 			WorktreeName: cook.worktreeName,
 		})
 		if err := l.emitEventChecked(ingest.EventMergeFailed, map[string]any{
-			"order_id":    cook.orderID,
-			"stage_index": cook.stageIndex,
-			"error":       reason,
+			"order_id":          cook.orderID,
+			"stage_index":       cook.stageIndex,
+			"error":             reason,
+			"conflict_observed": true,
 		}); err != nil {
 			return err
 		}

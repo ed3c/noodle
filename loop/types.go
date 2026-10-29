@@ -121,6 +121,7 @@ type cookHandle struct {
 	startedAt         time.Time
 	displayName       string // stable kitchen name, preserved across retries
 	dispatchedRuntime string // actual runtime used (may differ from stage.Runtime after fallback)
+	retainWorktree    bool   // selected on the loop goroutine before merge queue handoff
 }
 
 // pendingReviewCook is a completed cook waiting for human merge/reject.
@@ -156,6 +157,11 @@ type Dependencies struct {
 	Execution        *execution.Context
 	Admission        *admission.Budget
 	AdmissionContext string
+	HostContinuation *HostContinuation
+	DispatchBlocked  string
+	CleanupCompleted bool
+	OpenShellGateway *loopruntime.OpenShellGateway
+	OpenShellProfile *loopruntime.OpenShellProfile
 	Runtimes         map[string]loopruntime.Runtime
 	Worktree         WorktreeManager
 	Adapter          AdapterRunner
@@ -179,20 +185,20 @@ func (l *Loop) effectiveMode() state.RunMode {
 }
 
 type Loop struct {
-	terminalCause TerminalCause
-	projectDir    string
-	runtimeDir    string
-	config        config.Config
-	registry      taskreg.Registry
-	registryErr   error
-	deps          Dependencies
-	logger        *slog.Logger
-	events        *event.LoopEventWriter
+	projectDir  string
+	runtimeDir  string
+	config      config.Config
+	registry    taskreg.Registry
+	registryErr error
+	deps        Dependencies
+	logger      *slog.Logger
+	events      *event.LoopEventWriter
 
 	// Components — field-grouping sub-structs.
 	cooks           cookTracker
 	cmds            cmdProcessor
 	resourceUnknown error
+	cleanupUnknown  error
 	completionBuf   completionBuffer
 
 	state             State
@@ -222,6 +228,8 @@ type Loop struct {
 	releaseRequests chan releaseRequest
 	runReady        chan struct{}
 	runDone         chan struct{}
+	terminalCause   TerminalCause
+	hostRound       atomic.Pointer[HostContinuation]
 
 	lastStatus statusfile.Status
 

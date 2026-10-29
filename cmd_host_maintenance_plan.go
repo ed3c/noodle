@@ -33,6 +33,7 @@ type hostMaintenancePlan struct {
 	Effects      []string                     `json:"effects"`
 	Executable   bool                         `json:"executable"`
 	PlanSHA      string                       `json:"plan_sha256"`
+	Handover     *hostGatewayHandoverPlan     `json:"handover,omitempty"`
 }
 
 type hostMaintenanceContextPlan struct {
@@ -217,58 +218,7 @@ func planHostMaintenance(ctx context.Context, root, target, digest string, reque
 }
 
 func planHostMaintenanceContext(root string, receipt hostReceipt, paths []string) hostMaintenanceContextPlan {
-	p := hostMaintenanceContextPlan{Original: receipt, Files: map[string]string{}, Blockers: []string{}}
-	if receipt.ConfigPath != "" {
-		paths = append(append([]string{}, paths...), filepath.Join(filepath.Dir(receipt.ConfigPath), "host-request.json"))
-	}
-	for _, path := range paths {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			p.Blockers = append(p.Blockers, fmt.Sprintf("original request %s: %v", path, err))
-			continue
-		}
-		var b hostRequestBinding
-		if err = json.Unmarshal(raw, &b); err != nil {
-			p.Blockers = append(p.Blockers, fmt.Sprintf("original request %s: %v", path, err))
-			continue
-		}
-		if b.RequestID != receipt.RequestID {
-			continue
-		}
-		req := hostRequest{ProjectDir: b.ProjectDir, ConfigPath: b.ConfigPath, ConfigSHA256: b.ConfigSHA256, Mode: b.Mode, RequestID: b.RequestID, CleanupCompleted: b.CleanupCompleted}
-		if b.Schema != 1 || b.Status != "accepted" || b.Operation != "attach" || b.HostDir != root || b.BinarySHA256 != receipt.BinarySHA256 || b.EnvironmentSHA256 == "" || !hostReceiptMatches(req, receipt) {
-			p.Blockers = append(p.Blockers, "original accepted request conflicts with native context")
-			continue
-		}
-		if p.RequestFile != "" && p.Files[p.RequestFile] != hostDigest(raw) {
-			p.Blockers = append(p.Blockers, "conflicting original accepted request bytes")
-			continue
-		}
-		p.RequestFile = path
-		p.Files[path] = hostDigest(raw)
-	}
-	if p.RequestFile == "" {
-		p.Blockers = append(p.Blockers, "original accepted request envelope unavailable; do not reconstruct from a receipt")
-	}
-	configPath := receipt.ConfigPath
-	if configPath == "" {
-		configPath = filepath.Join(receipt.ProjectDir, ".noodle.toml")
-	}
-	if data, err := os.ReadFile(configPath); err == nil && hostDigest(data) == receipt.ConfigSHA256 {
-		p.ConfigSource = configPath
-	} else if p.RequestFile != "" {
-		// The accepted envelope remains unchanged. This is only an independently
-		// verified copy for custody, never a replacement execution binding.
-		path := filepath.Join(filepath.Dir(p.RequestFile), "noodle.toml")
-		if data, err := os.ReadFile(path); err == nil && hostDigest(data) == receipt.ConfigSHA256 {
-			p.ConfigSource = path
-		}
-	}
-	if p.ConfigSource == "" {
-		p.Blockers = append(p.Blockers, "original config bytes unavailable or changed; import must remain held")
-	} else {
-		p.Files[p.ConfigSource] = receipt.ConfigSHA256
-	}
+	p := planHostMaintenanceContextInputs(root, receipt, paths)
 	dir := filepath.Join(receipt.ProjectDir, ".noodle")
 	for _, name := range []string{"status.json", "state.snapshot.json", "control.ndjson", "control-ack.ndjson", "orders-next.json", "noodle.lock"} {
 		data, err := os.ReadFile(filepath.Join(dir, name))
@@ -325,4 +275,61 @@ func readMaintenanceStatus(raw []byte) (string, string, error) {
 	default:
 		return "", "", errors.New("original dispatch state is missing or invalid")
 	}
+}
+
+// Resource retirement preserves original request/config bindings without importing or resuming task checkpoints.
+func planHostMaintenanceContextInputs(root string, receipt hostReceipt, paths []string) hostMaintenanceContextPlan {
+	p := hostMaintenanceContextPlan{Original: receipt, Files: map[string]string{}, Blockers: []string{}}
+	if receipt.ConfigPath != "" {
+		paths = append(append([]string{}, paths...), filepath.Join(filepath.Dir(receipt.ConfigPath), "host-request.json"))
+	}
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			p.Blockers = append(p.Blockers, fmt.Sprintf("original request %s: %v", path, err))
+			continue
+		}
+		var b hostRequestBinding
+		if err = json.Unmarshal(raw, &b); err != nil {
+			p.Blockers = append(p.Blockers, fmt.Sprintf("original request %s: %v", path, err))
+			continue
+		}
+		if b.RequestID != receipt.RequestID {
+			continue
+		}
+		req := hostRequest{ProjectDir: b.ProjectDir, ConfigPath: b.ConfigPath, ConfigSHA256: b.ConfigSHA256, Mode: b.Mode, RequestID: b.RequestID, CleanupCompleted: b.CleanupCompleted}
+		if b.Schema != 1 || b.Status != "accepted" || b.Operation != "attach" || b.HostDir != root || b.BinarySHA256 != receipt.BinarySHA256 || b.EnvironmentSHA256 == "" || !hostReceiptMatches(req, receipt) {
+			p.Blockers = append(p.Blockers, "original accepted request conflicts with native context")
+			continue
+		}
+		if p.RequestFile != "" && p.Files[p.RequestFile] != hostDigest(raw) {
+			p.Blockers = append(p.Blockers, "conflicting original accepted request bytes")
+			continue
+		}
+		p.RequestFile = path
+		p.Files[path] = hostDigest(raw)
+	}
+	if p.RequestFile == "" {
+		p.Blockers = append(p.Blockers, "original accepted request envelope unavailable; do not reconstruct from a receipt")
+	}
+	configPath := receipt.ConfigPath
+	if configPath == "" {
+		configPath = filepath.Join(receipt.ProjectDir, ".noodle.toml")
+	}
+	if data, err := os.ReadFile(configPath); err == nil && hostDigest(data) == receipt.ConfigSHA256 {
+		p.ConfigSource = configPath
+	} else if p.RequestFile != "" {
+		// The accepted envelope remains unchanged. This is only an independently
+		// verified copy for custody, never a replacement execution binding.
+		path := filepath.Join(filepath.Dir(p.RequestFile), "noodle.toml")
+		if data, err := os.ReadFile(path); err == nil && hostDigest(data) == receipt.ConfigSHA256 {
+			p.ConfigSource = path
+		}
+	}
+	if p.ConfigSource == "" {
+		p.Blockers = append(p.Blockers, "original config bytes unavailable or changed; import must remain held")
+	} else {
+		p.Files[p.ConfigSource] = receipt.ConfigSHA256
+	}
+	return p
 }

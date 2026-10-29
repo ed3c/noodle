@@ -756,7 +756,7 @@ func TestCycleBootstrapsScheduleUsesRegistrySkill(t *testing.T) {
 	if rt.calls[0].Skill != "schedule" {
 		t.Fatalf("spawn skill = %q", rt.calls[0].Skill)
 	}
-	expectedMise := filepath.Join(runtimeDir, "mise.json")
+	expectedMise := filepath.Join(l.runtimeDir, "mise.json")
 	if !strings.Contains(rt.calls[0].Prompt, "Use Skill(schedule).") {
 		t.Fatalf("spawn prompt missing skill invocation: %q", rt.calls[0].Prompt)
 	}
@@ -766,7 +766,7 @@ func TestCycleBootstrapsScheduleUsesRegistrySkill(t *testing.T) {
 	if !strings.Contains(rt.calls[0].Prompt, "mise_input: "+expectedMise) {
 		t.Fatalf("spawn prompt missing typed mise input: %q", rt.calls[0].Prompt)
 	}
-	expectedOrdersNext := filepath.Join(runtimeDir, "orders-next.json")
+	expectedOrdersNext := filepath.Join(l.runtimeDir, "orders-next.json")
 	if !strings.Contains(rt.calls[0].Prompt, expectedOrdersNext) {
 		t.Fatalf("spawn prompt missing orders-next.json instruction: %q", rt.calls[0].Prompt)
 	}

@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -20,7 +21,6 @@ import (
 	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/internal/taskreg"
 	"github.com/poteto/noodle/mise"
-	"github.com/poteto/noodle/monitor"
 	loopruntime "github.com/poteto/noodle/runtime"
 	"github.com/poteto/noodle/skill"
 )
@@ -37,6 +37,9 @@ func New(projectDir, noodleBin string, cfg config.Config, deps Dependencies) *Lo
 	}
 	cfg, bindingErr := config.Bind(cfg, deps.Execution)
 	runtimeDir := filepath.Join(projectDir, ".noodle")
+	if canonical, err := filepath.EvalSymlinks(runtimeDir); err == nil {
+		runtimeDir = canonical
+	}
 	if deps.Logger == nil {
 		deps.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}
@@ -62,6 +65,22 @@ func New(projectDir, noodleBin string, cfg config.Config, deps Dependencies) *Lo
 		}
 		if deps.StatusFile == "" {
 			deps.StatusFile = defaults.StatusFile
+		}
+	}
+	if cfg.Runtime.OpenShell.Profile != "" {
+		if deps.OpenShellGateway == nil || deps.OpenShellProfile == nil || deps.AdmissionContext == "" {
+			bindingErr = errors.Join(bindingErr, fmt.Errorf("OpenShell runtime has no managed Host gateway binding"))
+		} else {
+			rt, err := loopruntime.NewOpenShellRuntime(loopruntime.OpenShellRuntimeConfig{
+				RuntimeDir: runtimeDir, ContextID: deps.AdmissionContext, Gateway: deps.OpenShellGateway,
+				Profile: *deps.OpenShellProfile, SkillResolver: skill.Resolver{SearchPaths: cfg.Skills.Paths},
+				EventSink: deps.EventSink, MaxConcurrent: cfg.Runtime.OpenShell.MaxConcurrent,
+			})
+			if err != nil {
+				bindingErr = errors.Join(bindingErr, err)
+			} else {
+				deps.Runtimes["openshell"] = rt
+			}
 		}
 	}
 	if deps.Now == nil {
@@ -204,7 +223,9 @@ func (l *Loop) Shutdown() {
 		adoptedSessions := l.adoptedSessionIDsSnapshot()
 
 		l.terminateActiveSessions(activeSessions)
-		l.terminateAdoptedSessions(adoptedSessions)
+		for _, sessionID := range adoptedSessions {
+			l.logger.Error("shutdown cannot signal recovered session without original child owner; readback required", "session", sessionID)
+		}
 		if l.waitForActiveSessionExit(shutdownDeadline, activeSessions) {
 			return
 		}
@@ -215,7 +236,6 @@ func (l *Loop) Shutdown() {
 		)
 
 		l.forceKillActiveSessions(activeSessions)
-		l.forceKillAdoptedSessions(adoptedSessions)
 		if l.waitForActiveSessionExit(shutdownDeadline, activeSessions) {
 			return
 		}
@@ -263,18 +283,6 @@ func (l *Loop) forceKillActiveSessions(sessions []loopruntime.SessionHandle) {
 		if err := session.ForceKill(); err != nil {
 			l.logger.Warn("shutdown force kill session failed", "session", session.ID(), "error", err)
 		}
-	}
-}
-
-func (l *Loop) terminateAdoptedSessions(sessionIDs []string) {
-	for _, sessionID := range sessionIDs {
-		monitor.TerminateSessionByPID(l.runtimeDir, sessionID)
-	}
-}
-
-func (l *Loop) forceKillAdoptedSessions(sessionIDs []string) {
-	for _, sessionID := range sessionIDs {
-		monitor.ForceKillSessionByPID(l.runtimeDir, sessionID)
 	}
 }
 
@@ -359,6 +367,20 @@ func (l *Loop) Run(ctx context.Context) error {
 	if err := l.hydrateProcessedCommands(); err != nil {
 		return err
 	}
+	if saved := l.deps.HostContinuation; saved != nil {
+		switch saved.Mode {
+		case "auto", "supervised", "manual":
+		default:
+			return fmt.Errorf("invalid Host continuation mode %q", saved.Mode)
+		}
+		switch saved.DispatchState {
+		case StateRunning, StateIdle, StatePaused, StateDraining:
+		default:
+			return fmt.Errorf("invalid Host continuation state %q", saved.DispatchState)
+		}
+		l.deps.ModeOverride = state.RunMode(saved.Mode)
+		l.setState(saved.DispatchState)
+	}
 	if err := l.Cycle(ctx); err != nil {
 		return err
 	}
@@ -404,11 +426,29 @@ func (l *Loop) Run(ctx context.Context) error {
 		case request := <-l.releaseRequests:
 			err := request.ctx.Err()
 			if err == nil {
-				err = l.releaseIfQuiescent()
+				if request.automatic {
+					err = l.cleanupAutomatic()
+				} else if request.cleanup {
+					err = l.cleanupCompleted(request.apply)
+				} else {
+					err = l.releaseIfQuiescent()
+				}
+			}
+			if err == nil && request.continuation != nil {
+				*request.continuation = HostContinuation{Mode: string(l.effectiveMode()), DispatchState: l.state}
+				saved := *request.continuation
+				l.hostRound.Store(&saved)
 			}
 			request.reply <- err
-			if err == nil {
-				l.terminalCause = TerminalMigrationDetach
+			if err == nil && request.apply {
+				switch {
+				case request.automatic:
+					l.terminalCause = TerminalAutoCompleted
+				case request.cleanup:
+					l.terminalCause = TerminalExplicitCleanup
+				default:
+					l.terminalCause = TerminalMigrationDetach
+				}
 				return nil
 			}
 		case <-ctx.Done():
@@ -418,6 +458,14 @@ func (l *Loop) Run(ctx context.Context) error {
 		case <-cycleTrigger:
 			if err := l.runOnce(ctx); err != nil {
 				return err
+			}
+			if l.cleanupUnknown == nil {
+				if err := l.cleanupAutomatic(); err == nil {
+					l.terminalCause = TerminalAutoCompleted
+					return nil
+				} else if !errors.Is(err, ErrReleaseBusy) {
+					l.logger.Error("automatic cleanup requires readback", "error", err)
+				}
 			}
 		case err := <-watchErr:
 			if err != nil {
@@ -692,6 +740,12 @@ func (l *Loop) emitEventChecked(eventType ingest.EventType, payload any) error {
 	next, effects, err := reducer.Reduce(l.canonical, evt)
 	if err != nil {
 		return fmt.Errorf("canonical reducer failed: %w", err)
+	}
+	if err := l.validateNewMergeEffects(effects); err != nil {
+		return err
+	}
+	if err := l.recordMergeEffectResult(l.canonical, next, evt); err != nil {
+		return err
 	}
 	l.canonical = next
 	if l.effectLedger == nil {

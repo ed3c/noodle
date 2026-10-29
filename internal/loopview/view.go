@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// Bound the complete multi-run registry, including source-bound recovery diagnostics.
+// Bound each imported projection, stored manifest and immutable detail document.
 const MaxBytes = 32 << 20
 
 var identity = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -48,6 +48,7 @@ type Breakpoint struct {
 	Message string `json:"message"`
 }
 type Run struct {
+	Detail      *DetailRef   `json:"detail,omitempty"`
 	ID          string       `json:"id"`
 	Repository  string       `json:"repository"`
 	Mode        string       `json:"mode"`
@@ -69,7 +70,11 @@ type View struct {
 func Empty() View { return View{SchemaVersion: 1, Runs: []Run{}} }
 
 func Decode(data []byte) (View, error) {
-	if len(data) > MaxBytes {
+	return decodeView(data, true)
+}
+
+func decodeView(data []byte, bounded bool) (View, error) {
+	if bounded && len(data) > MaxBytes {
 		return View{}, fmt.Errorf("loop view exceeds %d bytes", MaxBytes)
 	}
 	var view View

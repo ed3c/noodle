@@ -4,14 +4,22 @@ import (
 	"context"
 	"errors"
 	"github.com/poteto/noodle/config"
+	"github.com/poteto/noodle/internal/admission"
 	"github.com/poteto/noodle/mise"
 	loopruntime "github.com/poteto/noodle/runtime"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestProcessAdmissionCycleSkipsForeignAndSchedulerBeforeCapacity(t *testing.T) {
+	for _, warning := range []bool{false, true} {
+		t.Run(map[bool]string{false: "normal", true: "warning-grant"}[warning], func(t *testing.T) { checkProcessAdmissionCycle(t, warning) })
+	}
+}
+
+func checkProcessAdmissionCycle(t *testing.T, warning bool) {
 	root := t.TempDir()
 	dir := filepath.Join(root, ".noodle")
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -24,6 +32,16 @@ func TestProcessAdmissionCycleSkipsForeignAndSchedulerBeforeCapacity(t *testing.
 	cfg.Concurrency.MaxConcurrency = 1
 	cfg.Runtime.Process.AdmittedOrders = []string{"allowed"}
 	l := New(root, "noodle", cfg, Dependencies{Runtimes: map[string]loopruntime.Runtime{"process": rt}, Worktree: wt, Adapter: &fakeAdapterRunner{}, Mise: &fakeMise{}, Monitor: fakeMonitor{}, Registry: testLoopRegistry(), OrdersFile: writeTestOrders(t, dir, orders), ModeOverride: "manual"})
+	if warning {
+		b := resourceBudget(l, 1)
+		now := time.Now()
+		for i := 3; i >= 0; i-- {
+			b.Observe(admission.Sample{At: now.Add(-time.Duration(i) * admission.PollInterval), Pressure: admission.Warning}, nil)
+		}
+		if _, err := b.GrantWarning(l.projectDir, "allowed"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if err := l.Cycle(ctx); err != nil {
@@ -105,4 +123,25 @@ func TestProcessAdmissionFallbackCannotBypassScope(t *testing.T) {
 	if len(local.calls) != 1 {
 		t.Fatal("empty allowlist changed legacy behavior")
 	}
+}
+
+func TestMergedAdmissionNeverWidensEitherBoundScope(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Runtime.Default = "openshell"
+	cfg.Runtime.AdmittedOrders = []string{"general", "both"}
+	cfg.Runtime.Process.AdmittedOrders = []string{"legacy", "both"}
+	rt := newMockRuntime()
+	l := New(t.TempDir(), "noodle", cfg, Dependencies{Runtimes: map[string]loopruntime.Runtime{"process": rt}, Registry: testLoopRegistry()})
+	for _, order := range []string{"general", "legacy", "foreign", ""} {
+		_, _, err := l.dispatchSession(context.Background(), loopruntime.DispatchRequest{Runtime: "process", EnvVars: map[string]string{"NOODLE_ORDER_ID": order}})
+		if err == nil || len(rt.calls) != 0 {
+			t.Fatalf("scope widened for %q: %v", order, err)
+		}
+	}
+	if _, _, err := l.dispatchSession(context.Background(), loopruntime.DispatchRequest{Runtime: "process", EnvVars: map[string]string{"NOODLE_ORDER_ID": "both"}}); err != nil || len(rt.calls) != 1 {
+		t.Fatalf("common legal order refused: %v", err)
+	}
+	rt.sessions[0].complete("completed")
+	l.watcherWG.Wait()
+	l.mergeQueue.Close()
 }

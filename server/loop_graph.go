@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/poteto/noodle/internal/loopview"
 )
@@ -15,6 +16,10 @@ func loopJSON(w http.ResponseWriter, r *http.Request, status int, value any) {
 	data, err := json.Marshal(value)
 	if err != nil {
 		http.Error(w, "loop display encoding failed", 500)
+		return
+	}
+	if len(data) > loopview.MaxBytes {
+		http.Error(w, "loop detail response exceeds document limit", http.StatusUnprocessableEntity)
 		return
 	}
 	digest := sha256.Sum256(data)
@@ -33,7 +38,7 @@ func loopJSON(w http.ResponseWriter, r *http.Request, status int, value any) {
 	}
 }
 func graphView(w http.ResponseWriter, dir string) (loopview.View, bool) {
-	view, err := loopview.Load(dir)
+	view, err := loopview.LoadSummary(dir)
 	if err != nil {
 		http.Error(w, "loop display registry unreadable: "+err.Error(), http.StatusServiceUnavailable)
 		return view, false
@@ -98,7 +103,32 @@ func registerLoopGraph(mux *http.ServeMux, dir string) {
 		if view.Graph != nil {
 			for _, repo := range view.Graph.Repositories {
 				if repo.ID == r.PathValue("id") {
-					files := append(append([]loopview.IndexFile{}, repo.TrackedFiles...), repo.SelectedFiles...)
+					repo, err := readRepository(r, dir, repo)
+					if err != nil {
+						http.Error(w, "repository detail unavailable: "+err.Error(), 409)
+						return
+					}
+					files := []loopview.IndexFile{}
+					section := r.URL.Query().Get("section")
+					if section != "" && section != "tracked" && section != "selected" {
+						http.Error(w, "invalid index section", 400)
+						return
+					}
+					if section != "selected" {
+						files = append(files, repo.TrackedFiles...)
+					}
+					if section != "tracked" {
+						files = append(files, repo.SelectedFiles...)
+					}
+					if search := strings.ToLower(r.URL.Query().Get("search")); search != "" {
+						filtered := []loopview.IndexFile{}
+						for _, f := range files {
+							if strings.Contains(strings.ToLower(f.Path), search) {
+								filtered = append(filtered, f)
+							}
+						}
+						files = filtered
+					}
 					total := len(files)
 					if offset > total {
 						offset = total
@@ -107,7 +137,7 @@ func registerLoopGraph(mux *http.ServeMux, dir string) {
 					if end > total {
 						end = total
 					}
-					loopJSON(w, r, 200, map[string]any{"repository_id": repo.ID, "revision": repo.Revision, "index_status": repo.IndexStatus, "offset": offset, "total": total, "files": files[offset:end]})
+					loopJSON(w, r, 200, map[string]any{"repository_id": repo.ID, "revision": repo.Revision, "index_status": repo.IndexStatus, "offset": offset, "total": total, "files": files[offset:end], "ref": repo.Detail})
 					return
 				}
 			}
@@ -124,6 +154,11 @@ func registerLoopGraph(mux *http.ServeMux, dir string) {
 				if repo.ID != r.PathValue("id") {
 					continue
 				}
+				repo, err := readRepository(r, dir, repo)
+				if err != nil {
+					http.Error(w, "repository detail unavailable: "+err.Error(), 409)
+					return
+				}
 				for _, file := range append(append([]loopview.IndexFile{}, repo.TrackedFiles...), repo.SelectedFiles...) {
 					if file.ID == r.PathValue("fileID") {
 						result := loopview.IndexContent(r.Context(), repo, file)
@@ -139,4 +174,16 @@ func registerLoopGraph(mux *http.ServeMux, dir string) {
 		}
 		http.Error(w, "registered index file not found", 404)
 	})
+}
+
+func readRepository(r *http.Request, dir string, summary loopview.Repository) (loopview.Repository, error) {
+	if expected := r.URL.Query().Get("ref"); expected != "" && expected != summary.Detail.SHA256 {
+		return loopview.Repository{}, fmt.Errorf("selected repository version changed")
+	}
+	repo, err := loopview.RepositoryDetail(dir, summary)
+	if err != nil {
+		return repo, err
+	}
+	repo.Detail = summary.Detail
+	return repo, nil
 }

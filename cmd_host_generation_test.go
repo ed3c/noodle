@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/poteto/noodle/internal/admission"
@@ -93,11 +96,44 @@ func TestHostExplicitConfigSourceCannotFallBack(t *testing.T) {
 	root := t.TempDir()
 	req := hostTestRequest(t, root)
 	req.ConfigPath = filepath.Join(t.TempDir(), "missing.toml")
-	if _, err := readHostRequestConfig(req); !os.IsNotExist(err) {
+	if _, err := readHostRequestConfig(req); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("missing explicit source fell back", err)
 	}
 	req.ConfigPath = "relative.toml"
 	if _, err := readHostRequestConfig(req); err == nil {
 		t.Fatal("relative source accepted")
+	}
+}
+
+// Compatibility must be established before restricted maintenance can retire
+// the original owner. The fake CLI has no Host effects.
+func TestRollingTargetRetainsRestrictedMaintenanceAndAdmissionPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name, policy string
+		maintenance  int
+		accepted     bool
+	}{
+		{"compatible", admission.WorkerAdmissionPolicy, 1, true},
+		{"foreign-policy", "foreign-policy", 1, false},
+		{"missing-maintenance", admission.WorkerAdmissionPolicy, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caps, err := json.Marshal(map[string]any{"protocol": hostProtocol, "rolling_host_version": 1, "shared_worker_quota": 1, "codex_native_runtime": 1, "task_warning_grant": 1, "restricted_host_maintenance": tc.maintenance, "worker_admission_policy": tc.policy})
+			if err != nil {
+				t.Fatal(err)
+			}
+			binary := filepath.Join(t.TempDir(), "target")
+			data := []byte(fmt.Sprintf("#!/bin/sh\nif [ \"$2\" = capabilities ]; then\n printf '%%s\\n' '%s'\nelse\n printf '%%s\\n' '{\"local_task_directory_scope\":1,\"local_task_roles\":1}'\nfi\n", caps))
+			if err = os.WriteFile(binary, data, 0700); err != nil {
+				t.Fatal(err)
+			}
+			err = verifyRollingTarget(context.Background(), binary, hostDigest(data))
+			if tc.accepted && err != nil {
+				t.Fatal(err)
+			}
+			if !tc.accepted && (err == nil || !strings.Contains(err.Error(), "compatible rolling Host")) {
+				t.Fatalf("incompatible target did not refuse before owner control: %v", err)
+			}
+		})
 	}
 }

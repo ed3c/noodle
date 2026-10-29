@@ -118,6 +118,30 @@ func (l *Loop) handleBootstrapResult(result StageResult) {
 }
 
 func (l *Loop) handleCompletion(ctx context.Context, cook *cookHandle, resultStatus StageResultStatus, rawStatus string) error {
+	if cook.stage.Runtime == "openshell" && (resultStatus == StageResultCancelled || resultStatus == StageResultFailed) {
+		order, exists := l.canonical.Orders[cook.orderID]
+		if exists && cook.stageIndex >= 0 && cook.stageIndex < len(order.Stages) && l.isAdmittedLocalTask(order, order.Stages[cook.stageIndex]) {
+			status := state.AttemptFailed
+			if resultStatus == StageResultCancelled {
+				status = state.AttemptCancelled
+			}
+			return l.parkPendingReviewAttempt(cook, "OpenShell task stopped; saved progress requires original-owner inspection", status)
+		}
+	}
+	if resultStatus == StageResultFailed {
+		if handled, err := l.recoverMissingNativeContext(ctx, cook); handled {
+			if err != nil {
+				return &completionAdapterError{err: err}
+			}
+			return err
+		}
+	}
+	if resultStatus == StageResultCancelled {
+		order, exists := l.canonical.Orders[cook.orderID]
+		if exists && cook.stageIndex >= 0 && cook.stageIndex < len(order.Stages) && l.isAdmittedLocalTask(order, order.Stages[cook.stageIndex]) {
+			return l.parkPendingReview(cook, "local task interrupted; retain worktree for recovery")
+		}
+	}
 	status := stringx.Normalize(rawStatus)
 	if status == "" {
 		status = stringx.Normalize(cook.session.Outcome().Status.String())
@@ -224,6 +248,7 @@ func (l *Loop) processStageMessage(cook *cookHandle) (bool, *string) {
 // completeWithMerge handles a successful mergeable stage by persisting merge
 // metadata and either directly merging or enqueueing to the merge queue.
 func (l *Loop) completeWithMerge(ctx context.Context, cook *cookHandle, msg *string) error {
+	cook.retainWorktree = l.retainTaskData(cook.orderID)
 	l.logger.Info("cook completing",
 		"order", cook.orderID, "session", cook.session.ID())
 	if l.mergeQueue != nil {

@@ -26,3 +26,25 @@ func (p NativeIdentity) SameGeneration(q NativeIdentity) bool {
 		p.StartSec == q.StartSec && p.StartUsec == q.StartUsec && p.Version != 0 &&
 		p.Version == q.Version && len(p.Token) != 0 && bytes.Equal(p.Token, q.Token)
 }
+
+// ObserveNativeExit separates an exited generation from an exec replacement
+// that can still hold the original process's descriptors and resource control.
+func ObserveNativeExit(original NativeIdentity) (bool, error) {
+	if !original.SameGeneration(original) {
+		return false, errors.New("original kernel identity is incomplete")
+	}
+	current, err := ObserveNativeIdentity(original.PID)
+	if errors.Is(err, ErrProcessGone) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if current.Zombie || current.StartSec != original.StartSec || current.StartUsec != original.StartUsec {
+		return true, nil
+	}
+	if !original.SameGeneration(current) {
+		return false, errors.New("original process exec identity changed; resource control is unknown")
+	}
+	return false, nil
+}

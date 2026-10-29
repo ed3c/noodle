@@ -13,6 +13,9 @@ import (
 
 func (l *Loop) controlMode(value string) error {
 	value = stringx.Normalize(value)
+	if value != "manual" && l.deps.DispatchBlocked != "" {
+		return fmt.Errorf("worker context sources unavailable: %s", l.deps.DispatchBlocked)
+	}
 	switch value {
 	case string(state.RunModeAuto), string(state.RunModeSupervised), string(state.RunModeManual):
 		l.config.Mode = value

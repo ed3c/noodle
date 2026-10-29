@@ -25,6 +25,10 @@
 
 ## Codebase
 - [[codebase/swap-used-host-maintenance]]
+
+- [[codebase/grok-companion-source-projection]]
+
+- [[codebase/task-warning-grants]]
 - [[codebase/adopted-session-reconciliation]]
 - [[codebase/backlog-sync-parse-errors-are-recoverable-warnings]]
 - [[codebase/claude-code-ndjson-protocol]]
@@ -37,6 +41,8 @@
 - [[codebase/local-task-review-custody]]
 - [[codebase/merge-recovery-synthetic-cooks-must-preserve-task-key]]
 - [[codebase/orders-lifecycle-defaults-on-promotion]]
+- [[codebase/openshell-custody-and-native-identity]]
+- [[codebase/owned-worker-exit-and-recovery-evidence]]
 - [[codebase/provider-routing-must-fail-loudly]]
 - [[codebase/projection-owns-snapshot-active-order-ids]]
 - [[codebase/release-changelog-wrapper-script]]

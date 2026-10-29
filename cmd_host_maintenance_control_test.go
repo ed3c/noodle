@@ -232,3 +232,18 @@ func TestMaintenancePlanDirectoryReadbackNeverCreatesOrChmods(t *testing.T) {
 		t.Fatal("readback flag combined with a control operation")
 	}
 }
+
+func TestMaintenanceRetainedRunningRoundCannotReplayControls(t *testing.T) {
+	root := t.TempDir()
+	b := hostBootstrap{Tasks: []hostBootstrapTask{{
+		Original: hostReceipt{ProjectDir: filepath.Join(root, "original")},
+		Round:    &loop.HostContinuation{Mode: "manual", DispatchState: loop.StateRunning},
+	}}}
+	if done, err := bootstrapCheckpoint(context.Background(), root, &b); err == nil || done {
+		t.Fatal("unproved retained hold advanced", done, err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 0 {
+		t.Fatal("retained unknown checkpoint created new control state", entries, err)
+	}
+}

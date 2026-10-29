@@ -10,9 +10,10 @@ import (
 // MergeOpts holds optional parameters for Merge.
 type MergeOpts struct {
 	// Into overrides the integration branch for this merge.
-	Into         string
-	ExpectedHead string
-	ExpectedTree string
+	Into           string
+	ExpectedHead   string
+	ExpectedTree   string
+	RetainWorktree bool
 }
 
 // Merge rebases the worktree branch onto a target branch, merges, and cleans up.
@@ -21,6 +22,11 @@ func (a *App) Merge(name string, opts ...MergeOpts) error {
 	if len(opts) > 0 {
 		o = opts[0]
 	}
+	retained, err := a.retainsTaskWorktree(name)
+	if err != nil {
+		return err
+	}
+	o.RetainWorktree = o.RetainWorktree || retained
 	base := a.integrationBranch()
 	if o.Into != "" {
 		base = o.Into
@@ -129,7 +135,9 @@ func (a *App) Merge(name string, opts ...MergeOpts) error {
 	}
 
 	var warnings []string
-	if o.ExpectedHead == "" {
+	if o.RetainWorktree {
+		a.info("Retaining task worktree and branch until explicit deletion")
+	} else if o.ExpectedHead == "" {
 		warnings = a.cleanupWorktreeAndBranch(wtPath, mergeBranch, false)
 	} else {
 		// A concurrent Git writer does not take our merge lock. Preserve its work.
@@ -149,7 +157,11 @@ func (a *App) Merge(name string, opts ...MergeOpts) error {
 		a.warnf("WARNING: %s\n", warning)
 	}
 
-	a.printf("\nDone. %s merged into %s and cleaned up.\n", name, base)
+	if o.RetainWorktree {
+		a.printf("\nDone. %s merged into %s; task worktree retained.\n", name, base)
+	} else {
+		a.printf("\nDone. %s merged into %s and cleaned up.\n", name, base)
+	}
 	return nil
 }
 

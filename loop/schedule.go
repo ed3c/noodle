@@ -132,10 +132,10 @@ func scheduleBootstrapOopsOrder(cfg config.Config) Order {
 }
 
 func (l *Loop) spawnSchedule(ctx context.Context, order Order, attempt int, resumePrompt string) error {
-	if err := l.requireProcessOrder(l.config.Runtime.Default, order.ID); err != nil {
+	if err := l.requireAdmittedOrder(order.ID); err != nil {
 		return err
 	}
-	return l.withAdmission(ctx, l.config.Runtime.Default, func(ctx context.Context) error { return l.spawnScheduleAdmitted(ctx, order, attempt, resumePrompt) })
+	return l.withAdmission(ctx, l.config.Runtime.Default, "", func(ctx context.Context) error { return l.spawnScheduleAdmitted(ctx, order, attempt, resumePrompt) })
 }
 
 func (l *Loop) spawnScheduleAdmitted(ctx context.Context, order Order, attempt int, resumePrompt string) error {
@@ -230,10 +230,10 @@ func (l *Loop) spawnScheduleAdmitted(ctx context.Context, order Order, attempt i
 // schedule skill. Returns nil in all cases — the loop continues
 // regardless of bootstrap status.
 func (l *Loop) spawnBootstrapIfNeeded(ctx context.Context, order Order) error {
-	if err := l.requireProcessOrder(l.config.Runtime.Default, order.ID); err != nil {
+	if err := l.requireAdmittedOrder(order.ID); err != nil {
 		return err
 	}
-	return l.withAdmission(ctx, l.config.Runtime.Default, func(ctx context.Context) error { return l.spawnBootstrapIfNeededAdmitted(ctx, order) })
+	return l.withAdmission(ctx, l.config.Runtime.Default, "", func(ctx context.Context) error { return l.spawnBootstrapIfNeededAdmitted(ctx, order) })
 }
 
 func (l *Loop) spawnBootstrapIfNeededAdmitted(ctx context.Context, order Order) error {

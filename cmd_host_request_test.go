@@ -10,6 +10,43 @@ import (
 	"testing"
 )
 
+func TestHostRequestCleanupPolicyIsBoundAndLegacyDefaultsOff(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		req := hostTestRequest(t, t.TempDir())
+		req.RequestFile = filepath.Join(t.TempDir(), "request.json")
+		req.CleanupCompleted = enabled
+		binding, unlock, err := bindHostRequest(&req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unlock()
+		if binding.CleanupCompleted != enabled {
+			t.Fatal("policy not retained")
+		}
+		lookup := hostRequest{Operation: "status", ProjectDir: req.ProjectDir, BinarySHA256: req.BinarySHA256, RequestFile: req.RequestFile}
+		_, unlock, err = bindHostRequest(&lookup)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unlock()
+		if lookup.CleanupCompleted != enabled {
+			t.Fatal("readback lost original policy")
+		}
+		changed := req
+		changed.CleanupCompleted = !enabled
+		if _, unlock, err = bindHostRequest(&changed); err == nil {
+			unlock()
+			t.Fatal("policy changed in existing admission")
+		}
+		if !enabled {
+			data, err := os.ReadFile(req.RequestFile)
+			if err != nil || strings.Contains(string(data), "cleanup_completed") {
+				t.Fatalf("legacy bytes changed: %s %v", data, err)
+			}
+		}
+	}
+}
+
 func TestHostRequestBindingSeparatesOldReceiptAndNeverReplaysUnknown(t *testing.T) {
 	root := t.TempDir()
 	req := hostTestRequest(t, root)

@@ -2,6 +2,7 @@ package loop
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/poteto/noodle/dispatcher"
 	"github.com/poteto/noodle/event"
 	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/orderx"
@@ -32,6 +34,7 @@ type requestChangesRequeued struct {
 // Stored in existing stage Extra, so the checkpoint and order projection carry
 // the same custody binding. It authorizes only explicit edit-item and requeue.
 type requestChangesBinding struct {
+	TaskRole       *taskRoleFile     `json:"task_role,omitempty"`
 	Reason         string            `json:"reason,omitempty"`
 	WorktreeSHA256 string            `json:"worktree_sha256,omitempty"`
 	SessionID      string            `json:"session_id"`
@@ -55,6 +58,38 @@ type requestChangesPacket struct {
 }
 
 var recoverySessionFiles = []string{"spawn.json", "prompt.txt", "events.ndjson", "process.json"}
+
+func (l *Loop) recoverySessionExit(orderID string, stage state.StageNode, b requestChangesBinding) error {
+	if stage.Runtime == dispatcher.CodexNativeRuntime {
+		record, err := dispatcher.ReadReleasedNativeSession(context.Background(), l.runtimeDir, b.SessionID)
+		if err != nil {
+			return err
+		}
+		if record.Worktree != b.WorktreePath || record.OrderID != orderID || record.TaskKey != stage.TaskKey || record.Model != stage.Model {
+			return fmt.Errorf("recovery original native session binding differs")
+		}
+		return nil
+	}
+	raw, err := os.ReadFile(filepath.Join(l.runtimeDir, "sessions", b.SessionID, "process.json"))
+	if err != nil {
+		return err
+	}
+	var process struct {
+		SessionID string `json:"session_id"`
+		PID       int    `json:"pid"`
+	}
+	if json.Unmarshal(raw, &process) != nil || process.SessionID != b.SessionID || process.PID <= 1 {
+		return fmt.Errorf("recovery process identity mismatch")
+	}
+	absent, err := procx.ProcessGroupAbsent(process.PID)
+	if err != nil {
+		return err
+	}
+	if !absent {
+		return fmt.Errorf("recovery prior process/group is live")
+	}
+	return nil
+}
 
 func recoveryDigest(data []byte) string { return fmt.Sprintf("%x", sha256.Sum256(data)) }
 
@@ -88,7 +123,7 @@ func (l *Loop) captureRequestChanges(pending *pendingReviewCook) (requestChanges
 		return b, err
 	}
 	b.Files = make(map[string]string)
-	for _, name := range recoverySessionFiles {
+	for _, name := range recoveryFiles(node.Stages[pending.stageIndex].Runtime) {
 		data, err := os.ReadFile(filepath.Join(l.runtimeDir, "sessions", b.SessionID, name))
 		if err != nil {
 			return b, err
@@ -96,6 +131,13 @@ func (l *Loop) captureRequestChanges(pending *pendingReviewCook) (requestChanges
 		b.Files[name] = recoveryDigest(data)
 	}
 	if l.isAdmittedLocalTask(node, node.Stages[pending.stageIndex]) {
+		var original struct {
+			Role *taskRoleFile `json:"task_role"`
+		}
+		if err := json.Unmarshal([]byte(node.Stages[pending.stageIndex].Prompt), &original); err != nil {
+			return b, err
+		}
+		b.TaskRole = original.Role
 		b.WorktreeSHA256, err = l.localTaskWorktreeDigest(node.Stages[pending.stageIndex], b.WorktreePath)
 		if err != nil {
 			return b, err
@@ -142,7 +184,7 @@ func (l *Loop) validateRecovery(order state.OrderNode, review state.PendingRevie
 	}
 	dir := filepath.Join(l.runtimeDir, "sessions", b.SessionID)
 	contents := map[string][]byte{}
-	for _, name := range recoverySessionFiles {
+	for _, name := range recoveryFiles(stage.Runtime) {
 		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			return fmt.Errorf("recovery %s: %w", name, err)
@@ -160,19 +202,14 @@ func (l *Loop) validateRecovery(order state.OrderNode, review state.PendingRevie
 	if json.Unmarshal(contents["spawn.json"], &spawn) != nil || spawn.SessionID != b.SessionID || spawn.WorktreePath != b.WorktreePath || spawn.RetryCount != b.Attempt {
 		return fmt.Errorf("recovery spawn identity mismatch")
 	}
-	var process struct {
-		SessionID string `json:"session_id"`
-		PID       int    `json:"pid"`
+	var exitErr error
+	if stage.Runtime == dispatcher.CodexNativeRuntime {
+		exitErr = l.recoverySessionExit(order.OrderID, stage, b)
+	} else {
+		exitErr = l.requireRecoveryStopped(order, stage, b, contents["process.json"])
 	}
-	if json.Unmarshal(contents["process.json"], &process) != nil || process.SessionID != b.SessionID || process.PID <= 0 {
-		return fmt.Errorf("recovery process identity mismatch")
-	}
-	absent, err := procx.ProcessGroupAbsent(process.PID)
-	if err != nil {
+	if err := exitErr; err != nil {
 		return err
-	}
-	if !absent {
-		return fmt.Errorf("recovery prior process/group is live")
 	}
 	cook := &cookHandle{cookIdentity: cookIdentity{orderID: order.OrderID, stageIndex: si}, session: &adoptedSession{id: b.SessionID, status: "completed"}}
 	if l.isAdmittedLocalTask(order, stage) {

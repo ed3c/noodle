@@ -44,13 +44,15 @@ func (l *Loop) atMaxConcurrency() bool {
 
 func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Order, opts spawnOptions) error {
 	runtimeName := nonEmpty(cand.Stage.Runtime, "process")
+	admissionOrder := cand.OrderID
 	if isScheduleStage(cand.Stage) {
 		runtimeName = l.config.Runtime.Default
+		admissionOrder = ""
 	}
-	if err := l.requireProcessOrder(runtimeName, cand.OrderID); err != nil {
+	if err := l.requireAdmittedOrder(cand.OrderID); err != nil {
 		return err
 	}
-	return l.withAdmission(ctx, runtimeName, func(ctx context.Context) error { return l.spawnCookAdmitted(ctx, cand, order, opts) })
+	return l.withAdmission(ctx, runtimeName, admissionOrder, func(ctx context.Context) error { return l.spawnCookAdmitted(ctx, cand, order, opts) })
 }
 
 func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, order Order, opts spawnOptions) error {
@@ -59,6 +61,10 @@ func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, or
 	}
 
 	stage := cand.Stage
+	instructions, reasoning, err := l.remoteTaskInputs(cand)
+	if err != nil {
+		return err
+	}
 	interruption, err := l.interruptionForDispatch(cand, opts.attempt)
 	if err != nil {
 		return err
@@ -94,33 +100,55 @@ func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, or
 	}
 	worktreePath := l.worktreePath(name)
 	if !created {
-		if opts.attempt > 0 && interruption == nil && !preserveReview {
+		if opts.attempt > 0 && interruption == nil && !preserveReview && !l.retainTaskData(cand.OrderID) {
 			resetWorktreeState(worktreePath, l.deps.Execution)
 		}
 		if hint := worktreeResumeContext(worktreePath, name, l.deps.Execution); hint != "" {
 			resumePrompt = stringx.JoinNonEmpty("\n\n", hint, resumePrompt)
 		}
 	}
-	prompt := buildCookPrompt(cand.OrderID, stage, order.Plan, order.Title, order.Rationale, resumePrompt)
+	roleKey, roleSkill, err := l.taskRole(cand)
+	if err != nil {
+		return err
+	}
+	methodStage := stage
+	methodStage.Skill = roleSkill
+	prompt := buildCookPrompt(cand.OrderID, methodStage, order.Plan, order.Title, order.Rationale, resumePrompt)
 
 	taskType, _ := l.registry.ByKey(stage.TaskKey)
 	req := loopruntime.DispatchRequest{
-		Name:         name,
-		Prompt:       prompt,
-		Provider:     nonEmpty(stage.Provider, l.config.Routing.Defaults.Provider),
-		Model:        nonEmpty(stage.Model, l.config.Routing.Defaults.Model),
-		Skill:        stage.Skill,
-		WorktreePath: worktreePath,
-		TaskKey:      taskType.Key,
-		Runtime:      nonEmpty(stage.Runtime, "process"),
-		DisplayName:  opts.displayName,
-		Title:        order.Title,
-		RetryCount:   opts.attempt,
+		InstructionBundle: instructions,
+		ReasoningLevel:    reasoning,
+		Name:              name,
+		Prompt:            prompt,
+		Provider:          nonEmpty(stage.Provider, l.config.Routing.Defaults.Provider),
+		Model:             nonEmpty(stage.Model, l.config.Routing.Defaults.Model),
+		Skill:             roleSkill,
+		TaskRole:          roleKey,
+		WorktreePath:      worktreePath,
+		TaskKey:           taskType.Key,
+		Runtime:           nonEmpty(stage.Runtime, "process"),
+		DisplayName:       opts.displayName,
+		Title:             order.Title,
+		RetryCount:        opts.attempt,
 		EnvVars: map[string]string{
 			"NOODLE_PROJECT_DIR": l.projectDir,
 			"NOODLE_ORDER_ID":    cand.OrderID,
 			"NOODLE_STAGE_INDEX": strconv.Itoa(cand.StageIndex),
 		},
+	}
+	req.ResumeSessionID, err = l.resumeTaskSessionID(cand, opts.attempt)
+	if err != nil {
+		return err
+	}
+	if req.ResumeSessionID != "" {
+		req, err = l.degradedTaskDispatch(cand, opts.attempt, req)
+		if err != nil {
+			if errors.Is(err, errDispatchUnknown) {
+				return l.retainUnknownDispatch(ctx, err)
+			}
+			return err
+		}
 	}
 	attemptID := dispatchAttemptID(cand.OrderID, cand.StageIndex, opts.attempt)
 	if interruption != nil {
@@ -216,7 +244,13 @@ func (l *Loop) dispatchSession(ctx context.Context, req loopruntime.DispatchRequ
 	if runtimeName == "" {
 		runtimeName = "process"
 	}
+	if runtimeName == "codex-app-server" {
+		req.RequireGroupExit = false // The shared daemon is not a worker-owned OS group.
+	}
 
+	if err := l.requireAdmittedOrder(req.EnvVars["NOODLE_ORDER_ID"]); err != nil {
+		return nil, RuntimeFallbackOutcome{}, err
+	}
 	if err := l.requireProcessOrder(runtimeName, req.EnvVars["NOODLE_ORDER_ID"]); err != nil {
 		return nil, RuntimeFallbackOutcome{}, err
 	}
@@ -232,12 +266,20 @@ func (l *Loop) dispatchSession(ctx context.Context, req loopruntime.DispatchRequ
 		session = l.retainDispatched(ctx, session)
 		return session, RuntimeFallbackOutcome{}, nil
 	}
+	if runtimeName == "openshell" || runtimeName == "codex-app-server" {
+		// OpenShell returns a handle before any native mutation. An error here
+		// certifies local preflight refusal; neither fallback nor custody is needed.
+		return nil, RuntimeFallbackOutcome{}, classifyAgentStartFailure(runtimeName, err)
+	}
 	if runtimeName != "process" {
 		if l.deps.Admission != nil {
 			return nil, RuntimeFallbackOutcome{}, l.retainUnknownDispatch(ctx, err)
 		}
 		if fallback := l.deps.Runtimes["process"]; fallback != nil {
 			if err := l.requireProcessOrder("process", req.EnvVars["NOODLE_ORDER_ID"]); err != nil {
+				return nil, RuntimeFallbackOutcome{}, err
+			}
+			if err := l.requireAdmittedOrder(req.EnvVars["NOODLE_ORDER_ID"]); err != nil {
 				return nil, RuntimeFallbackOutcome{}, err
 			}
 			l.logger.Warn("runtime dispatch failed, falling back to process", "runtime", runtimeName, "error", err)
@@ -264,7 +306,7 @@ func (l *Loop) handleCookDispatchFailure(cand dispatchCandidate, stage Stage, wo
 	if errors.Is(err, errDispatchUnknown) {
 		return err
 	}
-	if created {
+	if created && !l.retainTaskData(cand.OrderID) {
 		_ = l.deps.Worktree.Cleanup(worktreeName, worktree.CleanupOpts{Force: true})
 	}
 	envelope, ok := asDispatchFailureEnvelope(err)

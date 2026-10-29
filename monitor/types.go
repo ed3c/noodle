@@ -17,6 +17,7 @@ const (
 	SessionStatusRunning SessionStatus = "running"
 	SessionStatusExited  SessionStatus = "exited"
 	SessionStatusFailed  SessionStatus = "failed"
+	SessionStatusUnknown SessionStatus = "unknown"
 )
 
 type HealthStatus string
@@ -28,10 +29,12 @@ const (
 )
 
 type Observation struct {
-	SessionID string
-	Alive     bool
-	LogMTime  time.Time
-	LogSize   int64
+	NativeState    string
+	NativeTerminal string
+	SessionID      string
+	Alive          bool
+	LogMTime       time.Time
+	LogSize        int64
 }
 
 type SessionClaims struct {
@@ -52,6 +55,7 @@ type SessionClaims struct {
 }
 
 type SessionMeta struct {
+	NativeState             string        `json:"native_state,omitempty"`
 	SessionID               string        `json:"session_id"`
 	Status                  SessionStatus `json:"status"`
 	Runtime                 string        `json:"runtime,omitempty"`
@@ -65,6 +69,7 @@ type SessionMeta struct {
 	ContextWindowUsagePct   float64       `json:"context_window_usage_pct"`
 	RetryCount              int           `json:"retry_count"`
 	Alive                   bool          `json:"alive"`
+	ExitPending             bool          `json:"exit_pending,omitempty"`
 	Stuck                   bool          `json:"stuck"`
 	LogSize                 int64         `json:"log_size"`
 	UpdatedAt               time.Time     `json:"updated_at"`

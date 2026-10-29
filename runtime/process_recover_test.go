@@ -57,8 +57,8 @@ func TestProcessRuntimeRecoverLivePID(t *testing.T) {
 	if rs.SessionHandle.ID() != sessionID {
 		t.Fatalf("session ID = %q, want %q", rs.SessionHandle.ID(), sessionID)
 	}
-	if rs.Reason != "live PID found" {
-		t.Fatalf("reason = %q, want %q", rs.Reason, "live PID found")
+	if rs.Reason != "original process/group exit requires owner readback" {
+		t.Fatalf("reason = %q, want %q", rs.Reason, "original process/group exit requires owner readback")
 	}
 }
 
@@ -108,7 +108,7 @@ func TestProcessRuntimeRecoverDeadPIDUpdatesMetaToExited(t *testing.T) {
 	}
 }
 
-func TestProcessRuntimeRecoverSkipsNoProcessJSON(t *testing.T) {
+func TestProcessRuntimeRecoverMissingProcessIdentityStaysUnknown(t *testing.T) {
 	runtimeDir := t.TempDir()
 	sessionID := "cook-no-process-json"
 	sessionDir := filepath.Join(runtimeDir, "sessions", sessionID)
@@ -127,8 +127,8 @@ func TestProcessRuntimeRecoverSkipsNoProcessJSON(t *testing.T) {
 
 	rt := &processRuntime{DispatcherRuntime: NewDispatcherRuntime("process", nil, runtimeDir)}
 	recovered, err := rt.Recover(context.Background())
-	if err != nil {
-		t.Fatalf("recover: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "process identity") {
+		t.Fatalf("missing original process identity must remain unknown: recovered=%v err=%v", recovered, err)
 	}
 	if len(recovered) != 0 {
 		t.Fatalf("recovered %d sessions, want 0 (no process.json)", len(recovered))
@@ -153,5 +153,81 @@ func TestProcessRuntimeRecoverEmptySessionsDir(t *testing.T) {
 	}
 	if len(recovered) != 0 {
 		t.Fatalf("recovered %d sessions, want 0", len(recovered))
+	}
+}
+
+func TestRecoveredIdentityCannotAcknowledgeStopOrExit(t *testing.T) {
+	s := &recoveredSessionHandle{id: "unowned", status: "running"}
+	if err := s.Terminate(); err == nil {
+		t.Fatal("recovered identity acknowledged a stop without its original child owner")
+	}
+	if err := s.ForceKill(); err == nil {
+		t.Fatal("recovered identity acknowledged force kill without its original child owner")
+	}
+	select {
+	case <-s.Done():
+		t.Fatal("recovered identity falsely certified process exit")
+	default:
+	}
+}
+
+func TestProcessRecoveryReadsFormattedMetadataAndPreservesRaw(t *testing.T) {
+	dir := t.TempDir()
+	sessionDir := filepath.Join(dir, "sessions", "formatted")
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	meta := []byte("{\n  \"session_id\": \"formatted\",\n  \"status\": \"running\",\n  \"retained\": {\"raw\": true}\n}\n")
+	process, _ := json.Marshal(map[string]any{"pid": os.Getpid(), "session_id": "formatted", "started_at": time.Now().UTC()})
+	if err := os.WriteFile(filepath.Join(sessionDir, "process.json"), process, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, "meta.json"), meta, 0644); err != nil {
+		t.Fatal(err)
+	}
+	rt := &processRuntime{DispatcherRuntime: NewDispatcherRuntime("process", nil, dir)}
+	recovered, err := rt.Recover(context.Background())
+	if err != nil || len(recovered) != 1 {
+		t.Fatalf("formatted native metadata lost pending identity: recovered=%v err=%v", recovered, err)
+	}
+	after, err := os.ReadFile(filepath.Join(sessionDir, "meta.json"))
+	if err != nil || string(after) != string(meta) {
+		t.Fatalf("live metadata modified: %s err=%v", after, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(sessionDir, "process.json"))
+	if err != nil || string(raw) != string(process) {
+		t.Fatal("original process identity changed")
+	}
+}
+
+func TestProcessRecoveryTerminalMetadataDoesNotHideLiveIdentity(t *testing.T) {
+	dir := t.TempDir()
+	sessionDir := filepath.Join(dir, "sessions", "terminal-live")
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	meta := []byte(`{"session_id":"terminal-live","status":"completed"}`)
+	raw, _ := json.Marshal(map[string]any{"pid": os.Getpid(), "session_id": "terminal-live", "started_at": time.Now().UTC()})
+	if err := os.WriteFile(filepath.Join(sessionDir, "meta.json"), meta, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, "process.json"), raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	rt := &processRuntime{DispatcherRuntime: NewDispatcherRuntime("process", nil, dir)}
+	recovered, err := rt.Recover(context.Background())
+	if err != nil || len(recovered) != 1 {
+		t.Fatalf("terminal claim hid original live process: recovered=%v err=%v", recovered, err)
+	}
+	wrong, _ := json.Marshal(map[string]any{"pid": os.Getpid(), "session_id": "different-session", "started_at": time.Now().UTC()})
+	if err := os.WriteFile(filepath.Join(sessionDir, "process.json"), wrong, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.Recover(context.Background()); err == nil {
+		t.Fatal("conflicting native Session identity accepted")
+	}
+	after, _ := os.ReadFile(filepath.Join(sessionDir, "meta.json"))
+	if string(after) != string(meta) {
+		t.Fatalf("unknown ownership rewrote history: %s", after)
 	}
 }

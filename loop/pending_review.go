@@ -61,10 +61,16 @@ func ReadPendingReview(runtimeDir string) ([]PendingReviewItem, error) {
 }
 
 func (l *Loop) parkPendingReview(cook *cookHandle, reason string) error {
+	return l.parkPendingReviewAttempt(cook, reason, state.AttemptCompleted)
+}
+
+func (l *Loop) parkPendingReviewAttempt(cook *cookHandle, reason string, status state.AttemptStatus) error {
 	if err := l.ensureCanonicalOrderFromOrders(cook.orderID); err != nil {
 		return err
 	}
-	if err := l.emitEventChecked(ingest.EventStageReviewParked, l.reviewPayloadForCook(cook, reason)); err != nil {
+	payload := l.reviewPayloadForCook(cook, reason)
+	payload["attempt_status"] = status
+	if err := l.emitEventChecked(ingest.EventStageReviewParked, payload); err != nil {
 		return err
 	}
 	if err := l.mirrorLegacyOrderFromCanonical(cook.orderID); err != nil {

@@ -14,6 +14,8 @@ func (l *Loop) requiresTypedOutcome(cook *cookHandle) bool {
 	switch provider {
 	case "claude":
 		return l.config.Agents.Claude.RequireTypedOutcome
+	case "pi":
+		return l.config.Agents.Pi.RequireTypedOutcome
 	case "codex":
 		return l.config.Agents.Codex.RequireTypedOutcome
 	default:

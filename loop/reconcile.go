@@ -54,8 +54,14 @@ func (l *Loop) reconcile(ctx context.Context) error {
 		)
 	}
 
+	if err := l.reconcileMaintainedProgress(ctx); err != nil {
+		return fmt.Errorf("reconcile maintained OpenShell progress: %w", err)
+	}
 	if err := l.recoverAdoptedSessions(ctx); err != nil {
 		return err
+	}
+	if err := l.reconcileNativeDegradations(ctx); err != nil {
+		return fmt.Errorf("reconcile native context degradation: %w", err)
 	}
 	if err := l.reconcileLateTypedFailed(ctx); err != nil {
 		return l.classifySystemHard(
@@ -170,6 +176,13 @@ func (l *Loop) recoverAdoptedSessions(ctx context.Context) error {
 	orderMap := make(map[string]Order, len(orders.Orders))
 	for _, o := range orders.Orders {
 		orderMap[o.ID] = o
+	}
+	nativeHistory, err := filepath.Glob(filepath.Join(l.runtimeDir, "sessions", "*", "openshell-dispatch.json"))
+	if err != nil {
+		return err
+	}
+	if len(nativeHistory) != 0 && l.deps.Runtimes["openshell"] == nil {
+		return fmt.Errorf("OpenShell session history requires its registered native recovery owner")
 	}
 
 	for _, rt := range l.deps.Runtimes {
@@ -351,7 +364,7 @@ func (l *Loop) reconcileFailedOrders() error {
 		if order.Status != OrderStatusFailed {
 			continue
 		}
-		if isScheduleOrder(order) || l.preserveRequestChanges(order.ID) || l.preserveLocalTaskFailure(order.ID) {
+		if isScheduleOrder(order) || l.retainTaskData(order.ID) || l.preserveRequestChanges(order.ID) || l.preserveLocalTaskFailure(order.ID) {
 			continue
 		}
 		f := reconciledFailure{
@@ -386,7 +399,7 @@ func (l *Loop) reconcileFailedOrders() error {
 	if err := l.mutateOrdersState(func(orders *OrdersFile) (bool, error) {
 		kept := orders.Orders[:0]
 		for _, order := range orders.Orders {
-			if order.Status == OrderStatusFailed && !isScheduleOrder(order) && !l.preserveRequestChanges(order.ID) && !l.preserveLocalTaskFailure(order.ID) {
+			if order.Status == OrderStatusFailed && !isScheduleOrder(order) && !l.retainTaskData(order.ID) && !l.preserveRequestChanges(order.ID) && !l.preserveLocalTaskFailure(order.ID) {
 				continue
 			}
 			kept = append(kept, order)
@@ -587,6 +600,7 @@ func (l *Loop) requeueStaleMerge(md mergeRecoveryStage) error {
 	l.logger.Info("merging stage branch exists, re-enqueueing merge",
 		"order", md.orderID, "stage", md.stage.StageIndex, "branch", md.checkBranch)
 	cook := &cookHandle{
+		retainWorktree: l.retainTaskData(md.orderID),
 		cookIdentity: cookIdentity{
 			orderID:    md.orderID,
 			stageIndex: md.stage.StageIndex,

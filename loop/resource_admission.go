@@ -18,7 +18,7 @@ type launchAdmission struct {
 	retained bool
 }
 
-func (l *Loop) withAdmission(ctx context.Context, runtimeName string, launch func(context.Context) error) error {
+func (l *Loop) withAdmission(ctx context.Context, runtimeName, orderID string, launch func(context.Context) error) error {
 	if l.resourceUnknown != nil {
 		return l.resourceUnknown
 	}
@@ -35,7 +35,7 @@ func (l *Loop) withAdmission(ctx context.Context, runtimeName string, launch fun
 	if rt, ok := l.deps.Runtimes[runtimeName].(interface{ CapacityAvailable() bool }); ok && !rt.CapacityAvailable() {
 		return admission.ErrDeferred
 	}
-	permit, err := l.deps.Admission.TryAcquire(l.deps.AdmissionContext)
+	permit, err := l.deps.Admission.TryAcquireTask(l.deps.AdmissionContext, orderID)
 	if err != nil {
 		return err
 	}

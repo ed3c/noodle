@@ -107,6 +107,9 @@ func TestNativeIdentityRejectsExecGeneration(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	if gone, err := ObserveNativeExit(old); gone || err == nil {
+		t.Fatalf("exec replacement must remain unknown, not settled: gone=%v err=%v", gone, err)
+	}
 	if err := SignalNativeIdentity(old, false); !errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("stale token must be refused by kernel: %v", err)
 	}

@@ -11,17 +11,28 @@ import (
 )
 
 type dispatchMetadata struct {
-	SessionID       string    `json:"session_id"`
-	Provider        string    `json:"provider"`
-	Model           string    `json:"model"`
-	Runtime         string    `json:"runtime,omitempty"`
-	Skill           string    `json:"skill,omitempty"`
-	WorktreePath    string    `json:"worktree_path,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	DispatchWarning string    `json:"dispatch_warning,omitempty"`
-	DisplayName     string    `json:"display_name,omitempty"`
-	Title           string    `json:"title,omitempty"`
-	RetryCount      int       `json:"retry_count,omitempty"`
+	SessionID             string                `json:"session_id"`
+	Provider              string                `json:"provider"`
+	Model                 string                `json:"model"`
+	ReasoningLevel        string                `json:"reasoning_level"`
+	InstructionBundle     *InstructionBundleRef `json:"instruction_bundle"`
+	Runtime               string                `json:"runtime,omitempty"`
+	Skill                 string                `json:"skill,omitempty"`
+	WorktreePath          string                `json:"worktree_path,omitempty"`
+	CreatedAt             time.Time             `json:"created_at"`
+	DispatchWarning       string                `json:"dispatch_warning,omitempty"`
+	DisplayName           string                `json:"display_name,omitempty"`
+	Title                 string                `json:"title,omitempty"`
+	RetryCount            int                   `json:"retry_count,omitempty"`
+	TaskRole              string                `json:"task_role,omitempty"`
+	ResumeSessionID       string                `json:"resume_session_id,omitempty"`
+	ResumeThreadID        string                `json:"resume_thread_id,omitempty"`
+	ResumeSourceSHA       string                `json:"resume_source_sha256,omitempty"`
+	TaskKey               string                `json:"task_key,omitempty"`
+	OrderID               string                `json:"order_id,omitempty"`
+	StageIndex            string                `json:"stage_index,omitempty"`
+	DegradedFromSessionID string                `json:"degraded_from_session_id,omitempty"`
+	DegradationReason     string                `json:"degradation_reason,omitempty"`
 }
 
 func writeDispatchMetadata(
@@ -42,17 +53,28 @@ func writeDispatchMetadata(
 	path := filepath.Join(runtimeDir, "sessions", sessionID, "spawn.json")
 
 	payload, err := json.Marshal(dispatchMetadata{
-		SessionID:       sessionID,
-		Provider:        strings.TrimSpace(req.Provider),
-		Model:           strings.TrimSpace(req.Model),
-		Runtime:         strings.TrimSpace(req.Runtime),
-		Skill:           strings.TrimSpace(req.Skill),
-		WorktreePath:    strings.TrimSpace(req.WorktreePath),
-		CreatedAt:       createdAt.UTC(),
-		DispatchWarning: strings.TrimSpace(req.DispatchWarning),
-		DisplayName:     strings.TrimSpace(req.DisplayName),
-		Title:           strings.TrimSpace(req.Title),
-		RetryCount:      req.RetryCount,
+		SessionID:             sessionID,
+		Provider:              strings.TrimSpace(req.Provider),
+		Model:                 strings.TrimSpace(req.Model),
+		ReasoningLevel:        req.ReasoningLevel,
+		InstructionBundle:     req.InstructionBundle,
+		Runtime:               strings.TrimSpace(req.Runtime),
+		Skill:                 strings.TrimSpace(req.Skill),
+		WorktreePath:          strings.TrimSpace(req.WorktreePath),
+		CreatedAt:             createdAt.UTC(),
+		DispatchWarning:       strings.TrimSpace(req.DispatchWarning),
+		DisplayName:           strings.TrimSpace(req.DisplayName),
+		Title:                 strings.TrimSpace(req.Title),
+		RetryCount:            req.RetryCount,
+		TaskRole:              req.TaskRole,
+		ResumeSessionID:       req.ResumeSessionID,
+		ResumeThreadID:        req.codexThreadID,
+		ResumeSourceSHA:       req.codexThreadSourceSHA,
+		TaskKey:               req.TaskKey,
+		OrderID:               req.EnvVars["NOODLE_ORDER_ID"],
+		StageIndex:            req.EnvVars["NOODLE_STAGE_INDEX"],
+		DegradedFromSessionID: req.DegradedFromSessionID,
+		DegradationReason:     req.DegradationReason,
 	})
 	if err != nil {
 		return fmt.Errorf("encode spawn metadata: %w", err)
@@ -61,4 +83,19 @@ func writeDispatchMetadata(
 		return fmt.Errorf("rename spawn metadata: %w", err)
 	}
 	return nil
+}
+
+// ReadSessionTaskRole reads only original dispatch provenance, not process names.
+func ReadSessionTaskRole(runtimeDir, sessionID string) (string, error) {
+	if sessionID == "." || sessionID == ".." || filepath.Base(sessionID) != sessionID || strings.ContainsAny(sessionID, `/\\`) {
+		return "", fmt.Errorf("task role session identity invalid")
+	}
+	var spawn dispatchMetadata
+	if err := readResumeJSON(filepath.Join(runtimeDir, "sessions", sessionID, "spawn.json"), &spawn); err != nil {
+		return "", err
+	}
+	if spawn.SessionID != sessionID {
+		return "", fmt.Errorf("task role session provenance differs")
+	}
+	return spawn.TaskRole, nil
 }

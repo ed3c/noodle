@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchLoopView, parseLoopView } from "./loop-views";
+import { fetchLoopView, parseLoopView, fetchLoopRun } from "./loop-views";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -45,4 +45,38 @@ describe("loop display readback", () => {
     expect(result.etag).toBe('"v2"');
     await expect(fetchLoopView()).rejects.toThrow("503");
   });
+});
+
+it("rejects a response for a different selected run digest", async () => {
+  const detail = { sha256: "a".repeat(64), bytes: 100, tracked: 0, selected: 0, artifact_ids: [] };
+  const view = parseLoopView({
+    schema_version: 1,
+    runs: [
+      {
+        id: "run",
+        repository: "repo",
+        mode: "manual",
+        status: "observed",
+        stages: [],
+        cards: [],
+        notes: [],
+        breakpoints: [],
+        next: null,
+        detail,
+      },
+    ],
+  });
+  const [run] = view.runs;
+  if (!run) {
+    throw new Error("fixture missing");
+  }
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({ ...view, projection_source: { ...detail, sha256: "b".repeat(64) } }),
+      ),
+  );
+  await expect(fetchLoopRun(run)).rejects.toThrow("Selected run version changed");
 });

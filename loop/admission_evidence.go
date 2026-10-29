@@ -2,6 +2,7 @@ package loop
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/poteto/noodle/dispatcher"
 	"github.com/poteto/noodle/internal/orderx"
 	"github.com/poteto/noodle/internal/procx"
 	"github.com/poteto/noodle/internal/reducer"
@@ -288,48 +290,8 @@ func observeAdmissionSessions(dir string, s state.State) error {
 		if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
 			return fmt.Errorf("ambiguous session entry %q", entry.Name())
 		}
-		path := filepath.Join(sessionDir, entry.Name())
-		data, err := readAdmissionFile(filepath.Join(path, "meta.json"))
-		if err != nil {
-			return fmt.Errorf("session %s: %w", entry.Name(), err)
-		}
-		var meta monitor.SessionMeta
-		if err := json.Unmarshal(data, &meta); err != nil {
+		if err := observeAdmissionProcessSession(dir, entry.Name()); err != nil {
 			return err
-		}
-		// meta.json is a derived historical observation. A stale running value
-		// cannot override fresh absence of both the process and its group, nor
-		// can a terminal value override a still-live process below.
-		if meta.SessionID != entry.Name() || (meta.Status != monitor.SessionStatusExited && meta.Status != monitor.SessionStatusFailed && meta.Status != monitor.SessionStatusRunning) {
-			return fmt.Errorf("active or ambiguous session %q", entry.Name())
-		}
-		if meta.Runtime != "" && meta.Runtime != "process" {
-			return fmt.Errorf("session %q process observation unavailable for runtime %q", entry.Name(), meta.Runtime)
-		}
-		data, err = readAdmissionFile(filepath.Join(path, "process.json"))
-		if err != nil {
-			return err
-		}
-		var process struct {
-			PID       int    `json:"pid"`
-			SessionID string `json:"session_id"`
-		}
-		if err := json.Unmarshal(data, &process); err != nil {
-			return err
-		}
-		if process.SessionID != entry.Name() {
-			return fmt.Errorf("mismatched process session %q", entry.Name())
-		}
-		pid, err := procx.ReadPIDFile(filepath.Join(path, "process.json"))
-		if err != nil {
-			return err
-		}
-		absent, err := procx.ProcessGroupAbsent(pid)
-		if err != nil {
-			return err
-		}
-		if !absent {
-			return fmt.Errorf("session %q process or process group is present", entry.Name())
 		}
 		observed[entry.Name()] = true
 	}
@@ -341,6 +303,58 @@ func observeAdmissionSessions(dir string, s state.State) error {
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// This process-only observation is shared without expanding offline admission.
+func observeAdmissionProcessSession(dir, sessionID string) error {
+	path := filepath.Join(dir, "sessions", sessionID)
+	data, err := readAdmissionFile(filepath.Join(path, "meta.json"))
+	if err != nil {
+		return fmt.Errorf("session %s: %w", sessionID, err)
+	}
+	var meta monitor.SessionMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return err
+	}
+	// meta.json is a derived historical observation. A stale running value
+	// cannot override fresh absence of both the process and its group, nor
+	// can a terminal value override a still-live process below.
+	if meta.SessionID != sessionID || (meta.Status != monitor.SessionStatusExited && meta.Status != monitor.SessionStatusFailed && meta.Status != monitor.SessionStatusRunning) {
+		return fmt.Errorf("active or ambiguous session %q", sessionID)
+	}
+	if meta.Runtime == dispatcher.CodexNativeRuntime {
+		_, err := dispatcher.ReadReleasedNativeSession(context.Background(), dir, sessionID)
+		return err
+	}
+	if meta.Runtime != "" && meta.Runtime != "process" {
+		return fmt.Errorf("session %q process observation unavailable for runtime %q", sessionID, meta.Runtime)
+	}
+	data, err = readAdmissionFile(filepath.Join(path, "process.json"))
+	if err != nil {
+		return err
+	}
+	var process struct {
+		PID       int    `json:"pid"`
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(data, &process); err != nil {
+		return err
+	}
+	if process.SessionID != sessionID {
+		return fmt.Errorf("mismatched process session %q", sessionID)
+	}
+	pid, err := procx.ReadPIDFile(filepath.Join(path, "process.json"))
+	if err != nil {
+		return err
+	}
+	absent, err := procx.ProcessGroupAbsent(pid)
+	if err != nil {
+		return err
+	}
+	if !absent {
+		return fmt.Errorf("session %q process or process group is present", sessionID)
 	}
 	return nil
 }

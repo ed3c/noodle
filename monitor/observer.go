@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -96,11 +97,34 @@ func (o *CompositeObserver) observerForSession(sessionID string) (Observer, erro
 
 	selected := o.local
 	if runtime, err := readSessionRuntime(o.runtimeDir, sessionID); err == nil {
+		if runtime == dispatcher.CodexNativeRuntime {
+			return &NativeObserver{runtimeDir: o.runtimeDir}, nil
+		}
 		if runtime != "" && runtime != "process" && runtime != "tmux" {
 			selected = o.remote
 		}
 	}
 	return selected, nil
+}
+
+type NativeObserver struct{ runtimeDir string }
+
+func (o *NativeObserver) Observe(session string) (Observation, error) {
+	obs, err := canonicalLogObservation(o.runtimeDir, session)
+	if err != nil {
+		return obs, err
+	}
+	record, err := dispatcher.ReadNativeSessionRecord(o.runtimeDir, session)
+	if err != nil {
+		return obs, err
+	}
+	obs.NativeState, obs.NativeTerminal = record.State, record.Terminal
+	if record.State == "released" {
+		_, err = dispatcher.ReadReleasedNativeSession(context.Background(), o.runtimeDir, session)
+	} else {
+		obs.Alive, err = dispatcher.NativeSessionProcessesAlive(context.Background(), record)
+	}
+	return obs, err
 }
 
 func readSessionRuntime(runtimeDir, sessionID string) (string, error) {

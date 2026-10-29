@@ -1,7 +1,6 @@
 package loop
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"maps"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/internal/orderx"
+	"github.com/poteto/noodle/internal/reducer"
 	"github.com/poteto/noodle/internal/taskreg"
 	"github.com/poteto/noodle/mise"
 )
@@ -395,7 +395,7 @@ func consumeOrdersNextAtRevision(nextPath string, existing OrdersFile, revision 
 }
 
 func initialAdmissionEffectID(orderID string) string {
-	return fmt.Sprintf("initial-admission-%x", sha256.Sum256([]byte(orderID)))
+	return reducer.InitialAdmissionEffectID(orderID)
 }
 
 func shouldReplaceFailedOrder(existing Order, incoming Order) bool {

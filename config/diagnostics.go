@@ -29,25 +29,44 @@ func Validate(config Config) ValidationResult {
 	} else if !isKnownProvider(config.Routing.Defaults.Provider) {
 		result.Diagnostics = append(result.Diagnostics, ConfigDiagnostic{
 			FieldPath: "routing.defaults.provider",
-			Message:   fmt.Sprintf("unknown provider %q (valid: claude, codex)", config.Routing.Defaults.Provider),
+			Message:   fmt.Sprintf("unknown provider %q (valid: claude, codex, pi)", config.Routing.Defaults.Provider),
 			Severity:  DiagnosticSeverityFatal,
-			Fix:       "Set routing.defaults.provider to \"claude\" or \"codex\" in .noodle.toml.",
+			Fix:       "Set routing.defaults.provider to \"claude\", \"codex\", or \"pi\" in .noodle.toml.",
 			Code:      DiagnosticCodeProviderUnknown,
 		})
 	}
 
+	if stringx.Normalize(config.Routing.Defaults.Provider) == "pi" {
+		provider, model, ok := strings.Cut(config.Routing.Defaults.Model, "/")
+		if !ok || provider == "" || model == "" {
+			result.Diagnostics = append(result.Diagnostics, ConfigDiagnostic{FieldPath: "routing.defaults.model", Message: "Pi model is missing an exact provider/model-id", Severity: DiagnosticSeverityFatal})
+		}
+	}
+	if len(config.Agents.Pi.Args) != 0 {
+		result.Diagnostics = append(result.Diagnostics, ConfigDiagnostic{FieldPath: "agents.pi.args", Message: "Pi extra arguments are not supported", Severity: DiagnosticSeverityFatal})
+	}
+
 	if rd := stringx.Normalize(config.Runtime.Default); rd != "" {
 		switch rd {
-		case "process", "sprites", "cursor":
+		case "process", "sprites", "cursor", "openshell", "codex-app-server":
 			// Known runtimes — ok.
 		default:
 			result.Diagnostics = append(result.Diagnostics, ConfigDiagnostic{
 				FieldPath: "runtime.default",
-				Message:   fmt.Sprintf("unknown runtime %q (valid: process, sprites, cursor)", config.Runtime.Default),
+				Message:   fmt.Sprintf("unknown runtime %q (valid: process, sprites, cursor, openshell, codex-app-server)", config.Runtime.Default),
 				Severity:  DiagnosticSeverityWarning,
-				Fix:       "Set runtime.default to \"process\", \"sprites\", or \"cursor\" in .noodle.toml.",
+				Fix:       "Set runtime.default to \"process\", \"sprites\", \"cursor\", \"openshell\", or \"codex-app-server\" in .noodle.toml.",
 				Code:      DiagnosticCodeRuntimeDefaultUnknown,
 			})
+		}
+	}
+
+	if config.Runtime.openshellDefined || config.Runtime.Default == "openshell" || config.Runtime.OpenShell.Profile != "" {
+		if strings.TrimSpace(config.Runtime.OpenShell.Profile) == "" {
+			result.Diagnostics = append(result.Diagnostics, ConfigDiagnostic{FieldPath: "runtime.openshell.profile", Message: "OpenShell profile is missing", Severity: DiagnosticSeverityFatal})
+		}
+		if config.Runtime.OpenShell.MaxConcurrent < 0 {
+			result.Diagnostics = append(result.Diagnostics, ConfigDiagnostic{FieldPath: "runtime.openshell.max_concurrent", Message: "OpenShell concurrency is negative", Severity: DiagnosticSeverityFatal})
 		}
 	}
 
@@ -80,6 +99,7 @@ func Validate(config Config) ValidationResult {
 	}
 	appendAgentDirDiagnostic("agents.claude.path", config.Agents.Claude.Path)
 	appendAgentDirDiagnostic("agents.codex.path", config.Agents.Codex.Path)
+	appendAgentDirDiagnostic("agents.pi.path", config.Agents.Pi.Path)
 
 	if _, hasBacklog := config.Adapters["backlog"]; !hasBacklog {
 		result.Diagnostics = append(result.Diagnostics, ConfigDiagnostic{
@@ -167,7 +187,7 @@ func commandLooksPath(token string) bool {
 
 func isKnownProvider(provider string) bool {
 	switch stringx.Normalize(provider) {
-	case "claude", "codex":
+	case "claude", "codex", "pi":
 		return true
 	}
 	return false

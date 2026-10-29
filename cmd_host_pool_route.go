@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -62,6 +64,57 @@ func poolBindingCompatible(root string, b hostRequestBinding, caller string) boo
 		}
 	}
 	return false
+}
+
+// Routing uses the one original task owner; no competing carrier acquires it.
+func (h *noodleHost) forwardRolling(ctx context.Context, req hostRequest) (any, bool) {
+	if h.rolling == nil || req.Operation == "resources" || req.Operation == "view_resources" || req.Operation == "round_prepare" || req.Operation == "round_rebuild" || (req.Operation == "round_admit" || req.Operation == "round_reconcile") {
+		return nil, false
+	}
+	p, err := readHostPool(h.rolling.root)
+	if err != nil {
+		return hostError("unknown_effect", err), true
+	}
+	owner, owned := p.Owners[req.RequestID]
+	if !owned && req.RequestID == "" && req.ContextID != "" {
+		for _, candidate := range p.Owners {
+			if candidate.Current.ContextID == req.ContextID && candidate.Current.HostInstanceID == req.InstanceID {
+				owner, owned = candidate, true
+				break
+			}
+		}
+	}
+	if owned {
+		if !hostReceiptMatches(req, owner.Original) {
+			return hostError("refused", errors.New("original task binding differs")), true
+		}
+		if owner.MaintenanceHold != "" && req.Operation != "status" {
+			return hostResponse{owner.Current, "busy", "original work is held by restricted maintenance; no dispatch or rebuild allowed"}, true
+		}
+	}
+	if req.AdmissionSHA == "" {
+		req.AdmissionSHA = req.BinarySHA256
+	}
+	g, err := poolRequestOwner(h.rolling.root, req)
+	if err != nil {
+		return hostError("refused", err), true
+	}
+	if g.ID == h.instanceID {
+		return nil, false
+	}
+	if g.State == "exited" {
+		if req.Operation == "status" || req.Operation == "detach" || req.Operation == "cleanup" {
+			req.BinarySHA256 = g.SHA
+			return offlineHostStatus(g.Directory, req, errors.New("native generation has exited")), true
+		}
+		return hostError("refused", errors.New("original generation ended; use its original task continuation")), true
+	}
+	req.BinarySHA256 = g.SHA
+	raw, err := nativeHostRPC(ctx, g.Directory, req)
+	if err != nil {
+		return hostError("unknown_effect", err), true
+	}
+	return json.RawMessage(raw), true
 }
 
 func routeBoundHost(root string, req *hostRequest) (string, error) {

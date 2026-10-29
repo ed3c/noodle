@@ -122,12 +122,31 @@ Controls which runtime executes agent sessions and per-runtime settings.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `default` | string | `"process"` | Default runtime kind: `"process"` or `"sprites"` |
+| `default` | string | `"process"` | Default runtime kind: `"process"`, `"sprites"`, `"cursor"`, `"openshell"`, or `"codex-app-server"` |
+| `admitted_orders` | string[] | `[]` | Exact order IDs allowed in this context across every runtime. Empty permits the ordinary unrestricted pipeline. |
+
 
 ```toml
 [runtime]
 default = "process"
+admitted_orders = ["selected-order"]
 ```
+
+A nonempty `admitted_orders` list rejects foreign or missing order IDs before
+worktree preparation or dispatch, including scheduler, bootstrap, and fallback
+paths. The same scope preserves admitted task data and binds candidate review
+and cleanup to the original order; it does not authorize a merge or bypass
+resource admission. Leave the list empty for normal scheduling.
+
+`runtime.process.admitted_orders` remains readable for bound legacy process and
+Codex native requests. It restricts those runtimes, including explicit runtime
+overrides and fallback. When both lists are present, both must admit the order.
+New OpenShell requests use `runtime.admitted_orders`; the legacy process list
+does not authorize OpenShell. Existing bound configuration bytes are preserved.
+New task admissions can inspect `noodle host task capabilities`: schema version
+2 reports `runtime_admitted_orders: true`, `config_key: "runtime.admitted_orders"`,
+and `scope: "runtime_dispatch"`. Existing immutable task configurations remain
+historical inputs for their original owner; they are not rewritten automatically.
 
 #### `[runtime.process]`
 
@@ -136,6 +155,8 @@ Local process runtime. Runs agent CLIs as child processes on the host machine.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `max_concurrent` | int | `4` | Maximum concurrent process sessions |
+| `rebuild_environment` | string[] | `[]` | Task environment names whose values must match when a released Host context is rebuilt. Only value digests are saved. |
+| `credential_environment` | string[] | `[]` | Credential environment source names required during context rebuilding. Values are obtained again and never saved in the context recipe. |
 
 ```toml
 [runtime.process]

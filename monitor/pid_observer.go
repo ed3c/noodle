@@ -54,15 +54,3 @@ func SessionPIDAlive(runtimeDir, sessionID string) bool {
 	}
 	return procx.IsPIDAlive(pid)
 }
-
-// TerminateSessionByPID reads the PID from a session's process.json and
-// requests graceful termination.
-func TerminateSessionByPID(runtimeDir, sessionID string) {
-	terminateSessionByPID(runtimeDir, sessionID)
-}
-
-// ForceKillSessionByPID reads the PID from a session's process.json and
-// forcefully kills the process.
-func ForceKillSessionByPID(runtimeDir, sessionID string) {
-	forceKillSessionByPID(runtimeDir, sessionID)
-}

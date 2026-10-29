@@ -73,3 +73,28 @@ func TestBudgetFiniteSwapUsedLimit(t *testing.T) {
 		})
 	}
 }
+
+func TestWarningGrantCannotBypassSwapCapacityAtThreshold(t *testing.T) {
+	b := NewBudgetWithSwapUsedLimit(1, DefaultSwapUsedLimit)
+	now := time.Now()
+	b.now = func() time.Time { return now }
+	b.Register("context")
+	for i := 0; i < 4; i++ {
+		now = now.Add(PollInterval)
+		b.Observe(Sample{At: now, Pressure: Warning, Swapouts: 100, SwapUsedBytes: DefaultSwapUsedLimit - 1}, nil)
+	}
+	if _, err := b.GrantWarning("context", "order"); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(PollInterval)
+	b.Observe(Sample{At: now, Pressure: Warning, Swapouts: 100, SwapUsedBytes: DefaultSwapUsedLimit}, nil)
+	if permit, err := b.TryAcquireTask("context", "order"); !errors.Is(err, ErrDeferred) {
+		if permit != nil {
+			permit.Release()
+		}
+		t.Fatal("warning grant bypassed the reached Swap capacity threshold")
+	}
+	if b.Snapshot().Active != 0 {
+		t.Fatal("blocked task consumed an allocation")
+	}
+}

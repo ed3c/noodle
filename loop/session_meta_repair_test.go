@@ -10,6 +10,7 @@ import (
 
 	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/event"
+	"github.com/poteto/noodle/internal/admission"
 	loopruntime "github.com/poteto/noodle/runtime"
 )
 
@@ -298,5 +299,36 @@ func TestEnqueueTerminalBootstrapCompletionFromMeta(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected bootstrap completion to be enqueued")
+	}
+}
+
+func TestAdmittedWorkerIgnoresStaleTerminalMetadata(t *testing.T) {
+	dir := t.TempDir()
+	session := newShutdownTestSession("owned-live")
+	sessionDir := filepath.Join(dir, "sessions", session.ID())
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, "meta.json"), []byte(`{"status":"exited"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	l := New(t.TempDir(), "noodle", config.DefaultConfig(), Dependencies{Admission: &admission.Budget{}, Now: time.Now})
+	l.runtimeDir = dir
+	l.cooks.activeCooksByOrder["owned"] = &cookHandle{cookIdentity: cookIdentity{orderID: "owned"}, session: session}
+	if err := l.enqueueTerminalActiveCompletions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if session.forceKillCalls.Load() != 0 {
+		t.Fatal("stale derived metadata killed an active admitted worker")
+	}
+	select {
+	case result := <-l.completionBuf.completions:
+		t.Fatalf("stale metadata enqueued completion: %+v", result)
+	default:
+	}
+	select {
+	case <-session.Done():
+		t.Fatal("stale metadata closed live worker")
+	default:
 	}
 }

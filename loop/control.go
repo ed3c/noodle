@@ -54,6 +54,8 @@ func (l *Loop) hydrateProcessedCommands() error {
 					action := stringx.Normalize(ack.Action)
 					if ack.DispatchState == StatePaused || ack.DispatchState == StateDraining || ack.DispatchState == StateRunning {
 						l.setState(ack.DispatchState)
+					} else if action == "stop-all" {
+						l.setState(StatePaused) // Even a partial kill failure installed the hold.
 					} else if ack.Status == "ok" {
 						switch action {
 						case "pause":
@@ -323,6 +325,8 @@ func (l *Loop) dispatchControlCommand(cmd ControlCommand) error {
 		return l.controlMerge(cmd.OrderID)
 	case "reject":
 		return l.controlReject(cmd.OrderID)
+	case "retry-saved-progress":
+		return l.controlRetrySavedProgress(cmd)
 	case "recover-local-task-completion":
 		return l.controlRecoverLocalTaskCompletion(cmd)
 	case "recover-local-task-merge":
@@ -340,8 +344,7 @@ func (l *Loop) dispatchControlCommand(cmd ControlCommand) error {
 	case "enqueue":
 		return l.controlEnqueue(cmd)
 	case "stop-all":
-		l.controlStopAll()
-		return nil
+		return l.controlStopAll()
 	case "requeue":
 		return l.controlRequeue(cmd.OrderID)
 	case "edit-item":
@@ -386,12 +389,15 @@ func (l *Loop) controlSteer(target, prompt string) error {
 	return l.steer(target, prompt)
 }
 
-func (l *Loop) controlStopAll() {
+func (l *Loop) controlStopAll() error {
+	l.setState(StatePaused)
+	var failures []error
 	for _, cook := range l.cooks.activeCooksByOrder {
-		if err := cook.session.ForceKill(); err != nil {
-			l.logger.Warn("stop-all force kill failed", "session", cook.session.ID(), "error", err)
+		if err := stopOwnedCook(cook); err != nil {
+			failures = append(failures, fmt.Errorf("stop-all session %q: %w", cook.session.ID(), err))
 		}
 	}
+	return errors.Join(failures...)
 }
 
 func (l *Loop) controlStop(name string) error {
@@ -422,9 +428,16 @@ func (l *Loop) controlStop(name string) error {
 	return fmt.Errorf("session not found")
 }
 
-// controlStopKill is the fallback for non-steerable sessions: kill the process
-// and clean up the cook.
+// controlStopKill requests termination of a non-steerable session. OpenShell
+// retains its watcher and worktree until native VM termination is confirmed.
 func (l *Loop) controlStopKill(cook *cookHandle) error {
+	if l.retainTaskData(cook.orderID) || cook.dispatchedRuntime == "openshell" || nativeCook(cook) {
+		if err := l.controlPause(); err != nil {
+			return err
+		}
+		// Keep the original watcher and resource owner until actual exit.
+		return stopOwnedCook(cook)
+	}
 	if err := cook.session.ForceKill(); err != nil {
 		return fmt.Errorf("force kill session %q failed: %w", cook.session.ID(), err)
 	}
@@ -436,6 +449,16 @@ func (l *Loop) controlStopKill(cook *cookHandle) error {
 	delete(l.cooks.activeCooksByOrder, cook.orderID)
 	l.cleanupCookWorktree(cook)
 	return nil
+}
+
+func nativeCook(cook *cookHandle) bool {
+	return nonEmpty(cook.dispatchedRuntime, cook.stage.Runtime) == "codex-app-server"
+}
+func stopOwnedCook(cook *cookHandle) error {
+	if nativeCook(cook) {
+		return cook.session.Terminate()
+	}
+	return cook.session.ForceKill()
 }
 
 func (l *Loop) writeLastAppliedSeq() error {

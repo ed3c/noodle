@@ -1,0 +1,241 @@
+"""Single-driver delegation contract; no model, VM, credential or daemon implementation."""
+import hashlib
+import json
+import math
+import os
+import threading
+import time
+from dataclasses import asdict, dataclass, replace
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+from typing import Protocol
+
+
+class Refused(RuntimeError):
+    """No new native effect was started."""
+
+
+class UnknownEffect(RuntimeError):
+    """Original owner effects are unresolved; every route is closed."""
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+
+
+def sha256(path):
+    if path.is_symlink() or not path.is_file():
+        raise Refused("evidence is not a regular file")
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def tree_ref(root):
+    """Bind complete explicit context bytes/modes; never follow symlinks."""
+    root = Path(root)
+    if root.resolve() != root.absolute() or not root.is_dir():
+        raise Refused("context is not a canonical directory")
+    rows = []
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            raise Refused("context contains a symlink")
+        if path.is_dir():
+            continue
+        rows.append([path.relative_to(root).as_posix(), path.stat().st_mode & 0o777,
+                     sha256(path)])
+    return {"path": str(root), "sha256": hashlib.sha256(canonical(rows)).hexdigest()}
+
+
+@dataclass(frozen=True)
+class OwnerCall:
+    group: str
+    run_id: str
+    role: str
+    provider: str
+    model: str
+    inputs: dict
+    # A bound supplied by the authorized paid owner, never an invented cost estimate.
+    paid_reservation_usd: str | None = None
+
+    def fingerprint(self):
+        return hashlib.sha256(canonical(asdict(self))).hexdigest()
+
+
+@dataclass(frozen=True)
+class OwnerResult:
+    run_dir: str
+    output_sha256: str
+    reply: str
+    workspace: str | None
+    receipt_path: str
+    receipt_sha256: str
+    # True requires the real bridge's original-owner completion/publication/Stop proof.
+    settled: bool
+    cost_usd: str | None
+    wall_s: float | None
+    cached: bool = False
+
+
+class OwnerBridge(Protocol):
+    def execute(self, call: OwnerCall) -> OwnerResult:
+        """Once-only delegate to the existing owner; never start a replacement owner.
+
+        Return only after original completion, validated artifact publication and native
+        stopped proof. Raise Refused ONLY when no native effect began; any other exception
+        is unknown. This protocol is not an implementation of the Soodles lifecycle.
+        """
+
+
+def money(value):
+    if not isinstance(value, str):
+        raise Refused("paid amount is not an explicit decimal string")
+    try:
+        amount = Decimal(value)
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise Refused("paid amount is invalid") from exc
+    if not amount.is_finite() or amount < 0:
+        raise Refused("paid amount is invalid")
+    return amount
+
+
+class SharedGate:
+    """One experiment driver's durable admission journal and serial owner delegation.
+
+    All solver/proposer objects share THIS object. No multi-process filesystem CAS is
+    claimed. Reopening pending/unknown evidence refuses; it never replays effects.
+    """
+    def __init__(self, journal: Path, owner: OwnerBridge | None, *, initial_paid_spent_usd: str):
+        self.journal = Path(journal)
+        self.owner = owner
+        self.lock = threading.RLock()
+        initial = str(money(initial_paid_spent_usd))
+        self.state = {"version": 1, "paid_limit_usd": "5", "initial_paid_spent_usd": initial,
+                      "blocked": "", "paid_blocked": "", "calls": {}}
+        if self.journal.exists():
+            loaded = json.loads(self.journal.read_text())
+            if (loaded["version"] != 1 or loaded["paid_limit_usd"] != "5"
+                    or loaded["initial_paid_spent_usd"] != initial):
+                raise Refused("original budget binding differs")
+            self.state = loaded
+            if any(row["state"] in {"pending", "unknown"} for row in loaded["calls"].values()):
+                self.state["blocked"] = "original owner effect is unresolved"
+        else:
+            self.journal.parent.mkdir(parents=True, exist_ok=True)
+            self._save()
+
+    def _save(self):
+        temporary = self.journal.with_suffix(self.journal.suffix + ".pending")
+        with temporary.open("x") as stream:
+            stream.write(json.dumps(self.state, indent=2, allow_nan=False) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, self.journal)
+        descriptor = os.open(self.journal.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def _spent(self):
+        total = money(self.state["initial_paid_spent_usd"])
+        for row in self.state["calls"].values():
+            if row["provider"] != "pi" or row["state"] == "refused":
+                continue
+            cost = (row.get("result") or {}).get("cost_usd")
+            total += money(cost if cost is not None else row["reserved_usd"])
+        return total
+
+    def verify_result(self, result):
+        with self.lock:
+            try:
+                self._verify_result(result)
+            except (Refused, UnknownEffect, OSError, ValueError) as exc:
+                self.state["blocked"] = "original owner completion evidence is unresolved"
+                self._save()
+                raise UnknownEffect(self.state["blocked"]) from exc
+
+    def _verify_result(self, result):
+        if not result.settled:
+            raise UnknownEffect("owner completion is unresolved")
+        if (tree_ref(Path(result.run_dir))["sha256"] != result.output_sha256
+                or not Path(result.run_dir).is_dir()
+                or sha256(Path(result.receipt_path)) != result.receipt_sha256
+                or (result.workspace is not None and (not Path(result.workspace).is_dir()
+                    or not Path(result.workspace).resolve().is_relative_to(Path(result.run_dir).resolve())))):
+            raise UnknownEffect("settled owner evidence differs")
+        if result.cost_usd is not None:
+            try:
+                money(result.cost_usd)
+            except Refused as exc:
+                raise UnknownEffect("owner cost evidence is invalid") from exc
+        if result.wall_s is not None and (result.wall_s < 0 or not math.isfinite(result.wall_s)):
+            raise UnknownEffect("owner duration is invalid")
+
+    def execute(self, call: OwnerCall) -> OwnerResult:
+        with self.lock:
+            if self.owner is None:
+                raise Refused("original-owner bridge is not implemented")
+            if self.state["blocked"]:
+                raise UnknownEffect(self.state["blocked"])
+            if call.role not in {"solver", "proposer", "selector", "reflection", "judge"}:
+                raise Refused("owner role is unsupported")
+            if not call.group or not call.run_id or not call.model:
+                raise Refused("owner call binding is incomplete")
+            if call.provider not in {"codex", "pi"}:
+                raise Refused("owner route is unsupported")
+            if call.provider == "pi" and call.model != "openrouter/deepseek/deepseek-v4.1-flash-1017":
+                raise Refused("paid model differs from authorized route")
+            call = OwnerCall(**json.loads(canonical(asdict(call))))
+            key = json.dumps([call.group, call.run_id])
+            digest = call.fingerprint()
+            prior = self.state["calls"].get(key)
+            if prior is not None:
+                if prior["input_sha256"] != digest:
+                    raise Refused("run id already binds different input")
+                if prior["state"] != "settled":
+                    raise Refused("original call has no settled reusable result")
+                result = OwnerResult(**prior["result"])
+                try:
+                    self.verify_result(result)
+                except UnknownEffect:
+                    self.state["blocked"] = "original settled owner evidence changed"
+                    self._save()
+                    raise
+                return replace(result, cached=True)
+            reserve = None
+            if call.provider == "pi":
+                if self.state["paid_blocked"]:
+                    raise Refused(self.state["paid_blocked"])
+                reserve = money(call.paid_reservation_usd)
+                if reserve <= 0 or self._spent() + reserve > Decimal("5"):
+                    raise Refused("OpenRouter reservation exceeds remaining authorized budget")
+            elif call.paid_reservation_usd is not None:
+                raise Refused("subscription call has an unrelated paid reservation")
+            row = {"input_sha256": digest, "call": asdict(call), "provider": call.provider, "role": call.role,
+                   "state": "pending", "reserved_usd": str(reserve) if reserve is not None else None,
+                   "started_unix_s": time.time(), "elapsed_s": None, "result": None}
+            self.state["calls"][key] = row
+            started = time.monotonic()
+            try:
+                self._save()  # intent before any owner effect
+                result = self.owner.execute(call)
+                self.verify_result(result)
+                if call.fingerprint() != digest:
+                    raise UnknownEffect("owner changed the frozen call")
+                row.update(state="settled", result=asdict(result), elapsed_s=time.monotonic()-started)
+                if reserve is not None and result.cost_usd is not None and money(result.cost_usd) > reserve:
+                    self.state["paid_blocked"] = "owner paid cost exceeded its reservation"
+                self._save()
+                return result
+            except Refused as exc:
+                row.update(state="refused", error=str(exc), elapsed_s=time.monotonic()-started)
+                self._save()
+                raise
+            except Exception as exc:
+                row.update(state="unknown", error=type(exc).__name__)
+                self.state["blocked"] = "original owner effect is unresolved"
+                try:
+                    self._save()
+                except OSError as persistence_error:
+                    raise UnknownEffect("owner effect unresolved; journal persistence failed") from persistence_error
+                raise UnknownEffect(self.state["blocked"]) from exc

@@ -119,7 +119,7 @@ func newWorktreeMergeCmd() *cobra.Command {
 }
 
 func newWorktreeCleanupCmd() *cobra.Command {
-	var force bool
+	var force, explicitDelete bool
 	cmd := &cobra.Command{
 		Use:   "cleanup <name>",
 		Short: cmdmeta.Short("worktree", "cleanup"),
@@ -130,13 +130,14 @@ func newWorktreeCleanupCmd() *cobra.Command {
 				return err
 			}
 			var opts []worktree.CleanupOpts
-			if force {
-				opts = append(opts, worktree.CleanupOpts{Force: true})
+			if force || explicitDelete {
+				opts = append(opts, worktree.CleanupOpts{Force: force, ExplicitDelete: explicitDelete})
 			}
 			return wApp.Cleanup(strings.TrimSpace(args[0]), opts...)
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "Remove even when unmerged commits exist")
+	cmd.Flags().BoolVar(&explicitDelete, "delete", false, "Explicitly delete a retained task worktree; ordinary cleanup preserves it")
 	return cmd
 }
 

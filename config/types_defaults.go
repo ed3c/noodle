@@ -55,17 +55,21 @@ type ProviderConfig struct {
 type AgentsConfig struct {
 	Claude ProviderConfig `toml:"claude"`
 	Codex  ProviderConfig `toml:"codex"`
+	Pi     ProviderConfig `toml:"pi"`
 }
 
 // RuntimeConfig controls the default runtime for spawned cook sessions.
 type RuntimeConfig struct {
-	Default string        `toml:"default"` // runtime kind, defaults to process
-	Process ProcessConfig `toml:"process"`
-	Sprites SpritesConfig `toml:"sprites"`
-	Cursor  CursorConfig  `toml:"cursor"`
+	AdmittedOrders []string        `toml:"admitted_orders"`
+	Default        string          `toml:"default"` // runtime kind, defaults to process
+	Process        ProcessConfig   `toml:"process"`
+	Sprites        SpritesConfig   `toml:"sprites"`
+	Cursor         CursorConfig    `toml:"cursor"`
+	OpenShell      OpenShellConfig `toml:"openshell"`
 
-	spritesDefined bool
-	cursorDefined  bool
+	spritesDefined   bool
+	cursorDefined    bool
+	openshellDefined bool
 }
 
 // MaxConcurrentFor returns the per-runtime concurrency cap for a given runtime name.
@@ -78,14 +82,23 @@ func (c RuntimeConfig) MaxConcurrentFor(name string) int {
 		return c.Sprites.MaxConcurrent
 	case "cursor":
 		return c.Cursor.MaxConcurrent
+	case "openshell":
+		return c.OpenShell.MaxConcurrent
 	default:
 		return 0
 	}
 }
 
+type OpenShellConfig struct {
+	Profile       string `toml:"profile"`
+	MaxConcurrent int    `toml:"max_concurrent"`
+}
+
 type ProcessConfig struct {
-	MaxConcurrent  int      `toml:"max_concurrent"`
-	AdmittedOrders []string `toml:"admitted_orders"`
+	MaxConcurrent         int      `toml:"max_concurrent"`
+	AdmittedOrders        []string `toml:"admitted_orders"`
+	RebuildEnvironment    []string `toml:"rebuild_environment"`
+	CredentialEnvironment []string `toml:"credential_environment"`
 }
 
 type SpritesConfig struct {
@@ -222,6 +235,12 @@ func defaultSkillPaths() []string {
 
 func (c Config) AvailableRuntimes() []string {
 	available := []string{"process"}
+	if strings.TrimSpace(c.Runtime.OpenShell.Profile) != "" {
+		available = append(available, "openshell")
+	}
+	if c.Runtime.Default == "codex-app-server" {
+		available = append(available, "codex-app-server")
+	}
 	if c.Runtime.spritesDefined && c.Runtime.Sprites.Token() != "" {
 		available = append(available, "sprites")
 	}

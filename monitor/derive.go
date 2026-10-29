@@ -28,10 +28,6 @@ func DeriveSessionMeta(
 
 	status := SessionStatusExited
 	switch {
-	case terminalByClaims && claims.Failed:
-		status = SessionStatusFailed
-	case terminalByClaims:
-		status = SessionStatusExited
 	case observation.Alive:
 		status = SessionStatusRunning
 	case claims.Failed:
@@ -42,6 +38,19 @@ func DeriveSessionMeta(
 		status = SessionStatusExited
 	default:
 		status = SessionStatusFailed
+	}
+	if observation.NativeState != "" {
+		switch {
+		case observation.NativeState == "released" && observation.NativeTerminal == "failed":
+			status = SessionStatusFailed
+		case observation.NativeState == "released":
+			status = SessionStatusExited
+		case observation.NativeState == "needs_owner_readback" || !observation.Alive:
+			status = SessionStatusUnknown
+		default:
+			status = SessionStatusRunning
+		}
+		terminalByClaims = observation.NativeTerminal != ""
 	}
 
 	contextUsagePct := 0.0
@@ -62,9 +71,12 @@ func DeriveSessionMeta(
 		health = HealthYellow
 	}
 
-	alive := observation.Alive
-	if terminalByClaims {
-		alive = false
+	exitPending := observation.Alive && terminalByClaims
+	if status == SessionStatusUnknown {
+		exitPending = true
+	}
+	if exitPending {
+		health = HealthYellow
 	}
 
 	durationSeconds := int64(0)
@@ -96,6 +108,7 @@ func DeriveSessionMeta(
 	}
 
 	return SessionMeta{
+		NativeState:             observation.NativeState,
 		SessionID:               sessionID,
 		Status:                  status,
 		Runtime:                 runtime,
@@ -108,7 +121,8 @@ func DeriveSessionMeta(
 		Health:                  health,
 		ContextWindowUsagePct:   contextUsagePct,
 		RetryCount:              previous.RetryCount,
-		Alive:                   alive,
+		Alive:                   observation.Alive,
+		ExitPending:             exitPending,
 		Stuck:                   false,
 		LogSize:                 observation.LogSize,
 		UpdatedAt:               now,

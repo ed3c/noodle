@@ -32,7 +32,6 @@ type ResidentSpec struct {
 	TestFixture bool `json:"test_fixture,omitempty"`
 }
 type Resident struct {
-	ConsumerLeases      []ResidentConsumer   `json:"consumer_leases,omitempty"`
 	ID                  string               `json:"id"`
 	Name                string               `json:"name"`
 	Fingerprint         string               `json:"fingerprint"`
@@ -45,19 +44,23 @@ type Resident struct {
 	Released            []string             `json:"released_contexts"`
 	Error               string               `json:"error,omitempty"`
 	ForceAfterGrace     bool                 `json:"force_after_grace,omitempty"`
+	GuardID             string               `json:"guard_id"`
 	StopRequested       string               `json:"stop_requested,omitempty"`
 	ForceRequested      string               `json:"force_requested,omitempty"`
 	History             []Resident           `json:"history,omitempty"`
 	Errors              []string             `json:"errors,omitempty"`
+	ConsumerLeases      []ResidentConsumer   `json:"consumer_leases,omitempty"`
 	TestFixture         bool                 `json:"test_fixture,omitempty"`
 	ObservedDescendants []ResidentDescendant `json:"observed_descendants,omitempty"`
 }
 type residentChild struct {
-	mu      sync.Mutex
-	reaped  bool
-	process *os.Process
-	permit  *Permit
-	done    chan struct{}
+	mu       sync.Mutex
+	reaped   bool
+	process  *os.Process
+	permit   *Permit
+	done     chan struct{}
+	guard    *ResidentGuard
+	checking bool
 }
 
 // Residents belongs to the existing Host. Only its own child handles can be stopped.
@@ -205,6 +208,11 @@ func residentIdentity(spec ResidentSpec, contextID string) (string, string, erro
 	if spec.Transport != "network" || (spec.Sharing != "shared" && spec.Sharing != "context") {
 		return "", "", errors.New("resident transport/sharing unsupported; stdio requires its original Session owner")
 	}
+	for _, arg := range spec.Argv {
+		if strings.ContainsRune(arg, 0) {
+			return "", "", errors.New("resident argument contains NUL")
+		}
+	}
 	dir, err := filepath.EvalSymlinks(spec.Directory)
 	if err != nil {
 		return "", "", err
@@ -245,15 +253,15 @@ func residentIdentity(spec ResidentSpec, contextID string) (string, string, erro
 	return key, hex.EncodeToString(sum[:]), nil
 }
 func (r *Residents) Acquire(spec ResidentSpec, contextID string, budget *Budget) (Resident, error) {
-	return r.acquire(spec, contextID, contextID, budget, nil, "")
+	return r.acquire(spec, contextID, contextID, budget, nil, "", nil)
 }
-func (r *Residents) acquire(spec ResidentSpec, contextID, permitContext string, budget *Budget, consumer *ResidentConsumer, group string) (Resident, error) {
+func (r *Residents) acquire(spec ResidentSpec, contextID, permitContext string, budget *Budget, consumer *ResidentConsumer, group string, guard *ResidentGuard) (Resident, error) {
 	// These exact helper entry points implement the test-only stateless contract.
 	// Other residents require an explicit opt-in and may not borrow this policy.
 	if fixtureHelper(spec.Argv) {
 		spec.TestFixture = true
 	}
-	if spec.Sharing == "shared" && !spec.TestFixture {
+	if spec.Sharing == "shared" && !spec.TestFixture && guard == nil {
 		return Resident{}, errors.New("shared service has no verified client isolation/drain adapter; retain private instances")
 	}
 	r.mu.Lock()
@@ -271,6 +279,32 @@ func (r *Residents) acquire(spec ResidentSpec, contextID, permitContext string, 
 	if spec.TestFixture {
 		if _, err = fixtureDirectoryPurpose(spec.Directory); err != nil {
 			return Resident{}, err
+		}
+	}
+	guardID := ""
+	if guard != nil {
+		guardID = guard.id
+		if spec.ForceAfterGrace {
+			return Resident{}, errors.New("guarded resident force_after_grace unsupported")
+		}
+		fingerprint = guardedFingerprint(fingerprint, guardID)
+	}
+	for _, old := range r.records {
+		if old.Name == spec.Name && old.Sharing != spec.Sharing && (old.GuardID != "" || guardID != "") {
+			return cloneResident(old), errors.New("guarded resident sharing conflicts with original service identity")
+		}
+	}
+	if old := r.records[key]; old != nil {
+		if old.GuardID != guardID {
+			return cloneResident(old), errors.New("resident release guard identity conflicts with original owner")
+		}
+		if child := r.children[key]; child != nil {
+			if child.checking {
+				return cloneResident(old), errors.New("resident release guard check in progress")
+			}
+			if child.guard != guard {
+				return cloneResident(old), errors.New("resident release guard callback belongs to original owner")
+			}
 		}
 	}
 	if old := r.records[key]; old != nil && slices.Contains(old.Released, contextID) {
@@ -297,11 +331,11 @@ func (r *Residents) acquire(spec ResidentSpec, contextID, permitContext string, 
 	if budget == nil {
 		return Resident{}, errors.New("resident resource admission unavailable")
 	}
-	permit, err := budget.TryAcquireResident(permitContext)
+	permit, err := budget.tryAcquire(permitContext, true, key, "")
 	if err != nil {
 		return Resident{}, err
 	}
-	v := &Resident{ID: key, Name: spec.Name, Fingerprint: fingerprint, Sharing: spec.Sharing, State: "starting", Contexts: []string{contextID}, ForceAfterGrace: spec.ForceAfterGrace, TestFixture: spec.TestFixture}
+	v := &Resident{ID: key, Name: spec.Name, Fingerprint: fingerprint, Sharing: spec.Sharing, State: "starting", Contexts: []string{contextID}, ForceAfterGrace: spec.ForceAfterGrace, TestFixture: spec.TestFixture, GuardID: guardID}
 	if consumer != nil {
 		v.ConsumerLeases = []ResidentConsumer{*consumer}
 	}
@@ -350,7 +384,7 @@ func (r *Residents) acquire(spec ResidentSpec, contextID, permitContext string, 
 		v.Error = "process start identity unavailable: " + readErr.Error()
 	}
 	v.State = "running"
-	child := &residentChild{process: process, permit: permit, done: make(chan struct{})}
+	child := &residentChild{process: process, permit: permit, done: make(chan struct{}), guard: guard}
 	r.children[key] = child
 	saveErr := r.persist()
 	go func() {
@@ -408,6 +442,11 @@ func (r *Residents) Release(id, contextID string) (Resident, error) {
 func (r *Residents) release(id, contextID, reason string) (Resident, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.releaseLocked(id, contextID, reason)
+}
+
+// releaseLocked requires the original resident lock.
+func (r *Residents) releaseLocked(id, contextID, reason string) (Resident, error) {
 	v := r.records[id]
 	if v == nil {
 		return Resident{}, errors.New("resident identity not found")
@@ -421,7 +460,16 @@ func (r *Residents) release(id, contextID, reason string) (Resident, error) {
 	if !slices.Contains(v.Contexts, contextID) {
 		return cloneResident(v), nil
 	}
-	if v.Sharing == "shared" && !v.TestFixture && len(v.Contexts) == 1 {
+	if child := r.children[id]; child != nil && child.checking {
+		return cloneResident(v), errors.New("resident release guard check in progress")
+	}
+	if len(v.Contexts) == 1 && v.State == "running" && v.GuardID != "" {
+		if err := r.checkRelease(v); err != nil {
+			v.Error = "resident release guard refused: " + err.Error()
+			return cloneResident(v), errors.Join(err, r.persist())
+		}
+	}
+	if v.Sharing == "shared" && !v.TestFixture && v.GuardID == "" && len(v.Contexts) == 1 {
 		return cloneResident(v), errors.New("legacy shared service drain unproven; original owner readback required")
 	}
 	for i := range v.ConsumerLeases {

@@ -77,15 +77,18 @@ func (r *CanonicalClaimsReader) ReadSession(sessionID string) (SessionClaims, er
 			claims.Provider = strings.TrimSpace(event.Provider)
 		}
 
+		if event.Type == parse.EventAction || event.Type == parse.EventResult {
+			claims.TotalCostUSD += event.CostUSD
+			claims.TokensIn += event.TokensIn
+			claims.TokensOut += event.TokensOut
+		}
+
 		switch event.Type {
 		case parse.EventAction:
 			if message := strings.TrimSpace(event.Message); message != "" {
 				claims.LastAction = message
 			}
 		case parse.EventResult:
-			claims.TotalCostUSD += event.CostUSD
-			claims.TokensIn += event.TokensIn
-			claims.TokensOut += event.TokensOut
 			claims.Completed = true
 		case parse.EventComplete:
 			claims.Completed = true

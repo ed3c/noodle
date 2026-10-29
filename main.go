@@ -45,6 +45,10 @@ var (
 )
 
 func main() {
+	if err := selectNativeFrontend(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	if err := NewRootCmd().ExecuteContext(context.Background()); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

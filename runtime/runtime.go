@@ -11,6 +11,12 @@ import (
 // DispatchRequest is shared with the existing dispatcher boundary.
 type DispatchRequest = dispatcher.DispatchRequest
 
+type CodexResumeRefusal = dispatcher.CodexResumeRefusal
+
+func ReadCodexResumeRefusal(runtimeDir, sessionID string) (*CodexResumeRefusal, error) {
+	return dispatcher.ReadCodexResumeRefusal(runtimeDir, sessionID)
+}
+
 // AgentController aliases dispatcher.AgentController so loop/ doesn't import dispatcher.
 type AgentController = dispatcher.AgentController
 
@@ -73,12 +79,12 @@ type dispatcherSessionHandle struct {
 	runtimeDir string
 }
 
-func (s dispatcherSessionHandle) ID() string                  { return s.session.ID() }
-func (s dispatcherSessionHandle) Outcome() SessionOutcome     { return s.session.Outcome() }
-func (s dispatcherSessionHandle) Done() <-chan struct{}        { return s.session.Done() }
-func (s dispatcherSessionHandle) TotalCost() float64    { return s.session.TotalCost() }
-func (s dispatcherSessionHandle) Terminate() error      { return s.session.Terminate() }
-func (s dispatcherSessionHandle) ForceKill() error      { return s.session.ForceKill() }
+func (s dispatcherSessionHandle) ID() string              { return s.session.ID() }
+func (s dispatcherSessionHandle) Outcome() SessionOutcome { return s.session.Outcome() }
+func (s dispatcherSessionHandle) Done() <-chan struct{}   { return s.session.Done() }
+func (s dispatcherSessionHandle) TotalCost() float64      { return s.session.TotalCost() }
+func (s dispatcherSessionHandle) Terminate() error        { return s.session.Terminate() }
+func (s dispatcherSessionHandle) ForceKill() error        { return s.session.ForceKill() }
 func (s dispatcherSessionHandle) VerdictPath() string {
 	return filepath.Join(s.runtimeDir, "quality", s.session.ID()+".json")
 }
@@ -90,4 +96,8 @@ func (s dispatcherSessionHandle) Controller() AgentController {
 func IsProcessStartFailure(err error) bool {
 	var startErr dispatcher.ProcessStartError
 	return errors.As(err, &startErr)
+}
+
+func ReadSessionTaskRole(runtimeDir, sessionID string) (string, error) {
+	return dispatcher.ReadSessionTaskRole(runtimeDir, sessionID)
 }

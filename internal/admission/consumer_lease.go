@@ -120,7 +120,7 @@ func (r *Residents) AcquireConsumer(spec ResidentSpec, c ResidentConsumer, budge
 	c.ID = sourceDigest(raw)
 	c.State = "active"
 	c.Liveness = "observed"
-	return r.acquire(spec, c.ID, c.ContextID, budget, &c, group)
+	return r.acquire(spec, c.ID, c.ContextID, budget, &c, group, nil)
 }
 
 func (r *Residents) ReleaseConsumer(id string, c ResidentConsumer, leaseID string) (Resident, error) {

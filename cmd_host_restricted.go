@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/poteto/noodle/config"
@@ -63,7 +64,14 @@ func newHostRestrictedCmd() *cobra.Command {
 					return err
 				}
 				observed := map[string]any{"journal": j, "effects": []string{}}
-				owners := map[string]string{"source": restrictedSource(p).Directory}
+				sourceDir := filepath.Join(p.Root, "g", p.Source.Instance)
+				if p.Handover == nil {
+					sourceDir = restrictedSource(p).Directory
+				}
+				owners := map[string]string{"source": sourceDir}
+				if p.Handover != nil {
+					owners["shared"] = p.Handover.SharedRoot
+				}
 				if j.Generation != nil {
 					owners["target"] = j.Generation.Directory
 				}
@@ -83,6 +91,9 @@ func newHostRestrictedCmd() *cobra.Command {
 			if confirmation != p.PlanSHA {
 				return errors.New("restricted maintenance requires the exact confirmed plan digest")
 			}
+			if p.Handover != nil {
+				return runGatewayHandover(cmd.Context(), p, dir, json.NewEncoder(cmd.OutOrStdout()))
+			}
 			return runRestrictedMaintenance(cmd.Context(), p, dir, json.NewEncoder(cmd.OutOrStdout()))
 		}}
 	cmd.Flags().StringVar(&path, "plan", "", "Original read-only maintenance plan file")
@@ -92,6 +103,9 @@ func newHostRestrictedCmd() *cobra.Command {
 }
 
 func validateRestrictedPlan(p hostMaintenancePlan) error {
+	if p.Handover != nil {
+		return validateGatewayHandoverPlan(p)
+	}
 	digest := p.PlanSHA
 	p.PlanSHA = ""
 	raw, err := json.Marshal(p)
@@ -124,9 +138,17 @@ func readRestrictedMaintenance(dir string) (restrictedMaintenance, error) {
 		err = errors.New("original restricted maintenance journal is invalid")
 	}
 	if err == nil {
-		switch j.Phase {
-		case "prepared", "fencing", "holding", "detached", "stopping", "stopped", "imported", "launching", "active":
-		default:
+		phases := []string{"prepared", "fencing", "holding", "detached", "stopping", "stopped", "imported", "launching", "active"}
+		taskPhases := []string{"prepared", "pausing", "checkpointing", "held", "detaching", "detached"}
+		if j.Plan.Handover != nil {
+			phases = []string{"handover-prepared", "handover-fencing", "handover-cleanup", "handover-releasing", "handover-stopping", "handover-stopped", "handover-completed"}
+			taskPhases = []string{"prepared", "cleanup-intent", "detached"}
+			if j.Plan.Handover.Cold != nil {
+				phases = []string{"handover-prepared", "handover-fencing", "handover-cleanup", "handover-cold-retiring", "handover-cold-releasing", "handover-completed"}
+				taskPhases = []string{"prepared"}
+			}
+		}
+		if !slices.Contains(phases, j.Phase) {
 			return j, errors.New("unknown original maintenance phase")
 		}
 		if len(j.Tasks) != len(j.Plan.Contexts) {
@@ -138,9 +160,7 @@ func readRestrictedMaintenance(dir string) (restrictedMaintenance, error) {
 			if !bytes.Equal(want, got) {
 				return j, errors.New("original maintenance task binding changed")
 			}
-			switch t.Phase {
-			case "prepared", "pausing", "checkpointing", "held", "detaching", "detached":
-			default:
+			if !slices.Contains(taskPhases, t.Phase) {
 				return j, errors.New("unknown original task maintenance phase")
 			}
 		}

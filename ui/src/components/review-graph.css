@@ -1,0 +1,59 @@
+.review-graph {
+  background: #101b2b;
+  color: #e4edf6;
+  padding: 1.4rem;
+  border-radius: 12px;
+  margin-block: 1rem;
+  font:
+    14px/1.6 system-ui,
+    sans-serif;
+  overflow-wrap: anywhere;
+}
+.review-graph h3 {
+  font-size: 1.6rem;
+  margin-top: 0;
+}
+.review-graph input,
+.review-graph select,
+.review-graph button {
+  color: #e4edf6;
+  background: #20324a;
+  border: 1px solid #55728e;
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+  margin: 0.2rem;
+}
+.review-graph button {
+  cursor: pointer;
+  text-align: left;
+}
+.review-graph button:hover,
+.review-graph button:focus-visible {
+  outline: 2px solid #78ccc4;
+}
+.review-graph-nodes {
+  max-height: 220px;
+  overflow: auto;
+}
+.review-graph-nodes button {
+  display: block;
+  width: calc(100% - 0.4rem);
+}
+.review-graph-canvas {
+  max-height: 500px;
+  overflow: auto;
+  border: 1px solid #354b62;
+  margin-block: 1rem;
+}
+.review-graph-canvas svg {
+  min-width: 700px;
+  width: 100%;
+}
+.review-graph-canvas g {
+  cursor: pointer;
+}
+.review-graph pre {
+  white-space: pre-wrap;
+  max-height: 320px;
+  overflow: auto;
+}

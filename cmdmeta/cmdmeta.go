@@ -95,6 +95,8 @@ func Commands() []Command {
 			{Name: "reject", Short: "Archive and reject unchanged stopped review custody"},
 			{Name: "prepare-local-completion-recovery", Short: "Bind retained terminal local-task work for review recovery"},
 			{Name: "prepare-local-merge-recovery", Short: "Bind retained local-task candidate backup bytes"},
+			{Name: "inspect-landed-local-merge", Short: "Inspect exact already-landed local-task merge custody"},
+			{Name: "reconcile-landed-local-merge", Short: "Reconcile stopped local projection without merging or replaying execution"},
 		}},
 		{Name: "interruption", Short: "Inspect or prepare one stopped interrupted execution", Subcommands: []Command{
 			{Name: "inspect", Short: "Read interrupted execution custody and exact continuation"},

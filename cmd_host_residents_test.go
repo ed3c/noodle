@@ -21,7 +21,7 @@ func TestHostResidentsRequireNativeContextAndExposeReadback(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := admission.NewBudget(2)
-	b.Observe(admission.Sample{At: time.Now(), Unsupported: true}, nil)
+	observeKnownHostFixtureSamples(b)
 	h := &noodleHost{dir: dir, instanceID: "actual-host", binaryPath: "/native/noodle", binarySHA: "bound-sha", budget: b, residents: r, contexts: map[string]*hostContext{}}
 	result := h.residentOperation(context.Background(), hostRequest{Operation: "resident_acquire_bound", ProjectDir: dir, ContextID: "original", RequestID: "request", InstanceID: "actual-host", BinarySHA256: "bound-sha"}).(map[string]any)
 	if result["status"] != "refused" || result["error"] != "active native context missing for resident lease" {
@@ -97,10 +97,7 @@ func TestHostResidentLeaseRejectsProjectOnlyRelease(t *testing.T) {
 	}
 	b := admission.NewBudget(1)
 	b.Register("current")
-	now := time.Now()
-	for i := 0; i < 4; i++ {
-		b.Observe(admission.Sample{At: now.Add(time.Duration(i-3) * time.Second), Pressure: admission.Normal}, nil)
-	}
+	observeKnownHostFixtureSamples(b)
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -114,7 +111,12 @@ func TestHostResidentLeaseRejectsProjectOnlyRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = r.ReleaseContext("current")
+		if err := r.ReleaseContext("current"); err != nil {
+			t.Error(err)
+		}
+		if err := os.WriteFile(filepath.Join(spec.Directory, "exit"), nil, 0600); err != nil {
+			t.Error(err)
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		if err := r.WaitClosed(ctx); err != nil {
@@ -155,17 +157,23 @@ func TestHostResidentReadbackRetainsFinishedContextAndRefusesOtherHost(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipt := hostReceipt{ContextID: "finished", RequestID: "original", HostInstanceID: "host", ProjectDir: "/original", ContextState: "detached", ConfigSHA256: "config", Mode: "manual"}
-	h := &noodleHost{instanceID: "host", binarySHA: "binary", budget: admission.NewBudget(1), residents: r, receipts: []hostReceipt{receipt}}
-	req := hostRequest{Operation: "resident_inspect_bound", ProjectDir: receipt.ProjectDir, ContextID: receipt.ContextID, RequestID: receipt.RequestID, InstanceID: receipt.HostInstanceID, BinarySHA256: "binary", ConfigSHA256: receipt.ConfigSHA256, Mode: receipt.Mode}
-	result := h.residentOperation(context.Background(), req).(map[string]any)
-	if result["status"] != "observed" {
-		t.Fatal(result)
-	}
-	req.InstanceID = "another-host"
-	result = h.residentOperation(context.Background(), req).(map[string]any)
-	if result["status"] != "refused" {
-		t.Fatal(result)
+	for _, cleanup := range []bool{false, true} {
+		receipt := hostReceipt{ContextID: "finished", RequestID: "original", HostInstanceID: "host", ProjectDir: "/original", ContextState: "detached", ConfigSHA256: "config", Mode: "manual", CleanupCompleted: cleanup}
+		h := &noodleHost{instanceID: "host", binarySHA: "binary", budget: admission.NewBudget(1), residents: r, receipts: []hostReceipt{receipt}}
+		req := hostRequest{Operation: "resident_inspect_bound", ProjectDir: receipt.ProjectDir, ContextID: receipt.ContextID, RequestID: receipt.RequestID, InstanceID: receipt.HostInstanceID, BinarySHA256: "binary", ConfigSHA256: receipt.ConfigSHA256, Mode: receipt.Mode, CleanupCompleted: cleanup}
+		result := h.residentOperation(context.Background(), req).(map[string]any)
+		if result["status"] != "observed" {
+			t.Fatal(result)
+		}
+		req.CleanupCompleted = !cleanup
+		if result = h.residentOperation(context.Background(), req).(map[string]any); result["status"] != "refused" {
+			t.Fatal(result)
+		}
+		req.CleanupCompleted = cleanup
+		req.InstanceID = "another-host"
+		if result = h.residentOperation(context.Background(), req).(map[string]any); result["status"] != "refused" {
+			t.Fatal(result)
+		}
 	}
 }
 
@@ -194,7 +202,7 @@ func TestHostResidentCLIContinuesOnOriginalSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	requestFile := filepath.Join(dir, "request.json")
-	binding := hostRequestBinding{Schema: 1, RequestID: "request", Operation: "attach", ProjectDir: project, ConfigSHA256: "config", Mode: "manual", BinarySHA256: hostDigest(raw), Status: "ok", HostDir: dir}
+	binding := hostRequestBinding{Schema: 1, RequestID: "request", Operation: "attach", ProjectDir: project, ConfigSHA256: "config", Mode: "manual", BinarySHA256: hostDigest(raw), Status: "ok", HostDir: dir, CleanupCompleted: true}
 	if err = saveHostRequest(requestFile, binding); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +213,7 @@ func TestHostResidentCLIContinuesOnOriginalSocket(t *testing.T) {
 	defer listener.Close()
 	seen := make(chan hostRequest, 4)
 	done := make(chan error, 1)
-	receipt := hostReceipt{Schema: 1, ContextID: "context", RequestID: "request", HostInstanceID: "instance", ProjectDir: project, ContextState: "active", ConfigSHA256: "config", Mode: "manual", BinarySHA256: binding.BinarySHA256, HostDir: dir}
+	receipt := hostReceipt{Schema: 1, ContextID: "context", RequestID: "request", HostInstanceID: "instance", ProjectDir: project, ContextState: "active", ConfigSHA256: "config", Mode: "manual", BinarySHA256: binding.BinarySHA256, HostDir: dir, CleanupCompleted: binding.CleanupCompleted}
 	go func() {
 		for i := 0; i < 4; i++ {
 			conn, e := listener.Accept()
@@ -260,7 +268,7 @@ func TestHostResidentCLIContinuesOnOriginalSocket(t *testing.T) {
 			t.Fatal(output.String())
 		}
 		status, operation := <-seen, <-seen
-		if status.Operation != "status" || operation.Operation != "resident_"+op+"_bound" || operation.InstanceID != "instance" || operation.ContextID != "context" || operation.RequestID != "request" {
+		if status.Operation != "status" || operation.Operation != "resident_"+op+"_bound" || operation.InstanceID != "instance" || operation.ContextID != "context" || operation.RequestID != "request" || !operation.CleanupCompleted {
 			t.Fatal(status, operation)
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -34,6 +35,7 @@ func newHostResourcesCmd(app *App) *cobra.Command {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 	}}
 	cmd.AddCommand(newHostResidentsCmd(app))
+	cmd.AddCommand(newHostWarningGrantCmd(app))
 	return cmd
 }
 
@@ -49,5 +51,24 @@ func (h *noodleHost) resources() any {
 			residents = map[string]any{"records": rows, "error": err.Error()}
 		}
 	}
-	return map[string]any{"binary_path": h.binaryPath, "binary_sha256": h.binarySHA, "rolling_host_version": h.rollingVersion(), "residents": residents, "schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot()}
+	shutdown := map[string]any{"requested": h.shutdown != nil}
+	if h.shutdown != nil {
+		shutdown["pending_finalizations"] = h.shutdown.pending
+		shutdown["diagnostic"] = h.shutdown.diagnostic
+	}
+	return map[string]any{"shutdown": shutdown, "host_root": h.controlRoot(), "host_dir": h.dir, "gateway_warning_grants": h.budget.GatewayWarningGrants(), "safe_host_switch": hostCapabilities(runtime.GOOS)["safe_host_switch"], "rolling_host_version": h.rollingVersion(), "warning_grants": h.budget.WarningGrants(), "rolling_error": h.rollingError(), "binary_path": h.binaryPath, "binary_sha256": h.binarySHA, "residents": residents, "schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot()}
+}
+
+func (h *noodleHost) rollingVersion() int {
+	if h.rolling != nil {
+		return 1
+	}
+	return 0
+}
+
+func (h *noodleHost) rollingError() string {
+	if h.rolling != nil {
+		return h.rolling.failure
+	}
+	return ""
 }

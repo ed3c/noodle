@@ -43,7 +43,7 @@ func NewRootCmd() *cobra.Command {
 				app.projectDir = dir
 				return err
 			}
-			if showVersion || rootSubcommandName(cmd) == "version" {
+			if showVersion || rootSubcommandName(cmd) == "version" || rootSubcommandName(cmd) == "openshell" {
 				return nil
 			}
 			dir, err := resolveProjectDir(projectDirFlag)
@@ -59,7 +59,7 @@ func NewRootCmd() *cobra.Command {
 					return err
 				}
 			}
-			loaded, validation, err := config.Load(config.DefaultConfigPath)
+			loaded, validation, err := config.LoadRuntime(app.projectDir)
 			if err != nil {
 				return err
 			}
@@ -76,6 +76,7 @@ func NewRootCmd() *cobra.Command {
 
 	root.AddCommand(
 		newHostCmd(&app),
+		newOpenShellCmd(),
 		newStartCmd(&app),
 		newVersionCmd(&app),
 		newSkillsCmd(&app),
