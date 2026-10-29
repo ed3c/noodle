@@ -97,7 +97,11 @@ func (r *OpenShellRuntime) readDiagnosticFailure(ctx context.Context, b Complete
 	if _, err = ReadSessionReadbackFile(filepath.Join(dir, "meta.json"), &meta); err != nil {
 		return result, err
 	}
-	if meta.SessionID != b.SessionID || meta.Status != "exited" || meta.Alive == nil || *meta.Alive || meta.ExitPending || meta.Provider != b.Provider || meta.Model != b.Model || meta.Runtime != "openshell" {
+	// Monitor reports stopped attempts without completion events as failed.
+	// Both terminal statuses describe liveness; original custody below still
+	// proves the failed/-1 outcome and that no model Exec was submitted.
+	terminal := meta.Status == "failed" || meta.Status == "exited"
+	if meta.SessionID != b.SessionID || !terminal || meta.Alive == nil || *meta.Alive || meta.ExitPending || meta.Provider != b.Provider || meta.Model != b.Model || meta.Runtime != "openshell" {
 		return result, fmt.Errorf("diagnostic original terminal metadata differs")
 	}
 	instructions, err := diagnosticInstructions(ctx, dir, b, spawn.InstructionBundle)

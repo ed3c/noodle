@@ -46,7 +46,7 @@ func (r *CanonicalClaimsReader) ReadSession(sessionID string) (SessionClaims, er
 	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return SessionClaims{SessionID: sessionID}, nil
+			return r.withSpawnMetadata(sessionID, SessionClaims{SessionID: sessionID}), nil
 		}
 		return SessionClaims{}, fmt.Errorf("open canonical events: %w", err)
 	}
@@ -97,6 +97,12 @@ func (r *CanonicalClaimsReader) ReadSession(sessionID string) (SessionClaims, er
 	if err := scanner.Err(); err != nil {
 		return SessionClaims{}, fmt.Errorf("read canonical events: %w", err)
 	}
+	return r.withSpawnMetadata(sessionID, claims), nil
+}
+
+// Spawn provenance exists before the first model event, including when local
+// preparation fails and no canonical log is ever created.
+func (r *CanonicalClaimsReader) withSpawnMetadata(sessionID string, claims SessionClaims) SessionClaims {
 	if metadata, err := r.readSpawnMetadata(sessionID); err == nil {
 		if claims.Skill == "" {
 			claims.Skill = metadata.Skill
@@ -112,7 +118,7 @@ func (r *CanonicalClaimsReader) ReadSession(sessionID string) (SessionClaims, er
 		}
 	}
 
-	return claims, nil
+	return claims
 }
 
 func (r *CanonicalClaimsReader) readSpawnMetadata(sessionID string) (SessionClaims, error) {

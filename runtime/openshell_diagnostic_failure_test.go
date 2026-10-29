@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"github.com/poteto/noodle/dispatcher"
+	"github.com/poteto/noodle/monitor"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,7 +60,9 @@ func diagnosticFailureInstructionFixture(t *testing.T, withInstructions bool) (*
 	if r.config.Gateway.custody.Snapshot().Records[0].Exec != nil {
 		t.Fatal("fixture submitted a model")
 	}
-	writeReadbackJSON(t, filepath.Join(r.config.RuntimeDir, "sessions", h.ID(), "meta.json"), map[string]any{"session_id": h.ID(), "provider": "codex", "model": "fixture", "runtime": "openshell", "status": "exited", "alive": false})
+	if _, err := monitor.NewMonitor(r.config.RuntimeDir).RunOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	return r, CompletedSessionBinding{OrderID: order, SessionID: h.ID(), Provider: "codex", Model: "fixture", WorktreePath: target}, f
 }
 
