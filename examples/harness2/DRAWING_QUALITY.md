@@ -70,6 +70,8 @@ The facts parser never evaluates JavaScript. It supports restricted arithmetic,
 explicit units and ranges. Ambiguous/correlated ranges, contextual symbols,
 unsupported tables or mixed relative-unit context remain UNKNOWN. SVG table
 extraction follows actual ruled Code/Variable/Value cells and transforms.
+Unclassified bare capital labels also block as UNKNOWN;
+the checker cannot silently assume that an undeclared symbol is ordinary prose.
 The detailed supported grammar and limitations live with `drawing-facts.mjs`.
 
 ## Visual measurement and its limits

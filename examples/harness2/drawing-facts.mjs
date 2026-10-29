@@ -359,7 +359,16 @@ export function checkDrawingFacts(observation, sourceFacts = {}) {
       add(partialTables || axisAmbiguity ? 'UNKNOWN':'FAIL',axisAmbiguity ? 'ambiguous-coordinate-symbol':'undefined-code',{...evidence,code});
     }
   };
-  for (const t of observation.texts) for (const code of references(t.text,known,t.heading)) use(code,t);
+  for (const t of observation.texts) {
+    const codes=references(t.text,known,t.heading);
+    for (const code of codes) use(code,t);
+    const bare=t.text.trim();
+    if (!codes.length && /^[A-Z][A-Z0-9]*$/.test(bare) &&
+        !['TBD','PX','MM','CM','IN','PT','CSS','REF'].includes(bare) &&
+        !(bare==='UNITS' && observation.units?.length)) {
+      add('UNKNOWN','ambiguous-dimension-label',t);
+    }
+  }
   for (const row of definitions.values()) for (const code of references(row.value,known)) use(code,{region:'table',location:row.location,definition:row.code,text:row.value});
   for (const [code,row] of definitions) if (!uses.has(code)) add(partialText ? 'UNKNOWN':'FAIL','unused-definition',{code,location:row.location});
   const pageUnits = [...new Set((observation.units || []).map(u => {

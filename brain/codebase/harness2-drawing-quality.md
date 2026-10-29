@@ -12,6 +12,8 @@
 - Author-selected heading tags/classes cannot suppress dimension reconciliation.
 - Internally consistent numbers need independent source-backed leaves before PASS.
   A legitimate source-unknown TBD is different from a checker unable to decide.
+- Explicit null source keys still require table definitions. Unclassified bare
+  capital symbols block rather than silently disappearing from reconciliation.
 - Pixel contribution checks must retain real white knockouts; otherwise ordinary
   dimension leaders become false failures. Accessible scrolling is not clipping.
 - Freeze generated DOM and disable author JavaScript during measurement. Preserve
@@ -21,3 +23,9 @@
 - Use the declared pnpm version in fresh worktrees. Bundled pnpm v11 can auto-edit
   workspace build-policy settings and reject dependencies that v10 handled; do not
   solve version drift by weakening build policy.
+- A dedicated Host directory alone does not pin a live Host: dispatch must carry
+  the native existing-instance constraint. An independent gateway needs its own
+  refresh grant; do not clone an already imported subscription grant.
+- Native custody retains stopped VM history and has no post-acceptance deletion
+  API. Count model-producing controls separately from bootstrap controls when
+  estimating storage; stopped does not mean disk space has been reclaimed.

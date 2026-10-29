@@ -173,6 +173,14 @@ test('an explicitly required source-unknown dimension cannot disappear from the 
   assert.ok(result.findings.some(f=>f.kind==='missing-source-definition' && f.code==='V1'));
 });
 
+test('unclassified bare dimension symbols block instead of disappearing from reconciliation', async () => {
+  for (const label of ['ZZ','Z','NEWCODE']) {
+    const result=await check(sheet([row('W1','480 px')],`W1|${label}`),{values:{W1:'480 px'}});
+    assert.equal(result.status,'UNKNOWN');
+    assert.ok(result.findings.some(f=>f.kind==='ambiguous-dimension-label' && f.text===label));
+  }
+});
+
 test('TBD dependency makes a formula UNKNOWN, not false PASS', async () => {
   const result=(await check(sheet([row('V1','[TBD]'),row('MH','100vh−2·V1')],'MH|V1')));
   assert.equal(result.status,'UNKNOWN');
