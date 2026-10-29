@@ -66,6 +66,28 @@ func poolBindingCompatible(root string, b hostRequestBinding, caller string) boo
 	return false
 }
 
+func hostOwnerMatches(req hostRequest, owner hostTaskOwner) bool {
+	if req.ContextID == "" {
+		return hostReceiptMatches(req, owner.Original)
+	}
+	if req.RequestID != "" {
+		binding := req
+		binding.ContextID, binding.InstanceID = "", ""
+		if !hostReceiptMatches(binding, owner.Original) {
+			return false
+		}
+	}
+	if hostReceiptMatches(req, owner.Current) || hostReceiptMatches(req, owner.Original) {
+		return true
+	}
+	for _, previous := range owner.Previous {
+		if hostReceiptMatches(req, previous) {
+			return true
+		}
+	}
+	return false
+}
+
 // Routing uses the one original task owner; no competing carrier acquires it.
 func (h *noodleHost) forwardRolling(ctx context.Context, req hostRequest) (any, bool) {
 	if h.rolling == nil || req.Operation == "resources" || req.Operation == "view_resources" || req.Operation == "round_prepare" || req.Operation == "round_rebuild" || (req.Operation == "round_admit" || req.Operation == "round_reconcile") {
@@ -85,7 +107,7 @@ func (h *noodleHost) forwardRolling(ctx context.Context, req hostRequest) (any, 
 		}
 	}
 	if owned {
-		if !hostReceiptMatches(req, owner.Original) {
+		if !hostOwnerMatches(req, owner) {
 			return hostError("refused", errors.New("original task binding differs")), true
 		}
 		if owner.MaintenanceHold != "" && req.Operation != "status" {

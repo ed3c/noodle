@@ -2,6 +2,7 @@ package dispatcher
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/poteto/noodle/skill"
 	"os"
 	"os/exec"
@@ -75,5 +76,50 @@ func TestRemoteHarnessRejectsResumeBeforeEvidence(t *testing.T) {
 	}
 	if _, err := os.Stat(runtimeDir); !os.IsNotExist(err) {
 		t.Fatalf("rejected launch wrote evidence: %v", err)
+	}
+}
+
+func TestRemoteHarnessPiStderrFailureKeepsOriginalProcess(t *testing.T) {
+	root := t.TempDir()
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := DispatchRequest{Name: "stderr-failure", Provider: "pi", Runtime: "openshell", Model: "openrouter/deepseek/deepseek-v4.1-flash-1017", Prompt: "unique remote task", WorktreePath: root}
+	plan, err := PrepareRemoteHarness(filepath.Join(root, "local"), skill.Resolver{}, req, "/sandbox/payload/pi", filepath.Join(root, "guest"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A directory is a real, consistently unwritable stderr evidence destination,
+	// including when this test runs as root.
+	plan.stderr = plan.Directory
+	args := append([]string{"-test.run=^TestPiRPCChild$", "--"}, plan.Command()[1:]...)
+	cmd := exec.Command(binary, args...)
+	cmd.Dir, cmd.Env = root, append(os.Environ(), "NOODLE_FAKE_PI=1", "NOODLE_FAKE_PI_MODE=no-read")
+	process, err := StartProcess(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = process.ForceKill(); <-process.Done() })
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	session, err := plan.Start(ctx, process, nil)
+	if err != nil || session == nil {
+		t.Fatalf("started process lost: session=%v err=%v", session, err)
+	}
+	waitHarnessSession(t, session)
+	if _, exited := process.ExitCode(); !exited {
+		t.Fatal("failed stderr did not join original process")
+	}
+	var receipt piReceipt
+	data, err := os.ReadFile(filepath.Join(plan.Directory, "pi-rpc.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if session.Outcome().Status != StatusFailed || !strings.Contains(receipt.Error, plan.Directory) || receipt.PromptSent {
+		t.Fatalf("stderr failure lost diagnostic or sent task: outcome=%+v receipt=%+v", session.Outcome(), receipt)
 	}
 }

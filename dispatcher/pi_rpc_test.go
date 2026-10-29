@@ -98,10 +98,19 @@ func TestPiRPCChild(t *testing.T) {
 		success = false
 	}
 	_ = os.WriteFile(filepath.Join(dir, "native-pi.jsonl"), []byte("{\"type\":\"session\",\"id\":\"native-pi\"}\n"), 0600)
+	response := map[string]any{"type": "response", "command": "get_state", "id": id, "success": success, "data": state, "error": "fixture state error"}
 	if mode == "unsolicited" {
-		_ = out.Encode(map[string]string{"type": "agent_start"})
+		// Both rows must exist before the parent rejects the first event and
+		// stops this child. Separate writes race that legitimate rejection.
+		raw, err := json.Marshal(response)
+		if err != nil {
+			os.Exit(22)
+		}
+		rows := append([]byte("{\"type\":\"agent_start\"}\n"), append(raw, '\n')...)
+		_, _ = os.Stdout.Write(rows)
+	} else {
+		_ = out.Encode(response)
 	}
-	_ = out.Encode(map[string]any{"type": "response", "command": "get_state", "id": id, "success": success, "data": state, "error": "fixture state error"})
 	if mode == "input-block" {
 		_ = os.WriteFile("input-block-ready", []byte("ready"), 0600)
 		time.Sleep(time.Minute)

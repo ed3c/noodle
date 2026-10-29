@@ -373,3 +373,196 @@ func TestNativeCodexStopRefusalRequiresOriginalTerminal(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeCodexStartedResumeFailureRetainsOriginalHandle(t *testing.T) {
+	d, req := nativeDispatcherFixture(t, func(conn *websocket.Conn) {
+		t.Cleanup(func() { _ = conn.Close() })
+		for {
+			var call struct {
+				ID     json.RawMessage
+				Method string
+			}
+			if conn.ReadJSON(&call) != nil {
+				return
+			}
+			if call.Method != "thread/list" {
+				t.Errorf("invalid predecessor caused effect: %s", call.Method)
+				return
+			}
+			if conn.WriteJSON(map[string]any{"id": call.ID, "result": map[string]any{"data": []any{}}}) != nil {
+				return
+			}
+		}
+	})
+	req.ResumeSessionID = "missing-original"
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	session, err := d.Dispatch(ctx, req)
+	if session == nil || err != nil {
+		t.Fatalf("started native foreground discarded: session=%v err=%v", session, err)
+	}
+	assertRetainedNativeDispatch(t, session)
+}
+
+func assertRetainedNativeDispatch(t *testing.T, session Session) {
+	t.Helper()
+	native, ok := session.(*nativeCodexSession)
+	if !ok || native.process == nil || native.client == nil {
+		t.Fatalf("original native handle missing: %T", session)
+	}
+	t.Cleanup(func() {
+		native.client.close()
+		select {
+		case <-native.process.Done():
+		case <-time.After(3 * time.Second):
+			t.Error("owned foreground did not exit after explicit cleanup EOF")
+		}
+		if native.stderrDone != nil {
+			select {
+			case <-native.stderrDone:
+			case <-time.After(3 * time.Second):
+				t.Error("owned foreground stderr did not drain")
+			}
+		}
+	})
+	native.nativeMu.Lock()
+	state, problem, foreground := native.record.State, native.record.Problem, native.record.Foreground
+	native.nativeMu.Unlock()
+	if state != "needs_owner_readback" || problem == "" || foreground.PID <= 0 || foreground.Started == "" {
+		t.Fatalf("post-start failure lacks original owner evidence: state=%s problem=%s foreground=%+v", state, problem, foreground)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	var readback struct{ Data []json.RawMessage }
+	if err := native.client.call(ctx, "thread/list", map[string]any{}, &readback); err != nil || readback.Data == nil {
+		t.Fatalf("post-start failure lost original owner readback: %+v %v", readback, err)
+	}
+	if _, exited := native.process.ExitCode(); exited {
+		t.Fatal("local dispatch failure closed the original native foreground")
+	}
+	select {
+	case <-session.Done():
+		t.Fatal("post-start failure released admission")
+	default:
+	}
+}
+
+func TestNativeCodexResumePersistenceFailureRetainsOriginalHandle(t *testing.T) {
+	var d *CodexNativeDispatcher
+	var firstID string
+	var inject atomic.Bool
+	injected := make(chan error, 1)
+	server := func(conn *websocket.Conn) {
+		loaded := false
+		t.Cleanup(func() { _ = conn.Close() })
+		for {
+			var call struct {
+				ID     json.RawMessage
+				Method string
+			}
+			if conn.ReadJSON(&call) != nil {
+				return
+			}
+			var result any
+			switch call.Method {
+			case "thread/start":
+				loaded = true
+				result = map[string]any{"thread": map[string]string{"id": nativeTestThread, "source": "appServer"}}
+			case "turn/start":
+				_ = conn.WriteJSON(map[string]any{"method": "turn/started", "params": map[string]any{"threadId": nativeTestThread, "turn": map[string]string{"id": "round-1"}}})
+				_ = conn.WriteJSON(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": nativeTestThread, "turn": map[string]string{"id": "round-1", "status": "completed"}}})
+				result = map[string]any{"turn": map[string]string{"id": "round-1"}}
+			case "thread/read":
+				result = map[string]any{"thread": map[string]any{"id": nativeTestThread, "status": map[string]string{"type": "notLoaded"}}}
+			case "thread/turns/list":
+				if inject.CompareAndSwap(true, false) {
+					// The original terminal RPC is a real boundary after process binding.
+					// Make its following native receipt write fail without replacing the
+					// process or injecting a persistence implementation.
+					files, err := filepath.Glob(filepath.Join(d.prepare.runtimeDir, "sessions", "*", "native.json"))
+					if err == nil {
+						found := false
+						for _, file := range files {
+							if filepath.Base(filepath.Dir(file)) == firstID {
+								continue
+							}
+							found = true
+							if err = os.Rename(file, file+".before-fault"); err != nil {
+								break
+							}
+							if err = os.Mkdir(file, 0700); err != nil {
+								break
+							}
+						}
+						if !found {
+							err = fmt.Errorf("current native receipt missing")
+						}
+					}
+					injected <- err
+				}
+				result = map[string]any{"data": []map[string]string{{"id": "round-1", "status": "completed"}}}
+			case "thread/unsubscribe":
+				loaded = false
+				result = map[string]string{"status": "unsubscribed"}
+			case "thread/loaded/list":
+				rows := []string{}
+				if loaded {
+					rows = append(rows, nativeTestThread)
+				}
+				result = map[string]any{"data": rows}
+			case "thread/list", "thread/backgroundTerminals/list", "mcpServerStatus/list":
+				result = map[string]any{"data": []any{}}
+			default:
+				t.Errorf("unexpected native call: %s", call.Method)
+				return
+			}
+			if conn.WriteJSON(map[string]any{"id": call.ID, "result": result}) != nil {
+				return
+			}
+		}
+	}
+	var req DispatchRequest
+	d, req = nativeDispatcherFixture(t, server)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	first, err := d.Dispatch(ctx, req)
+	if err != nil || first == nil {
+		t.Fatalf("positive dispatch failed: %v", err)
+	}
+	select {
+	case <-first.Done():
+	case <-ctx.Done():
+		t.Fatal("positive native release did not finish")
+	}
+	if first.Outcome().Status != StatusCompleted {
+		t.Fatalf("positive native outcome=%+v", first.Outcome())
+	}
+	firstID = first.ID()
+	req.ResumeSessionID = firstID
+	inject.Store(true)
+	session, err := d.Dispatch(ctx, req)
+	select {
+	case fault := <-injected:
+		if fault != nil {
+			t.Fatal(fault)
+		}
+	default:
+		t.Fatal("did not reach original terminal persistence boundary")
+	}
+	if session == nil || err != nil {
+		t.Fatalf("started native foreground discarded after persistence failure: session=%v err=%v", session, err)
+	}
+	assertRetainedNativeDispatch(t, session)
+}
+
+func TestNativeCodexPreStartRefusalDoesNotCreateSession(t *testing.T) {
+	d, req := nativeDispatcherFixture(t, func(conn *websocket.Conn) { t.Error("pre-start refusal launched native foreground") })
+	req.Provider = "pi"
+	session, err := d.Dispatch(t.Context(), req)
+	if session != nil || err == nil {
+		t.Fatalf("pre-start invalid provider accepted: session=%v err=%v", session, err)
+	}
+	if _, err := os.Stat(d.prepare.runtimeDir); !os.IsNotExist(err) {
+		t.Fatalf("pre-start refusal created session evidence: %v", err)
+	}
+}

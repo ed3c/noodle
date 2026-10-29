@@ -154,6 +154,9 @@ func (p *RemoteHarness) Start(ctx context.Context, process HarnessProcess, sink 
 		return nil, fmt.Errorf("remote harness already started or streams missing")
 	}
 	p.started = true
+	if p.pi != nil {
+		p.pi.process = process
+	}
 	stderrDone := make(chan struct{})
 	process.IOWaitGroup().Add(1)
 	go func() {
@@ -163,9 +166,7 @@ func (p *RemoteHarness) Start(ctx context.Context, process HarnessProcess, sink 
 			p.pi.fail(err)
 		}
 	}()
-	if p.pi != nil {
-		p.pi.process = process
-	} else {
+	if p.pi == nil {
 		process.IOWaitGroup().Add(1)
 		go func() { defer process.IOWaitGroup().Done(); p.startup.writeInput(process.Stdin(), p.prompt) }()
 	}

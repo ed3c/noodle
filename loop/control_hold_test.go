@@ -19,7 +19,11 @@ func TestHydratedHoldUsesFirstACKWithoutReplayingEffects(t *testing.T) {
 		{"pause-then-duplicate", []ControlAck{{ID: "pause", Action: "pause", Status: "ok", DispatchState: StatePaused}, {ID: "pause", Action: "pause", Status: "duplicate", DispatchState: StateRunning}}, StatePaused},
 		{"legacy-pause", []ControlAck{{ID: "pause", Action: "pause", Status: "ok"}}, StatePaused},
 		{"failed-pause", []ControlAck{{ID: "pause", Action: "pause", Status: "error"}}, StateRunning},
-		{"stop-all-is-not-pause", []ControlAck{{ID: "stop", Action: "stop-all", Status: "ok"}}, StateRunning},
+		{"legacy-stop-all-has-no-hold", []ControlAck{{ID: "stop", Action: "stop-all", Status: "ok"}}, StateRunning},
+		{"legacy-failed-stop-all-has-no-hold", []ControlAck{{ID: "stop", Action: "stop-all", Status: "error"}}, StateRunning},
+		{"stop-all-retains-recorded-hold", []ControlAck{{ID: "stop", Action: "stop-all", Status: "ok", DispatchState: StatePaused}}, StatePaused},
+		{"failed-stop-all-retains-recorded-hold", []ControlAck{{ID: "stop", Action: "stop-all", Status: "error", DispatchState: StatePaused}}, StatePaused},
+		{"duplicate-stop-all-keeps-later-resume", []ControlAck{{ID: "stop", Action: "stop-all", Status: "error", DispatchState: StatePaused}, {ID: "resume", Action: "resume", Status: "ok", DispatchState: StateRunning}, {ID: "stop", Action: "stop-all", Status: "duplicate", DispatchState: StatePaused}}, StateRunning},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()

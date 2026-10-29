@@ -158,34 +158,34 @@ func (d *CodexNativeDispatcher) Dispatch(ctx context.Context, req DispatchReques
 	if req.ResumeSessionID != "" {
 		previous, err := readNativePredecessor(d.prepare.runtimeDir, req, home)
 		if err != nil {
-			client.close()
-			return nil, err
+			s.unknown(err)
+			return s, nil
 		}
 		raw, err := os.ReadFile(filepath.Join(d.prepare.runtimeDir, "sessions", req.ResumeSessionID, "raw.ndjson"))
 		if err != nil {
-			client.close()
-			return nil, err
+			s.unknown(err)
+			return s, nil
 		}
 		req.codexThreadID = previous.ThreadID
 		req.codexThreadSourceSHA = fmt.Sprintf("%x", sha256.Sum256(raw))
 		if err := writeDispatchMetadata(d.prepare.runtimeDir, id, req, nowUTC()); err != nil {
-			client.close()
-			return nil, err
+			s.unknown(err)
+			return s, nil
 		}
 		s.nativeMu.Lock()
 		s.record.ThreadID, s.record.TurnID, s.record.Terminal = previous.ThreadID, previous.TurnID, previous.Terminal
 		s.nativeMu.Unlock()
 		if err := s.originalTerminal(ctx); err != nil {
-			client.close()
-			return nil, err
+			s.unknown(err)
+			return s, nil
 		}
 		s.nativeMu.Lock()
 		s.record.TurnID, s.record.Terminal = "", ""
 		err = s.persist()
 		s.nativeMu.Unlock()
 		if err != nil {
-			client.close()
-			return nil, err
+			s.unknown(err)
+			return s, nil
 		}
 		params["threadId"] = previous.ThreadID
 		method = "thread/resume"
@@ -195,8 +195,8 @@ func (d *CodexNativeDispatcher) Dispatch(ctx context.Context, req DispatchReques
 	err = s.persist()
 	s.nativeMu.Unlock()
 	if err != nil {
-		client.close()
-		return nil, err
+		s.unknown(err)
+		return s, nil
 	}
 	var started struct {
 		Thread struct {

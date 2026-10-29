@@ -226,6 +226,28 @@ func TestHostRebuildReleasedRoundPreservesBindingAndPause(t *testing.T) {
 	if got.Status != "ok" || got.ContextID == "old-context" || got.HostInstanceID != newID || len(runtimes) != 1 {
 		t.Fatalf("rebuild: %+v", got)
 	}
+	lookup := req
+	lookup.Operation, lookup.ContextID, lookup.InstanceID, lookup.BinarySHA256 = "status", got.ContextID, newID, "new"
+	for _, contextID := range []string{got.ContextID, history.ContextID} {
+		lookup.ContextID = contextID
+		if result := h.handle(context.Background(), lookup); result.Status != "ok" || result.ContextID != contextID {
+			t.Fatalf("bound context readback: %+v", result)
+		}
+	}
+	lookup.ContextID = got.ContextID
+	for _, change := range []func(*hostRequest){
+		func(r *hostRequest) { r.RequestID = "foreign-task" },
+		func(r *hostRequest) { r.ConfigSHA256 = "foreign-config" },
+		func(r *hostRequest) { r.ConfigPath = "/foreign/config.toml" },
+		func(r *hostRequest) { r.ContextID = "foreign-context" },
+		func(r *hostRequest) { r.InstanceID = oldID },
+	} {
+		foreign := lookup
+		change(&foreign)
+		if result := h.handle(context.Background(), foreign); result.Status == "ok" {
+			t.Fatalf("foreign binding accepted: %+v", result)
+		}
+	}
 	defer func() {
 		if r := h.handle(context.Background(), hostRequest{Operation: "detach", ProjectDir: req.ProjectDir, ContextID: got.ContextID, InstanceID: newID, BinarySHA256: "new"}); r.Status != "ok" {
 			t.Errorf("cleanup: %+v", r)

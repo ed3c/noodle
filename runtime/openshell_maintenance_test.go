@@ -206,7 +206,7 @@ func TestProgressMaintenanceStopsOnceAndRestoresOriginalArchives(t *testing.T) {
 	if err := maintenanceVerify(stop, &proof); err != nil {
 		t.Fatal(err)
 	}
-	c, err := OpenOpenShellCustody(t.Context(), r.config.Profile.Gateway.Binding, r.config.Profile.Gateway.TLS, nil, filepath.Dir(r.config.Profile.Gateway.Binding.StateRoot))
+	c, err := OpenOpenShellCustody(t.Context(), r.config.Profile.Gateway.Binding, r.config.Profile.Gateway.TLS, nil, f.spec.ControlRoot)
 	if err != nil {
 		t.Fatal(err)
 	}

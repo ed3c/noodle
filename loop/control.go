@@ -54,8 +54,6 @@ func (l *Loop) hydrateProcessedCommands() error {
 					action := stringx.Normalize(ack.Action)
 					if ack.DispatchState == StatePaused || ack.DispatchState == StateDraining || ack.DispatchState == StateRunning {
 						l.setState(ack.DispatchState)
-					} else if action == "stop-all" {
-						l.setState(StatePaused) // Even a partial kill failure installed the hold.
 					} else if ack.Status == "ok" {
 						switch action {
 						case "pause":
