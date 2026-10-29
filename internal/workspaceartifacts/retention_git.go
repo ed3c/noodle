@@ -137,36 +137,8 @@ func retainedReachableObjects(ctx context.Context, root string, roots []string) 
 			return nil, fmt.Errorf("retained Git object traversal omitted a root")
 		}
 	}
-	// Bound each batch independently of total repository history.
-	for start := 0; start < len(oids); start += 32 {
-		batch := oids[start:min(start+32, len(oids))]
-		raw, err := compactionGit(ctx, root, []byte(strings.Join(batch, "\n")+"\n"), "cat-file", "--batch")
-		if err != nil {
-			return nil, err
-		}
-		reader := bytes.NewBuffer(raw)
-		for _, oid := range batch {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			header, err := reader.ReadString('\n')
-			fields := strings.Fields(header)
-			if err != nil || len(fields) != 3 || fields[0] != oid || (fields[1] != "commit" && fields[1] != "tree" && fields[1] != "blob" && fields[1] != "tag") {
-				return nil, fmt.Errorf("retained reachable Git object is missing or malformed: %s", oid)
-			}
-			size, err := strconv.ParseInt(fields[2], 10, 64)
-			if err != nil || size < 0 || size >= int64(reader.Len()) {
-				return nil, fmt.Errorf("retained reachable Git object size is malformed")
-			}
-			body := reader.Next(int(size))
-			newline, err := reader.ReadByte()
-			if err != nil || newline != '\n' || !matchesRetainedObject(body, fields[1], oid) {
-				return nil, fmt.Errorf("retained reachable Git object bytes differ: %s", oid)
-			}
-		}
-		if reader.Len() != 0 {
-			return nil, fmt.Errorf("retained Git object batch has trailing data")
-		}
+	if err := verifyRetainedObjectStream(ctx, root, oids); err != nil {
+		return nil, err
 	}
 	return oids, nil
 }

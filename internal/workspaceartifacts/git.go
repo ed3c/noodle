@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-func git(ctx context.Context, root string, input []byte, args ...string) ([]byte, error) {
+func gitCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
 	options := []string{"-C", root, "-c", "core.autocrlf=false", "-c", "core.filemode=true", "-c", "core.fsmonitor=false", "-c", "core.quotePath=true", "-c", "core.hooksPath=" + os.DevNull, "-c", "core.attributesFile=" + os.DevNull}
 	cmd := exec.CommandContext(ctx, "git", append(options, args...)...)
 	// Repository selection, alternate indexes, and injected Git configuration
@@ -22,6 +22,11 @@ func git(ctx context.Context, root string, input []byte, args ...string) ([]byte
 		}
 	}
 	cmd.Env = append(cmd.Env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_TERMINAL_PROMPT=0", "GIT_ATTR_NOSYSTEM=1")
+	return cmd
+}
+
+func git(ctx context.Context, root string, input []byte, args ...string) ([]byte, error) {
+	cmd := gitCommand(ctx, root, args...)
 	cmd.Stdin = bytes.NewReader(input)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
