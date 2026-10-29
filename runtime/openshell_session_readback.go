@@ -308,6 +308,11 @@ func (r *OpenShellRuntime) readSettledSession(ctx context.Context, b CompletedSe
 		return result, errors.Join(err, fmt.Errorf("OpenShell saved harness progress is not successful"))
 	}
 	sources["progress_receipt"] = progressRef
+	archiveSources, err := progressArchiveSources(ctx, dir, receipt)
+	if err != nil {
+		return result, err
+	}
+	maps.Copy(sources, archiveSources)
 	instructions, instructionSources, err := r.instructionReadback(ctx, dir, b, spawn.InstructionBundle, original.Exec.Command)
 	if err != nil {
 		return result, err

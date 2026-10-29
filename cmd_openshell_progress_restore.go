@@ -20,7 +20,7 @@ import (
 	loopruntime "github.com/poteto/noodle/runtime"
 )
 
-func restoreProgressMaintenance(ctx context.Context, ref loopruntime.SessionReadbackFileRef, p loopruntime.ProgressMaintenance, profile loopruntime.OpenShellProfile) (loopruntime.SessionReadbackFileRef, error) {
+func restoreProgressMaintenance(ctx context.Context, ref loopruntime.SessionReadbackFileRef, p loopruntime.ProgressMaintenance, profile loopruntime.OpenShellProfile, phase string, repair *loopruntime.SessionReadbackFileRef, history loopruntime.SessionReadbackFileRef) (loopruntime.SessionReadbackFileRef, error) {
 	fail := func(err error) (loopruntime.SessionReadbackFileRef, error) {
 		return loopruntime.SessionReadbackFileRef{}, err
 	}
@@ -87,7 +87,7 @@ func restoreProgressMaintenance(ctx context.Context, ref loopruntime.SessionRead
 	directory := filepath.Dir(ref.Path)
 	receiptsPath := filepath.Join(p.HostDir, "receipts.json")
 	var receipts []hostReceipt
-	_, err = loopruntime.ReadSessionReadbackFile(receiptsPath, &receipts)
+	liveBefore, err := loopruntime.ReadSessionReadbackFile(receiptsPath, &receipts)
 	if err != nil {
 		return fail(err)
 	}
@@ -112,11 +112,27 @@ func restoreProgressMaintenance(ctx context.Context, ref loopruntime.SessionRead
 		return fail(err)
 	}
 	beforePath := filepath.Join(directory, "host-receipts-before.json")
-	if err = writeMaintenanceExclusive(beforePath, before); err != nil {
-		return fail(err)
+	if phase == "restore" {
+		if err = writeMaintenanceExclusive(beforePath, before); err != nil {
+			return fail(err)
+		}
+	} else {
+		beforeRef, err := loopruntime.ReadSessionReadbackFile(beforePath, nil)
+		if err != nil {
+			return fail(err)
+		}
+		if beforeRef.SHA256 != liveBefore.SHA256 {
+			return fail(fmt.Errorf("original Host before-image changed before restore continuation"))
+		}
+		if phase == "restore-inspect" {
+			return loopruntime.InspectProgressMaintenanceRestore(ctx, ref, profile, beforeRef, history)
+		}
+		if phase != "restore-continue" || repair == nil {
+			return fail(fmt.Errorf("maintenance restore continuation is not bound"))
+		}
 	}
 	var handoffRef loopruntime.SessionReadbackFileRef
-	_, err = loopruntime.RestoreProgressMaintenance(ctx, ref, profile, func(runtimeRef loopruntime.SessionReadbackFileRef) error {
+	finalize := func(runtimeRef loopruntime.SessionReadbackFileRef) error {
 		receipts[index].ContextState = "detached"
 		receipts[index].TerminalCause = "maintenance-handoff"
 		after, err := json.MarshalIndent(receipts, "", "  ")
@@ -149,7 +165,12 @@ func restoreProgressMaintenance(ctx context.Context, ref loopruntime.SessionRead
 		}
 		handoffRef, err = loopruntime.ReadSessionReadbackFile(path, nil)
 		return err
-	})
+	}
+	if repair == nil {
+		_, err = loopruntime.RestoreProgressMaintenance(ctx, ref, profile, finalize)
+	} else {
+		_, err = loopruntime.ContinueProgressMaintenanceRestore(ctx, ref, profile, *repair, finalize)
+	}
 	if err != nil {
 		return fail(err)
 	}

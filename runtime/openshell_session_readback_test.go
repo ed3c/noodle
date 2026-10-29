@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -58,9 +59,10 @@ func TestOpenShellSessionReadbackOriginalExecutionAndSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ProfileSHA256 == "" || result.NativeAttemptID == "" || result.CandidateHead == "" || result.NativePhase != "Stopped" || !result.StopAcknowledged || len(result.Sources) != 8 {
+	if result.ProfileSHA256 == "" || result.NativeAttemptID == "" || result.CandidateHead == "" || result.NativePhase != "Stopped" || !result.StopAcknowledged || len(result.Sources) != 10 {
 		t.Fatalf("incomplete observation: %+v", result)
 	}
+	assertOriginalReadbackArchives(t, result.Sources)
 	eventsAfter, _ := os.ReadFile(filepath.Join(f.root, "events"))
 	if string(eventsAfter[len(eventsBefore):]) != "get\n" {
 		t.Fatalf("readback made non-Get native calls: %q", eventsAfter[len(eventsBefore):])
@@ -75,6 +77,49 @@ func TestOpenShellSessionReadbackOriginalExecutionAndSources(t *testing.T) {
 	raw, _ := json.Marshal(result)
 	if strings.Contains(string(raw), "Argv") || strings.Contains(string(raw), "Environment") {
 		t.Fatal("readback exposed executable inputs")
+	}
+}
+
+func assertOriginalReadbackArchives(t *testing.T, sources map[string]SessionReadbackFileRef) {
+	t.Helper()
+	for _, name := range []string{"noodle-result.tar", "noodle-session.tar"} {
+		ref := sources["progress_archive_"+name]
+		actual, err := ReadSessionReadbackFile(ref.Path, nil)
+		if err != nil || actual != ref {
+			t.Fatalf("readback lost original %s reference: %v", name, err)
+		}
+		data, err := os.ReadFile(ref.Path)
+		if err != nil || !bytes.Equal(data, progressFixtureArchive(t, name)) {
+			t.Fatalf("readback did not retain exact %s bytes", name)
+		}
+	}
+}
+
+func TestOpenShellSessionReadbackRejectsChangedRawArchives(t *testing.T) {
+	r, b, _ := completedReadbackFixture(t)
+	result, err := r.ReadCompletedSession(t.Context(), b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"noodle-result.tar", "noodle-session.tar"} {
+		t.Run(name, func(t *testing.T) {
+			path := result.Sources["progress_archive_"+name].Path
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := os.WriteFile(path, before, 0600); err != nil {
+					t.Error(err)
+				}
+			})
+			if err := os.WriteFile(path, append(before, 'x'), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.ReadCompletedSession(t.Context(), b); err == nil {
+				t.Fatal("changed original archive was reported observed")
+			}
+		})
 	}
 }
 func TestOpenShellSessionReadbackRejectsChangedBindingsAndEvidence(t *testing.T) {

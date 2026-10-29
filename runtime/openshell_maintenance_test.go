@@ -286,8 +286,12 @@ func maintenanceHostFixture(t *testing.T, r *OpenShellRuntime, p ProgressMainten
 	}
 	dir := filepath.Dir(ref.Path)
 	old := map[string]any{"request_id": "original", "project_dir": r.config.RuntimeDir, "binary_sha256": "original-binary", "config_sha256": "original-config", "host_instance_id": p.HostInstance, "host_pid": p.HostPID, "context_id": p.ContextID, "context_state": "failed"}
-	beforePath, afterPath := filepath.Join(dir, "host-before.json"), filepath.Join(dir, "host-after.json")
-	if err := maintenanceWrite(beforePath, []map[string]any{old}); err != nil {
+	beforePath, afterPath := filepath.Join(dir, "host-receipts-before.json"), filepath.Join(dir, "host-after.json")
+	if _, err := os.Lstat(beforePath); os.IsNotExist(err) {
+		if err := maintenanceWrite(beforePath, []map[string]any{old}); err != nil {
+			return err
+		}
+	} else if err != nil {
 		return err
 	}
 	old["context_state"], old["terminal_cause"] = "detached", "maintenance-handoff"

@@ -16,6 +16,14 @@ import (
 // RestoreProgressMaintenance is called only while the CLI owns the old Host
 // and project locks and has proved its resident service closed.
 func RestoreProgressMaintenance(ctx context.Context, planRef SessionReadbackFileRef, profile OpenShellProfile, finalize func(SessionReadbackFileRef) error) (SessionReadbackFileRef, error) {
+	return restoreProgressMaintenance(ctx, planRef, profile, nil, finalize)
+}
+
+func ContinueProgressMaintenanceRestore(ctx context.Context, planRef SessionReadbackFileRef, profile OpenShellProfile, repair SessionReadbackFileRef, finalize func(SessionReadbackFileRef) error) (SessionReadbackFileRef, error) {
+	return restoreProgressMaintenance(ctx, planRef, profile, &repair, finalize)
+}
+
+func restoreProgressMaintenance(ctx context.Context, planRef SessionReadbackFileRef, profile OpenShellProfile, repair *SessionReadbackFileRef, finalize func(SessionReadbackFileRef) error) (SessionReadbackFileRef, error) {
 	if finalize == nil {
 		return SessionReadbackFileRef{}, fmt.Errorf("maintenance Host finalizer is missing")
 	}
@@ -70,27 +78,35 @@ func RestoreProgressMaintenance(ctx context.Context, planRef SessionReadbackFile
 			}
 		}
 	}
-	currentData, err := os.ReadFile(ownerPath)
-	if err != nil {
-		return SessionReadbackFileRef{}, err
-	}
-	currentPath := filepath.Join(directory, "custody-before-restore.json")
-	if err := maintenanceWriteBytes(currentPath, currentData); err != nil {
-		return SessionReadbackFileRef{}, err
-	}
-	currentRef, err := ReadSessionReadbackFile(currentPath, nil)
-	if err != nil {
-		return SessionReadbackFileRef{}, err
-	}
-	if err := maintenanceWrite(filepath.Join(directory, "restore-intent.json"), map[string]any{"plan": planRef, "stop": stopRef, "custody": currentRef}); err != nil {
-		return SessionReadbackFileRef{}, fmt.Errorf("maintenance restore already attempted; inspect original effects: %w", err)
-	}
-	for _, archive := range saved.Archives {
-		dest := filepath.Join(p.SessionDirectory, "returned")
-		if archive.Name == "noodle-session.tar" {
-			dest = filepath.Join(p.SessionDirectory, "guest-session")
+	if repair == nil {
+		currentData, err := os.ReadFile(ownerPath)
+		if err != nil {
+			return SessionReadbackFileRef{}, err
 		}
-		if err := workspaceartifacts.Extract(ctx, p.Archives[archive.Name].Path, dest); err != nil {
+		currentPath := filepath.Join(directory, "custody-before-restore.json")
+		if err := maintenanceWriteBytes(currentPath, currentData); err != nil {
+			return SessionReadbackFileRef{}, err
+		}
+		currentRef, err := ReadSessionReadbackFile(currentPath, nil)
+		if err != nil {
+			return SessionReadbackFileRef{}, err
+		}
+		if err := maintenanceWrite(filepath.Join(directory, "restore-intent.json"), map[string]any{"plan": planRef, "stop": stopRef, "custody": currentRef}); err != nil {
+			return SessionReadbackFileRef{}, fmt.Errorf("maintenance restore already attempted; inspect original effects: %w", err)
+		}
+	} else {
+		if err := validateProgressMaintenanceRestoreRepair(ctx, planRef, d, profile, *repair); err != nil {
+			return SessionReadbackFileRef{}, err
+		}
+		if err := maintenanceWrite(filepath.Join(directory, "restore-repair-intent.json"), *repair); err != nil {
+			return SessionReadbackFileRef{}, fmt.Errorf("maintenance restore continuation already attempted; inspect original effects: %w", err)
+		}
+	}
+	if err := retainMaintenanceArchives(ctx, p, saved); err != nil {
+		return SessionReadbackFileRef{}, err
+	}
+	if repair == nil {
+		if err := workspaceartifacts.Extract(ctx, p.Archives["noodle-result.tar"].Path, filepath.Join(p.SessionDirectory, "returned")); err != nil {
 			return SessionReadbackFileRef{}, err
 		}
 	}
@@ -126,6 +142,7 @@ func RestoreProgressMaintenance(ctx context.Context, planRef SessionReadbackFile
 	d.Outcome = SessionOutcome{Status: StatusCancelled, Reason: "OpenShell interrupted; archived progress recovered through explicit maintenance", ExitCode: saved.ExitCode}
 	d.ProgressHead, d.Phase, d.Error, d.Delivery = head, "settled", "", delivery
 	completion := ProgressMaintenanceCompletion{Schema: 1, Plan: planRef, Stop: stopRef, OriginalDispatch: p.Originals["dispatch"], OriginalCustody: p.Originals["custody"], ContextID: d.ContextID, SessionID: d.SessionID, OrderID: d.OrderID, ProgressHead: head}
+	completion.RestoreRepair = repair
 	completePath := filepath.Join(directory, "runtime-complete.json")
 	if err := maintenanceWrite(completePath, completion); err != nil {
 		return SessionReadbackFileRef{}, err
@@ -220,6 +237,9 @@ func maintenanceCompletion(d openShellDispatchReceipt) (*ProgressMaintenanceComp
 		return nil, err
 	}
 	if err := validateMaintenanceHostHandoff(c, handoff); err != nil {
+		return nil, err
+	}
+	if _, err := maintenanceRestoreRepairSources(c, handoff); err != nil {
 		return nil, err
 	}
 	return &c, nil

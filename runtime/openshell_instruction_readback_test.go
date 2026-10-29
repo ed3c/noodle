@@ -57,9 +57,10 @@ func TestInstructionReadbackBindsTransportedInputsWithoutOriginalSourceRead(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Instructions == nil || result.Instructions.Manifest.SHA256 != ref.SHA256 || len(result.Sources) != 11 || result.Sources["instruction_manifest"] != result.Instructions.Manifest {
+	if result.Instructions == nil || result.Instructions.Manifest.SHA256 != ref.SHA256 || len(result.Sources) != 13 || result.Sources["instruction_manifest"] != result.Instructions.Manifest {
 		t.Fatal("completion lost the transported manifest or bounded input evidence")
 	}
+	assertOriginalReadbackArchives(t, result.Sources)
 }
 
 func TestInstructionReadbackRejectsChangedInputsAndNativeCommand(t *testing.T) {

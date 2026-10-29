@@ -114,11 +114,7 @@ func (s *openShellSession) receiveProgress(command OpenShellCommand) error {
 		return err
 	}
 	for _, archive := range receipt.Archives {
-		destination := filepath.Join(s.dir, "returned")
-		if archive.Name == "noodle-session.tar" {
-			destination = filepath.Join(s.dir, "guest-session")
-		}
-		if err = s.receiveProgressArchive(binding.Directory, archive, destination); err != nil {
+		if err = s.receiveProgressArchive(binding.Directory, archive); err != nil {
 			return err
 		}
 	}
@@ -129,7 +125,7 @@ func (s *openShellSession) receiveProgress(command OpenShellCommand) error {
 	return s.persist()
 }
 
-func (s *openShellSession) receiveProgressArchive(directory string, archive guestprogress.Archive, destination string) error {
+func (s *openShellSession) receiveProgressArchive(directory string, archive guestprogress.Archive) error {
 	staging, err := os.MkdirTemp(s.dir, "progress-archive-")
 	if err != nil {
 		return err
@@ -161,7 +157,12 @@ func (s *openShellSession) receiveProgressArchive(directory string, archive gues
 	if hex.EncodeToString(hash.Sum(nil)) != archive.SHA256 {
 		return fmt.Errorf("progress archive content digest differs")
 	}
-	return workspaceartifacts.Extract(context.Background(), path, destination)
+	// Native session state is retained as the exact archive. Its guest-local
+	// executable links are evidence, not paths to materialize on the Host.
+	if archive.Name == "noodle-session.tar" {
+		return nil
+	}
+	return workspaceartifacts.Extract(context.Background(), path, filepath.Join(s.dir, "returned"))
 }
 
 func readSavedProgress(dir string, receipt openShellDispatchReceipt, command OpenShellCommand, stopRequestID string) (SessionReadbackFileRef, error) {

@@ -59,6 +59,13 @@ func maintainedSources(d openShellDispatchReceipt, record OpenShellCustodyRecord
 	if err != nil {
 		return nil, err
 	}
+	repairRefs, err := maintenanceRestoreRepairSources(*c, h)
+	if err != nil {
+		return nil, err
+	}
+	for name, ref := range repairRefs {
+		refs[name] = ref
+	}
 	refs["maintenance_host_handoff"], refs["maintenance_host_before"], refs["maintenance_host_after"] = handoffRef, h.HostReceiptsBefore, h.HostReceiptsAfter
 	refs["maintenance_release"], refs["maintenance_host_exit"], refs["maintenance_launcher"] = h.Release, h.HostExit, p.Launcher
 	var release ProgressMaintenanceRelease

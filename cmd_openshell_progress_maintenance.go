@@ -21,6 +21,8 @@ func newProgressMaintenanceCmd() *cobra.Command {
 	root := &cobra.Command{Use: "progress-maintenance", Short: "Recover one explicitly drained OpenShell attempt without replaying its model"}
 	var request, session, archives, output, plan, expected, launcher, launcherCall string
 	var launcherSession int
+	var repairPath, repairSHA string
+	var historyPath, historySHA string
 	prepare := &cobra.Command{Use: "prepare", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		ref, err := prepareProgressMaintenance(request, session, archives, output, launcher, launcherCall, launcherSession)
 		if err != nil {
@@ -39,7 +41,7 @@ func newProgressMaintenanceCmd() *cobra.Command {
 	_ = prepare.MarkFlagRequired("launcher-intent")
 	_ = prepare.MarkFlagRequired("launcher-session")
 	_ = prepare.MarkFlagRequired("launcher-call")
-	for _, phase := range []string{"stop", "release", "release-inspect", "restore"} {
+	for _, phase := range []string{"stop", "release", "release-inspect", "restore", "restore-inspect", "restore-continue"} {
 		child := &cobra.Command{Use: phase, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			var p loopruntime.ProgressMaintenance
 			ref, err := loopruntime.ReadSessionReadbackFile(plan, &p)
@@ -71,17 +73,59 @@ func newProgressMaintenanceCmd() *cobra.Command {
 				defer cancel()
 				result, err = releaseProgressMaintenance(ctx, ref, p, profile, phase == "release-inspect")
 			} else {
-				result, err = restoreProgressMaintenance(cmd.Context(), ref, p, profile)
+				var repair *loopruntime.SessionReadbackFileRef
+				var history loopruntime.SessionReadbackFileRef
+				if phase == "restore-inspect" {
+					history, err = loopruntime.ReadSessionReadbackFile(historyPath, nil)
+					if err != nil {
+						return err
+					}
+					if history.SHA256 != historySHA {
+						return fmt.Errorf("reviewed original Host history changed")
+					}
+				}
+				if phase == "restore-continue" {
+					bound, readErr := loopruntime.ReadSessionReadbackFile(repairPath, nil)
+					if readErr != nil {
+						return readErr
+					}
+					if bound.SHA256 != repairSHA {
+						return fmt.Errorf("reviewed restore repair changed")
+					}
+					repair = &bound
+				}
+				result, err = restoreProgressMaintenance(cmd.Context(), ref, p, profile, phase, repair, history)
 			}
 			if err != nil {
 				return err
 			}
-			return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"status": phase + "-complete", "receipt": result})
+			response := map[string]any{"status": phase + "-complete", "receipt": result}
+			if phase == "restore-inspect" {
+				executable, err := os.Executable()
+				if err != nil {
+					return err
+				}
+				response["next"] = map[string]any{"owner": "Noodle", "argv": []string{executable, "openshell", "progress-maintenance", "restore-continue", "--plan", ref.Path, "--expected-sha256", ref.SHA256, "--repair-file", result.Path, "--expected-repair-sha256", result.SHA256}}
+				response["effects"] = []string{}
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(response)
 		}}
 		child.Flags().StringVar(&plan, "plan", "", "Original immutable maintenance plan")
 		child.Flags().StringVar(&expected, "expected-sha256", "", "Reviewed exact plan digest")
 		_ = child.MarkFlagRequired("plan")
 		_ = child.MarkFlagRequired("expected-sha256")
+		if phase == "restore-inspect" {
+			child.Flags().StringVar(&historyPath, "host-history-file", "", "Independently retained original native Host responses")
+			child.Flags().StringVar(&historySHA, "expected-host-history-sha256", "", "Reviewed exact original Host history digest")
+			_ = child.MarkFlagRequired("host-history-file")
+			_ = child.MarkFlagRequired("expected-host-history-sha256")
+		}
+		if phase == "restore-continue" {
+			child.Flags().StringVar(&repairPath, "repair-file", "", "Original pre-publication inspection packet")
+			child.Flags().StringVar(&repairSHA, "expected-repair-sha256", "", "Reviewed exact repair packet digest")
+			_ = child.MarkFlagRequired("repair-file")
+			_ = child.MarkFlagRequired("expected-repair-sha256")
+		}
 		root.AddCommand(child)
 	}
 	return root

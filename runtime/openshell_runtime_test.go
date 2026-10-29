@@ -108,6 +108,11 @@ func progressFixtureArchive(t *testing.T, archive string) []byte {
 	if _, err := tw.Write([]byte(data)); err != nil {
 		t.Fatal(err)
 	}
+	if archive == "noodle-session.tar" {
+		if err := tw.WriteHeader(&tar.Header{Name: "codex/tmp/arg0-linux/codex-arg0fixture/apply_patch", Typeflag: tar.TypeSymlink, Linkname: "/sandbox/payload/codex/bin/codex", Mode: 0777}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := tw.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -361,9 +366,16 @@ func TestOpenShellRuntimeStopPreservesProgressAfterBothNativeExits(t *testing.T)
 	if err != nil || string(data) != "accepted output\n" {
 		t.Fatal("guest progress not restored to original worktree")
 	}
-	sessionData, err := os.ReadFile(filepath.Join(session.dir, "guest-session", "native.jsonl"))
-	if err != nil || string(sessionData) != "native session evidence\n" {
-		t.Fatal("guest session not retained")
+	archives, err := progressArchiveSources(t.Context(), session.dir, receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionData, err := os.ReadFile(archives["progress_archive_noodle-session.tar"].Path)
+	if err != nil || !bytes.Equal(sessionData, progressFixtureArchive(t, "noodle-session.tar")) {
+		t.Fatal("original native session archive was not retained exactly")
+	}
+	if _, err := os.Lstat(filepath.Join(session.dir, "guest-session")); !os.IsNotExist(err) {
+		t.Fatal("guest-local executable links were materialized on the Host")
 	}
 	writeReadbackJSON(t, filepath.Join(session.dir, "meta.json"), map[string]any{"session_id": h.ID(), "provider": "codex", "model": "fixture", "runtime": "openshell", "status": "exited", "alive": false})
 	binding := CompletedSessionBinding{OrderID: "interrupted", SessionID: h.ID(), Provider: "codex", Model: "fixture", WorktreePath: target}

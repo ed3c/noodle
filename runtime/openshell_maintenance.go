@@ -44,6 +44,18 @@ type ProgressMaintenanceCompletion struct {
 	Schema                                        int
 	Plan, Stop, OriginalDispatch, OriginalCustody SessionReadbackFileRef
 	ContextID, SessionID, OrderID, ProgressHead   string
+	RestoreRepair                                 *SessionReadbackFileRef
+}
+
+type ProgressMaintenanceRestoreRepair struct {
+	Schema                                         int
+	Plan, RestoreIntent, CustodyBefore, HostBefore SessionReadbackFileRef
+	HostHistory                                    SessionReadbackFileRef
+}
+
+type ProgressMaintenanceHostHistory struct {
+	Schema   int
+	Receipts []SessionReadbackFileRef
 }
 
 func maintenanceWrite(name string, value any) error {
