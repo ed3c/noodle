@@ -1,0 +1,21 @@
+{
+  "name": "pele",
+  "version": "1.9.0",
+  "source": "https://registry.npmjs.org/pele/-/pele-1.9.0.tgz",
+  "repository": "https://github.com/obsidianmd/pele",
+  "license": "MIT",
+  "files": [
+    {
+      "upstream_path": "dist/pele.js",
+      "path": "vendor/pele.mjs",
+      "sha256": "7c40a25eeaf4370fb56c03d9d8f6780051c9c39b6c6ca36d53239075117097f5",
+      "bytes": 701816
+    },
+    {
+      "upstream_path": "LICENSE",
+      "path": "vendor/LICENSE",
+      "sha256": "311bccc30de6f7b9cbfb64232bb0c911ccb2191abe316550813ae25b2c7925b9",
+      "bytes": 1934
+    }
+  ]
+}
