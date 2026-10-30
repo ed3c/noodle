@@ -18,7 +18,13 @@ import (
 
 func completedObservationFixture(t *testing.T) (*custodyGateway, *OpenShellCustody, OpenShellCustodyBinding, OpenShellIdentity) {
 	t.Helper()
-	g, b, security, open := custodyInProcessFixture(t)
+	g, c, b, id, _, _ := completedObservationFactoryFixture(t, custodyInProcessFixture)
+	return g, c, b, id
+}
+
+func completedObservationFactoryFixture(t *testing.T, factory custodyFactory) (*custodyGateway, *OpenShellCustody, OpenShellCustodyBinding, OpenShellIdentity, OpenShellTLS, custodyOpener) {
+	t.Helper()
+	g, b, security, open := factory(t)
 	g.mutate(func() {
 		g.afterCreate = func() {
 			for _, s := range g.sandboxes {
@@ -46,7 +52,7 @@ func completedObservationFixture(t *testing.T) (*custodyGateway, *OpenShellCusto
 		t.Fatal(err)
 	}
 	g.mutate(func() { g.sandboxes[name].Status.Phase = pb.SandboxPhase_SANDBOX_PHASE_STOPPED })
-	return g, c, b, identity
+	return g, c, b, identity, security, open
 }
 
 type observationBefore struct {

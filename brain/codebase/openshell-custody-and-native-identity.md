@@ -16,6 +16,26 @@
 
 See also [[codebase/owned-worker-exit-and-recovery-evidence]] and [[codebase/runtime-routing-owned-by-orders]].
 
+## Completed retirement after task archive removal
+
+`OpenShellRetirement.Acknowledged` plus `Completed` is the original durable
+retirement result. `observeRetirement` validates that ledger and performs a fresh
+native Get to confirm absence. It does not reread the old task's closure files
+after completion. Incomplete retirement still requires the original closure and
+all evidence. Neither a missing archive nor native absence supplies a missing ACK.
+
+`initialize` can recover the exact missing-file block of a completed retirement.
+Gateway reservation retains that block for this native readback instead of
+rejecting before its managed service starts. Reservation makes no native call
+and does not make the custody mutable.
+It first confirms fresh native absence and preserves the original blocked owner
+bytes, closure reference and recovery observation in a durable receipt. It then
+clears that local block and performs the normal full inventory audit. Unrelated
+blocks, unknown effects and reappeared native names still refuse new work.
+The archive remains missing; this recovery does not reconstruct it or certify
+historical task acceptance. Public mTLS reopen regressions are in
+`runtime/openshell_retired_archive_test.go`.
+
 ## Formal dispatch and artifact return
 
 - `OpenShellRuntime` now reuses the local Codex/Pi protocol parser through native streams. Its session completion still waits for the original VM stop acknowledgement and a fresh same-ID Stopped read.

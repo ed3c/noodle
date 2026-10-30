@@ -284,6 +284,9 @@ func (c *OpenShellCustody) initialize(ctx context.Context) (err error) {
 			c.initialized = false
 		}
 	}()
+	if err = c.recoverRetiredArchive(ctx); err != nil {
+		return err
+	}
 	if err = c.available(); err != nil {
 		return err
 	}

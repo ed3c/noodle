@@ -177,8 +177,10 @@ func (c *OpenShellCustody) observeRetirement(ctx context.Context, r *OpenShellCu
 	if v == nil {
 		return fmt.Errorf("retirement intent missing")
 	}
-	if _, err := readOpenShellClosure(v.Closure, r.Worker.Identity); err != nil {
-		return err
+	if !v.Completed {
+		if _, err := readOpenShellClosure(v.Closure, r.Worker.Identity); err != nil {
+			return err
+		}
 	}
 	if !v.Acknowledged {
 		return fmt.Errorf("native retirement acknowledgement unresolved; replay prohibited")

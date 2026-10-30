@@ -111,7 +111,7 @@ func NewOpenShellGateway(residents *admission.Residents, budget *admission.Budge
 		o.diagnostic = errors.Join(err, identityErr)
 		return o, o.diagnostic
 	}
-	if err == nil && c.state.Blocked != "" {
+	if err == nil && c.state.Blocked != "" && c.retiredArchiveBlock() == nil {
 		err = fmt.Errorf("openshell custody blocked: %s", c.state.Blocked)
 		o.diagnostic = err
 	}
