@@ -16,9 +16,12 @@ ReadRejectedAdmission 是已查證未接納後的恢復分支；其真實資料�
 同步讀回來源為 Soodles `5233a45e75570ee56ac594e475b777bd96e2b236`、
 NeoWeaver `7ace72b6101755601706347020da2662a293a836`。
 Noodle archive 反例對照 base `655edfc3ddb34de4c53b769c555c0f1f26df62e2`；
-custody 修正已提交為 `7f409e188585ce676c7b4f2f95e7dae9c0b9a9bd`，
-其 public mTLS 正反控制與完整 pnpm check 第二輪通過；Native rollout 仍待原入口。
-這個 commit 是該修正的 source sync，不是 live Host 已採用的證據。
+custody 修正為 `7f409e188585ce676c7b4f2f95e7dae9c0b9a9bd`，
+Native 試跑再揭露 not_started subtype 的 archive 依賴，已由
+`ded66f606c5d2a4a2f70d34069301c50ba667f0c` 補正。
+新增真實 Retire→移除 archive→重開的正反測試先失敗再通過，相關 race 與完整 pnpm check 第三輪通過。
+原 Host 已採用補正 binary；原 Soodles Owner 已採納其手動 context 為同一原任務的 runtime successor。
+這只證明本次 admission 恢復，原 Stage／acceptance／A 真實產品交付仍各自需要證據。
 上游 pstack 相關五檔與 cursor/plugins `4dd1d05818d19792e7cd6e818f1667f95f7e1dbe` bytes 相同。
 
 ## 已執行的控制
