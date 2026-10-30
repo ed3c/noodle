@@ -20,8 +20,33 @@ import (
 
 func retiredArchiveFixture(t *testing.T) (*custodyGateway, *OpenShellCustody, OpenShellCustodyBinding, OpenShellIdentity, OpenShellTLS, custodyOpener, SessionReadbackFileRef) {
 	t.Helper()
+	return retiredArchiveExecutionFixture(t, true)
+}
+
+func retiredArchiveExecutionFixture(t *testing.T, executed bool) (*custodyGateway, *OpenShellCustody, OpenShellCustodyBinding, OpenShellIdentity, OpenShellTLS, custodyOpener, SessionReadbackFileRef) {
+	t.Helper()
 	g, c, b, id, security, open := completedObservationFactoryFixture(t, custodyFixture)
 	closure := closureFixture(t, id)
+	if !executed {
+		c.state.Records[0].Exec = nil
+		c.state.Records[0].Worker.ExecResult = OpenShellExecResult{}
+		var value OpenShellClosure
+		if _, err := ReadSessionReadbackFile(closure.Path, &value); err != nil {
+			t.Fatal(err)
+		}
+		value.Outcome, value.ExecutionBasis = StatusFailed, openShellNotStarted
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(closure.Path, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		closure, err = ReadSessionReadbackFile(closure.Path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	c.client = retiringClient{OpenShellClient: c.client, delete: func(_ context.Context, _ *pb.DeleteSandboxRequest) (*pb.DeleteSandboxResponse, error) {
 		g.mutate(func() { delete(g.sandboxes, id.SandboxName) })
 		return &pb.DeleteSandboxResponse{SandboxId: id.Sandbox.SandboxID, Outcome: pb.DeletionOutcome_DELETION_OUTCOME_COMPLETED}, nil
@@ -272,5 +297,41 @@ func TestOpenShellRetiredArchiveRecoveryPreservesBlockOnUnknownNativeAbsence(t *
 	files, _ := filepath.Glob(filepath.Join(b.StateRoot, "retired-archive-recovery-*.json"))
 	if len(files) != 0 {
 		t.Fatal("unknown native absence published a recovery proof")
+	}
+}
+
+func TestOpenShellNotStartedRetirementRecoversRemovedArchive(t *testing.T) {
+	for _, completed := range []bool{true, false} {
+		t.Run(fmt.Sprint(completed), func(t *testing.T) {
+			_, c, b, _, security, open, closure := retiredArchiveExecutionFixture(t, false)
+			c.state.Records[0].Retirement.Completed = completed
+			if err := os.Remove(closure.Path); err != nil {
+				t.Fatal(err)
+			}
+			_, missing := os.Lstat(closure.Path)
+			_ = c.block(missing.Error())
+			if err := c.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := open(t.Context(), b, security, nil)
+			if reopened != nil {
+				defer reopened.Close()
+			}
+			if !completed {
+				if err == nil {
+					t.Fatal("pending diagnostic retirement lost its original archive requirement")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("completed not-started retirement depends on removed archive: %v", err)
+			}
+			if _, err := reopened.Create(t.Context(), OpenShellTask{"next", "next", "next"}, &pb.SandboxSpec{}); err != nil {
+				t.Fatal(err)
+			}
+			if reopened.Snapshot().Records[0].Exec != nil {
+				t.Fatal("recovery invented execution")
+			}
+		})
 	}
 }

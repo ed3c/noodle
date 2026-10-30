@@ -59,6 +59,9 @@ func validateNotStartedRetirement(r OpenShellCustodyRecord) error {
 	if !reflect.DeepEqual(r.Retirement.Observation, notStartedObservation(r)) {
 		return fmt.Errorf("not-started retirement observation differs")
 	}
+	if r.Retirement.Completed && r.Retirement.Acknowledged {
+		return nil
+	}
 	closure, err := readOpenShellClosure(r.Retirement.Closure, r.Worker.Identity)
 	if err != nil {
 		return err
