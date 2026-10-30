@@ -83,8 +83,8 @@ If you want skills to be scheduled in a certain order, you specify that in the `
 ## Global pstack for Codex
 
 Keep one complete pstack package at `~/.local/share/pstack`. This host uses
-[pstack 0.15.5](https://github.com/cursor/plugins/tree/2eb7ed4613cfc8f098dfe464a23680ea44d84c5e/pstack).
-The package includes all 47 skills and their supporting files. Store the pinned
+[pstack 0.15.36](https://github.com/cursor/plugins/tree/c742dd61706fbacc1b95f1a20b7b988cf096ce6c/pstack).
+The installed package exposes 58 skills and their supporting files. Store the pinned
 revision, file hashes and executable modes in `~/.local/share/pstack-source.json`.
 Do not vendor another copy into the repository.
 
@@ -117,3 +117,29 @@ Update the canonical package and source manifest together, preserving the
 symlink targets. Remove older pstack copies from `~/.codex/skills` only after
 checking for local edits. Verify Codex discovery and Noodle resolution after an
 update; neither result proves that every bundled workflow can run on the host.
+
+## Poteto diagram capability
+
+Noodle Poteto profiles include Pele rendering as an available capability; they do
+not draw a diagram on every iteration. The project `pele-render` support skill
+ships unmodified Pele 1.9.0 and its license, with an offline Node CLI for Mermaid
+to SVG and custom CSS. See [the renderer](../../.agents/skills/pele-render/SKILL.md).
+
+For a Soodles-admitted worker, explicitly include the selected Poteto skill and
+the applicable `statechart`, `create-formal-verification-skill`, and `pele-render`
+support packages in the original request. The producer freezes the packages and
+checks peer links against the actual guest aliases. Registry discovery alone does
+not prove the files reached a worker. Do not rewrite frozen task instructions.
+
+Process execution uses the Host's selected Node. OpenShell uses the platform Node
+from its original payload mapping; a Host path is not a guest path. The retained
+NeoWeaver r3 payload already includes Linux aarch64 `node/bin/node`, which is
+transported as `/sandbox/payload/node/bin/node`. Use the actual profile's mapping
+for another runtime. Do not download npm packages during worker execution or
+replace Pele with another renderer.
+
+The project [loop verification skill](../../.agents/skills/verify-neo-loop-statechart/SKILL.md)
+keeps the finite model, source map, counterexamples and the limits of the result.
+TLC checks the supplied TLA+ model. Pele draws its Mermaid output. Neither a
+registry entry nor a local SVG certifies native worker consumption, product
+acceptance or a measured improvement in iteration speed.
