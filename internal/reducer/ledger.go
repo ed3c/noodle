@@ -21,6 +21,30 @@ func NewEffectLedger() *EffectLedger {
 	}
 }
 
+// RestoreEffectLedger reads saved history without replaying lifecycle transitions.
+func RestoreEffectLedger(records []EffectLedgerRecord) (*EffectLedger, error) {
+	ledger := NewEffectLedger()
+	for _, record := range records {
+		if record.EffectID == "" || record.EffectID != record.Effect.EffectID {
+			return nil, fmt.Errorf("saved effect identity mismatch: %q", record.EffectID)
+		}
+		if _, exists := ledger.records[record.EffectID]; exists {
+			return nil, fmt.Errorf("duplicate saved effect: %q", record.EffectID)
+		}
+		switch record.Status {
+		case EffectLedgerPending, EffectLedgerRunning, EffectLedgerDone, EffectLedgerFailed:
+		default:
+			return nil, fmt.Errorf("unsupported saved effect status %q for %q", record.Status, record.EffectID)
+		}
+		if record.Result != nil && record.Result.EffectID != record.EffectID {
+			return nil, fmt.Errorf("saved effect result identity mismatch: %q", record.EffectID)
+		}
+		ledger.records[record.EffectID] = cloneLedgerRecord(record)
+		ledger.order = append(ledger.order, record.EffectID)
+	}
+	return ledger, nil
+}
+
 // Record adds a new effect as pending. Existing effect IDs are preserved.
 func (l *EffectLedger) Record(effect Effect) {
 	l.mu.Lock()

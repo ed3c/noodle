@@ -69,6 +69,14 @@ func (l *Loop) parkPendingReviewAttempt(cook *cookHandle, reason string, status 
 		return err
 	}
 	payload := l.reviewPayloadForCook(cook, reason)
+	target, err := l.prepareReturnHandoff(cook)
+	if err != nil {
+		return err
+	}
+	if target != nil {
+		payload["return_handoff"] = &state.ReturnHandoffIntent{
+			BindingPath: target.Binding.Path, BindingSHA256: target.Binding.SHA256, Status: "unknown"}
+	}
 	payload["attempt_status"] = status
 	if err := l.emitEventChecked(ingest.EventStageReviewParked, payload); err != nil {
 		return err
@@ -76,7 +84,23 @@ func (l *Loop) parkPendingReviewAttempt(cook *cookHandle, reason string, status 
 	if err := l.mirrorLegacyOrderFromCanonical(cook.orderID); err != nil {
 		return err
 	}
-	return l.syncPendingReviewProjection()
+	if err := l.syncPendingReviewProjection(); err != nil {
+		return err
+	}
+	if target != nil {
+		packet := returnPacket{Operation: "worker_return", Schema: 1, Binding: target.Binding,
+			EventID: l.canonical.PendingReviews[cook.orderID].ReturnHandoff.EventID,
+			Type:    "stage_review_parked", OrderID: cook.orderID, StageIndex: cook.stageIndex,
+			AttemptID: payload["attempt_id"].(string), SessionID: payload["session_id"].(string),
+			HostInstanceID: l.deps.ReturnHostInstance, Producer: target.Producer}
+		// A single bounded attempt after the checkpoint. Restart never resends unknown intent.
+		go func() {
+			if err := sendReturnHandoff(target.Endpoint, packet); err != nil {
+				l.logger.Warn("return handoff unknown; original owner readback required", "error", err)
+			}
+		}()
+	}
+	return nil
 }
 
 func (l *Loop) writePendingReview() error {

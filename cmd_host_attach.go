@@ -147,7 +147,7 @@ func (h *noodleHost) attachContinuation(ctx context.Context, req hostRequest, co
 		return failBeforeRuntime(err)
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	deps := loop.Dependencies{ModeOverride: state.RunMode(req.Mode), Execution: e, Admission: h.budget, AdmissionContext: id, CleanupCompleted: req.CleanupCompleted, HostContinuation: continuation, DispatchBlocked: req.DispatchBlocked}
+	deps := loop.Dependencies{ReturnHostInstance: h.instanceID, ModeOverride: state.RunMode(req.Mode), Execution: e, Admission: h.budget, AdmissionContext: id, CleanupCompleted: req.CleanupCompleted, HostContinuation: continuation, DispatchBlocked: req.DispatchBlocked}
 	if cfg.Runtime.OpenShell.Profile != "" {
 		deps.OpenShellGateway, deps.OpenShellProfile = h.openShell, selectedOpenShell
 	}

@@ -60,6 +60,7 @@ type AgentsConfig struct {
 
 // RuntimeConfig controls the default runtime for spawned cook sessions.
 type RuntimeConfig struct {
+	ReturnHandoff  RuntimeSource   `toml:"return_handoff"`
 	AdmittedOrders []string        `toml:"admitted_orders"`
 	Default        string          `toml:"default"` // runtime kind, defaults to process
 	Process        ProcessConfig   `toml:"process"`
