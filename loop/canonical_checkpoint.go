@@ -58,7 +58,10 @@ func (l *Loop) loadCanonicalSnapshot() (bool, error) {
 	l.canonical = snapshot.State.Clone()
 	l.orderRevision = snapshot.OrderRevision
 	l.checkpointOrderIDs = nonScheduleOrderIDs(l.canonical)
-	l.effectLedger = restoreEffectLedger(snapshot.EffectLedger)
+	l.effectLedger, err = reducer.RestoreEffectLedger(snapshot.EffectLedger)
+	if err != nil {
+		return false, fmt.Errorf("restore canonical effects: %w", err)
+	}
 
 	lastEventID, err := parseLastEventID(l.canonical.LastEventID)
 	if err != nil {
@@ -257,39 +260,6 @@ func legacyStageStatusToCanonical(status orderx.StageStatus) state.StageLifecycl
 	default:
 		return state.StagePending
 	}
-}
-
-func restoreEffectLedger(records []reducer.EffectLedgerRecord) *reducer.EffectLedger {
-	ledger := reducer.NewEffectLedger()
-	for _, rec := range records {
-		ledger.Record(rec.Effect)
-
-		switch rec.Status {
-		case reducer.EffectLedgerPending:
-			continue
-		case reducer.EffectLedgerRunning:
-			_ = ledger.MarkRunning(rec.EffectID)
-		case reducer.EffectLedgerDone:
-			if rec.Result != nil && rec.Result.Status == reducer.EffectResultCancelled && rec.Attempts == 0 {
-				_ = ledger.CancelPending(rec.EffectID, rec.Result.Error, rec.Result.Timestamp)
-				continue
-			}
-			_ = ledger.MarkRunning(rec.EffectID)
-			result := rec.Result
-			if result == nil {
-				result = &reducer.EffectResult{EffectID: rec.EffectID, Status: reducer.EffectResultCompleted}
-			}
-			_ = ledger.MarkDone(rec.EffectID, *result)
-		case reducer.EffectLedgerFailed:
-			_ = ledger.MarkRunning(rec.EffectID)
-			result := rec.Result
-			if result == nil {
-				result = &reducer.EffectResult{EffectID: rec.EffectID, Status: reducer.EffectResultFailed}
-			}
-			_ = ledger.MarkFailed(rec.EffectID, *result)
-		}
-	}
-	return ledger
 }
 
 func parseLastEventID(raw string) (uint64, error) {

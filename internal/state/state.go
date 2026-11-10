@@ -143,20 +143,28 @@ type MergeRecoveryNode struct {
 }
 
 // PendingReviewNode records a stage parked for human review.
+type ReturnHandoffIntent struct {
+	BindingPath   string `json:"binding_path"`
+	BindingSHA256 string `json:"binding_sha256"`
+	EventID       string `json:"event_id"`
+	Status        string `json:"status"`
+}
+
 type PendingReviewNode struct {
-	OrderID      string   `json:"order_id"`
-	StageIndex   int      `json:"stage_index"`
-	TaskKey      string   `json:"task_key"`
-	Prompt       string   `json:"prompt"`
-	Provider     string   `json:"provider"`
-	Model        string   `json:"model"`
-	Runtime      string   `json:"runtime"`
-	Skill        string   `json:"skill"`
-	Plan         []string `json:"plan"`
-	WorktreeName string   `json:"worktree_name"`
-	WorktreePath string   `json:"worktree_path"`
-	SessionID    string   `json:"session_id"`
-	Reason       string   `json:"reason"`
+	ReturnHandoff *ReturnHandoffIntent `json:"return_handoff,omitempty"`
+	OrderID       string               `json:"order_id"`
+	StageIndex    int                  `json:"stage_index"`
+	TaskKey       string               `json:"task_key"`
+	Prompt        string               `json:"prompt"`
+	Provider      string               `json:"provider"`
+	Model         string               `json:"model"`
+	Runtime       string               `json:"runtime"`
+	Skill         string               `json:"skill"`
+	Plan          []string             `json:"plan"`
+	WorktreeName  string               `json:"worktree_name"`
+	WorktreePath  string               `json:"worktree_path"`
+	SessionID     string               `json:"session_id"`
+	Reason        string               `json:"reason"`
 }
 
 // IsTerminal reports whether the order status is terminal
@@ -204,6 +212,10 @@ func (s State) Clone() State {
 	if s.PendingReviews != nil {
 		reviewsCopy := make(map[string]PendingReviewNode, len(s.PendingReviews))
 		for orderID, review := range s.PendingReviews {
+			if review.ReturnHandoff != nil {
+				intent := *review.ReturnHandoff
+				review.ReturnHandoff = &intent
+			}
 			reviewCopy := review
 			if review.Plan != nil {
 				planCopy := make([]string, len(review.Plan))

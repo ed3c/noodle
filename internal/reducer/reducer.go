@@ -65,21 +65,22 @@ type orderStagePayload struct {
 }
 
 type reviewPayload struct {
-	AttemptStatus state.AttemptStatus `json:"attempt_status"`
-	OrderID       string              `json:"order_id"`
-	StageIndex    int                 `json:"stage_index"`
-	AttemptID     string              `json:"attempt_id"`
-	SessionID     string              `json:"session_id"`
-	WorktreeName  string              `json:"worktree_name"`
-	WorktreePath  string              `json:"worktree_path"`
-	Reason        string              `json:"reason"`
-	TaskKey       string              `json:"task_key"`
-	Prompt        string              `json:"prompt"`
-	Provider      string              `json:"provider"`
-	Model         string              `json:"model"`
-	Runtime       string              `json:"runtime"`
-	Skill         string              `json:"skill"`
-	Plan          []string            `json:"plan"`
+	ReturnHandoff *state.ReturnHandoffIntent `json:"return_handoff,omitempty"`
+	AttemptStatus state.AttemptStatus        `json:"attempt_status"`
+	OrderID       string                     `json:"order_id"`
+	StageIndex    int                        `json:"stage_index"`
+	AttemptID     string                     `json:"attempt_id"`
+	SessionID     string                     `json:"session_id"`
+	WorktreeName  string                     `json:"worktree_name"`
+	WorktreePath  string                     `json:"worktree_path"`
+	Reason        string                     `json:"reason"`
+	TaskKey       string                     `json:"task_key"`
+	Prompt        string                     `json:"prompt"`
+	Provider      string                     `json:"provider"`
+	Model         string                     `json:"model"`
+	Runtime       string                     `json:"runtime"`
+	Skill         string                     `json:"skill"`
+	Plan          []string                   `json:"plan"`
 }
 
 type orderPayload struct {
@@ -619,6 +620,10 @@ func reduceStageReviewParked(current state.State, event ingest.StateEvent) (stat
 		return current, nil, nil
 	}
 
+	if review, ok := current.PendingReviews[payload.OrderID]; ok && review.ReturnHandoff != nil {
+		return current, nil, fmt.Errorf("return handoff already unknown; original Owner readback required")
+	}
+
 	next := current.Clone()
 	if next.PendingReviews == nil {
 		next.PendingReviews = make(map[string]state.PendingReviewNode)
@@ -632,20 +637,29 @@ func reduceStageReviewParked(current state.State, event ingest.StateEvent) (stat
 	recordReviewAttempt(&stage, payload, event)
 	order.Stages[payload.StageIndex] = stage
 	next.Orders[payload.OrderID] = order
+	if payload.ReturnHandoff != nil {
+		if payload.ReturnHandoff.BindingPath == "" || len(payload.ReturnHandoff.BindingSHA256) != 64 || payload.ReturnHandoff.Status != "unknown" {
+			return current, nil, fmt.Errorf("invalid return handoff intent")
+		}
+		intent := *payload.ReturnHandoff
+		intent.EventID = strconv.FormatUint(uint64(event.ID), 10)
+		payload.ReturnHandoff = &intent
+	}
 	next.PendingReviews[payload.OrderID] = state.PendingReviewNode{
-		OrderID:      payload.OrderID,
-		StageIndex:   payload.StageIndex,
-		TaskKey:      strings.TrimSpace(payload.TaskKey),
-		Prompt:       strings.TrimSpace(payload.Prompt),
-		Provider:     strings.TrimSpace(payload.Provider),
-		Model:        strings.TrimSpace(payload.Model),
-		Runtime:      strings.TrimSpace(payload.Runtime),
-		Skill:        strings.TrimSpace(payload.Skill),
-		Plan:         slices.Clone(payload.Plan),
-		WorktreeName: strings.TrimSpace(payload.WorktreeName),
-		WorktreePath: strings.TrimSpace(payload.WorktreePath),
-		SessionID:    strings.TrimSpace(payload.SessionID),
-		Reason:       strings.TrimSpace(payload.Reason),
+		ReturnHandoff: payload.ReturnHandoff,
+		OrderID:       payload.OrderID,
+		StageIndex:    payload.StageIndex,
+		TaskKey:       strings.TrimSpace(payload.TaskKey),
+		Prompt:        strings.TrimSpace(payload.Prompt),
+		Provider:      strings.TrimSpace(payload.Provider),
+		Model:         strings.TrimSpace(payload.Model),
+		Runtime:       strings.TrimSpace(payload.Runtime),
+		Skill:         strings.TrimSpace(payload.Skill),
+		Plan:          slices.Clone(payload.Plan),
+		WorktreeName:  strings.TrimSpace(payload.WorktreeName),
+		WorktreePath:  strings.TrimSpace(payload.WorktreePath),
+		SessionID:     strings.TrimSpace(payload.SessionID),
+		Reason:        strings.TrimSpace(payload.Reason),
 	}
 	next.LastEventID = strconv.FormatUint(uint64(event.ID), 10)
 	return next, nil, nil
