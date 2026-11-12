@@ -9,11 +9,7 @@ import (
 )
 
 func newHostBudget() (*admission.Budget, error) {
-	limit, err := hostSwapUsedLimit()
-	if err != nil {
-		return nil, err
-	}
-	return admission.NewBudgetWithSwapUsedLimit(0, limit), nil
+	return admission.NewBudget(admission.DefaultWorkerLimit), nil
 }
 
 func hostGenerationFence(dir string) (*lockfile.Lock, error) {

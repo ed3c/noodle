@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"github.com/poteto/noodle/config"
@@ -58,7 +59,6 @@ func handoverSharedReadback(ctx context.Context, root string, releaseSchema int)
 		Shutdown   *struct{ Requested *bool }
 		Resources  struct {
 			Policy string                 `json:"worker_admission_policy"`
-			Limit  uint64                 `json:"swap_used_limit_bytes"`
 			Quota  *struct{ Maximum int } `json:"shared_quota"`
 		}
 	}
@@ -69,8 +69,8 @@ func handoverSharedReadback(ctx context.Context, root string, releaseSchema int)
 		Instance string `json:"host_instance_id"`
 		Rolling  int    `json:"rolling_host_version"`
 	}
-	if json.Unmarshal(raw, &row) != nil || json.Unmarshal(raw, &identity) != nil || identity.Protocol != hostProtocol || identity.Root != root || !validPoolID(identity.Instance) || identity.Rolling != 1 || row.Shutdown == nil || row.Shutdown.Requested == nil || *row.Shutdown.Requested || row.Resources.Policy != admission.WorkerAdmissionPolicy || row.Resources.Limit != admission.DefaultSwapUsedLimit || row.Resources.Quota == nil || row.Resources.Quota.Maximum != 4 {
-		return "", errors.New("gateway handover target is not the existing shared 15 GB Swap owner")
+	if json.Unmarshal(raw, &row) != nil || json.Unmarshal(raw, &identity) != nil || identity.Protocol != hostProtocol || identity.Root != root || !validPoolID(identity.Instance) || identity.Rolling != 1 || row.Shutdown == nil || row.Shutdown.Requested == nil || *row.Shutdown.Requested || row.Resources.Policy != admission.WorkerAdmissionPolicy || row.Resources.Quota == nil || row.Resources.Quota.Maximum != admission.DefaultWorkerLimit {
+		return "", errors.New("gateway handover target Host policy or identity differs")
 	}
 	ref, err := loopruntime.ReadSessionReadbackFile(row.BinaryPath, nil)
 	if err != nil || ref.SHA256 != row.BinarySHA {
@@ -78,11 +78,13 @@ func handoverSharedReadback(ctx context.Context, root string, releaseSchema int)
 	}
 	capsRaw, err := hostCapabilityCommand(ctx, ref.Path).Output()
 	var caps struct {
-		Custody  int `json:"openshell_custody_version"`
-		Handover int `json:"gateway_host_handover"`
-		Release  int `json:"gateway_custody_release"`
+		Custody         int   `json:"openshell_custody_version"`
+		CustodyVersions []int `json:"openshell_custody_versions"`
+		Handover        int   `json:"gateway_host_handover"`
+		Release         int   `json:"gateway_custody_release"`
 	}
-	if err != nil || json.Unmarshal(capsRaw, &caps) != nil || caps.Custody != 4 || caps.Handover != 1 {
+	if err != nil || json.Unmarshal(capsRaw, &caps) != nil || caps.Handover != 1 ||
+		(caps.Custody != 4 && !(caps.Custody == 5 && slices.Contains(caps.CustodyVersions, 4) && slices.Contains(caps.CustodyVersions, 5))) {
 		return "", errors.New("shared OpenShell Host requires the custody v4 compatible deployment")
 	}
 	if releaseSchema >= 2 && caps.Release < releaseSchema {
@@ -251,7 +253,7 @@ func planGatewayHandoverWithRecovery(ctx context.Context, root, shared, target, 
 	if p.Handover.Profile.Path == "" {
 		p.Blockers = append(p.Blockers, "original gateway profile FileRef unavailable; no profile is reconstructed")
 	} else {
-		p.Handover.Custody, err = loopruntime.ReadSessionReadbackFile(filepath.Join(p.Handover.Binding.StateRoot, "owner.json"), nil)
+		p.Handover.Custody, err = readLegacyGatewayHandoverCustody(filepath.Join(p.Handover.Binding.StateRoot, "owner.json"))
 		if err != nil {
 			p.Blockers = append(p.Blockers, err.Error())
 		}
@@ -315,6 +317,18 @@ func validateGatewayHandoverPlan(p hostMaintenancePlan) error {
 	return nil
 }
 
+func readLegacyGatewayHandoverCustody(filename string) (loopruntime.SessionReadbackFileRef, error) {
+	var state loopruntime.OpenShellCustodyState
+	ref, err := loopruntime.ReadSessionReadbackFile(filename, &state)
+	if err != nil {
+		return ref, err
+	}
+	if state.Version != 3 || len(state.Credentials) != 0 {
+		return ref, errors.New("legacy gateway handover requires credential-free custody v3; retain original owner")
+	}
+	return ref, nil
+}
+
 func verifyGatewayHandoverSources(ctx context.Context, p hostMaintenancePlan) error {
 	if err := verifyRollingTarget(ctx, p.Target, p.TargetSHA); err != nil {
 		return err
@@ -327,6 +341,13 @@ func verifyGatewayHandoverSources(ctx context.Context, p hostMaintenancePlan) er
 		if err != nil || current != ref {
 			return errors.New("gateway handover source changed")
 		}
+	}
+	current, err := readLegacyGatewayHandoverCustody(p.Handover.Custody.Path)
+	if err != nil {
+		return err
+	}
+	if current != p.Handover.Custody {
+		return errors.New("gateway handover custody source changed")
 	}
 	for name, digest := range p.Files {
 		raw, err := os.ReadFile(filepath.Join(p.Root, name))

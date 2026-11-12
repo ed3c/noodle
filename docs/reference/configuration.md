@@ -69,7 +69,7 @@ Controls parallel execution limits.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `max_concurrency` | int | `4` | Maximum number of concurrent agent sessions |
+| `max_concurrency` | int | `9` | Maximum number of concurrent agent sessions |
 
 ```toml
 [concurrency]
@@ -154,7 +154,7 @@ Local process runtime. Runs agent CLIs as child processes on the host machine.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `max_concurrent` | int | `4` | Maximum concurrent process sessions |
+| `max_concurrent` | int | `9` | Maximum concurrent process sessions |
 | `rebuild_environment` | string[] | `[]` | Task environment names whose values must match when a released Host context is rebuilt. Only value digests are saved. |
 | `credential_environment` | string[] | `[]` | Credential environment source names required during context rebuilding. Values are obtained again and never saved in the context recipe. |
 

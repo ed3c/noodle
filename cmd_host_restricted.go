@@ -562,7 +562,7 @@ func restrictedPublicationObserved(j restrictedMaintenance) bool {
 		Binary    string             `json:"binary_sha256"`
 		Resources admission.Snapshot `json:"resources"`
 	}
-	return json.Unmarshal(raw, &observed) == nil && observed.Instance == g.ID && observed.PID == g.Process.PID && observed.Binary == j.Plan.TargetSHA && observed.Resources.AdmissionPolicy == admission.WorkerAdmissionPolicy && observed.Resources.SwapUsedLimit == admission.DefaultSwapUsedLimit
+	return json.Unmarshal(raw, &observed) == nil && observed.Instance == g.ID && observed.PID == g.Process.PID && observed.Binary == j.Plan.TargetSHA && observed.Resources.AdmissionPolicy == admission.WorkerAdmissionPolicy && observed.Resources.Maximum == admission.DefaultWorkerLimit
 }
 
 func captureRestrictedTasks(ctx context.Context, dir string, j *restrictedMaintenance, source hostGeneration) (bool, error) {
@@ -852,7 +852,7 @@ func verifyRestrictedTarget(ctx context.Context, j restrictedMaintenance) error 
 	if err = json.Unmarshal(raw, &observed); err != nil {
 		return err
 	}
-	if observed.Instance != j.Generation.ID || observed.PID != j.Generation.Process.PID || observed.Binary != j.Plan.TargetSHA || observed.Contexts != 0 || observed.Resources.AdmissionPolicy != admission.WorkerAdmissionPolicy || observed.Resources.SwapUsedLimit != admission.DefaultSwapUsedLimit || observed.Resources.Allocations != 0 {
+	if observed.Instance != j.Generation.ID || observed.PID != j.Generation.Process.PID || observed.Binary != j.Plan.TargetSHA || observed.Contexts != 0 || observed.Resources.AdmissionPolicy != admission.WorkerAdmissionPolicy || observed.Resources.Maximum != admission.DefaultWorkerLimit || observed.Resources.Allocations != 0 {
 		return errors.New("new Host policy, ownership or zero-dispatch readback differs")
 	}
 	if _, err = legacyProcessIdentity(ctx, observed.PID, j.Plan.Target); err != nil {

@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/poteto/noodle/config"
+	"github.com/poteto/noodle/internal/admission"
 	"github.com/poteto/noodle/internal/lockfile"
 	"github.com/poteto/noodle/loop"
 )
@@ -439,7 +440,12 @@ func TestHostCapabilitiesPreservesProtocolContract(t *testing.T) {
 	if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
 		wantRolling = 1
 	}
-	if value["existing_instance_admission"] != float64(1) || value["openshell_warning_grant"] != float64(1) || value["task_warning_grant"] != float64(1) || value["safe_host_switch"] != float64(0) || value["rolling_host_version"] != wantRolling || value["shared_worker_quota"] != wantRolling || value["codex_native_runtime"] != wantForce || value["schema"] != float64(1) || value["protocol"] != "noodle-host-v1" || value["resident_request_binding"] != float64(1) || value["completed_context_cleanup"] != float64(1) || value["resident_force_after_grace"] != wantForce || value["local_task_interrupt_custody"] != float64(1) || value["external_task_config"] != float64(1) {
+	versions, _ := value["openshell_custody_versions"].([]any)
+	if value["openshell_custody_version"] != float64(5) || value["openshell_credential_delivery"] != float64(1) ||
+		len(versions) != 2 || versions[0] != float64(4) || versions[1] != float64(5) {
+		t.Fatalf("credential custody capability missing: %v", value)
+	}
+	if value["existing_instance_admission"] != float64(1) || value["openshell_warning_grant"] != nil || value["task_warning_grant"] != nil || value["worker_admission_policy"] != admission.WorkerAdmissionPolicy || value["safe_host_switch"] != float64(0) || value["rolling_host_version"] != wantRolling || value["shared_worker_quota"] != wantRolling || value["codex_native_runtime"] != wantForce || value["schema"] != float64(1) || value["protocol"] != "noodle-host-v1" || value["resident_request_binding"] != float64(1) || value["completed_context_cleanup"] != float64(1) || value["resident_force_after_grace"] != wantForce || value["local_task_interrupt_custody"] != float64(1) || value["external_task_config"] != float64(1) {
 		t.Fatalf("host protocol changed: %v", value)
 	}
 }

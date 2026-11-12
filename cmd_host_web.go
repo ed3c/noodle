@@ -62,8 +62,7 @@ func (h *noodleHost) viewResources() []loopview.Resource {
 			rate = fmt.Sprintf("%g MiB/s", *b.SwapoutRate/(1<<20))
 		}
 		age := fmt.Sprintf("%.1f s", b.SampleAgeSeconds)
-		switch b.Reason {
-		case "awaiting_sample", "sample_failed", "hardware_unknown":
+		if b.SampleAgeSeconds < 0 {
 			age = "unknown"
 		}
 		sampleError := "none reported"

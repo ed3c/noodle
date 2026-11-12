@@ -25,6 +25,7 @@ import (
 )
 
 const openShellCustodyVersion = 4
+const openShellCredentialCustodyVersion = 5
 
 // OpenShellCustodyBinding identifies one dedicated gateway deployment. The
 // operator must assign exactly one state root per gateway. Its advisory local
@@ -83,25 +84,28 @@ type OpenShellCustodyState struct {
 	Blocked         string
 	Records         []OpenShellCustodyRecord
 	PendingRetained []OpenShellRetainedSandbox
+	Credentials     []OpenShellCredentialDelivery `json:",omitempty"`
 }
 
 // OpenShellCustody serializes local admission and native lifecycle operations.
 // Close releases only local streams/lock, and never stops remote compute.
 type OpenShellCustody struct {
-	ctx             context.Context
-	cancel          context.CancelFunc
-	mu              sync.Mutex
-	state           OpenShellCustodyState
-	lock            *lockfile.Lock
-	conn            *grpc.ClientConn
-	client          pb.OpenShellClient
-	fault           error
-	closed          bool
-	quiesced        bool
-	initialized     bool
-	managed         bool // immutable after construction; only gateway owner may close
-	retryReadback   bool
-	residentRunning func() error
+	ctx                     context.Context
+	cancel                  context.CancelFunc
+	mu                      sync.Mutex
+	state                   OpenShellCustodyState
+	lock                    *lockfile.Lock
+	conn                    *grpc.ClientConn
+	client                  pb.OpenShellClient
+	fault                   error
+	closed                  bool
+	quiesced                bool
+	initialized             bool
+	managed                 bool // immutable after construction; only gateway owner may close
+	retryReadback           bool
+	residentRunning         func() error
+	credentialSourceBinding string // only the source-capable gateway reservation sets this
+	credentialInFlight      int    // local RPC lifetime, not a durable effect receipt
 }
 
 // OpenOpenShellCustody returns a non-nil owner on an inventory/binding block.
@@ -134,6 +138,10 @@ func openOpenShellCustody(ctx context.Context, binding OpenShellCustodyBinding, 
 
 // Reserve local control and the retained source before any native RPC.
 func reserveOpenShellCustody(binding OpenShellCustodyBinding, conn *grpc.ClientConn, retained []OpenShellRetainedSandbox, controlRoot string) (*OpenShellCustody, error) {
+	return reserveOpenShellCustodyWithCredentials(binding, conn, retained, controlRoot, nil)
+}
+
+func reserveOpenShellCustodyWithCredentials(binding OpenShellCustodyBinding, conn *grpc.ClientConn, retained []OpenShellRetainedSandbox, controlRoot string, source *OpenShellCredentialSource) (*OpenShellCustody, error) {
 	fail := func(err error) (*OpenShellCustody, error) { _ = conn.Close(); return nil, err }
 	if !filepath.IsAbs(controlRoot) {
 		return fail(fmt.Errorf("openshell Host control root is not absolute"))
@@ -167,13 +175,16 @@ func reserveOpenShellCustody(binding OpenShellCustodyBinding, conn *grpc.ClientC
 	}
 	ownerCtx, cancel := context.WithCancel(context.Background())
 	c := &OpenShellCustody{lock: lock, conn: conn, client: pb.NewOpenShellClient(conn), ctx: ownerCtx, cancel: cancel}
+	if source != nil {
+		c.credentialSourceBinding = source.BindingSHA256
+	}
 	data, err := os.ReadFile(filepath.Join(root, "owner.json"))
 	if err == nil {
 		if err := json.Unmarshal(data, &c.state); err != nil {
 			_ = c.Close()
 			return nil, fmt.Errorf("decode openshell custody: %w", err)
 		}
-		if c.state.Version != openShellCustodyVersion {
+		if !openShellCustodySupportsProfile(c.state, OpenShellGatewaySpec{CredentialSource: source}) {
 			_ = c.Close()
 			return nil, fmt.Errorf("unsupported openshell custody version")
 		}
@@ -255,6 +266,12 @@ func sameOpenShellRetained(state OpenShellCustodyState, retained []OpenShellReta
 // Validate only local ledger structure here; native identity is audited after
 // the original child starts. Corrupt receipts never justify a service spawn.
 func (c *OpenShellCustody) validateLedger() error {
+	if c.state.Version != openShellCredentialCustodyVersion && len(c.state.Credentials) != 0 {
+		return fmt.Errorf("openshell credential custody schema was downgraded")
+	}
+	if err := validateOpenShellCredentialLedger(c.state.Credentials); err != nil {
+		return err
+	}
 	names, ids := map[string]bool{}, map[string]bool{}
 	for _, r := range c.state.Records {
 		if r.Name == "" || names[r.Name] {
@@ -411,6 +428,10 @@ func (c *OpenShellCustody) available() error {
 func (c *OpenShellCustody) Snapshot() OpenShellCustodyState {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.snapshotLocked()
+}
+
+func (c *OpenShellCustody) snapshotLocked() OpenShellCustodyState {
 	state := c.state
 	if state.Handover != nil {
 		ref := *state.Handover
@@ -418,6 +439,7 @@ func (c *OpenShellCustody) Snapshot() OpenShellCustodyState {
 	}
 	state.Records = slices.Clone(state.Records)
 	state.PendingRetained = slices.Clone(state.PendingRetained)
+	state.Credentials = cloneOpenShellCredentialDeliveries(state.Credentials)
 	for i := range state.Records {
 		r := &state.Records[i]
 		r.Spec = slices.Clone(r.Spec)

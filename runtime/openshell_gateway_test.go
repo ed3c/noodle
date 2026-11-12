@@ -680,22 +680,21 @@ func TestManagedOpenShellGatewayQuotaAndRetainedInitialization(t *testing.T) {
 				p.Release()
 			}
 		}()
-		if _, err := o.Acquire(t.Context(), "a"); err == nil {
-			t.Fatal("quota refusal bypassed")
-		}
-		f.spawns(t, 0)
-		rows, err := f.residents.Snapshot()
-		if err != nil || len(rows) != 0 {
-			t.Fatalf("quota refusal spawned: %+v %v", rows, err)
-		}
-		for _, p := range permits {
-			p.Release()
-		}
-		observeOpenShellFixtureBudget(f.budget)
 		if _, err := o.Acquire(t.Context(), "a"); err != nil {
-			t.Fatal(err)
+			t.Fatalf("worker quota blocked the independently owned gateway: %v", err)
 		}
 		f.spawns(t, 1)
+		rows, err := f.residents.Snapshot()
+		if err != nil || len(rows) != 1 || rows[0].PID != o.resident.PID {
+			t.Fatalf("gateway ownership was not retained: %+v %v", rows, err)
+		}
+		if snapshot := f.budget.Snapshot(); snapshot.Active != 3 || snapshot.Residents != 1 || snapshot.Allocations != 4 {
+			t.Fatalf("resident changed the worker quota: %+v", snapshot)
+		}
+		if permit, err := f.budget.TryAcquire("a"); err == nil {
+			permit.Release()
+			t.Fatal("gateway presence allowed a fourth worker")
+		}
 		if _, err := o.Release("a"); err != nil {
 			t.Fatal(err)
 		}

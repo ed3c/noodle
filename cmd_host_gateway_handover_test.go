@@ -16,7 +16,7 @@ import (
 )
 
 func TestGatewayHandoverSharedPolicyRequiresExplicitFields(t *testing.T) {
-	for _, fault := range []string{"none", "shutdown-missing", "requested-missing", "wrong-quota", "wrong-custody", "binary-changed", "schema2-supported", "schema2-missing", "schema3-supported", "schema3-missing"} {
+	for _, fault := range []string{"none", "shutdown-missing", "requested-missing", "wrong-quota", "wrong-custody", "binary-changed", "schema2-supported", "schema2-missing", "schema3-supported", "schema3-missing", "v5-supported", "v5-unsupported", "v5-no-latest", "v5-unlisted", "future-custody"} {
 		t.Run(fault, func(t *testing.T) {
 			root, err := os.MkdirTemp("/tmp", "ngh-")
 			if err != nil {
@@ -28,6 +28,20 @@ func TestGatewayHandoverSharedPolicyRequiresExplicitFields(t *testing.T) {
 			if fault == "wrong-custody" {
 				version = "3"
 			}
+			versions := ""
+			if strings.HasPrefix(fault, "v5-") || fault == "future-custody" {
+				version, versions = "5", ",\"openshell_custody_versions\":[4,5]"
+				switch fault {
+				case "v5-unsupported":
+					versions = ",\"openshell_custody_versions\":[5]"
+				case "v5-no-latest":
+					versions = ",\"openshell_custody_versions\":[4]"
+				case "v5-unlisted":
+					versions = ""
+				case "future-custody":
+					version = "6"
+				}
+			}
 			release := ""
 			if fault == "schema2-supported" {
 				release = ",\"gateway_custody_release\":2"
@@ -35,7 +49,7 @@ func TestGatewayHandoverSharedPolicyRequiresExplicitFields(t *testing.T) {
 			if fault == "schema3-supported" {
 				release = ",\"gateway_custody_release\":3"
 			}
-			script := []byte("#!/bin/sh\n[ \"$1\" = host ] && [ \"$2\" = capabilities ] || exit 2\nprintf '%s\\n' '{\"openshell_custody_version\":" + version + ",\"gateway_host_handover\":1" + release + "}'\n")
+			script := []byte("#!/bin/sh\n[ \"$1\" = host ] && [ \"$2\" = capabilities ] || exit 2\nprintf '%s\\n' '{\"openshell_custody_version\":" + version + versions + ",\"gateway_host_handover\":1" + release + "}'\n")
 			if err = os.WriteFile(binary, script, 0700); err != nil {
 				t.Fatal(err)
 			}
@@ -44,11 +58,11 @@ func TestGatewayHandoverSharedPolicyRequiresExplicitFields(t *testing.T) {
 				sha = strings.Repeat("0", 64)
 			}
 			shutdown := map[string]any{"requested": false}
-			maximum := 4
+			maximum := admission.DefaultWorkerLimit
 			if fault == "wrong-quota" {
 				maximum = 5
 			}
-			row := map[string]any{"protocol": hostProtocol, "host_root": root, "host_instance_id": strings.Repeat("a", 32), "rolling_host_version": 1, "binary_path": binary, "binary_sha256": sha, "shutdown": shutdown, "resources": map[string]any{"worker_admission_policy": "swap-used-critical-guard-v2", "swap_used_limit_bytes": 15000000000, "shared_quota": map[string]any{"maximum": maximum}}}
+			row := map[string]any{"protocol": hostProtocol, "host_root": root, "host_instance_id": strings.Repeat("a", 32), "rolling_host_version": 1, "binary_path": binary, "binary_sha256": sha, "shutdown": shutdown, "resources": map[string]any{"worker_admission_policy": admission.WorkerAdmissionPolicy, "shared_quota": map[string]any{"maximum": maximum}}}
 			if fault == "shutdown-missing" {
 				delete(row, "shutdown")
 			}
@@ -86,12 +100,47 @@ func TestGatewayHandoverSharedPolicyRequiresExplicitFields(t *testing.T) {
 			}
 			instance, err := handoverSharedReadback(context.Background(), root, schema)
 			<-done
-			if fault == "none" || fault == "schema2-supported" || fault == "schema3-supported" {
+			if fault == "none" || fault == "schema2-supported" || fault == "schema3-supported" || fault == "v5-supported" {
 				if err != nil || instance != strings.Repeat("a", 32) {
 					t.Fatal(instance, err)
 				}
 			} else if err == nil {
 				t.Fatal("incompatible shared owner accepted", fault)
+			}
+		})
+	}
+}
+
+func TestLegacyGatewayHandoverRefusesCredentialCustody(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		version     int
+		credentials bool
+		accepted    bool
+	}{{"legacy-v3", 3, false, true}, {"v4", 4, false, false}, {"v5", 5, true, false}, {"v5-empty", 5, false, false}, {"downgraded-v3", 3, true, false}} {
+		t.Run(test.name, func(t *testing.T) {
+			state := loopruntime.OpenShellCustodyState{Version: test.version}
+			if test.credentials {
+				state.Credentials = []loopruntime.OpenShellCredentialDelivery{{Provider: "original"}}
+			}
+			raw, err := json.Marshal(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			filename := filepath.Join(t.TempDir(), "owner.json")
+			if err := os.WriteFile(filename, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			ref, err := readLegacyGatewayHandoverCustody(filename)
+			if (err == nil) != test.accepted {
+				t.Fatalf("legacy handover acceptance differs: %v", err)
+			}
+			if ref.SHA256 != hostDigest(raw) {
+				t.Fatal("original custody reference lost")
+			}
+			after, readErr := os.ReadFile(filename)
+			if readErr != nil || !bytes.Equal(raw, after) {
+				t.Fatal("custody preflight changed original state", readErr)
 			}
 		})
 	}

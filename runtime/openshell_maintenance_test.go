@@ -206,6 +206,10 @@ func TestProgressMaintenanceStopsOnceAndRestoresOriginalArchives(t *testing.T) {
 	if err := maintenanceVerify(stop, &proof); err != nil {
 		t.Fatal(err)
 	}
+	if foreign, err := OpenOpenShellCustody(t.Context(), r.config.Profile.Gateway.Binding, r.config.Profile.Gateway.TLS, nil, t.TempDir()); err == nil {
+		_ = foreign.Close()
+		t.Fatal("restored custody accepted another Host control root")
+	}
 	c, err := OpenOpenShellCustody(t.Context(), r.config.Profile.Gateway.Binding, r.config.Profile.Gateway.TLS, nil, f.spec.ControlRoot)
 	if err != nil {
 		t.Fatal(err)

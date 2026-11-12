@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/poteto/noodle/config"
-	"github.com/poteto/noodle/internal/admission"
 	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/lockfile"
 	"github.com/poteto/noodle/internal/state"
@@ -102,9 +101,6 @@ func (h *noodleHost) attachContinuation(ctx context.Context, req hostRequest, co
 	if err != nil {
 		return hostError("refused", err)
 	}
-	if req.WarningOrderID != "" && (req.Operation != "attach" || cfg.Mode != "manual" || req.RequiredHostInstanceID != h.instanceID || cfg.Runtime.OpenShell.Profile == "" || len(cfg.Runtime.AdmittedOrders) != 1 || cfg.Runtime.AdmittedOrders[0] != req.WarningOrderID) {
-		return hostError("refused", errors.New("gateway warning requires the existing Host and one explicitly admitted manual OpenShell order"))
-	}
 	if shouldStartServer(cfg.Server) {
 		return hostError("refused", errors.New("host contexts require server.enabled=false"))
 	}
@@ -164,15 +160,7 @@ func (h *noodleHost) attachContinuation(ctx context.Context, req hostRequest, co
 	}
 	keepLock = true
 	if c.openShell {
-		if req.WarningOrderID != "" {
-			_, err = h.openShell.GrantWarning(id, req.WarningOrderID, 0)
-			if err != nil {
-				err = fmt.Errorf("%w: %v", admission.ErrDeferred, err)
-			}
-		}
-		if err == nil {
-			_, err = h.openShell.Acquire(ctx, id)
-		}
+		_, err = h.openShell.Acquire(ctx, id)
 		if err != nil {
 			if response, settled := h.finishOpenShellDeferral(c, err); settled {
 				return response

@@ -99,8 +99,9 @@ type loopFixtureSpawnDump struct {
 }
 
 type fixtureConfigOverride struct {
-	Mode    string `toml:"mode"`
-	Routing struct {
+	Mode        string                   `toml:"mode"`
+	Concurrency config.ConcurrencyConfig `toml:"concurrency"`
+	Routing     struct {
 		Defaults struct {
 			Provider string `toml:"provider"`
 			Model    string `toml:"model"`
@@ -342,6 +343,9 @@ func applyConfigOverride(t *testing.T, cfg *config.Config, overridePath string) 
 	var override fixtureConfigOverride
 	if _, err := toml.Decode(string(data), &override); err != nil {
 		t.Fatalf("parse config override %s: %v", overridePath, err)
+	}
+	if override.Concurrency.MaxConcurrency > 0 {
+		cfg.Concurrency = override.Concurrency
 	}
 	if provider := strings.TrimSpace(override.Routing.Defaults.Provider); provider != "" {
 		cfg.Routing.Defaults.Provider = provider

@@ -37,20 +37,21 @@ type hostVersionRequest struct {
 	Error            string `json:"error,omitempty"`
 }
 type hostTaskOwner struct {
-	MaintenanceHold       string                 `json:"maintenance_hold,omitempty"`
-	ExecutionProfile      *hostExecutionProfile  `json:"execution_profile,omitempty"`
-	ControllerOnly        bool                   `json:"controller_only,omitempty"`
-	ContextInputs         *hostContextInputs     `json:"context_inputs,omitempty"`
-	RebuildError          string                 `json:"rebuild_error,omitempty"`
-	LastAdmission         *hostResponse          `json:"last_admission,omitempty"`
-	RoundState            *loop.HostContinuation `json:"round_state,omitempty"`
-	AdmissionOnly         bool                   `json:"admission_only,omitempty"`
-	Original              hostReceipt            `json:"original"`
-	Current               hostReceipt            `json:"current"`
-	State                 string                 `json:"state"`
-	EnvironmentSHA        string                 `json:"environment_sha256"`
-	RuntimeEnvironmentSHA string                 `json:"runtime_environment_sha256,omitempty"`
-	Previous              []hostReceipt          `json:"previous,omitempty"`
+	NotAdmitted           *hostUnacceptedAdmission `json:"not_admitted,omitempty"`
+	MaintenanceHold       string                   `json:"maintenance_hold,omitempty"`
+	ExecutionProfile      *hostExecutionProfile    `json:"execution_profile,omitempty"`
+	ControllerOnly        bool                     `json:"controller_only,omitempty"`
+	ContextInputs         *hostContextInputs       `json:"context_inputs,omitempty"`
+	RebuildError          string                   `json:"rebuild_error,omitempty"`
+	LastAdmission         *hostResponse            `json:"last_admission,omitempty"`
+	RoundState            *loop.HostContinuation   `json:"round_state,omitempty"`
+	AdmissionOnly         bool                     `json:"admission_only,omitempty"`
+	Original              hostReceipt              `json:"original"`
+	Current               hostReceipt              `json:"current"`
+	State                 string                   `json:"state"`
+	EnvironmentSHA        string                   `json:"environment_sha256"`
+	RuntimeEnvironmentSHA string                   `json:"runtime_environment_sha256,omitempty"`
+	Previous              []hostReceipt            `json:"previous,omitempty"`
 }
 
 func historicalHostContext(owner hostTaskOwner, id string) bool {

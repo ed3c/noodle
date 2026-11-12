@@ -14,7 +14,10 @@ import (
 )
 
 func TestUpgradeReturnCheckpointAndReentry(t *testing.T) {
-	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	runtimeDir := filepath.Join(dir, ".noodle")
 	if err := os.MkdirAll(runtimeDir, 0700); err != nil {
 		t.Fatal(err)

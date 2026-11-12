@@ -15,8 +15,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"slices"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -62,14 +60,13 @@ type hostResponse struct {
 }
 
 type hostRequest struct {
+	AdmissionTargetRoot    string                             `json:"admission_target_root"`
+	AdmissionConfigPath    string                             `json:"admission_config_path"`
 	ExpectedVersion        string                             `json:"expected_version"`
 	ReadbackOrderID        string                             `json:"readback_order_id"`
 	ReadbackSessionID      string                             `json:"readback_session_id"`
 	ReadbackRequest        loopruntime.SessionReadbackFileRef `json:"readback_request"`
 	Operation              string                             `json:"operation"`
-	WarningOrderID         string                             `json:"warning_order_id"`
-	GatewayWarning         bool                               `json:"gateway_warning"`
-	WarningRevision        uint64                             `json:"warning_revision"`
 	ProjectDir             string                             `json:"project_dir"`
 	ContextID              string                             `json:"context_id"`
 	RequiredHostInstanceID string                             `json:"required_host_instance_id"`
@@ -150,7 +147,7 @@ type noodleHost struct {
 
 func newHostCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{Use: "host", Short: "Manage the persistent Noodle Host and its rolling versions"}
-	cmd.AddCommand(newHostResourcesCmd(app))
+	cmd.AddCommand(newHostResourcesCmd(app), newHostGoalEnsureCmd(), newHostGoalTemplateCmd(), newHostControlCmd(), newHostAdmissionReadbackCmd(app), newHostAdmissionTransferCmd(app), newHostAdmissionTransferReadbackCmd())
 	cmd.AddCommand(newHostRollingCmd())
 	cmd.AddCommand(newHostRestrictedCmd())
 	cmd.AddCommand(newHostRebuildCmd())
@@ -177,13 +174,13 @@ func newHostCmd(app *App) *cobra.Command {
 		return serveHost(ctx)
 	}})
 	for _, operation := range []string{"attach", "once", "status", "detach"} {
-		var mode, contextID, instanceID, requiredInstanceID, configSHA, requestFile, configPath, warningOrderID string
+		var mode, contextID, instanceID, requiredInstanceID, configSHA, requestFile, configPath string
 		var cleanupCompleted bool
 		child := &cobra.Command{Use: operation, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			if cmd.Flags().Changed("require-existing-instance") && requiredInstanceID == "" {
 				return errors.New("required original Host instance is empty")
 			}
-			req := hostRequest{Operation: operation, ProjectDir: app.projectDir, Mode: mode, ContextID: contextID, InstanceID: instanceID, RequiredHostInstanceID: requiredInstanceID, ConfigPath: configPath, ConfigSHA256: configSHA, RequestFile: requestFile, CleanupCompleted: cleanupCompleted, WarningOrderID: warningOrderID}
+			req := hostRequest{Operation: operation, ProjectDir: app.projectDir, Mode: mode, ContextID: contextID, InstanceID: instanceID, RequiredHostInstanceID: requiredInstanceID, ConfigPath: configPath, ConfigSHA256: configSHA, RequestFile: requestFile, CleanupCompleted: cleanupCompleted}
 			response := callHost(cmd.Context(), req)
 			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(response); err != nil {
 				return err
@@ -199,7 +196,6 @@ func newHostCmd(app *App) *cobra.Command {
 			child.Flags().StringVar(&configPath, "config-file", "", "Exact absolute task config source (repository config remains unchanged)")
 		}
 		if operation == "attach" {
-			child.Flags().StringVar(&warningOrderID, "warning-order-id", "", "Authorize one selected OpenShell gateway and worker launch under stable warning pressure")
 			child.Flags().BoolVar(&cleanupCompleted, "cleanup-completed", false, "Release completed task runtime automatically; preserve manual migration holds")
 		}
 		if operation != "detach" {
@@ -226,7 +222,7 @@ func hostCapabilities(platform string) map[string]any {
 	if platform == "darwin" || platform == "linux" {
 		rolling = 1
 	}
-	return map[string]any{"schema": 1, "protocol": hostProtocol, "stateless_fixture_recovery": 1, "resident_request_binding": 1, "restricted_host_maintenance": 1, "existing_instance_admission": 1, "openshell_warning_grant": 1, "native_consumer_leases": 1, "native_consumer_worktrees": 1, "shared_service_adapter": "stateless_fixtures_only", "completed_context_cleanup": 1, "external_task_config": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1, "codex_native_runtime": force, "safe_host_switch": 0, "rolling_host_version": rolling, "shared_worker_quota": rolling, "openshell_pool_owner": rolling, "openshell_custody_version": 4, "gateway_host_handover": 1, "gateway_custody_release": 3, "worker_admission_policy": admission.WorkerAdmissionPolicy, "task_warning_grant": 1}
+	return map[string]any{"schema": 1, "protocol": hostProtocol, "stateless_fixture_recovery": 1, "resident_request_binding": 1, "restricted_host_maintenance": 1, "existing_instance_admission": 1, "unaccepted_admission_transfer_readback": 1, "native_consumer_leases": 1, "native_consumer_worktrees": 1, "shared_service_adapter": "stateless_fixtures_only", "completed_context_cleanup": 1, "external_task_config": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1, "codex_native_runtime": force, "safe_host_switch": 0, "rolling_host_version": rolling, "shared_worker_quota": rolling, "openshell_pool_owner": rolling, "openshell_custody_version": 5, "openshell_custody_versions": []int{4, 5}, "openshell_credential_delivery": 1, "gateway_host_handover": 1, "gateway_custody_release": 3, "worker_admission_policy": admission.WorkerAdmissionPolicy}
 }
 
 func hostDirectory() (string, error) {
@@ -283,171 +279,6 @@ func readHostRequestConfig(req hostRequest) ([]byte, error) {
 		return config.ReadExplicitSource(req.ConfigPath)
 	}
 	return readHostConfig(req.ProjectDir)
-}
-
-func callHost(ctx context.Context, req hostRequest) hostResponse {
-	managedOpenShell := false
-	dir, err := hostDirectory()
-	if err != nil {
-		return hostError("refused", err)
-	}
-	path, err := os.Executable()
-	if err != nil {
-		return hostError("refused", err)
-	}
-	path, err = filepath.EvalSymlinks(path)
-	if err != nil {
-		return hostError("refused", err)
-	}
-	binary, err := os.ReadFile(path)
-	if err != nil {
-		return hostError("refused", err)
-	}
-	req.BinarySHA256 = hostDigest(binary)
-	req.AdmissionSHA = req.BinarySHA256
-	req.AdmissionPath = path
-	req.ProjectDir, err = filepath.EvalSymlinks(req.ProjectDir)
-	if err != nil {
-		return hostError("refused", err)
-	}
-	if req.Operation == "attach" || req.Operation == "once" || (req.Operation == "status" && req.ContextID == "" && req.RequestFile == "") {
-		data, err := readHostRequestConfig(req)
-		if err != nil {
-			return hostError("refused", err)
-		}
-		cfg, err := config.Parse(data)
-		if err != nil {
-			return hostError("refused", err)
-		}
-		if req.Operation == "once" {
-			req.Mode = "manual"
-		}
-		cfg, err = startConfig(cfg, req.Mode)
-		if err != nil {
-			return hostError("refused", err)
-		}
-		managedOpenShell = cfg.Runtime.OpenShell.Profile != ""
-		req.Mode = cfg.Mode
-		if req.Operation != "status" {
-			req.ConfigSHA256 = hostDigest(data)
-			req.Environment = os.Environ()
-			slices.Sort(req.Environment)
-		}
-	}
-	req.HostDir = dir
-	var requestBinding *hostRequestBinding
-	if req.RequestFile != "" || req.Operation == "attach" || req.Operation == "once" {
-		var unlock func()
-		requestBinding, unlock, err = bindHostRequest(&req)
-		if err != nil {
-			return hostError("refused", err)
-		}
-		defer unlock()
-		dir = req.HostDir
-	}
-	if managedOpenShell && (req.Operation == "attach" || req.Operation == "once") {
-		if err = bindSharedOpenShellAdmission(ctx, &req, requestBinding); err != nil {
-			if requestBinding != nil {
-				requestBinding.Status = "busy"
-				if saveErr := saveHostRequest(req.RequestFile, *requestBinding); saveErr != nil {
-					return hostError("unknown_effect", saveErr)
-				}
-			}
-			return hostError("busy", err)
-		}
-	}
-	if (req.Operation == "detach" || (req.Operation == "status" && req.ContextID != "")) && (req.ContextID == "" || req.InstanceID == "") {
-		return hostError("refused", errors.New("context-id and instance-id are required together"))
-	}
-	if req.Operation == "status" && req.ContextID == "" && req.ConfigSHA256 == "" {
-		return hostError("refused", errors.New("status needs context identity or config-sha256"))
-	}
-	if req.Operation == "attach" || req.Operation == "once" {
-		if waiting := maintenanceWaitResponse(dir); waiting != nil {
-			if requestBinding != nil && waiting.Status == "busy" {
-				requestBinding.Status = "busy"
-				if err := saveHostRequest(req.RequestFile, *requestBinding); err != nil {
-					return hostError("unknown_effect", err)
-				}
-			}
-			return *waiting
-		}
-	}
-	if _, statErr := os.Stat(filepath.Join(dir, "pool.json")); os.IsNotExist(statErr) && req.RequiredHostInstanceID == "" && (req.Operation == "attach" || req.Operation == "once") {
-		if !sameUnpooledHost(ctx, dir, req.BinarySHA256) {
-			if err := ensureHostVersion(ctx, path, dir); err != nil {
-				if requestBinding != nil {
-					requestBinding.Status = "busy"
-					if saveErr := saveHostRequest(req.RequestFile, *requestBinding); saveErr != nil {
-						return hostError("unknown_effect", saveErr)
-					}
-				}
-				return hostError("busy", err)
-			}
-		}
-	}
-	rootDir := dir
-	dir, err = routeBoundHost(rootDir, &req)
-	if err != nil {
-		return hostError("refused", err)
-	}
-	conn, err := net.DialTimeout("unix", filepath.Join(dir, "host.sock"), time.Second)
-	if err != nil && req.RequiredHostInstanceID == "" && (req.Operation == "attach" || req.Operation == "once") {
-		if err = ensureHostVersion(ctx, path, rootDir); err == nil {
-			conn, err = net.DialTimeout("unix", filepath.Join(dir, "host.sock"), time.Second)
-		}
-	}
-	if err != nil {
-		if req.Operation == "status" {
-			return offlineHostStatus(dir, req, err)
-		}
-		// No request bytes have been sent. This is known nonacceptance,
-		// including another client still launching the shared host.
-		if requestBinding != nil && (req.Operation == "attach" || req.Operation == "once") {
-			requestBinding.Status = "busy"
-			if saveErr := saveHostRequest(req.RequestFile, *requestBinding); saveErr != nil {
-				return hostError("unknown_effect", saveErr)
-			}
-			return hostError("busy", err)
-		}
-		return hostError("host_unavailable", err)
-	}
-	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
-	if err = json.NewEncoder(conn).Encode(req); err != nil {
-		return hostError("unknown_effect", err)
-	}
-	var response hostResponse
-	if err = json.NewDecoder(conn).Decode(&response); err != nil {
-		return hostError("unknown_effect", err)
-	}
-	if req.Operation == "status" && req.RequestFile != "" && response.Status == "ok" {
-		if _, statErr := os.Stat(filepath.Join(rootDir, "pool.json")); statErr == nil {
-			bound, bindErr := readHostOwnerBinding(req.RequestFile)
-			if bindErr != nil {
-				return hostError("unknown_effect", bindErr)
-			}
-			if bound.Current.ContextID != response.ContextID || bound.Current.HostInstanceID != response.HostInstanceID {
-				return hostError("unknown_effect", errors.New("current owner changed during status readback"))
-			}
-			response.OwnerBinding = bound
-		} else if !os.IsNotExist(statErr) {
-			return hostError("unknown_effect", statErr)
-		}
-	}
-	if requestBinding != nil && req.Operation != "status" && req.Operation != "cleanup" {
-		requestBinding.Status = "pending"
-		if response.Status == "busy" || response.Status == "deferred" {
-			requestBinding.Status = response.Status
-		}
-		if response.Status == "ok" {
-			requestBinding.Status = "accepted"
-		}
-		if err := saveHostRequest(req.RequestFile, *requestBinding); err != nil {
-			return hostError("unknown_effect", err)
-		}
-	}
-	return response
 }
 
 func ensureHostVersion(ctx context.Context, binary, root string) error {
@@ -753,8 +584,10 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 				call.reply <- h.cleanupContexts(ctx, call.request)
 			} else if strings.HasPrefix(call.request.Operation, "resident_") {
 				call.reply <- h.residentOperation(ctx, call.request)
-			} else if call.request.Operation == "grant_warning" {
-				call.reply <- h.grantWarning(call.request)
+			} else if call.request.Operation == "admission_readback" {
+				call.reply <- h.admissionReadback(call.request)
+			} else if call.request.Operation == "admission_transfer" {
+				call.reply <- h.admissionTransfer(ctx, call.request)
 			} else if call.request.Operation == "resources" {
 				call.reply <- h.resources()
 			} else {
@@ -940,7 +773,7 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 		return hostReceiptResult(r)
 	}
 	if h.blocked {
-		return hostError("unknown_effect", errors.New("prior active or failed context requires readback; attach refused"))
+		return h.recordAdmissionRefusal(req, hostError("unknown_effect", errors.New("prior active or failed context requires readback; attach refused")))
 	}
 	if len(h.contexts) >= 16 {
 		return hostError("busy", errors.New("host context limit reached (16)"))
@@ -954,23 +787,9 @@ func (h *noodleHost) handle(ctx context.Context, req hostRequest) hostResponse {
 	return h.attachRolling(ctx, req, nil)
 }
 
-const hostSwapUsedLimitEnv = "NOODLE_HOST_SWAP_USED_LIMIT_BYTES"
-
-func hostSwapUsedLimit() (uint64, error) {
-	value, present := os.LookupEnv(hostSwapUsedLimitEnv)
-	if !present {
-		return admission.DefaultSwapUsedLimit, nil
-	}
-	limit, err := strconv.ParseUint(value, 10, 53)
-	if err != nil {
-		return 0, fmt.Errorf("%s must be an unsigned integer byte limit (0..9007199254740991): %w", hostSwapUsedLimitEnv, err)
-	}
-	return limit, nil
-}
-
 func hostBaselineEnvironment(dir string) []string {
 	result := []string{"NOODLE_HOST_DIR=" + dir}
-	for _, key := range []string{hostSwapUsedLimitEnv, "HOME", "PATH", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "USER", "LOGNAME", "SystemRoot", "WINDIR"} {
+	for _, key := range []string{"HOME", "PATH", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "USER", "LOGNAME", "SystemRoot", "WINDIR"} {
 		if value, ok := os.LookupEnv(key); ok {
 			result = append(result, key+"="+value)
 		}

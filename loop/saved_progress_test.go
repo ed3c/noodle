@@ -198,7 +198,12 @@ func TestSavedProgressQueueStaleAndDeferredHaveNoDispatch(t *testing.T) {
 		t.Fatal("stale request changed queue")
 	}
 	b := resourceBudget(l, 1)
-	b.Observe(admission.Sample{At: time.Now(), Pressure: admission.Warning}, nil)
+	b.Observe(admission.Sample{At: time.Now(), Pressure: admission.Critical}, nil)
+	occupied, err := b.TryAcquire(l.projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Release()
 	if _, err = l.QueueSavedProgressAttempt(t.Context(), order, session, observed.Version); err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +213,7 @@ func TestSavedProgressQueueStaleAndDeferredHaveNoDispatch(t *testing.T) {
 	if len(rt.mockRuntime.calls) != 0 || len(l.canonical.Orders[order].Stages[0].Extra[savedProgressAttemptsKey]) != 0 {
 		t.Fatal("resource deferral admitted new attempt")
 	}
-	healthyResourceBudget(b)
+	occupied.Release()
 	if err = l.processControlCommands(); err != nil {
 		t.Fatal(err)
 	}

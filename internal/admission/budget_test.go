@@ -17,137 +17,84 @@ func testBudget(max int) (*Budget, func(Pressure, uint64, error)) {
 	}
 }
 
-func TestBudgetPressureRecoveryCreditAndCeiling(t *testing.T) {
-	b, sample := testBudget(2)
-	b.Register("a")
-	b.Register("b")
-	sample(Normal, 50, nil)
-	if b.Snapshot().SwapoutRate != nil {
-		t.Fatal("baseline must not claim zero swapout rate")
-	}
-	for i := 0; i < 2; i++ {
-		sample(Normal, 50, nil)
-		if _, err := b.TryAcquire("a"); !errors.Is(err, ErrDeferred) {
-			t.Fatal("resumed before stable window")
-		}
-	}
-	sample(Normal, 50, nil)
-	p, err := b.TryAcquire("a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if b.Snapshot().Limit != 1 {
-		t.Fatal("recovery did not begin at one")
-	}
-	if _, err = b.TryAcquire("b"); !errors.Is(err, ErrDeferred) {
-		t.Fatal("sample credit allowed a burst")
-	}
-	sample(Normal, 50, nil)
-	q, err := b.TryAcquire("b")
-	if err != nil {
-		t.Fatal(err)
-	}
-	sample(Normal, 50, nil)
-	if _, err = b.TryAcquire("a"); !errors.Is(err, ErrDeferred) {
-		t.Fatal("exceeded ceiling")
-	}
-	sample(Warning, 50, nil)
-	p.Release()
-	p.Release()
-	if b.Snapshot().Active != 1 {
-		t.Fatal("release was not exactly once")
-	}
-	r, err := b.TryAcquire("a")
-	if err != nil {
-		t.Fatal("warning below Swap ceiling must permit ordinary admission", err)
-	}
-	r.Release()
-	q.Release()
-}
-
-func TestBudgetUnknownResetGapAndCapacityBlock(t *testing.T) {
-	for _, kind := range []string{"error", "reset", "gap", "stale", "capacity", "critical"} {
-		t.Run(kind, func(t *testing.T) {
-			b, sample := testBudget(4)
-			b.Register("a")
-			for i := 0; i < 4; i++ {
-				sample(Normal, 100, nil)
-			}
-			switch kind {
-			case "error":
-				sample(Normal, 100, errors.New("unavailable"))
-			case "reset":
-				sample(Normal, 1, nil)
-			case "gap":
-				now := b.now().Add(MaxSampleAge + time.Second)
-				b.now = func() time.Time { return now }
-				b.Observe(Sample{At: now, Pressure: Normal, Swapouts: 100}, nil)
-			case "stale":
-				now := b.now().Add(MaxSampleAge + time.Second)
-				b.now = func() time.Time { return now }
-			case "capacity":
-				now := b.now().Add(PollInterval)
-				b.now = func() time.Time { return now }
-				b.Observe(Sample{At: now, Pressure: Normal, Swapouts: 101, SwapUsedBytes: DefaultSwapUsedLimit + 1}, nil)
+func TestBudgetObservationsNeverReduceWorkerCapacity(t *testing.T) {
+	for _, condition := range []string{"missing", "normal", "critical", "swap", "failed", "unsupported", "stale", "reset"} {
+		t.Run(condition, func(t *testing.T) {
+			b, sample := testBudget(0)
+			b.Register("worker")
+			switch condition {
+			case "normal":
+				sample(Normal, 10, nil)
 			case "critical":
-				sample(Critical, 100, nil)
+				sample(Critical, 10, nil)
+			case "swap":
+				b.Observe(Sample{At: b.now(), Pressure: Warning, SwapUsedBytes: 99_000_000_000, CPUs: 1, TotalMemoryBytes: 1}, nil)
+			case "failed":
+				sample(Normal, 10, errors.New("monitor unavailable"))
+			case "unsupported":
+				b.Observe(Sample{At: b.now(), Unsupported: true}, nil)
+			case "stale":
+				now := b.now().Add(-MaxSampleAge - time.Second)
+				b.Observe(Sample{At: now, Pressure: Normal}, nil)
+			case "reset":
+				sample(Normal, 20, nil)
+				sample(Normal, 1, nil)
 			}
-			if _, err := b.TryAcquire("a"); !errors.Is(err, ErrDeferred) {
-				t.Fatalf("%s admitted worker", kind)
+			permits := make([]*Permit, 0, DefaultWorkerLimit)
+			for range DefaultWorkerLimit {
+				permit, err := b.TryAcquire("worker")
+				if err != nil {
+					t.Fatalf("observation blocked worker %d: %v", len(permits)+1, err)
+				}
+				permits = append(permits, permit)
 			}
-			if b.Snapshot().Limit != 0 {
-				t.Fatal("blocked admission reports nonzero effective capacity")
+			if _, err := b.TryAcquire("worker"); !errors.Is(err, ErrDeferred) {
+				t.Fatal("tenth worker exceeded its Host ceiling")
 			}
-			if kind != "capacity" && kind != "critical" && b.Snapshot().SwapoutRate != nil {
-				t.Fatal("unknown rate represented as observed zero")
+			if got := b.Snapshot(); got.Maximum != 9 || got.Limit != 9 || got.Active != 9 || got.Reason != "worker_limit" {
+				t.Fatalf("Host capacity changed: %+v", got)
+			}
+			for _, permit := range permits {
+				permit.Release()
+				permit.Release()
+			}
+			if got := b.Snapshot(); got.Active != 0 || got.Limit != 9 {
+				t.Fatalf("duplicate release changed capacity: %+v", got)
 			}
 		})
 	}
 }
 
-func TestBudgetConcurrentRequestsAndFairness(t *testing.T) {
-	b, sample := testBudget(4)
-	for _, id := range []string{"a", "b"} {
-		b.Register(id)
-	}
-	for i := 0; i < 4; i++ {
-		sample(Normal, 0, nil)
-	}
+func TestBudgetConcurrentRequestsUseOnlyOneHostCeiling(t *testing.T) {
+	b := NewBudget(0)
+	b.Register("worker")
 	var mu sync.Mutex
 	var permits []*Permit
-	var winner string
 	var wg sync.WaitGroup
-	for _, id := range []string{"a", "b"} {
+	for range 40 {
 		wg.Add(1)
-		go func(id string) {
+		go func() {
 			defer wg.Done()
-			p, e := b.TryAcquire(id)
-			if e == nil {
+			permit, err := b.TryAcquire("worker")
+			if err == nil {
 				mu.Lock()
-				permits = append(permits, p)
-				winner = id
+				permits = append(permits, permit)
 				mu.Unlock()
+			} else if !errors.Is(err, ErrDeferred) {
+				t.Error(err)
 			}
-		}(id)
+		}()
 	}
 	wg.Wait()
-	if len(permits) != 1 {
-		t.Fatalf("same sample admitted %d", len(permits))
+	if len(permits) != 9 {
+		t.Fatalf("concurrent requests admitted %d workers", len(permits))
 	}
-	permits[0].Release()
-	sample(Normal, 0, nil)
-	if _, err := b.TryAcquire(winner); !errors.Is(err, ErrDeferred) {
-		t.Fatal("winner jumped a waiting context")
+	for _, permit := range permits {
+		permit.Release()
 	}
-	loser := "a"
-	if winner == "a" {
-		loser = "b"
+	if _, err := b.TryAcquire("foreign"); !errors.Is(err, ErrDeferred) {
+		t.Fatal("unregistered context acquired a worker")
 	}
-	p, e := b.TryAcquire(loser)
-	if e != nil {
-		t.Fatal(e)
-	}
-	p.Release()
 }
 
 func TestBudgetReplacementKeepsSlotUntilBothOwnersJoin(t *testing.T) {
@@ -184,32 +131,14 @@ func TestBudgetReplacementKeepsSlotUntilBothOwnersJoin(t *testing.T) {
 	}
 }
 
-func TestBudgetHardwareAndUnsupportedAreFinite(t *testing.T) {
-	if HardwareLimit(16<<30, 10) != 4 {
-		t.Fatal("wrong 16 GiB ceiling")
-	}
-	b := NewBudget(0)
-	b.Register("a")
-	b.Observe(Sample{At: time.Now(), Unsupported: true, CPUs: 10}, nil)
-	if _, err := b.TryAcquire("a"); !errors.Is(err, ErrDeferred) {
-		t.Fatal("unobservable Swap capacity admitted worker")
-	}
-	if b.Snapshot().Maximum != 1 || b.Snapshot().Pressure != Unknown || !b.Snapshot().Unsupported || b.Snapshot().SwapoutRate != nil {
-		t.Fatal("unsupported platform claimed memory health")
-	}
-	if _, err := b.TryAcquire("a"); !errors.Is(err, ErrDeferred) {
-		t.Fatal("unsupported Swap monitor admitted worker")
-	}
-}
-
-func TestBudgetSnapshotPreservesSampleFailureDiagnosis(t *testing.T) {
+func TestBudgetSnapshotPreservesSampleFailureWithoutBlocking(t *testing.T) {
 	b := NewBudget(1)
-	if s := b.Snapshot(); s.Reason != "awaiting_sample" || s.Limit != 0 || s.SampleError != nil {
+	if s := b.Snapshot(); s.Reason != "ready" || s.Limit != 1 || s.SampleError != nil || s.Pressure != Unknown {
 		t.Fatalf("initial state lost: %+v", s)
 	}
 	b.Observe(Sample{}, errors.New("vm_stat timed out"))
-	if s := b.Snapshot(); s.Reason != "sample_failed" || s.SampleError == nil || *s.SampleError != "vm_stat timed out" || s.Limit != 0 || s.SwapoutRate != nil {
-		t.Fatalf("sampler failure hidden: %+v", s)
+	if s := b.Snapshot(); s.Reason != "ready" || s.SampleError == nil || *s.SampleError != "vm_stat timed out" || s.Limit != 1 || s.SwapoutRate != nil || s.Pressure != Unknown {
+		t.Fatalf("sampler failure hidden or used as admission policy: %+v", s)
 	}
 }
 

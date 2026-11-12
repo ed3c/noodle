@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestQuotaMigrationPreservesWindowAndConcurrentOutcome(t *testing.T) {
+func TestQuotaMigrationPreservesOriginalBytesAndConcurrentOutcome(t *testing.T) {
 	dir, custody := t.TempDir(), t.TempDir()
 	original := []byte(`{"schema":1,"maximum":4,"swap_used_limit_bytes":15000000000,"last_start_window":358629289,"leases":{},"retained_field":"original"}`)
 	path := filepath.Join(dir, "quota.json")
@@ -36,7 +36,7 @@ func TestQuotaMigrationPreservesWindowAndConcurrentOutcome(t *testing.T) {
 	if err = json.Unmarshal(raw, &q); err != nil {
 		t.Fatal(err)
 	}
-	if string(q["schema"]) != "2" || string(q["last_start_window"]) != "358629289" || string(q["retained_field"]) != `"original"` {
+	if string(q["schema"]) != "3" || string(q["maximum"]) != "9" || string(q["worker_admission_policy"]) != `"host-workers-v1"` || q["last_start_window"] != nil || q["swap_used_limit_bytes"] != nil {
 		t.Fatal(string(raw))
 	}
 	backup, err := os.ReadFile(filepath.Join(custody, "quota-schema1.json"))

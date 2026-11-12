@@ -22,7 +22,7 @@ func TestDefaultConfigValues(t *testing.T) {
 	if config.Mode != "supervised" {
 		t.Fatalf("mode default = %q, want supervised", config.Mode)
 	}
-	if config.Concurrency.MaxConcurrency != 4 {
+	if config.Concurrency.MaxConcurrency != 9 {
 		t.Fatalf("concurrency.max_concurrency default = %d", config.Concurrency.MaxConcurrency)
 	}
 	if config.Agents.Claude.Path != "" || config.Agents.Codex.Path != "" {
@@ -31,8 +31,8 @@ func TestDefaultConfigValues(t *testing.T) {
 	if config.Runtime.Default != "process" {
 		t.Fatalf("runtime.default = %q, want process", config.Runtime.Default)
 	}
-	if config.Runtime.Process.MaxConcurrent != 4 {
-		t.Fatalf("runtime.process.max_concurrent default = %d, want 4", config.Runtime.Process.MaxConcurrent)
+	if config.Runtime.Process.MaxConcurrent != 9 {
+		t.Fatalf("runtime.process.max_concurrent default = %d, want 9", config.Runtime.Process.MaxConcurrent)
 	}
 	if config.Runtime.Sprites.MaxConcurrent != 50 {
 		t.Fatalf("runtime.sprites.max_concurrent default = %d, want 50", config.Runtime.Sprites.MaxConcurrent)
@@ -143,7 +143,7 @@ model = "x"
 `,
 			wantProvider:       "claude",
 			wantMode:           "supervised",
-			wantMaxConcurrency: 4,
+			wantMaxConcurrency: 9,
 		},
 		{
 			name: "invalid mode",
@@ -156,7 +156,7 @@ model = "x"
 `,
 			wantMode:           "supervised",
 			wantProvider:       "claude",
-			wantMaxConcurrency: 4,
+			wantMaxConcurrency: 9,
 		},
 		{
 			name: "invalid max concurrency",
@@ -170,7 +170,7 @@ max_concurrency = 0
 `,
 			wantMode:           "supervised",
 			wantProvider:       "claude",
-			wantMaxConcurrency: 4,
+			wantMaxConcurrency: 9,
 		},
 	}
 
@@ -217,8 +217,8 @@ max_cooks = 99
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Concurrency.MaxConcurrency != 4 {
-		t.Fatalf("max_concurrency = %d, want default 4", cfg.Concurrency.MaxConcurrency)
+	if cfg.Concurrency.MaxConcurrency != 9 {
+		t.Fatalf("max_concurrency = %d, want default 9", cfg.Concurrency.MaxConcurrency)
 	}
 
 	foundRemoved := false

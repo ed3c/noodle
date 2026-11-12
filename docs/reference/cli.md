@@ -28,7 +28,7 @@ noodle start [flags]
 
 ## `noodle host`
 
-Host 讓不同 project 共用 Noodle 服務。正常時使用一代；換版時最多兩代短暫共存。每個 project context 保留自己的設定、環境與 worktree。
+Host 讓已選定的 project context 共用 Noodle 服務。不同 Goal 可各自選定隔離的 Host；每個 Host 正常時使用一代，換版時最多兩代短暫共存。每個 context 保留自己的設定、環境與 worktree。
 Host 最多接上 16 個 context；同一 project 同時只能接上一個。Context 必須設定 `server.enabled=false`。
 原 Loop 仍負責排程與工作佇列。Host 的共享資源額度決定何時可以啟動 worker。
 沒有 worker 的 context 不占 worker 額度。共享 Host 不支援 Sprites 或 Cursor runtime，會在建立 runtime 前拒絕。Standalone 遠端模式不受此限制。
@@ -51,8 +51,9 @@ Loop 確認沒有 worker、合併工作或待處理輸入後，才釋放 context
 Host 等待 process、stream 與 watcher 結束，再移除該 context。其他 context 與主進程繼續運作。
 Host 不切換全域環境或工作目錄。每個 context 的原生命令使用自己的 PATH、HOME 與環境快照。
 
-鎖定範圍是同一使用者的 cache directory 下 `noodle/host`。
-新版 `start` 共用此鎖。`NOODLE_HOST_DIR` 可指定隔離的測試端點。
+預設 Host 目錄是同一使用者的 cache directory 下 `noodle/host`。
+`NOODLE_HOST_DIR` 指定已選定的 Host 根目錄；該 Host 的 launcher 與 context 共用原鎖。
+Goal Host 的 `ensure`、template、control 與未接納請求 transfer 見 [Goal Host](goal-hosts.md)。
 此鎖不能約束舊 binary 或另一個 OS 帳戶。歷史進程需要原 owner 確認結束後遷移。
 Host 重啟若發現未解決的 active receipt，會回傳 `unknown_effect` 並拒絕新工作。
 這不表示工作已失敗或可以重播；原 owner 必須先取得效果讀回。
@@ -82,7 +83,7 @@ Runtime 與 worker 目錄保存在 checkout 外；原路徑保留 alias。
 此保存範圍不代表已封存 control checkout 的所有來源與未提交修改。
 
 換版不能中斷正在執行的 worker。因此舊版繼續服務已接納的本輪，新版接納新請求。
-兩代共用一份持久配額與啟動時間窗，不能各算一份全機額度。
+同一 Host 的兩代共用一份持久配額，合計最多 9 個 worker。不同 Host 各有自己的配額。
 共用檔案鎖阻止仍使用獨立配額的舊 launcher 同時啟動。
 最多兩代可以存活。後續版本依 FIFO 等待；相同排隊或 blocked 請求的重送讀回原紀錄。
 
@@ -154,10 +155,12 @@ CLI 核對原生 terminal、unsubscribe ACK、空 loaded-list、foreground 退�
 原設定的 admitted order 必須仍在原生快照內，否則保留 hold；不從 legacy 平面檔案拼造快照，也不還原設定到活躍 checkout。
 App 清理後已失去的 linked runtime lock 由前景維護程序暫持現有路徑的鎖，持久核對 inode；未知建立效果或其他持有者都拒絕續行。
 
-context 排空並確認原生 detach、原 Host 及群組退出、全部舊 quota writer 退休後，才在 quota 原鎖內核對未變的空 schema-1 帳本，備份原 bytes 並移轉 schema 2。
-容量、全機額度與 last-start window 保留。已記錄但結果不明的 quota／pool 寫入只讀回，不再次改寫。
-候選沿原 Host 啟動入口啟動一次，先讀回政策、15 GB、零 context／allocation 與原工作停放，再發布入口；沒有維護 daemon。
-取消或失敗不會自動 resume，也不在 schema 2 上重開舊 Host；原 owner 已退出後，回復須另核對新 owner／租約並沿原維護入口處理。
+context 排空並確認原生 detach、原 Host 及群組退出、全部舊 quota writer 退休後，才在 quota 原鎖內核對未變的空 schema-1 帳本並備份原 bytes。
+目前的移轉程式建立 schema 3、`host-workers-v1`、9-worker 上限與空租約；舊容量及 last-start window 留在備份，不帶入新政策。
+已記錄但結果不明的 quota／pool 寫入只讀回，不再次改寫。
+候選沿原 Host 啟動入口啟動一次，先讀回政策、9-worker 上限、零 context／allocation 與原工作停放，再發布入口；沒有維護 daemon。
+取消或失敗不會自動 resume，也不在新帳本上重開舊 Host；原 owner 已退出後，回復須另核對新 owner／租約並沿原維護入口處理。
+這些是目前程式的維護條件，不表示任何既有部署已完成 schema-1 → schema-3 移轉。
 
 原 bootstrap 的 hold 現在先送一次原生 `pause`，核對 ACK 與 paused 狀態，再改為 manual 並核對完整 checkpoint。
 manual 本身不代表暫停。缺原狀態或 checkpoint 時，在送 pause 前拒絕；舊紀錄沒有已核實的 pause 邊界時只讀回。
@@ -165,45 +168,31 @@ detach 在呼叫前持久保存原意圖。後續呼叫只查同一 context 的 
 維護期間對外只轉送 resources／status；resident 啟停、釋放及未識別操作均拒絕。
 
 單一 Host 不代表單一 worker，也不代表可以無上限啟動 worker。
-每個 worker 及其準備工作都可能使用記憶體與磁碟。因此 Host 在建立 worktree、安裝依賴或啟動 worker 前，先取得共享額度。
-每個 Loop 原有的並行設定仍有效；共享額度是額外的全 Host 限制；rolling 兩代共用同一份上限。
+每個 worker 及其準備工作都可能使用記憶體與磁碟。因此 worker 派發在準備 worktree、安裝依賴或啟動程序前，先取得共享額度；`host control` 的 admission checkout 準備另屬原 control owner。
+每個 Loop 原有的並行設定仍有效；共享額度是額外的全 Host 限制。每個 Host 最多 9 個 worker；rolling 兩代合計共用這 9 個名額。
+OpenShell gateway resident 另列 allocation，不扣 worker 名額。它仍有原生程序、租約與退出讀回責任。
 
 macOS Host 每 5 秒讀取系統 memory pressure、`vm.swapusage` 已使用容量與累計 Swapouts bytes。每次採樣最多等待 1 秒。
-Swapout 速率是相鄰有效樣本的差值除以時間，不是目前 Swap 使用量；一般 normal／warning 派發只觀察速率，不以正流量阻擋；明確 warning grant 仍要求零換出速率。
-Host 在系統 Swap 已使用容量達到 15 GB（≥15,000,000,000 bytes）時停止接納新 worker。這不是每個 worker 的配額，也不是 OS 的硬上限。
-初次採樣、計數器重設、超過 15 秒沒有有效樣本、採樣失敗、critical／未知壓力，或容量達到上限，都會停止接納新 worker。
-連續三個 normal／warning、容量低於上限的有效樣本後，額度逐次恢復。每個正常採樣最多提供一次啟動機會，不累積突發啟動額度。
-Host 啟動時可用 `NOODLE_HOST_SWAP_USED_LIMIT_BYTES` 覆寫容量上限。數值須為 0 至 9007199254740991 的整數 bytes；格式錯誤時 Host 拒絕啟動。
-設定格式的範圍不是已驗證的安全範圍。15 GB 是選定的派發政策，不保證 worker 啟動後容量不超標。
-warning 不單獨阻擋一般派發；critical、未知讀值與硬體並行上限仍有效。既有明確任務 warning grant 保留原綁定、單次及期限規則，不能繞過已達容量上限。換版不自動建立 grant。
-執行中的 Host 不因另一個呼叫者更改環境而更新政策。兩代必須使用相同容量與並行政策。新准入政策使用 quota schema 2；舊 schema 1 與不同容量的帳本拒絕加入，且保留原檔。現有換版入口不自動移轉或改寫帳本政策，須先沿原 owner 完成維護與租約核對。
-warning grant 同樣在達到容量上限時拒絕。其共享 allocation 在真正退出前阻止另一代追加 worker。
-`host resources` 的 `worker_admission_policy` 應為 `swap-used-critical-guard-v2`；`swap_used_limit_bytes` 與 `swap_used_bytes` 分別讀回上限及實際容量。缺少有效容量樣本時後者為 `null`。
-候選程式或測試通過不代表目前 Host 已載入。未啟用的換出速率設定已移除，不把容量轉成 bytes/second。
-
-macOS Host 每 5 秒讀取系統 memory pressure、目前 Swap 已用 bytes 與累計 Swapouts。每次採樣最多等待 1 秒。
-預設容量門檻為 **15,000,000,000 bytes（15 GB）**，已用量 **大於或等於** 門檻就停止接納新 worker。
-warning pressure 與正的 Swapout 速率本身不會提早停派；critical、未知壓力、採樣失敗或超過 15 秒沒有有效樣本仍會停派。
-初次採樣及計數器重設先建立基線；連續三個有效、壓力為 normal／warning 且容量低於門檻的樣本後，額度逐次恢復。
-每個有效採樣最多提供一次啟動機會，不累積突發啟動額度。
-`NOODLE_HOST_SWAP_USED_LIMIT_BYTES` 可在啟動 owner 前指定整數 bytes；同帳本的所有世代必須使用相同門檻。
+Swapout 速率是相鄰有效樣本的差值除以時間，不是目前 Swap 使用量。
+memory pressure、Swap 容量、換出速率與採樣狀態都是觀察資料。critical、缺少樣本、採樣失敗、樣本過期與不支援監控都不縮減 worker 名額。
+目前沒有 Swap 容量 gate、採樣啟動 credit、硬體推算上限或 warning grant API；`NOODLE_HOST_SWAP_USED_LIMIT_BYTES` 不再選擇 Host 政策。
+worker 名額用完時，原佇列留在同一 Host 等待。未解決的 resident ownership、quota 歸還或帳本錯誤仍會阻擋 admission；這些是 custody 條件。
+新政策使用 quota schema 3。舊 schema 或不一致的 Host 上限拒絕加入，且保留原檔；正常換版不自動移轉帳本。
+`host resources` 的 `worker_admission_policy` 為 `host-workers-v1`，`maximum_workers` 為 9。`active_workers`、`active_residents` 與 `active_allocations` 分開列示。
+`swap_used_bytes` 只表示有效的容量觀察；缺少有效樣本時為 `null`。候選程式或測試通過不代表目前 Host 已載入新政策。
 
 等待不計為 worker 失敗，也不增加重試次數。已啟動的 worker 繼續執行；完成處理與清理不等待新額度。
 等待期間仍可處理 pause、drain、kill、stop 與 stop-all。原控制檔內容不變時，Loop 不重寫它，避免觸發新的檔案事件。
 
-硬體上限為 `min(CPU 數量, max(1, floor((RAM − 4 GiB) / 3 GiB)))`。
-16 GiB、10 CPU 的機器最多同時持有 4 個 worker 額度。這是保守的初始政策，並非實測最佳吞吐量或每個 worker 的記憶體配額。
-非 macOS 平台會回報 `unsupported_monitor=true` 並停止新 admission；缺少 Swap 讀值時不假設容量安全。
-
-不支援 Swap 監控的平台會回報 `unsupported_monitor=true`，有效額度為 0；取得可驗證讀值前不接納新 worker。
+不支援 Swap 監控的平台會回報 `unsupported_monitor=true`，但保留相同 worker 上限。
 
 `noodle host resources` 不啟動 Host。它讀回目前 Host PID、context 數量、有效額度、使用中的額度、壓力與 Swapout 速率。
 不能計算速率時，`swapout_bytes_per_second` 為 `null`。
 額度涵蓋已接納的準備工作與尚未確認結束的 worker，所以 `active_workers` 不等於瞬間 OS 進程數量。
-替換不可即時 steer 的 worker 時，Host 先確認資源條件，再停止並等待舊 worker 結束，沿用同一額度。
+替換不可即時 steer 的 worker 時，Host 先保留原名額並確認 custody 條件，再停止並等待舊 worker 結束，沿用同一額度。
 本機連線結束不能證明遠端 worker 已退出。共享 Host 的 OpenShell 路徑會保留額度，直到原 VM 的停止回覆與 fresh same-ID Stopped 觀察都成立；Sprites 與 Cursor 仍在啟動前拒絕。
 
-這個機制控制啟動速度與同時執行數量。它不限制 worker 自行建立的子進程、單次寫入大小或 RSS，也不能保證 Swap 不增加。
+這個機制限制同時持有的 worker 名額。它不限制 worker 自行建立的子進程、單次寫入大小或 RSS，也不能保證 Swap 不增加。
 它不修改 Spotlight、Time Machine、Gatekeeper 或系統 Swap 設定。Poteto playbook 與原有 Issue admission 保持原本的責任。
 
 ### 受限 Host 維護交接
@@ -214,17 +203,18 @@ warning pressure 與正的 Swapout 速率本身不會提早停派；critical、�
 `host switch --status` 讀取既有世代紀錄；`host maintenance --plan /absolute/plan.json --status` 只讀回原交接狀態，不推進操作。
 
 狀態機先封住新 admission，再由原 owner 各送一次 pause、原生 checkpoint 與 detach。
-原程序及其群組確認退出、原 runtime 鎖釋放後，才移轉空的 schema-1 帳本至 schema 2，並啟動一次新世代。
-移轉保留原 bytes、容量門檻、啟動窗口及未知欄位；非空帳本、政策不一致或未知寫入一律拒絕。
+原程序及其群組確認退出、原 runtime 鎖釋放後，才移轉空的 schema-1 帳本至 schema 3，並啟動一次新世代。
+備份保留原 bytes 及未知欄位。新帳本使用 `host-workers-v1`、9-worker 上限與空租約，不帶入舊容量門檻或啟動窗口。
+非空帳本、政策不一致或未知寫入一律拒絕。
 每項效果先保存 intent；回覆遺失或未知時只讀回，不能藉重跑命令重送控制、重置帳本或啟動另一代。
 
 此相容入口只支援已驗明的原版 `2b636db20166ada9e304ac3462db52dd07c69899`；原 binary 必須有乾淨的 build revision 且符合計畫 digest。
 其他來源需提供原生維護契約，不能套用這個例外。未完成交接時 admission 保持關閉。
-原證據與 binary 可供讀回，但 schema 2 不能直接交給 schema-1 owner；回復不得覆寫帳本或清空未知租約。
+原證據與 binary 可供讀回，但 schema 3 不能直接交給 schema-1 owner；回復不得覆寫帳本或清空未知租約。
 
 歷史 owner、原 request／binding、設定檔、原執行模式與派工狀態保留，所有原工作加上 maintenance hold。
 本入口不消費歷史換版佇列、不重建 context，也不恢復業務派工。一般 rolling 升版與停放工作的恢復需另有明確契約。
-新世代透過共享帳本鎖計入 worker 與 resident 額度；Host 結束本身不會清掉未證實退出的租約。
+新世代透過共享帳本鎖保存 worker 與 resident 租約。Resident 不扣 worker 名額；Host 結束本身不會清掉未證實退出的租約。
 這項交接不包含 iOS、REPL、原生 Codex 派工、聊天搬移或封存。
 
 ### 原 Host 的 OpenShell 完成證據

@@ -201,12 +201,12 @@ func DefaultConfig() Config {
 		},
 		Mode: defaultMode,
 		Concurrency: ConcurrencyConfig{
-			MaxConcurrency: 4,
+			MaxConcurrency: defaultMaxConcurrency,
 		},
 		Agents: AgentsConfig{},
 		Runtime: RuntimeConfig{
 			Default: "process",
-			Process: ProcessConfig{MaxConcurrent: 4},
+			Process: ProcessConfig{MaxConcurrent: defaultMaxConcurrency},
 			Sprites: SpritesConfig{MaxConcurrent: 50},
 			Cursor:  CursorConfig{MaxConcurrent: 10},
 		},

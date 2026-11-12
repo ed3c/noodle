@@ -255,7 +255,7 @@ func (r *OpenShellRuntime) readSettledSession(ctx context.Context, b CompletedSe
 	if err != nil {
 		return result, err
 	}
-	if custody.Version != openShellCustodyVersion || custody.Binding != r.config.Gateway.spec.Binding || custody.Blocked != "" {
+	if !openShellCustodySupportsProfile(custody, r.config.Gateway.spec) || custody.Binding != r.config.Gateway.spec.Binding || custody.Blocked != "" {
 		return result, fmt.Errorf("original OpenShell custody source differs")
 	}
 	count := 0

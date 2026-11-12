@@ -83,7 +83,7 @@ func planHostMaintenance(ctx context.Context, root, target, digest string, reque
 			"Confirm zero owned resources and retire the exact original Host generation through normal shutdown",
 			"After all old quota writers are proved retired, migrate an unchanged empty quota ledger under its lock",
 			"Import original requests as held; do not restore business dispatch or rebuild missing inputs",
-			"Read back the new Host policy and 15,000,000,000-byte ceiling before publishing the selected entry",
+			"Read back the new Host policy host-workers-v1 and its 9-worker ceiling before publishing the selected entry",
 		},
 	}
 	if !filepath.IsAbs(root) || !filepath.IsAbs(target) {
@@ -147,7 +147,7 @@ func planHostMaintenance(ctx context.Context, root, target, digest string, reque
 			SwapLimit uint64                     `json:"swap_used_limit_bytes"`
 			Leases    map[string]json.RawMessage `json:"leases"`
 		}
-		if json.Unmarshal(raw, &q) != nil || q.Schema != 1 || q.Maximum <= 0 || q.SwapLimit != admission.DefaultSwapUsedLimit || q.Leases == nil || len(q.Leases) != 0 {
+		if json.Unmarshal(raw, &q) != nil || q.Schema != 1 || q.Maximum <= 0 || q.SwapLimit != 15_000_000_000 || q.Leases == nil || len(q.Leases) != 0 {
 			p.Blockers = append(p.Blockers, "quota is not a verified empty original schema-1 ledger with the selected ceiling")
 		}
 	}

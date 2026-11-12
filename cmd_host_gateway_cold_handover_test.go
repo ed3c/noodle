@@ -85,15 +85,32 @@ func TestColdRetirementPersistsIntentBeforeNativeControl(t *testing.T) {
 	}
 	actor := loopruntime.OpenShellRetiredActor{Process: identity}
 	writes := 0
-	err = retireColdActor(context.Background(), &actor, func() error {
+	save := func() error {
 		writes++
 		if writes == 1 && (actor.IntentAt.IsZero() || !actor.ExitedAt.IsZero()) {
 			t.Fatal("control preceded intent")
 		}
 		return nil
-	})
+	}
+	initialErr := retireColdActor(context.Background(), &actor, save)
+	err = initialErr
+	if initialErr != nil {
+		if writes != 1 || actor.IntentAt.IsZero() || !actor.ExitedAt.IsZero() {
+			t.Fatal("unknown retirement changed original intent or claimed exit", initialErr, writes)
+		}
+		t.Logf("initial native retirement remained unknown: %v", initialErr)
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			gone, readErr := procx.ObserveNativeExit(actor.Process)
+			if readErr == nil && gone {
+				err = retireColdActor(context.Background(), &actor, save)
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
 	if err != nil || writes != 2 || actor.ExitedAt.IsZero() {
-		t.Fatal("native retirement lacks actual exit", err, writes)
+		t.Fatal("native retirement lacks actual exit", err, writes, "initial result:", initialErr)
 	}
 	writes = 0
 	if err := retireColdActor(context.Background(), &actor, func() error { writes++; return nil }); err != nil || writes != 0 {

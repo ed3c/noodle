@@ -13,10 +13,13 @@ No setup required. It works out of the box. Best for local development, quick it
 default = "process"
 
 [runtime.process]
-max_concurrent = 4
+max_concurrent = 9
 ```
 
-`max_concurrent` defaults to 4. This caps how many local agent processes run simultaneously, independent of the global `max_concurrency` ceiling.
+`max_concurrent` defaults to 9. This runtime cap and the Loop's `max_concurrency` both apply.
+A Host also enforces a shared limit of 9 workers across its rolling generations.
+Different Goal Hosts have separate limits; gateway residents do not consume worker slots.
+See [Goal Host](../reference/goal-hosts.md).
 
 ## Native Codex app-server
 
@@ -134,7 +137,7 @@ max_concurrent = 20
 
 | Runtime   | Best for                                | Default `max_concurrent` |
 | --------- | --------------------------------------- | -----------------------: |
-| process   | Local dev, quick iteration, small teams |                        4 |
+| process   | Local dev, quick iteration, small teams |                        9 |
 | sprites   | Parallel throughput, CI/CD, scaling out |                       50 |
 
 ## Configuration

@@ -99,7 +99,7 @@ func (r *Residents) updateRecoveryBudget() {
 	}
 	count := 0
 	for id, v := range r.records {
-		if v.State != "exited" && r.children[id] == nil {
+		if v.State != "exited" && (r.children[id] == nil || v.State == "needs_owner_readback") {
 			count++
 		}
 	}
