@@ -20,7 +20,7 @@ func openShellGatewayMintable(strategy pb.ProviderCredentialRefreshStrategy) boo
 	return false
 }
 
-func credentialSourceReadbackSettled(profile *pb.ProviderProfile, keys []string, provider, providerID string, response *pb.GetProviderRefreshStatusResponse, now time.Time) error {
+func credentialSourceReadbackSettled(profile *pb.ProviderProfile, selection *OpenShellCredentialSourceRead, provider, providerID string, response *pb.GetProviderRefreshStatusResponse, now time.Time) error {
 	wait := func() error {
 		return credentialWaiting("openshell credential source refresh readback incomplete or unsettled; original owner recovery required")
 	}
@@ -34,14 +34,18 @@ func credentialSourceReadbackSettled(profile *pb.ProviderProfile, keys []string,
 			declared[key] = strategy
 		}
 	}
-	managed := make(map[string]pb.ProviderCredentialRefreshStrategy)
-	for _, key := range keys {
-		strategy, exists := declared[key]
-		if !exists {
+	if selection == nil || len(selection.Keys) == 0 || selection.Owners == nil {
+		return wait()
+	}
+	for _, key := range selection.Keys {
+		if _, exists := declared[key]; !exists {
 			return wait()
 		}
-		if openShellGatewayMintable(strategy) {
-			managed[key] = strategy
+	}
+	managed := selection.Owners
+	for key, strategy := range managed {
+		if declared[key] != strategy || !openShellGatewayMintable(strategy) {
+			return wait()
 		}
 	}
 	seen := make(map[string]bool)
@@ -60,6 +64,10 @@ func credentialSourceReadbackSettled(profile *pb.ProviderProfile, keys []string,
 		} else if openShellGatewayMintable(state.GetStrategy()) || (state.GetStrategy() != pb.ProviderCredentialRefreshStrategy_PROVIDER_CREDENTIAL_REFRESH_STRATEGY_UNSPECIFIED && state.GetStrategy() != pb.ProviderCredentialRefreshStrategy_PROVIDER_CREDENTIAL_REFRESH_STRATEGY_STATIC && state.GetStrategy() != pb.ProviderCredentialRefreshStrategy_PROVIDER_CREDENTIAL_REFRESH_STRATEGY_EXTERNAL) {
 			return wait()
 		}
+		seen[state.GetCredentialKey()] = true
+		if _, required := managed[state.GetCredentialKey()]; !required {
+			continue
+		}
 		// provider_refresh.rs exposes configured/refreshed only outside the
 		// in-progress/committing exchange. A retryable error supplies its own
 		// authoritative schedule; absence or a future date does not permit minting.
@@ -75,7 +83,6 @@ func credentialSourceReadbackSettled(profile *pb.ProviderProfile, keys []string,
 		default:
 			return wait()
 		}
-		seen[state.GetCredentialKey()] = true
 	}
 	for key := range managed {
 		if !seen[key] {

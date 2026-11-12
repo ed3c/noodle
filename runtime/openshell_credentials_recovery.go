@@ -46,11 +46,7 @@ func (o *OpenShellGateway) recoverCredentialRow(ctx context.Context, row *OpenSh
 	if err != nil {
 		return credentialFailure("source orphan refresh readback", err)
 	}
-	keys, _, err := credentialSourceKeys(profileResponse.GetProfile(), provider, status)
-	if err != nil {
-		return err
-	}
-	if err := credentialSourceReadbackSettled(profileResponse.GetProfile(), keys, row.Provider, row.SourceProviderID, status, o.credentialTime()); err != nil {
+	if err := credentialSourceReadbackSettled(profileResponse.GetProfile(), row.SourceRead, row.Provider, row.SourceProviderID, status, o.credentialTime()); err != nil {
 		return err
 	}
 	// GetProviderRefreshStatus cannot return the original GetCredentials ACK.

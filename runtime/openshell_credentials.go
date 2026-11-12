@@ -46,6 +46,7 @@ type OpenShellCredentialDelivery struct {
 	RefreshAt                                                        time.Time
 	ExpiresAt                                                        time.Time
 	SourceReadPending                                                bool
+	SourceRead                                                       *OpenShellCredentialSourceRead
 	Pending                                                          *OpenShellCredentialIntent
 	MutationID, LastError                                            string
 	TargetReceipts                                                   [][]byte
@@ -62,6 +63,12 @@ type OpenShellCredentialIntent struct {
 func cloneOpenShellCredentialDeliveries(rows []OpenShellCredentialDelivery) []OpenShellCredentialDelivery {
 	rows = slices.Clone(rows)
 	for i := range rows {
+		if rows[i].SourceRead != nil {
+			proof := *rows[i].SourceRead
+			proof.Keys = slices.Clone(proof.Keys)
+			proof.Owners = maps.Clone(proof.Owners)
+			rows[i].SourceRead = &proof
+		}
 		rows[i].TargetReceipts = slices.Clone(rows[i].TargetReceipts)
 		for j := range rows[i].TargetReceipts {
 			rows[i].TargetReceipts[j] = slices.Clone(rows[i].TargetReceipts[j])
@@ -83,6 +90,23 @@ func validateOpenShellCredentialLedger(rows []OpenShellCredentialDelivery) error
 			return fmt.Errorf("openshell credential custody identity invalid")
 		}
 		seen[row.Provider] = true
+		if proof := row.SourceRead; proof != nil {
+			if !row.SourceReadPending || row.SourceProviderID == "" || row.ProfileID == "" || len(proof.Keys) == 0 || len(proof.Keys) > 32 || proof.Owners == nil {
+				return fmt.Errorf("openshell credential custody source-read proof invalid")
+			}
+			keys := make(map[string]bool)
+			for _, key := range proof.Keys {
+				if key == "" || strings.TrimSpace(key) != key || keys[key] {
+					return fmt.Errorf("openshell credential custody source-read keys invalid")
+				}
+				keys[key] = true
+			}
+			for key, strategy := range proof.Owners {
+				if key == "" || strings.TrimSpace(key) != key || !openShellGatewayMintable(strategy) {
+					return fmt.Errorf("openshell credential custody source-read owner invalid")
+				}
+			}
+		}
 		if intent := row.Pending; intent != nil {
 			if (intent.Kind != "import" && intent.Kind != "create" && intent.Kind != "update") || intent.RequestID == "" || intent.StartedAt.IsZero() || len(intent.SealedPayload) < 28 || row.ProfileID == "" || row.SourceProviderID == "" {
 				return fmt.Errorf("openshell credential custody intent invalid")
@@ -465,12 +489,13 @@ func (o *OpenShellGateway) deliverCredentialRow(ctx context.Context, r *OpenShel
 			return credentialFailure("source refresh readback", err)
 		}
 	}
-	keys, ownedKeys, err := credentialSourceKeys(profileResponse.GetProfile(), p, refreshReadback)
+	selection, ownedKeys, err := credentialSourceKeys(profileResponse.GetProfile(), p, refreshReadback, o.credentialTime())
 	if err != nil {
 		return err
 	}
-	if r.SourceReadPending {
-		if err := credentialSourceReadbackSettled(profileResponse.GetProfile(), keys, provider, r.SourceProviderID, refreshReadback, o.credentialTime()); err != nil {
+	keys := selection.Keys
+	if r.SourceReadPending && len(keys) > 0 {
+		if err := credentialSourceReadbackSettled(profileResponse.GetProfile(), r.SourceRead, provider, r.SourceProviderID, refreshReadback, o.credentialTime()); err != nil {
 			return err
 		}
 	}
@@ -478,13 +503,17 @@ func (o *OpenShellGateway) deliverCredentialRow(ctx context.Context, r *OpenShel
 	if err := o.ensureCredentialProfile(ctx, r, profile); err != nil {
 		return err
 	}
-	r.SourceReadPending = true
-	if err := o.saveCredentialRow(r); err != nil {
-		return err
-	}
-	values, err := o.credentialClient.GetProviderCredentials(ctx, &pb.GetProviderCredentialsRequest{WorkspaceScope: scope, Name: provider, CredentialKeys: keys, MinimumRemainingLifetime: durationpb.New(5 * time.Minute)})
-	if err != nil {
-		return credentialFailure("source retrieval", err)
+	var values *pb.GetProviderCredentialsResponse
+	if len(keys) > 0 {
+		r.SourceReadPending = true
+		r.SourceRead = selection
+		if err := o.saveCredentialRow(r); err != nil {
+			return err
+		}
+		values, err = o.credentialClient.GetProviderCredentials(ctx, &pb.GetProviderCredentialsRequest{WorkspaceScope: scope, Name: provider, CredentialKeys: keys, MinimumRemainingLifetime: durationpb.New(openShellCredentialMinimumLifetime)})
+		if err != nil {
+			return credentialFailure("source retrieval", err)
+		}
 	}
 	credentials := make(map[string]string)
 	expiration := make(map[string]*timestamppb.Timestamp)
@@ -577,7 +606,10 @@ func (o *OpenShellGateway) deliverCredentialRow(ctx context.Context, r *OpenShel
 			r.RefreshAt = o.credentialTime().Add(30 * time.Second)
 		}
 	}
-	r.SourceReadPending = false
+	if len(keys) > 0 {
+		r.SourceReadPending = false
+		r.SourceRead = nil
+	}
 	if err := o.saveCredentialIntent(r, kind, id, request); err != nil {
 		return err
 	}
@@ -606,9 +638,6 @@ func externalOpenShellProfile(original *pb.ProviderProfile) (*pb.ProviderProfile
 		credential.StablePlaceholder = true
 	}
 	keys = slices.Compact(slices.Sorted(slices.Values(keys)))
-	if len(keys) == 0 {
-		return nil, nil, fmt.Errorf("openshell runtime credential selection invalid")
-	}
 	bytes, err := openShellBytes(p)
 	if err != nil {
 		return nil, nil, err

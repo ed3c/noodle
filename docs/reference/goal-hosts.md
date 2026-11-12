@@ -42,11 +42,12 @@ payload 與 route spec 保留原來源。materializer 只準備本機檔案，�
 下文 Source 指原登入 gateway；Target 指各任務的 gateway。
 
 worker 使用前，原 Gateway owner 只取得該 route 所需 provider 的 runtime credential，並配送到任務 gateway 的 external `stable_placeholder` provider。它不另建 refresh owner。
-原 profile 的 `env_vars` 是 credential aliases。配送只選原 provider 已有的 key，或原 refresh owner 可證實的輸出；Required 群保留任一 alias 可用的原語義。未設定的 optional credential 不會變成新的必填欄位。續供使用原 Update API 同步來源刪除的 config、credential 與 expiry。
+原 profile 的 `env_vars` 是 credential aliases。配送按公開 expiry 與實際 refresh owner 選取可供應的 key；已過期且不能續期的 alias 不會阻擋同群可用的 alias。Required 群保留任一 alias 可用的原語義，optional 群可為空。合法空選集不呼叫 credential getter，仍透過原 Update API 同步來源刪除的 config、credential 與 expiry。
 原 Gateway owner 按實際 expiry 持續更新 provider。placeholder 保留原 VM 與 worker 身分；更新成功仍須原 mutation／installation readback，不能從 redacted provider 資料推定 ACK。
 登入服務故障時，原 owner 保留錯誤與續供義務。需要新憑證的工作不能冒充可用；已有有效憑證的 worker 不因登入服務故障被停止。授權失效沿原登入 owner 處理。
 
 每次 Target mutation 前，原 custody 以 schema v5 保存來源綁定、原 request ID 與加密 payload。未知的 Target 回覆保留同一筆請求；超過原服務的 24 小時去重界線後，不換新 ID 重播。
+每次 Source getter 前，原 custody 保存本次選鍵與實際 refresh owner 的非秘密證據。回覆遺失時，只核對該次實際 owner；不從 profile 全部 aliases 猜出不存在的 owner。舊 pending 缺少這份證據時保留 unknown，不補造。
 一般 receipt 與 log 不保存 token。解密依賴該任務 gateway 原 mTLS private key；該 key 與 custody 必須一起保留，不能用另一個 Host 的 key 接管。
 未使用配送的既有 custody 維持 schema v4。standalone custody 與原 v3→v4 handover 不接受 v5；拒絕不會把 credential state 降版或丟棄。
 

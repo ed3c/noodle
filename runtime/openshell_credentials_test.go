@@ -104,9 +104,13 @@ func (s *credentialNative) GetProvider(_ context.Context, r *pb.GetProviderReque
 	p := proto.Clone(s.provider).(*dm.Provider)
 	if s.values != nil {
 		p.Credentials = make(map[string]string)
-		for key := range s.values {
+		p.CredentialExpirationTimes = make(map[string]*timestamppb.Timestamp)
+		for key, value := range s.values {
 			if !s.hiddenCredentialKeys[key] {
 				p.Credentials[key] = "<redacted>"
+				if value.ExpirationTime != nil {
+					p.CredentialExpirationTimes[key] = value.ExpirationTime
+				}
 			}
 		}
 	}
@@ -149,6 +153,9 @@ func (s *credentialNative) GetProviderCredentials(ctx context.Context, r *pb.Get
 	for _, key := range r.CredentialKeys {
 		if s.values[key] == nil {
 			return nil, status.Error(codes.InvalidArgument, "unexportable")
+		}
+		if expiry := s.values[key].ExpirationTime; expiry != nil && !expiry.AsTime().After(time.Now().Add(r.GetMinimumRemainingLifetime().AsDuration())) {
+			return nil, status.Error(codes.FailedPrecondition, "credential cannot meet the requested remaining lifetime")
 		}
 		values[key] = proto.Clone(s.values[key]).(*pb.ProviderCredentialValue)
 	}
