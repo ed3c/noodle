@@ -454,7 +454,7 @@ func TestRollingTargetAcceptsCurrentNativeCapabilitiesWithoutWarningGrant(t *tes
 }
 
 func TestAdmissionTargetConfigPreservesIsolatedDispatchPolicy(t *testing.T) {
-	for _, fault := range []string{"none", "image", "provider", "gateway-driver"} {
+	for _, fault := range []string{"none", "image", "provider", "gateway-driver", "credential-owner"} {
 		t.Run(fault, func(t *testing.T) {
 			root, _, template, _ := goalHostFixture(t)
 			originalRoot, targetRoot := filepath.Join(root, "original"), filepath.Join(root, "target")
@@ -477,7 +477,7 @@ func TestAdmissionTargetConfigPreservesIsolatedDispatchPolicy(t *testing.T) {
 				if err := os.WriteFile(filename, bytes.Replace(raw, []byte("/immutable/driver"), []byte("/different/driver"), 1), 0600); err != nil {
 					t.Fatal(err)
 				}
-			} else if fault != "none" {
+			} else if fault != "none" && fault != "credential-owner" {
 				raw, err := os.ReadFile(template)
 				if err != nil {
 					t.Fatal(err)
@@ -521,6 +521,24 @@ func TestAdmissionTargetConfigPreservesIsolatedDispatchPolicy(t *testing.T) {
 			target, err := loopruntime.MaterializeGoalOpenShellProfile(targetTemplate, targetRoot, "")
 			if err != nil {
 				t.Fatal(err)
+			}
+			if fault == "credential-owner" {
+				raw, err := os.ReadFile(target.Profile.Path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var profile map[string]any
+				if err := json.Unmarshal(raw, &profile); err != nil {
+					t.Fatal(err)
+				}
+				profile["credential_source"].(map[string]any)["gateway"] = "https://127.0.0.1:18671"
+				raw, err = json.Marshal(profile)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(target.Profile.Path, raw, 0600); err != nil {
+					t.Fatal(err)
+				}
 			}
 			originalConfig := []byte(fmt.Sprintf("mode='manual'\n[server]\nenabled=false\n[runtime]\nadmitted_orders=['selected-task']\n[runtime.openshell]\nprofile=%q\n", original.Profile.Path))
 			configPath, targetConfigPath := filepath.Join(root, "original.toml"), filepath.Join(root, "target.toml")

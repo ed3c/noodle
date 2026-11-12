@@ -21,6 +21,9 @@ func (c *OpenShellCustody) Quiesce(ctx context.Context) error {
 		c.mu.Lock()
 	}
 	defer c.mu.Unlock()
+	if c.credentialInFlight != 0 {
+		return fmt.Errorf("openshell credential operation in progress; gateway release refused")
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

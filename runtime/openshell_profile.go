@@ -35,6 +35,7 @@ type OpenShellProfile struct {
 	InstructionVerifier             string
 	ProgressSupervisor              string
 	Routes                          map[string]OpenShellRoute
+	CredentialOrigin                OpenShellCredentialSource
 }
 type OpenShellRoute struct {
 	Binary string
@@ -42,13 +43,14 @@ type OpenShellRoute struct {
 }
 
 type openShellProfileFile struct {
-	SchemaVersion       int      `json:"schema_version"`
-	CLI                 string   `json:"cli"`
-	GatewayName         string   `json:"gateway_name"`
-	Environment         []string `json:"environment"`
-	PayloadDirectory    string   `json:"payload_directory"`
-	InstructionVerifier string   `json:"instruction_verifier"`
-	ProgressSupervisor  string   `json:"progress_supervisor"`
+	SchemaVersion       int                            `json:"schema_version"`
+	CLI                 string                         `json:"cli"`
+	GatewayName         string                         `json:"gateway_name"`
+	Environment         []string                       `json:"environment"`
+	PayloadDirectory    string                         `json:"payload_directory"`
+	InstructionVerifier string                         `json:"instruction_verifier"`
+	ProgressSupervisor  string                         `json:"progress_supervisor"`
+	CredentialSource    *openShellCredentialSourceFile `json:"credential_source,omitempty"`
 	Routes              map[string]struct {
 		Binary   string `json:"binary"`
 		SpecFile string `json:"spec_file"`
@@ -280,6 +282,29 @@ func LoadOpenShellProfile(filename string) (OpenShellProfile, error) {
 			return p, err
 		}
 	}
+	origin := openShellCredentialSourceFile{Gateway: f.Gateway.Binding.Gateway, Workspace: f.Gateway.Binding.Workspace}
+	origin.TLS = f.Gateway.TLS
+	p.CredentialOrigin, err = profileCredentialOrigin(origin, OpenShellTLS{RootCAs: roots, Certificate: pair, ServerName: f.Gateway.TLS.ServerName}, ca, cert, key)
+	if err != nil {
+		return p, err
+	}
+	if f.CredentialSource != nil {
+		selected := *f.CredentialSource
+		for _, value := range []*string{&selected.TLS.CAFile, &selected.TLS.CertificateFile, &selected.TLS.KeyFile} {
+			*value, err = resolve(*value)
+			if err != nil {
+				return p, err
+			}
+		}
+		p.CredentialOrigin, err = loadProfileCredentialSource(selected, readGateway)
+		if err != nil {
+			return p, err
+		}
+		if err = validateOpenShellCredentialSource(p.CredentialOrigin, f.Gateway.Binding.Gateway); err != nil {
+			return p, err
+		}
+		gatewayHash.Write([]byte("\x00credential-source\x00" + p.CredentialOrigin.BindingSHA256))
+	}
 	deployment, err := json.Marshal(struct {
 		Gateway     any
 		CLI, Name   string
@@ -300,6 +325,9 @@ func LoadOpenShellProfile(filename string) (OpenShellProfile, error) {
 		return p, fmt.Errorf("OpenShell gateway readiness timeout outside 1..30 seconds")
 	}
 	p.Gateway = OpenShellGatewaySpec{Resident: resident, Binding: OpenShellCustodyBinding{StateRoot: stateRoot, Gateway: f.Gateway.Binding.Gateway, Workspace: f.Gateway.Binding.Workspace, Owner: f.Gateway.Binding.Owner, ConfigSource: identitySource, ConfigFingerprint: hex.EncodeToString(gatewayHash.Sum(nil))}, TLS: OpenShellTLS{RootCAs: roots, Certificate: pair, ServerName: f.Gateway.TLS.ServerName}, Version: f.Gateway.Version, ComputeDriver: f.Gateway.ComputeDriver, ReadinessTimeout: time.Duration(f.Gateway.ReadinessTimeoutSeconds) * time.Second, Retained: append([]OpenShellRetainedSandbox(nil), f.Gateway.Retained...)}
+	if f.CredentialSource != nil {
+		p.Gateway.CredentialSource = &p.CredentialOrigin
+	}
 	if p.ClientSHA256, err = openShellClientHash(p); err != nil {
 		return p, err
 	}

@@ -124,9 +124,12 @@ func progressFixtureArchive(t *testing.T, archive string) []byte {
 	}
 	return output.Bytes()
 }
-func openShellRuntimeFixture(t *testing.T) (*OpenShellRuntime, *managedFixture, string) {
+func openShellRuntimeFixture(t *testing.T, prepare ...func(*managedFixture)) (*OpenShellRuntime, *managedFixture, string) {
 	t.Helper()
 	f := newManagedFixture(t, true)
+	for _, configure := range prepare {
+		configure(f)
+	}
 	managedMarker(t, f.root, "runtime-dispatch")
 	owner := f.open(t)
 	root := t.TempDir()

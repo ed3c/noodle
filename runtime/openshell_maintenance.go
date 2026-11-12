@@ -158,7 +158,7 @@ func maintenanceInputs(p ProgressMaintenance, profile OpenShellProfile) (OpenShe
 	if d.Version != 1 || d.ProfileSHA256 != profileSHA || d.ContextID != p.ContextID || filepath.Base(p.SessionDirectory) != d.SessionID || d.Phase != "progress-unknown" || d.Error == "" || d.Baseline == nil || d.Worker == nil || d.Progress != nil || d.ProgressHead != "" || d.CandidateHead != "" || d.Delivery != nil {
 		return fail(fmt.Errorf("maintenance requires the original unreturned progress failure"))
 	}
-	if c.Version != openShellCustodyVersion || c.Binding != profile.Gateway.Binding || c.Blocked != "" {
+	if !openShellCustodySupportsProfile(c, profile.Gateway) || c.Binding != profile.Gateway.Binding || c.Blocked != "" {
 		return fail(fmt.Errorf("maintenance custody differs"))
 	}
 	count := 0

@@ -131,6 +131,7 @@ func (r *OpenShellRuntime) Dispatch(ctx context.Context, req DispatchRequest) (S
 }
 
 type openShellDispatchReceipt struct {
+	CredentialWaitError                                            string `json:",omitempty"`
 	ProfileSHA256                                                  string
 	CandidateHead                                                  string
 	ProgressHead                                                   string
@@ -265,6 +266,22 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 		return
 	}
 	s.custody = custody
+	releaseCredentials, err := s.waitCredentials(ctx, route.Spec.Providers)
+	if err != nil {
+		s.fail(err)
+		if s.interrupted() || errors.Is(err, context.Canceled) {
+			s.mu.Lock()
+			s.receipt.Outcome.Status = StatusCancelled
+			if persistErr := s.persistLocked(); persistErr != nil {
+				s.receipt.Error = errors.Join(err, persistErr).Error()
+				s.receipt.Outcome.Reason = s.receipt.Error
+			}
+			s.mu.Unlock()
+		}
+		s.complete()
+		return
+	}
+	go func() { <-s.done; releaseCredentials() }()
 	if err = s.phase("creating"); err != nil {
 		s.fail(err)
 		s.complete()

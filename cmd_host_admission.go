@@ -303,6 +303,9 @@ func targetAdmissionConfig(binding hostRequestBinding, target, filename string) 
 }
 
 func validateAdmissionProfilePolicy(original, target loopruntime.OpenShellProfile) error {
+	if original.CredentialOrigin.BindingSHA256 == "" || original.CredentialOrigin.BindingSHA256 != target.CredentialOrigin.BindingSHA256 {
+		return errors.New("successor OpenShell credential owner policy differs")
+	}
 	if original.CLI != target.CLI || original.PayloadDirectory != target.PayloadDirectory ||
 		original.PayloadSHA256 != target.PayloadSHA256 || original.InstructionVerifier != target.InstructionVerifier ||
 		original.ProgressSupervisor != target.ProgressSupervisor || len(original.Routes) != len(target.Routes) ||

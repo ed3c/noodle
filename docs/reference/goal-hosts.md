@@ -35,6 +35,21 @@ memory pressure、Swap 使用量、換出速率與採樣失敗都是觀察資料
 payload 與 route spec 保留原來源。materializer 只準備本機檔案，不執行模型 credential provisioning；隔離設定不代表 gateway、VM 或模型憑證已可使用。
 `status=ready` 只表示已讀回選定 Host 的 admission 身分與政策；`runtime_readiness=not_observed` 保留原生 runtime 與 credential readiness 的證據缺口。
 
+## 沿用登入與憑證續供
+
+新 Goal profile 的 `credential_source` 保留原登入 gateway、workspace 與 operator mTLS 來源。materializer 不複製 OAuth refresh grant。從另一個 Goal profile 建立替代 Host 時，來源仍指向原登入 gateway。
+這個登入服務是明確的共用依賴。任務 gateway、SQLite、VM 與 custody 維持各 Host 隔離。
+
+worker 使用前，原 Gateway owner 只取得該 route 所需 provider 的 runtime credential，並配送到任務 gateway 的 external `stable_placeholder` provider。它不另建 refresh owner。
+原 Gateway owner 按實際 expiry 持續更新 provider。placeholder 保留原 VM 與 worker 身分；更新成功仍須原 mutation／installation readback，不能從 redacted provider 資料推定 ACK。
+登入服務故障時，原 owner 保留錯誤與續供義務。需要新憑證的工作不能冒充可用；已有有效憑證的 worker 不因登入服務故障被停止。授權失效沿原登入 owner 處理。
+
+配送前，原 custody 以 schema v5 保存來源綁定、原 request ID 與加密 payload。未知回覆保留同一筆請求；超過原服務的 24 小時去重界線後，不換新 ID 重播。
+一般 receipt 與 log 不保存 token。解密依賴該任務 gateway 原 mTLS private key；該 key 與 custody 必須一起保留，不能用另一個 Host 的 key 接管。
+未使用配送的既有 custody 維持 schema v4。standalone custody 與原 v3→v4 handover 不接受 v5；拒絕不會把 credential state 降版或丟棄。
+
+這些是來源可追溯的實作行為。真正的模型登入、同 VM 跨 token 到期與 worker 返回，仍須原生驗收；本文件不代表已部署或驗收通過。
+
 ## Control checkout
 
 ```sh

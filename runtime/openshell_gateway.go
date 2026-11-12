@@ -35,6 +35,7 @@ type OpenShellGatewaySpec struct {
 	ComputeDriver    string
 	ReadinessTimeout time.Duration
 	Retained         []OpenShellRetainedSandbox
+	CredentialSource *OpenShellCredentialSource
 }
 
 // OpenShellGateway belongs to a Host, outside any worker Runtime.Shutdown.
@@ -44,18 +45,27 @@ type OpenShellGatewaySpec struct {
 // when not nested). Residents drops its lock before invoking guard;
 // Release never holds owner.mu across that callback. Native RPCs are bounded.
 type OpenShellGateway struct {
-	mu         sync.Mutex
-	residents  *admission.Residents
-	budget     *admission.Budget
-	spec       OpenShellGatewaySpec
-	custody    *OpenShellCustody
-	guard      *admission.ResidentGuard
-	generation *admission.ResidentGeneration
-	resident   admission.Resident
-	attempted  bool
-	ready      bool
-	closed     bool
-	diagnostic error
+	mu                   sync.Mutex
+	residents            *admission.Residents
+	budget               *admission.Budget
+	spec                 OpenShellGatewaySpec
+	custody              *OpenShellCustody
+	guard                *admission.ResidentGuard
+	generation           *admission.ResidentGeneration
+	resident             admission.Resident
+	attempted            bool
+	ready                bool
+	closed               bool
+	diagnostic           error
+	credentialMu         sync.Mutex
+	credentialLifetimeMu sync.Mutex
+	credentialCancel     context.CancelFunc
+	credentialDone       chan struct{}
+	credentialActive     map[string]int
+	credentialFlights    map[string]bool
+	credentialConnection *grpc.ClientConn
+	credentialClient     pb.OpenShellClient
+	credentialNow        func() time.Time
 }
 
 // NewOpenShellGateway reserves canonical local custody before any service spawn.
@@ -84,11 +94,22 @@ func NewOpenShellGateway(residents *admission.Residents, budget *admission.Budge
 	if err != nil {
 		return nil, err
 	}
+	if spec.CredentialSource != nil {
+		source := *spec.CredentialSource
+		source.TLS, err = freezeOpenShellTLS(source.TLS)
+		if err != nil {
+			return nil, err
+		}
+		if err = validateOpenShellCredentialSource(source, spec.Binding.Gateway); err != nil {
+			return nil, err
+		}
+		spec.CredentialSource = &source
+	}
 	conn, err := newOpenShellConnection(spec.Binding.Gateway, spec.TLS)
 	if err != nil {
 		return nil, err
 	}
-	c, err := reserveOpenShellCustody(spec.Binding, conn, spec.Retained, spec.ControlRoot)
+	c, err := reserveOpenShellCustodyWithCredentials(spec.Binding, conn, spec.Retained, spec.ControlRoot, spec.CredentialSource)
 	if c == nil {
 		return nil, err
 	}
@@ -278,6 +299,15 @@ func (o *OpenShellGateway) readback(ctx context.Context) (*OpenShellCustody, err
 		return nil, o.diagnostic
 	}
 	o.ready = true
+	// Recovered native obligations continue token delivery without requiring a
+	// new worker/session to register first.
+	o.credentialMu.Lock()
+	err = o.startCredentials()
+	o.credentialMu.Unlock()
+	if err != nil {
+		o.ready = false
+		return nil, err
+	}
 	return c, nil
 }
 
@@ -326,6 +356,7 @@ func (o *OpenShellGateway) quiesce(ctx context.Context) error {
 	if err := o.custody.Quiesce(ctx); err != nil {
 		return err
 	}
+	o.stopCredentials()
 	o.ready = false
 	return nil
 }
@@ -359,6 +390,7 @@ func (o *OpenShellGateway) Close() error {
 		return err
 	}
 	o.closed, o.ready = true, false
+	o.stopCredentials()
 	return o.custody.closeLocal()
 }
 

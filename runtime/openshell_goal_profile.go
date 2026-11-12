@@ -144,6 +144,13 @@ func MaterializeGoalOpenShellProfile(template, hostRoot, address string) (GoalPr
 		}
 		return filepath.Join(filepath.Dir(template), value)
 	}
+	if f.CredentialSource == nil {
+		f.CredentialSource = &openShellCredentialSourceFile{Gateway: f.Gateway.Binding.Gateway, Workspace: f.Gateway.Binding.Workspace}
+		f.CredentialSource.TLS = f.Gateway.TLS
+	}
+	for _, value := range []*string{&f.CredentialSource.TLS.CAFile, &f.CredentialSource.TLS.CertificateFile, &f.CredentialSource.TLS.KeyFile} {
+		*value = resolve(*value)
+	}
 	if len(f.Gateway.ConfigFiles) != 1 || resolve(f.Gateway.ConfigFiles[0]) != resolve(f.Gateway.IdentitySource) {
 		return result, errors.New("Goal profile template does not select one gateway configuration source")
 	}
