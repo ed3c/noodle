@@ -119,12 +119,13 @@ func TestOpenShellCredentialSlowSourceDoesNotBlockOtherAcquire(t *testing.T) {
 }
 
 func TestOpenShellCredentialSessionWaitsThenCreatesOrCancels(t *testing.T) {
-	for _, mode := range []string{"recovered", "cancelled", "source-aborted"} {
+	for _, mode := range []string{"recovered", "cancelled", "source-aborted", "source-not-found"} {
 		cancelled := mode == "cancelled"
 		t.Run(mode, func(t *testing.T) {
 			fixture, source, _, _ := credentialFixture(t)
-			source.unavailable = mode != "source-aborted"
+			source.unavailable = mode != "source-aborted" && mode != "source-not-found"
 			source.abortRetrievalOnce = mode == "source-aborted"
+			source.retrievalNotFoundOnce = mode == "source-not-found"
 			r, f, target := openShellRuntimeFixture(t, func(f *managedFixture) {
 				f.spec.CredentialSource = fixture.spec.CredentialSource
 				managedMarker(t, f.root, "provider-ready")
@@ -155,6 +156,9 @@ func TestOpenShellCredentialSessionWaitsThenCreatesOrCancels(t *testing.T) {
 					expected := "Unavailable"
 					if mode == "source-aborted" {
 						expected = "Aborted"
+					}
+					if mode == "source-not-found" {
+						expected = "NotFound"
 					}
 					if !strings.Contains(diagnostic, expected) {
 						t.Fatal("native safe error missing")
@@ -207,16 +211,19 @@ func TestOpenShellCredentialSessionWaitsThenCreatesOrCancels(t *testing.T) {
 				if mode == "source-aborted" {
 					expected = "Aborted"
 				}
+				if mode == "source-not-found" {
+					expected = "NotFound"
+				}
 				if !strings.Contains(prior, expected) {
 					t.Fatal("recovered native error history lost")
 				}
-				if mode == "source-aborted" {
+				if mode == "source-aborted" || mode == "source-not-found" {
 					source.mu.Lock()
 					events := append([]string(nil), source.retrievalEvents...)
 					source.mu.Unlock()
 					first := slices.Index(events, "retrieve")
 					if first < 0 || len(events) < first+3 || events[first+1] != "readback" || events[first+2] != "retrieve" {
-						t.Fatalf("source Aborted retried without original readback: %v", events)
+						t.Fatalf("source retrieval retried without original readback: %v", events)
 					}
 				}
 			}

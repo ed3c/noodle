@@ -39,6 +39,8 @@ type credentialNative struct {
 	gets, retrievals, readbacks, creates, updates, imports int
 	unavailable, sourceLost, refreshing                    bool
 	abortRetrievalOnce                                     bool
+	retrievalNotFoundOnce                                  bool
+	onRetrievalNotFound                                    func(*credentialNative)
 	retrievalEvents                                        []string
 	hiddenCredentialKeys                                   map[string]bool
 	afterRetrieval                                         func(*credentialNative)
@@ -135,6 +137,13 @@ func (s *credentialNative) GetProviderCredentials(ctx context.Context, r *pb.Get
 	if s.abortRetrievalOnce {
 		s.abortRetrievalOnce = false
 		return nil, status.Error(codes.Aborted, "provider changed during credential resolution")
+	}
+	if s.retrievalNotFoundOnce {
+		s.retrievalNotFoundOnce = false
+		if s.onRetrievalNotFound != nil {
+			s.onRetrievalNotFound(s)
+		}
+		return nil, status.Error(codes.NotFound, "selected runtime credential disappeared after refresh")
 	}
 	if s.blockRetrieval != nil {
 		close(s.blockRetrieval)

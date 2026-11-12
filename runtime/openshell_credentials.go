@@ -356,6 +356,9 @@ func credentialFailure(operation string, err error) error {
 	if strings.HasPrefix(operation, "source") && (code == codes.Aborted || code == codes.Unauthenticated || code == codes.PermissionDenied || code == codes.FailedPrecondition) {
 		transient = true
 	}
+	if operation == "source retrieval" && code == codes.NotFound {
+		transient = true
+	}
 	if transient {
 		return credentialWaiting(message)
 	}
@@ -584,6 +587,20 @@ func (o *OpenShellGateway) deliverCredentialRow(ctx context.Context, r *OpenShel
 		var clearExpiration []string
 		for key := range native.GetCredentials() {
 			if _, exists := credentials[key]; !exists {
+				// A transport subset does not prove source removal. Native Update
+				// retains omitted still-member values without copying redacted material.
+				_, present := current.GetCredentials()[key]
+				if present || ownedKeys[key] {
+					if ts := native.GetCredentialExpirationTimes()[key]; ts != nil {
+						if ts.CheckValid() != nil {
+							return fmt.Errorf("openshell credential retained target expiration invalid")
+						}
+						if expires.IsZero() || ts.AsTime().Before(expires) {
+							expires = ts.AsTime()
+						}
+					}
+					continue
+				}
 				material.Credentials[key] = ""
 				if native.GetCredentialExpirationTimes()[key] != nil {
 					clearExpiration = append(clearExpiration, key)

@@ -76,9 +76,7 @@ func credentialSourceKeys(profile *pb.ProviderProfile, provider *dm.Provider, re
 			if owner != nil {
 				// Native final delivery rejects an in-progress/committing owner even
 				// when its old value is valid. A static alias can remain independently usable.
-				switch owner.GetStatus() {
-				case "configured", "refreshed", "error":
-				default:
+				if owner.GetStatus() == "refresh_in_progress" || owner.GetStatus() == "refresh_committing" {
 					continue
 				}
 			}

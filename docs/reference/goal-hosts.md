@@ -43,6 +43,7 @@ payload 與 route spec 保留原來源。materializer 只準備本機檔案，�
 
 worker 使用前，原 Gateway owner 只取得該 route 所需 provider 的 runtime credential，並配送到任務 gateway 的 external `stable_placeholder` provider。它不另建 refresh owner。
 原 profile 的 `env_vars` 是 credential aliases。配送按公開 expiry 與實際 refresh owner 選取可供應的 key；已過期且不能續期的 alias 不會阻擋同群可用的 alias。Required 群保留任一 alias 可用的原語義，optional 群可為空。合法空選集不呼叫 credential getter，仍透過原 Update API 同步來源刪除的 config、credential 與 expiry。
+當次未選取不等於來源已刪除。若 Source 仍保有該 key，或該 key 仍屬實際 refresh owner 的輸出，Target 會透過原 Update 的省略語義保留既有值。原 owner 將其公開 expiry 納入續供時程。只有來源讀回證明移除的 key 才送出刪除標記。
 原 Gateway owner 按實際 expiry 持續更新 provider。placeholder 保留原 VM 與 worker 身分；更新成功仍須原 mutation／installation readback，不能從 redacted provider 資料推定 ACK。
 登入服務故障時，原 owner 保留錯誤與續供義務。需要新憑證的工作不能冒充可用；已有有效憑證的 worker 不因登入服務故障被停止。授權失效沿原登入 owner 處理。
 
