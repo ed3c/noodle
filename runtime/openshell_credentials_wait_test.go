@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -66,6 +67,7 @@ func TestOpenShellCredentialSlowSourceDoesNotBlockOtherAcquire(t *testing.T) {
 	started := make(chan struct{})
 	source.mu.Lock()
 	source.blockRetrieval = started
+	source.releaseRetrieval = make(chan struct{})
 	source.mu.Unlock()
 	clock.Add(int64(55 * time.Minute))
 	select {
@@ -89,6 +91,18 @@ func TestOpenShellCredentialSlowSourceDoesNotBlockOtherAcquire(t *testing.T) {
 		t.Fatal(err)
 	}
 	other()
+	close(source.releaseRetrieval)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		state := c.Snapshot()
+		if len(state.Credentials) == 1 && !state.Credentials[0].SourceReadPending && state.Credentials[0].Pending == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("original source RPC did not finish its saved intent")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	o.stopCredentials()
 	select {
 	case <-o.credentialDone:
@@ -105,10 +119,12 @@ func TestOpenShellCredentialSlowSourceDoesNotBlockOtherAcquire(t *testing.T) {
 }
 
 func TestOpenShellCredentialSessionWaitsThenCreatesOrCancels(t *testing.T) {
-	for _, cancelled := range []bool{false, true} {
-		t.Run(map[bool]string{false: "recovered", true: "cancelled"}[cancelled], func(t *testing.T) {
+	for _, mode := range []string{"recovered", "cancelled", "source-aborted"} {
+		cancelled := mode == "cancelled"
+		t.Run(mode, func(t *testing.T) {
 			fixture, source, _, _ := credentialFixture(t)
-			source.unavailable = true
+			source.unavailable = mode != "source-aborted"
+			source.abortRetrievalOnce = mode == "source-aborted"
 			r, f, target := openShellRuntimeFixture(t, func(f *managedFixture) {
 				f.spec.CredentialSource = fixture.spec.CredentialSource
 				managedMarker(t, f.root, "provider-ready")
@@ -136,7 +152,11 @@ func TestOpenShellCredentialSessionWaitsThenCreatesOrCancels(t *testing.T) {
 				phase, diagnostic := s.receipt.Phase, s.receipt.Error
 				s.mu.Unlock()
 				if phase == "credential_waiting" {
-					if !strings.Contains(diagnostic, "Unavailable") {
+					expected := "Unavailable"
+					if mode == "source-aborted" {
+						expected = "Aborted"
+					}
+					if !strings.Contains(diagnostic, expected) {
 						t.Fatal("native safe error missing")
 					}
 					break
@@ -183,8 +203,21 @@ func TestOpenShellCredentialSessionWaitsThenCreatesOrCancels(t *testing.T) {
 				s.mu.Lock()
 				prior := s.receipt.CredentialWaitError
 				s.mu.Unlock()
-				if !strings.Contains(prior, "Unavailable") {
+				expected := "Unavailable"
+				if mode == "source-aborted" {
+					expected = "Aborted"
+				}
+				if !strings.Contains(prior, expected) {
 					t.Fatal("recovered native error history lost")
+				}
+				if mode == "source-aborted" {
+					source.mu.Lock()
+					events := append([]string(nil), source.retrievalEvents...)
+					source.mu.Unlock()
+					first := slices.Index(events, "retrieve")
+					if first < 0 || len(events) < first+3 || events[first+1] != "readback" || events[first+2] != "retrieve" {
+						t.Fatalf("source Aborted retried without original readback: %v", events)
+					}
 				}
 			}
 			data, err := os.ReadFile(filepath.Join(s.dir, "openshell-dispatch.json"))
@@ -257,6 +290,10 @@ func TestOpenShellCredentialExpiryCarrierMatchesNativeMerge(t *testing.T) {
 }
 
 func TestOpenShellCredentialPermanentFailureDoesNotWait(t *testing.T) {
+	var waiting *openShellCredentialWaiting
+	if errors.As(credentialFailure("target mutation", status.Error(codes.Aborted, "CAS conflict")), &waiting) {
+		t.Fatal("target CAS conflict was changed to transient waiting")
+	}
 	for _, reason := range []string{"REQUEST_ID_PAYLOAD_MISMATCH", "REQUEST_REPLAY_UNAVAILABLE"} {
 		native, _ := status.New(codes.FailedPrecondition, "private payload must not leak").WithDetails(&errdetails.ErrorInfo{Reason: reason})
 		err := credentialFailure("target mutation", native.Err())

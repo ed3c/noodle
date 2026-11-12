@@ -244,6 +244,11 @@ func (o *OpenShellGateway) credentialTick(ctx context.Context) {
 			providers[provider]++
 		}
 	}
+	for _, row := range state.Credentials {
+		if row.Pending != nil || row.SourceReadPending {
+			providers[row.Provider] += 0
+		}
+	}
 	var batch sync.WaitGroup
 	for provider := range providers {
 		var row *OpenShellCredentialDelivery
@@ -260,7 +265,7 @@ func (o *OpenShellGateway) credentialTick(ctx context.Context) {
 			bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 			// The original provider row records any error and its pending intent.
-			_ = o.deliverCredential(bounded, provider)
+			_ = o.advanceCredential(bounded, provider, providers[provider] > 0)
 		})
 	}
 	batch.Wait()
@@ -324,7 +329,7 @@ func credentialFailure(operation string, err error) error {
 		message += ": " + reason
 	}
 	transient := code == codes.Unavailable || code == codes.DeadlineExceeded || code == codes.ResourceExhausted || reason == "REQUEST_OUTCOME_UNCERTAIN"
-	if strings.HasPrefix(operation, "source") && (code == codes.Unauthenticated || code == codes.PermissionDenied || code == codes.FailedPrecondition) {
+	if strings.HasPrefix(operation, "source") && (code == codes.Aborted || code == codes.Unauthenticated || code == codes.PermissionDenied || code == codes.FailedPrecondition) {
 		transient = true
 	}
 	if transient {
@@ -333,7 +338,11 @@ func credentialFailure(operation string, err error) error {
 	return errors.New(message)
 }
 
-func (o *OpenShellGateway) deliverCredential(ctx context.Context, provider string) (result error) {
+func (o *OpenShellGateway) deliverCredential(ctx context.Context, provider string) error {
+	return o.advanceCredential(ctx, provider, true)
+}
+
+func (o *OpenShellGateway) advanceCredential(ctx context.Context, provider string, allowFresh bool) (result error) {
 	// This is only an in-memory same-provider fence. The custody intent remains
 	// the durable authority across process loss and lost native replies.
 	o.credentialMu.Lock()
@@ -393,6 +402,9 @@ func (o *OpenShellGateway) deliverCredential(ctx context.Context, provider strin
 		c.credentialInFlight--
 		c.mu.Unlock()
 	}()
+	if !allowFresh {
+		return o.recoverCredentialRow(ctx, r)
+	}
 	return o.deliverCredentialRow(ctx, r)
 }
 
@@ -439,25 +451,32 @@ func (o *OpenShellGateway) deliverCredentialRow(ctx context.Context, r *OpenShel
 	if err != nil {
 		return credentialFailure("source profile", err)
 	}
-	profile, keys, err := externalOpenShellProfile(profileResponse.GetProfile())
+	profile, _, err := externalOpenShellProfile(profileResponse.GetProfile())
 	if err != nil {
 		return err
 	}
 	if r.ProfileID != "" && r.ProfileID != profile.Id {
 		return fmt.Errorf("openshell credential source profile changed")
 	}
-	r.ProfileID = profile.Id
-	if err := o.ensureCredentialProfile(ctx, r, profile); err != nil {
-		return err
-	}
-	if r.SourceReadPending {
-		readback, err := o.credentialClient.GetProviderRefreshStatus(ctx, &pb.GetProviderRefreshStatusRequest{WorkspaceScope: scope, Provider: provider})
+	var refreshReadback *pb.GetProviderRefreshStatusResponse
+	if r.SourceReadPending || credentialProfileHasRefresh(profileResponse.GetProfile()) {
+		refreshReadback, err = o.credentialClient.GetProviderRefreshStatus(ctx, &pb.GetProviderRefreshStatusRequest{WorkspaceScope: scope, Provider: provider})
 		if err != nil {
 			return credentialFailure("source refresh readback", err)
 		}
-		if err := credentialSourceReadbackSettled(profileResponse.GetProfile(), keys, provider, r.SourceProviderID, readback, o.credentialTime()); err != nil {
+	}
+	keys, ownedKeys, err := credentialSourceKeys(profileResponse.GetProfile(), p, refreshReadback)
+	if err != nil {
+		return err
+	}
+	if r.SourceReadPending {
+		if err := credentialSourceReadbackSettled(profileResponse.GetProfile(), keys, provider, r.SourceProviderID, refreshReadback, o.credentialTime()); err != nil {
 			return err
 		}
+	}
+	r.ProfileID = profile.Id
+	if err := o.ensureCredentialProfile(ctx, r, profile); err != nil {
+		return err
 	}
 	r.SourceReadPending = true
 	if err := o.saveCredentialRow(r); err != nil {
@@ -496,6 +515,9 @@ func (o *OpenShellGateway) deliverCredentialRow(ctx context.Context, r *OpenShel
 	if current.GetMetadata().GetId() != r.SourceProviderID || current.GetType() != p.GetType() || current.GetProfileWorkspace() != p.GetProfileWorkspace() || !maps.Equal(current.GetConfig(), p.GetConfig()) {
 		return fmt.Errorf("openshell credential source changed during retrieval")
 	}
+	if !credentialSourceKeySnapshotMatches(p, current, ownedKeys) {
+		return credentialWaiting("openshell credential source key selection changed during retrieval")
+	}
 	target, err := o.custody.client.GetProvider(ctx, &pb.GetProviderRequest{WorkspaceScope: o.custody.scope(), Name: provider})
 	create := status.Code(err) == codes.NotFound
 	if err != nil && !create {
@@ -518,9 +540,27 @@ func (o *OpenShellGateway) deliverCredentialRow(ctx context.Context, r *OpenShel
 		if r.ProviderID == "" || native.GetMetadata().GetId() != r.ProviderID || native.GetType() != profile.Id || native.GetProfileWorkspace() != o.custody.state.Binding.Workspace {
 			return fmt.Errorf("openshell credential target provider ownership changed")
 		}
+		// Native Update merges config and retains omitted keys. Express source
+		// deletions with its existing empty-string marker in this same CAS intent.
+		if material.Config == nil {
+			material.Config = make(map[string]string)
+		}
+		for key := range native.GetConfig() {
+			if _, exists := p.GetConfig()[key]; !exists {
+				material.Config[key] = ""
+			}
+		}
 		material.Metadata.ResourceVersion = native.GetMetadata().GetResourceVersion()
 		kind = "update"
 		var clearExpiration []string
+		for key := range native.GetCredentials() {
+			if _, exists := credentials[key]; !exists {
+				material.Credentials[key] = ""
+				if native.GetCredentialExpirationTimes()[key] != nil {
+					clearExpiration = append(clearExpiration, key)
+				}
+			}
+		}
 		for _, key := range keys {
 			if native.GetCredentialExpirationTimes()[key] != nil && expiration[key] == nil {
 				clearExpiration = append(clearExpiration, key)
@@ -566,7 +606,7 @@ func externalOpenShellProfile(original *pb.ProviderProfile) (*pb.ProviderProfile
 		credential.StablePlaceholder = true
 	}
 	keys = slices.Compact(slices.Sorted(slices.Values(keys)))
-	if len(keys) == 0 || len(keys) > 32 {
+	if len(keys) == 0 {
 		return nil, nil, fmt.Errorf("openshell runtime credential selection invalid")
 	}
 	bytes, err := openShellBytes(p)

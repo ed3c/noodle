@@ -39,14 +39,19 @@ payload 與 route spec 保留原來源。materializer 只準備本機檔案，�
 
 新 Goal profile 的 `credential_source` 保留原登入 gateway、workspace 與 operator mTLS 來源。materializer 不複製 OAuth refresh grant。從另一個 Goal profile 建立替代 Host 時，來源仍指向原登入 gateway。
 這個登入服務是明確的共用依賴。任務 gateway、SQLite、VM 與 custody 維持各 Host 隔離。
+下文 Source 指原登入 gateway；Target 指各任務的 gateway。
 
 worker 使用前，原 Gateway owner 只取得該 route 所需 provider 的 runtime credential，並配送到任務 gateway 的 external `stable_placeholder` provider。它不另建 refresh owner。
+原 profile 的 `env_vars` 是 credential aliases。配送只選原 provider 已有的 key，或原 refresh owner 可證實的輸出；Required 群保留任一 alias 可用的原語義。未設定的 optional credential 不會變成新的必填欄位。續供使用原 Update API 同步來源刪除的 config、credential 與 expiry。
 原 Gateway owner 按實際 expiry 持續更新 provider。placeholder 保留原 VM 與 worker 身分；更新成功仍須原 mutation／installation readback，不能從 redacted provider 資料推定 ACK。
 登入服務故障時，原 owner 保留錯誤與續供義務。需要新憑證的工作不能冒充可用；已有有效憑證的 worker 不因登入服務故障被停止。授權失效沿原登入 owner 處理。
 
-配送前，原 custody 以 schema v5 保存來源綁定、原 request ID 與加密 payload。未知回覆保留同一筆請求；超過原服務的 24 小時去重界線後，不換新 ID 重播。
+每次 Target mutation 前，原 custody 以 schema v5 保存來源綁定、原 request ID 與加密 payload。未知的 Target 回覆保留同一筆請求；超過原服務的 24 小時去重界線後，不換新 ID 重播。
 一般 receipt 與 log 不保存 token。解密依賴該任務 gateway 原 mTLS private key；該 key 與 custody 必須一起保留，不能用另一個 Host 的 key 接管。
 未使用配送的既有 custody 維持 schema v4。standalone custody 與原 v3→v4 handover 不接受 v5；拒絕不會把 credential state 降版或丟棄。
+
+Host 重啟後，持久的未知 credential 效果仍沿原 owner 讀回。未決的 Target mutation 會阻止最後一份租約釋放，因為該 gateway 可能仍在執行原 mutation。Source retrieval 回覆遺失則保留 unknown 與原登入 gateway 的讀回路徑；沒有活躍 consumer 或 VM 時，它不固定 Target resident。停止 Target 不會停止 Source refresh，也不會清除未知紀錄。沒有活躍 consumer 時，owner 只恢復既有 intent 或讀取原狀態，不開始新的 retrieval、renewal 或 VM。
+這不提供 worker 自動 resume。原 RemoteHarness 沒有完整的重啟 carrier；尚未 Create 的 interrupted attempt 仍沿原讀回與 explicit-new-attempt 邊界處理。worker 結束不代表 credential ACK，原 shared-admission recovery guard 保留。
 
 這些是來源可追溯的實作行為。真正的模型登入、同 VM 跨 token 到期與 worker 返回，仍須原生驗收；本文件不代表已部署或驗收通過。
 

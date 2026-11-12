@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -36,7 +38,12 @@ type credentialNative struct {
 	lost                                                   string
 	gets, retrievals, readbacks, creates, updates, imports int
 	unavailable, sourceLost, refreshing                    bool
+	abortRetrievalOnce                                     bool
+	retrievalEvents                                        []string
+	hiddenCredentialKeys                                   map[string]bool
+	afterRetrieval                                         func(*credentialNative)
 	blockRetrieval                                         chan struct{}
+	releaseRetrieval                                       chan struct{}
 	sandbox                                                *pb.Sandbox
 	receipt                                                *pb.ProviderMutationReceipt
 	installationReady                                      bool
@@ -95,6 +102,14 @@ func (s *credentialNative) GetProvider(_ context.Context, r *pb.GetProviderReque
 		return nil, status.Error(codes.NotFound, "absent")
 	}
 	p := proto.Clone(s.provider).(*dm.Provider)
+	if s.values != nil {
+		p.Credentials = make(map[string]string)
+		for key := range s.values {
+			if !s.hiddenCredentialKeys[key] {
+				p.Credentials[key] = "<redacted>"
+			}
+		}
+	}
 	for key := range p.Credentials {
 		p.Credentials[key] = "<redacted>"
 	}
@@ -112,10 +127,19 @@ func (s *credentialNative) GetProviderCredentials(ctx context.Context, r *pb.Get
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.retrievals++
+	s.retrievalEvents = append(s.retrievalEvents, "retrieve")
+	if s.abortRetrievalOnce {
+		s.abortRetrievalOnce = false
+		return nil, status.Error(codes.Aborted, "provider changed during credential resolution")
+	}
 	if s.blockRetrieval != nil {
 		close(s.blockRetrieval)
-		<-ctx.Done()
-		return nil, ctx.Err()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-s.releaseRetrieval:
+		}
+		s.blockRetrieval = nil
 	}
 	if s.sourceLost {
 		s.sourceLost = false
@@ -128,12 +152,18 @@ func (s *credentialNative) GetProviderCredentials(ctx context.Context, r *pb.Get
 		}
 		values[key] = proto.Clone(s.values[key]).(*pb.ProviderCredentialValue)
 	}
+	if s.afterRetrieval != nil {
+		action := s.afterRetrieval
+		s.afterRetrieval = nil
+		action(s)
+	}
 	return &pb.GetProviderCredentialsResponse{Credentials: values}, nil
 }
 func (s *credentialNative) GetProviderRefreshStatus(context.Context, *pb.GetProviderRefreshStatusRequest) (*pb.GetProviderRefreshStatusResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.readbacks++
+	s.retrievalEvents = append(s.retrievalEvents, "readback")
 	if s.refreshReadback != nil {
 		return proto.Clone(s.refreshReadback).(*pb.GetProviderRefreshStatusResponse), nil
 	}
@@ -141,7 +171,21 @@ func (s *credentialNative) GetProviderRefreshStatus(context.Context, *pb.GetProv
 	if s.refreshing {
 		state = "refresh_in_progress"
 	}
-	return &pb.GetProviderRefreshStatusResponse{Credentials: []*pb.ProviderCredentialRefreshStatus{{Provider: "chosen", ProviderId: "source-provider", CredentialKey: "CODEX_AUTH_ACCESS_TOKEN", Strategy: pb.ProviderCredentialRefreshStrategy_PROVIDER_CREDENTIAL_REFRESH_STRATEGY_OAUTH2_REFRESH_TOKEN, Status: state}}}, nil
+	var rows []*pb.ProviderCredentialRefreshStatus
+	for _, credential := range s.profile.GetCredentials() {
+		if !openShellGatewayMintable(credential.GetRefresh().GetStrategy()) || len(credential.EnvVars) == 0 {
+			continue
+		}
+		key := credential.EnvVars[0]
+		for _, candidate := range credential.EnvVars {
+			if s.values[candidate] != nil {
+				key = candidate
+				break
+			}
+		}
+		rows = append(rows, &pb.ProviderCredentialRefreshStatus{Provider: s.provider.GetMetadata().GetName(), ProviderId: s.provider.GetMetadata().GetId(), CredentialKey: key, Strategy: credential.GetRefresh().GetStrategy(), Status: state})
+	}
+	return &pb.GetProviderRefreshStatusResponse{Credentials: rows}, nil
 }
 func (s *credentialNative) replay(id string, request proto.Message) (proto.Message, error) {
 	if id == "" {
@@ -404,7 +448,7 @@ func TestOpenShellCredentialUnknownSourceReadback(t *testing.T) {
 	if err := credentialDeliver(t, o); err == nil {
 		t.Fatal("uncertain source refresh retried")
 	}
-	if source.retrievals != 1 || source.readbacks != 1 || target.creates != 0 {
+	if source.retrievals != 1 || source.readbacks != 2 || target.creates != 0 {
 		t.Fatal("readback was skipped")
 	}
 	source.refreshing = false
@@ -678,5 +722,148 @@ func TestOpenShellCredentialLegacyCustodyUnchanged(t *testing.T) {
 	}
 	if err := credentialDeliver(t, o); err == nil {
 		t.Fatal("standalone custody performed credential effect")
+	}
+}
+
+func TestOpenShellCredentialRenewalRemovesDeletedSourceConfig(t *testing.T) {
+	for _, mode := range []string{"delete-one", "delete-all", "keep-and-add"} {
+		t.Run(mode, func(t *testing.T) {
+			o, source, target, now := credentialFixture(t)
+			source.provider.Config = map[string]string{"retired": "old-value", "retained": "stable-value"}
+			if err := credentialDeliver(t, o); err != nil {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "delete-one":
+				delete(source.provider.Config, "retired")
+			case "delete-all":
+				source.provider.Config = nil
+			case "keep-and-add":
+				source.provider.Config["added"] = "new-value"
+			}
+			*now = now.Add(55 * time.Minute)
+			source.values["CODEX_AUTH_ACCESS_TOKEN"].ExpirationTime = timestamppb.New(now.Add(time.Hour))
+			if err := credentialDeliver(t, o); err != nil {
+				t.Fatal(err)
+			}
+			if !maps.Equal(target.provider.GetConfig(), source.provider.GetConfig()) {
+				t.Fatalf("renewal retained deleted config or removed its valid neighbor: target=%v source=%v", target.provider.GetConfig(), source.provider.GetConfig())
+			}
+			if target.creates != 1 || target.updates != 1 {
+				t.Fatal("config synchronization recreated provider or repeated mutation")
+			}
+			credentialNoLeaks(t, o)
+		})
+	}
+}
+
+func TestOpenShellCredentialExportUsesActualAliasAndOptionalKeys(t *testing.T) {
+	for _, mode := range []string{"first-alias", "second-alias", "optional-absent", "required-none"} {
+		t.Run(mode, func(t *testing.T) {
+			o, source, target, now := credentialFixture(t)
+			source.profile = &pb.ProviderProfile{Id: "alias-profile", Credentials: []*pb.ProviderProfileCredential{{Name: "access", EnvVars: []string{"ACCESS_A", "ACCESS_B"}, Required: true}, {Name: "optional_id", EnvVars: []string{"OPTIONAL_ID"}}}}
+			source.provider.Type = source.profile.Id
+			source.values = map[string]*pb.ProviderCredentialValue{}
+			selected := "ACCESS_A"
+			if mode == "second-alias" {
+				selected = "ACCESS_B"
+			}
+			if mode != "required-none" {
+				source.values[selected] = &pb.ProviderCredentialValue{Value: "synthetic-alias-value", ExpirationTime: timestamppb.New(now.Add(time.Hour))}
+			}
+			err := credentialDeliver(t, o)
+			if mode == "required-none" {
+				var waiting *openShellCredentialWaiting
+				if !errors.As(err, &waiting) || source.retrievals != 0 || target.creates != 0 {
+					t.Fatalf("missing required alias group was retrieved or not waiting: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(target.provider.Credentials) != 1 || target.provider.Credentials[selected] != "synthetic-alias-value" || len(target.profile.Credentials[0].EnvVars) != 2 || !target.profile.Credentials[0].Required || target.profile.Credentials[1].Required {
+				t.Fatal("actual aliases/optional absence changed original group contract")
+			}
+		})
+	}
+}
+
+func TestOpenShellCredentialRemovedOptionalKeyClearsValueAndExpiry(t *testing.T) {
+	o, source, target, now := credentialFixture(t)
+	source.profile = &pb.ProviderProfile{Id: "optional-profile", Credentials: []*pb.ProviderProfileCredential{{Name: "access", EnvVars: []string{"ACCESS"}, Required: true}, {Name: "optional_id", EnvVars: []string{"OPTIONAL_ID"}}}}
+	source.provider.Type = source.profile.Id
+	source.values = map[string]*pb.ProviderCredentialValue{"ACCESS": {Value: "synthetic-access", ExpirationTime: timestamppb.New(now.Add(time.Hour))}, "OPTIONAL_ID": {Value: "synthetic-optional", ExpirationTime: timestamppb.New(now.Add(time.Hour))}}
+	if err := credentialDeliver(t, o); err != nil {
+		t.Fatal(err)
+	}
+	profileID := target.profile.Id
+	delete(source.values, "OPTIONAL_ID")
+	*now = now.Add(55 * time.Minute)
+	source.values["ACCESS"].ExpirationTime = timestamppb.New(now.Add(time.Hour))
+	if err := credentialDeliver(t, o); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := target.provider.Credentials["OPTIONAL_ID"]; exists {
+		t.Fatal("removed source optional credential retained at target")
+	}
+	if _, exists := target.provider.CredentialExpirationTimes["OPTIONAL_ID"]; exists {
+		t.Fatal("removed credential retained expiry")
+	}
+	if target.profile.Id != profileID || target.creates != 1 || target.updates != 1 || target.provider.Credentials["ACCESS"] != "synthetic-access" {
+		t.Fatal("optional removal changed profile identity or required neighbor")
+	}
+}
+
+func TestOpenShellCredentialSourceKeyBracketAndRefreshOutputs(t *testing.T) {
+	for _, mode := range []string{"unowned-added", "unowned-removed", "value-only", "owned-output"} {
+		t.Run(mode, func(t *testing.T) {
+			o, source, target, now := credentialFixture(t)
+			source.profile = &pb.ProviderProfile{Id: "key-bracket", Credentials: []*pb.ProviderProfileCredential{{Name: "access", EnvVars: []string{"ACCESS"}, Required: true}, {Name: "optional", EnvVars: []string{"OPTIONAL"}}}}
+			source.provider.Type = source.profile.Id
+			source.values = map[string]*pb.ProviderCredentialValue{"ACCESS": {Value: "synthetic-access", ExpirationTime: timestamppb.New(now.Add(time.Hour))}}
+			switch mode {
+			case "unowned-added":
+				source.afterRetrieval = func(s *credentialNative) {
+					s.values["OPTIONAL"] = &pb.ProviderCredentialValue{Value: "synthetic-added"}
+				}
+			case "unowned-removed":
+				source.values["OPTIONAL"] = &pb.ProviderCredentialValue{Value: "synthetic-old"}
+				source.afterRetrieval = func(s *credentialNative) { delete(s.values, "OPTIONAL") }
+			case "value-only":
+				source.afterRetrieval = func(s *credentialNative) { s.values["ACCESS"].Value = "synthetic-new-value" }
+			case "owned-output":
+				source.profile = &pb.ProviderProfile{Id: "aws-output-profile", Credentials: []*pb.ProviderProfileCredential{
+					{Name: "access", EnvVars: []string{"AWS_ACCESS_KEY_ID"}, Required: true, Refresh: &pb.ProviderCredentialRefresh{Strategy: pb.ProviderCredentialRefreshStrategy_PROVIDER_CREDENTIAL_REFRESH_STRATEGY_AWS_STS_ASSUME_ROLE, AdditionalOutputs: []*pb.ProviderCredentialRefreshOutput{{Output: "secret_access_key", Credential: "secret"}, {Output: "session_token", Credential: "session"}}}},
+					{Name: "secret", EnvVars: []string{"AWS_SECRET_ACCESS_KEY"}, Required: true}, {Name: "session", EnvVars: []string{"AWS_SESSION_TOKEN"}, Required: true},
+				}}
+				source.provider.Type = source.profile.Id
+				source.values = map[string]*pb.ProviderCredentialValue{"AWS_ACCESS_KEY_ID": {Value: "synthetic-aws-access"}, "AWS_SECRET_ACCESS_KEY": {Value: "synthetic-aws-secret"}, "AWS_SESSION_TOKEN": {Value: "synthetic-minted-output"}}
+				source.hiddenCredentialKeys = map[string]bool{"AWS_ACCESS_KEY_ID": true, "AWS_SECRET_ACCESS_KEY": true, "AWS_SESSION_TOKEN": true}
+				source.refreshReadback = &pb.GetProviderRefreshStatusResponse{Credentials: []*pb.ProviderCredentialRefreshStatus{{Provider: "chosen", ProviderId: "source-provider", CredentialKey: "AWS_ACCESS_KEY_ID", Strategy: pb.ProviderCredentialRefreshStrategy_PROVIDER_CREDENTIAL_REFRESH_STRATEGY_AWS_STS_ASSUME_ROLE, Status: "configured"}}}
+				source.afterRetrieval = func(s *credentialNative) { s.hiddenCredentialKeys = nil }
+			}
+			err := credentialDeliver(t, o)
+			if mode == "unowned-added" || mode == "unowned-removed" {
+				var waiting *openShellCredentialWaiting
+				if !errors.As(err, &waiting) || target.creates != 0 {
+					t.Fatalf("keyset drift was exported or not waiting: %v", err)
+				}
+				if err := credentialDeliver(t, o); err != nil {
+					t.Fatal(err)
+				}
+				if target.creates != 1 {
+					t.Fatal("fresh original source readback did not resume")
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "owned-output" && (len(target.provider.Credentials) != 3 || target.provider.Credentials["AWS_SESSION_TOKEN"] != "synthetic-minted-output") {
+				t.Fatal("native refresh-owned output was not selected")
+			}
+			if mode == "value-only" && target.creates != 1 {
+				t.Fatal("normal credential value refresh became key drift")
+			}
+		})
 	}
 }
