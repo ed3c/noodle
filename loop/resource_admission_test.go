@@ -59,7 +59,12 @@ func TestResourceDeferredAllSpawnEntrancesPreservePreparation(t *testing.T) {
 		t.Run(entry, func(t *testing.T) {
 			rt := newMockRuntime()
 			l := newSteerTestLoop(t, rt)
-			resourceBudget(l, 1)
+			budget := resourceBudget(l, 1)
+			occupied, err := budget.TryAcquire(l.projectDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer occupied.Release()
 			stage := Stage{TaskKey: "execute", Skill: "execute", Status: StageStatusPending}
 			order := Order{ID: "42", Status: OrderStatusActive, Stages: []Stage{stage}}
 			cand := dispatchCandidate{OrderID: order.ID, StageIndex: 0, Stage: stage}
@@ -67,7 +72,6 @@ func TestResourceDeferredAllSpawnEntrancesPreservePreparation(t *testing.T) {
 			l.lastPromotionError = "retain"
 			l.scheduleDispatchDigest = "retain"
 			before := resourceTree(t, l.projectDir)
-			var err error
 			switch entry {
 			case "cook":
 				err = l.spawnCook(context.Background(), cand, order, spawnOptions{})
@@ -135,9 +139,9 @@ func TestResourceSessionJoinedAndUnknownRetention(t *testing.T) {
 	}
 }
 
-func TestResourceSteerCapOneTransfersAndPressureRefusesBeforeKill(t *testing.T) {
-	for _, pressure := range []bool{false, true} {
-		t.Run(map[bool]string{false: "healthy_replacement", true: "pressure_refusal"}[pressure], func(t *testing.T) {
+func TestResourceSteerCapOneTransfersUnderPressureAndCustodyRefusesBeforeKill(t *testing.T) {
+	for _, condition := range []string{"normal", "critical", "unresolved-custody"} {
+		t.Run(condition, func(t *testing.T) {
 			rt := newMockRuntime()
 			l := newControlTestLoop(t, &fakeWorktree{}, rt)
 			l.config.Concurrency.MaxConcurrency = 1
@@ -150,15 +154,18 @@ func TestResourceSteerCapOneTransfersAndPressureRefusesBeforeKill(t *testing.T) 
 			}
 			old := l.cooks.activeCooksByOrder["42"]
 			before := resourceTree(t, l.projectDir)
-			if pressure {
+			if condition != "normal" {
 				b.Observe(admission.Sample{At: time.Now(), Pressure: admission.Critical}, nil)
 			} else {
 				b.Observe(admission.Sample{At: time.Now(), Pressure: admission.Normal}, nil)
 			}
+			if condition == "unresolved-custody" {
+				b.SetUnresolvedResidents(1)
+			}
 			err := l.steerRespawn(old, "keep exact original direction")
-			if pressure {
+			if condition == "unresolved-custody" {
 				if !errors.Is(err, admission.ErrDeferred) || rt.sessions[0].status != "running" || l.cooks.activeCooksByOrder["42"] != old || !reflect.DeepEqual(before, resourceTree(t, l.projectDir)) {
-					t.Fatal("pressure steer changed old owner")
+					t.Fatal("unresolved custody steer changed old owner")
 				}
 			} else {
 				if err != nil {
@@ -237,7 +244,7 @@ func TestResourceRuntimeCapacityDefersBeforePreparation(t *testing.T) {
 	before := resourceTree(t, l.projectDir)
 	stage := Stage{TaskKey: "execute", Skill: "execute", Status: StageStatusPending}
 	err := l.spawnCook(context.Background(), dispatchCandidate{OrderID: "42", Stage: stage}, Order{ID: "42"}, spawnOptions{})
-	if !errors.Is(err, admission.ErrDeferred) || len(rt.calls) != 0 || b.Snapshot().Active != 0 || b.Snapshot().Credit != 1 || !reflect.DeepEqual(before, resourceTree(t, l.projectDir)) {
+	if !errors.Is(err, admission.ErrDeferred) || len(rt.calls) != 0 || b.Snapshot().Active != 0 || b.Snapshot().Limit != 1 || !reflect.DeepEqual(before, resourceTree(t, l.projectDir)) {
 		t.Fatalf("local capacity refusal changed preparation: %v", err)
 	}
 }
@@ -270,9 +277,9 @@ func TestResourceRecoveryErrorFailsClosed(t *testing.T) {
 	}
 }
 
-func TestResourceControlQueueRetainsPressureWaitAndUnknownCustody(t *testing.T) {
+func TestResourceControlQueueRetainsCustodyWaitAndUnknownDispatch(t *testing.T) {
 	for _, unknown := range []bool{false, true} {
-		t.Run(map[bool]string{false: "pressure_then_resume", true: "unknown_no_replay"}[unknown], func(t *testing.T) {
+		t.Run(map[bool]string{false: "custody_then_resume", true: "unknown_no_replay"}[unknown], func(t *testing.T) {
 			rt := newMockRuntime()
 			l := newControlTestLoop(t, &fakeWorktree{}, rt)
 			b := resourceBudget(l, 1)
@@ -290,6 +297,7 @@ func TestResourceControlQueueRetainsPressureWaitAndUnknownCustody(t *testing.T) 
 				b.Observe(admission.Sample{At: time.Now(), Pressure: admission.Normal}, nil)
 			} else {
 				b.Observe(admission.Sample{At: time.Now(), Pressure: admission.Critical}, nil)
+				b.SetUnresolvedResidents(1)
 			}
 			command := ControlCommand{ID: "original-steer", Action: "steer", Target: old.session.ID(), Prompt: "retain exact direction"}
 			raw, _ := json.Marshal(command)
@@ -324,7 +332,7 @@ func TestResourceControlQueueRetainsPressureWaitAndUnknownCustody(t *testing.T) 
 				if !bytes.Equal(raw, pending) || len(ack) != 0 || seen || l.cmds.lastAppliedSeq != 0 || len(rt.calls) != 1 || rt.sessions[0].status != "running" {
 					t.Fatal("deferred control consumed original request")
 				}
-				healthyResourceBudget(b)
+				b.SetUnresolvedResidents(0)
 				if err = l.processControlCommands(); err != nil {
 					t.Fatal(err)
 				}
@@ -360,6 +368,7 @@ func TestResourceControlWaitAllowsLoadReductionAndHydration(t *testing.T) {
 			}
 			old := l.cooks.activeCooksByOrder[order.ID]
 			b.Observe(admission.Sample{At: time.Now(), Pressure: admission.Critical}, nil)
+			b.SetUnresolvedResidents(1)
 			raw, _ := json.Marshal(ControlCommand{ID: "waiting-steer", Action: "steer", Target: old.session.ID(), Prompt: "original queued direction"})
 			raw = append(raw, '\n')
 			reduction, _ := json.Marshal(ControlCommand{ID: "reduce-load", Action: action})
@@ -410,7 +419,7 @@ func TestResourceControlWaitAllowsLoadReductionAndHydration(t *testing.T) {
 				if !info.ModTime().Equal(stamp) {
 					t.Fatal("unchanged waiting input rewrote control and would retrigger watcher")
 				}
-				healthyResourceBudget(b)
+				b.SetUnresolvedResidents(0)
 				if err := l.processControlCommands(); err != nil {
 					t.Fatal(err)
 				}

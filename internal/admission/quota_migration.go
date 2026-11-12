@@ -15,22 +15,23 @@ import (
 )
 
 // MigrateEmptySharedQuota is called only by the maintenance owner after native
-// retirement of every old writer. It preserves the exact old bytes and the
-// admission window. A repeat reads the same result, never empties live leases.
+// retirement of every old writer. It preserves exact old bytes separately.
+// A repeat reads the same result, never empties live leases.
 func MigrateEmptySharedQuota(ctx context.Context, dir, custody string, original []byte) error {
-	var before quotaState
+	var before struct {
+		Schema    int                   `json:"schema"`
+		Maximum   int                   `json:"maximum"`
+		SwapLimit uint64                `json:"swap_used_limit_bytes"`
+		Leases    map[string]quotaLease `json:"leases"`
+	}
 	if err := json.Unmarshal(original, &before); err != nil {
 		return err
 	}
-	if before.Schema != 1 || before.Maximum <= 0 || before.SwapLimit != DefaultSwapUsedLimit || before.Leases == nil || len(before.Leases) != 0 {
+	if before.Schema != 1 || before.Maximum <= 0 || before.SwapLimit != 15_000_000_000 || before.Leases == nil || len(before.Leases) != 0 {
 		return errors.New("migration requires an original empty schema-1 quota with the selected ceiling")
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(original, &fields); err != nil {
-		return err
-	}
-	fields["schema"] = json.RawMessage("2")
-	next, err := json.Marshal(fields)
+	next, err := json.Marshal(quotaState{Schema: sharedQuotaSchema, Policy: WorkerAdmissionPolicy,
+		Maximum: DefaultWorkerLimit, Leases: map[string]quotaLease{}})
 	if err != nil {
 		return err
 	}

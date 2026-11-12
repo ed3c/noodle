@@ -13,7 +13,10 @@ import (
 )
 
 func TestReturnHandoffProducerGuards(t *testing.T) {
-	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	save := func(name string, v any) config.RuntimeSource {
 		data, err := json.Marshal(v)
 		if err != nil {

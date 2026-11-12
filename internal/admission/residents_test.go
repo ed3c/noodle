@@ -112,10 +112,10 @@ func residentFixture(t *testing.T) (*Residents, *Budget, ResidentSpec) {
 		t.Fatal(err)
 	}
 	b := NewBudget(3)
+	r.BindBudget(b)
 	b.Register("a")
 	b.Register("b")
-	// Lifecycle fixtures start with known, below-ceiling samples.
-	// Unsupported sampling is a real admission refusal under policy v2.
+	// Samples are observations; process ownership controls admission.
 	started := time.Now().Add(-3 * PollInterval)
 	for i := 0; i < 4; i++ {
 		b.Observe(Sample{At: started.Add(time.Duration(i) * PollInterval), Pressure: Normal, SwapUsedBytes: 0}, nil)
@@ -226,7 +226,7 @@ func TestResidentsShareLeaseAndReleaseOnlyLastConsumer(t *testing.T) {
 	}
 	awaitResidentExit(t, r, fresh.ID)
 }
-func TestResidentsRefuseConflictStdioAndPressureButReuse(t *testing.T) {
+func TestResidentsRefuseConflictAndStdioWithoutUsingPressureAsAdmission(t *testing.T) {
 	r, b, spec := residentFixture(t)
 	first, err := r.Acquire(spec, "a", b)
 	if err != nil {
@@ -250,9 +250,17 @@ func TestResidentsRefuseConflictStdioAndPressureButReuse(t *testing.T) {
 	}
 	distinct := spec
 	distinct.Name = "another"
-	if _, err = r.Acquire(distinct, "b", b); err == nil {
-		t.Fatal("new resident bypassed pressure")
+	second, err := r.Acquire(distinct, "b", b)
+	if err != nil || second.PID == first.PID {
+		t.Fatalf("independent resident was blocked by pressure or reused another process: %+v %v", second, err)
 	}
+	if got := b.Snapshot(); got.Active != 0 || got.Residents != 2 {
+		t.Fatalf("residents consumed worker capacity: %+v", got)
+	}
+	if _, err = r.Release(second.ID, "b"); err != nil {
+		t.Fatal(err)
+	}
+	awaitResidentExit(t, r, second.ID)
 }
 func TestResidentsPriorHostNeedsReadbackNotPIDAdoption(t *testing.T) {
 	r, b, spec := residentFixture(t)

@@ -15,25 +15,23 @@ import (
 	"github.com/poteto/noodle/internal/admission"
 )
 
-func TestHostBudgetValidatesAndForwardsCapacity(t *testing.T) {
-	for _, raw := range []string{"", "-1", "1.5", " 15", "9007199254740992"} {
-		t.Run("invalid-"+raw, func(t *testing.T) {
+func TestHostBudgetUsesFixedWorkerPolicyWithoutCapacityOverride(t *testing.T) {
+	for _, raw := range []string{"", "-1", "1.5", " 15", "9007199254740992", "15000000000"} {
+		t.Run(raw, func(t *testing.T) {
 			t.Setenv("NOODLE_HOST_SWAP_USED_LIMIT_BYTES", raw)
-			if _, err := newHostBudget(); err == nil {
-				t.Fatal("invalid capacity accepted")
+			b, err := newHostBudget()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := b.Snapshot(); got.AdmissionPolicy != admission.WorkerAdmissionPolicy || got.Maximum != admission.DefaultWorkerLimit {
+				t.Fatalf("environment changed the fixed Host policy: %+v", got)
+			}
+			if slices.ContainsFunc(hostBaselineEnvironment(t.TempDir()), func(value string) bool {
+				return strings.HasPrefix(value, "NOODLE_HOST_SWAP_USED_LIMIT_BYTES=")
+			}) {
+				t.Fatal("removed capacity override crossed the launcher boundary")
 			}
 		})
-	}
-	t.Setenv("NOODLE_HOST_SWAP_USED_LIMIT_BYTES", "15000000000")
-	b, err := newHostBudget()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if b.Snapshot().SwapUsedLimit != admission.DefaultSwapUsedLimit {
-		t.Fatal(b.Snapshot())
-	}
-	if !slices.Contains(hostBaselineEnvironment(t.TempDir()), "NOODLE_HOST_SWAP_USED_LIMIT_BYTES=15000000000") {
-		t.Fatal("capacity lost at launcher boundary")
 	}
 }
 

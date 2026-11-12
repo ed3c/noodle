@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/poteto/noodle/internal/admission"
 	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/internal/stringx"
 )
@@ -15,7 +16,7 @@ const (
 	defaultRoutingProvider = "claude"
 	defaultRoutingModel    = "claude-opus-4-6"
 	defaultMode            = string(state.RunModeSupervised)
-	defaultMaxConcurrency  = 4
+	defaultMaxConcurrency  = admission.DefaultWorkerLimit
 	defaultRuntimeName     = "process"
 	defaultServerPort      = 3000
 )
@@ -93,7 +94,7 @@ func applyDefaultsFromMetadata(config *Config, metadata toml.MetaData, diagnosti
 		config.Runtime.Default = defaultRuntimeName
 	}
 	if !metadata.IsDefined("runtime", "process", "max_concurrent") {
-		config.Runtime.Process.MaxConcurrent = 4
+		config.Runtime.Process.MaxConcurrent = defaultMaxConcurrency
 	}
 	if !metadata.IsDefined("runtime", "sprites", "max_concurrent") {
 		config.Runtime.Sprites.MaxConcurrent = 50

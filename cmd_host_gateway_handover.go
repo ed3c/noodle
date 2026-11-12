@@ -58,7 +58,6 @@ func handoverSharedReadback(ctx context.Context, root string, releaseSchema int)
 		Shutdown   *struct{ Requested *bool }
 		Resources  struct {
 			Policy string                 `json:"worker_admission_policy"`
-			Limit  uint64                 `json:"swap_used_limit_bytes"`
 			Quota  *struct{ Maximum int } `json:"shared_quota"`
 		}
 	}
@@ -69,8 +68,8 @@ func handoverSharedReadback(ctx context.Context, root string, releaseSchema int)
 		Instance string `json:"host_instance_id"`
 		Rolling  int    `json:"rolling_host_version"`
 	}
-	if json.Unmarshal(raw, &row) != nil || json.Unmarshal(raw, &identity) != nil || identity.Protocol != hostProtocol || identity.Root != root || !validPoolID(identity.Instance) || identity.Rolling != 1 || row.Shutdown == nil || row.Shutdown.Requested == nil || *row.Shutdown.Requested || row.Resources.Policy != admission.WorkerAdmissionPolicy || row.Resources.Limit != admission.DefaultSwapUsedLimit || row.Resources.Quota == nil || row.Resources.Quota.Maximum != 4 {
-		return "", errors.New("gateway handover target is not the existing shared 15 GB Swap owner")
+	if json.Unmarshal(raw, &row) != nil || json.Unmarshal(raw, &identity) != nil || identity.Protocol != hostProtocol || identity.Root != root || !validPoolID(identity.Instance) || identity.Rolling != 1 || row.Shutdown == nil || row.Shutdown.Requested == nil || *row.Shutdown.Requested || row.Resources.Policy != admission.WorkerAdmissionPolicy || row.Resources.Quota == nil || row.Resources.Quota.Maximum != admission.DefaultWorkerLimit {
+		return "", errors.New("gateway handover target Host policy or identity differs")
 	}
 	ref, err := loopruntime.ReadSessionReadbackFile(row.BinaryPath, nil)
 	if err != nil || ref.SHA256 != row.BinarySHA {

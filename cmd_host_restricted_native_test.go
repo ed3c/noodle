@@ -250,7 +250,7 @@ func TestRestrictedNativeLegacyMaintenance(t *testing.T) {
 			t.Fatal("fixture transition incomplete", j.Phase, "evidence", base)
 		}
 	}
-	if err = admission.NewBudgetWithSwapUsedLimit(4, admission.DefaultSwapUsedLimit).BindSharedQuota(filepath.Join(root, "quota"), "fixture-readback"); err != nil {
+	if err = admission.NewBudget(admission.DefaultWorkerLimit).BindSharedQuota(filepath.Join(root, "quota"), "fixture-readback"); err != nil {
 		t.Fatal(err)
 	}
 	result, err := readHostPool(root)

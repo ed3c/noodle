@@ -18,7 +18,7 @@ func TestOrderAdmissionCycleSkipsForeignAndSchedulerBeforeCapacity(t *testing.T)
 	for _, selected := range []string{"process", "openshell"} {
 		for _, defaultRuntime := range []string{"process", "openshell"} {
 			for _, warning := range []bool{false, true} {
-				name := selected + "/default-" + defaultRuntime + "/" + map[bool]string{false: "normal", true: "warning-grant"}[warning]
+				name := selected + "/default-" + defaultRuntime + "/" + map[bool]string{false: "normal", true: "critical-observation"}[warning]
 				t.Run(name, func(t *testing.T) { checkOrderAdmissionCycle(t, selected, defaultRuntime, warning) })
 			}
 		}
@@ -45,10 +45,7 @@ func checkOrderAdmissionCycle(t *testing.T, selected, defaultRuntime string, war
 		b := resourceBudget(l, 1)
 		now := time.Now()
 		for i := 3; i >= 0; i-- {
-			b.Observe(admission.Sample{At: now.Add(-time.Duration(i) * admission.PollInterval), Pressure: admission.Warning}, nil)
-		}
-		if _, err := b.GrantWarning(l.projectDir, "allowed"); err != nil {
-			t.Fatal(err)
+			b.Observe(admission.Sample{At: now.Add(-time.Duration(i) * admission.PollInterval), Pressure: admission.Critical}, nil)
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())

@@ -25,7 +25,7 @@ func TestWorkerGroupRetainsAdmissionAfterLauncherExit(t *testing.T) {
 	}
 }
 
-func TestWarningWorkerGroupRetainsAdmissionAfterLauncherExit(t *testing.T) {
+func TestCriticalObservationWorkerGroupRetainsAdmissionAfterLauncherExit(t *testing.T) {
 	checkWorkerGroupAdmission(t, "terminate", true)
 }
 
@@ -46,10 +46,7 @@ func checkWorkerGroupAdmission(t *testing.T, stop string, warning bool) {
 		orderID = "selected-task"
 		now := time.Now()
 		for i := 3; i >= 0; i-- {
-			b.Observe(admission.Sample{At: now.Add(-time.Duration(i) * admission.PollInterval), Pressure: admission.Warning}, nil)
-		}
-		if _, err := b.GrantWarning(root, orderID); err != nil {
-			t.Fatal(err)
+			b.Observe(admission.Sample{At: now.Add(-time.Duration(i) * admission.PollInterval), Pressure: admission.Critical}, nil)
 		}
 	} else {
 		healthyResourceBudget(b)

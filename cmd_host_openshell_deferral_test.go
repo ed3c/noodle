@@ -164,7 +164,7 @@ func hostDeferralProfile(t *testing.T) string {
 	return filepath.Join(root, "profile.json")
 }
 
-func TestHostOpenShellWarningRefusalIsRepeatableWithoutPoisoningContext(t *testing.T) {
+func TestHostOpenShellCustodyRefusalIsRepeatableWithoutPoisoningContext(t *testing.T) {
 	root := t.TempDir()
 	req := hostTestRequest(t, root)
 	profile := hostDeferralProfile(t)
@@ -205,8 +205,9 @@ func TestHostOpenShellWarningRefusalIsRepeatableWithoutPoisoningContext(t *testi
 		}
 	})
 	now := time.Now()
-	h.budget.Observe(admission.Sample{At: now.Add(-time.Second), Pressure: admission.Warning}, nil)
-	h.budget.Observe(admission.Sample{At: now, Pressure: admission.Warning}, nil)
+	h.budget.Observe(admission.Sample{At: now.Add(-time.Second), Pressure: admission.Critical}, nil)
+	h.budget.Observe(admission.Sample{At: now, Pressure: admission.Critical}, nil)
+	h.budget.SetUnresolvedResidents(1)
 	first := h.handle(context.Background(), req)
 	if first.Status != "deferred" || first.ContextState != "detached" || first.AdmissionRefusal == "" || h.blocked || len(h.contexts) != 0 {
 		t.Fatalf("known refusal poisoned host: %+v", first)
@@ -244,20 +245,18 @@ func TestHostOpenShellWarningRefusalIsRepeatableWithoutPoisoningContext(t *testi
 		}
 	}
 	if _, settled := h.finishOpenShellDeferral(nil, errors.New("native outcome unknown")); settled {
-		t.Fatal("native uncertainty was treated as a pressure refusal")
+		t.Fatal("native uncertainty was treated as a proven pre-start refusal")
 	}
-	for i := 1; i <= 3; i++ {
-		h.budget.Observe(admission.Sample{At: now.Add(time.Duration(i) * time.Millisecond), Pressure: admission.Normal}, nil)
-	}
+	h.budget.SetUnresolvedResidents(0)
 	retry := req
 	retry.RequestID = "explicit-new-request"
 	second := h.handle(context.Background(), retry)
 	if second.Status != "ok" || second.ContextState != "active" || second.ContextID == first.ContextID || len(runtimes) != 2 || h.blocked {
-		t.Fatalf("pressure-cleared new request refused: %+v", second)
+		t.Fatalf("custody-cleared new request refused under critical observation: %+v", second)
 	}
 	records, err = h.residents.Snapshot()
 	snapshot = h.budget.Snapshot()
-	if err != nil || len(records) != 1 || snapshot.Active != 0 || snapshot.Residents != 1 || snapshot.Allocations != 1 {
+	if err != nil || len(records) != 1 || snapshot.Active != 0 || snapshot.Residents != 1 || snapshot.Allocations != 1 || snapshot.Pressure != admission.Critical {
 		t.Fatalf("new request did not own one gateway: %+v %+v %v", records, snapshot, err)
 	}
 	// Even an ErrDeferred wrapper cannot certify no effect once a lease exists.
@@ -298,7 +297,7 @@ func TestHostOpenShellDeferredRequestBindingRemainsReadOnly(t *testing.T) {
 			served <- err
 			return
 		}
-		served <- json.NewEncoder(conn).Encode(hostResponse{hostReceipt: hostReceipt{ContextState: "detached", RequestID: req.RequestID, AdmissionRefusal: "memory pressure"}, Status: "deferred", Error: "memory pressure"})
+		served <- json.NewEncoder(conn).Encode(hostResponse{hostReceipt: hostReceipt{ContextState: "detached", RequestID: req.RequestID, AdmissionRefusal: "resident ownership unresolved"}, Status: "deferred", Error: "resident ownership unresolved"})
 	}()
 	req := hostTestRequest(t, t.TempDir())
 	req.RequestFile = filepath.Join(req.ProjectDir, "request.json")

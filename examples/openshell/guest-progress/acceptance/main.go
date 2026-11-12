@@ -206,7 +206,7 @@ func (o *owner) waitBudget(ctx context.Context) error {
 	defer tick.Stop()
 	for {
 		s := o.budget.Snapshot()
-		if s.Limit > s.Allocations && s.Credit > 0 {
+		if s.Active < s.Limit {
 			return nil
 		}
 		select {

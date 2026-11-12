@@ -38,7 +38,7 @@ mode = "supervised"
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `max_concurrency` | int | `4` | Maximum concurrent agent sessions |
+| `max_concurrency` | int | `9` | Maximum concurrent agent sessions |
 
 ## `[agents.claude]`
 
@@ -68,7 +68,7 @@ Local process runtime. Runs agent CLIs as child processes.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `max_concurrent` | int | `4` | Maximum concurrent process sessions |
+| `max_concurrent` | int | `9` | Maximum concurrent process sessions |
 
 ### `[runtime.sprites]`
 

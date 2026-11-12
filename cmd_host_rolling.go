@@ -199,11 +199,10 @@ func verifyRollingTarget(ctx context.Context, binary, digest string) error {
 		Rolling     int    `json:"rolling_host_version"`
 		Quota       int    `json:"shared_worker_quota"`
 		Native      int    `json:"codex_native_runtime"`
-		Warning     int    `json:"task_warning_grant"`
 		Maintenance int    `json:"restricted_host_maintenance"`
 		Policy      string `json:"worker_admission_policy"`
 	}
-	if json.Unmarshal(raw, &caps) != nil || caps.Protocol != hostProtocol || caps.Rolling != 1 || caps.Quota != 1 || caps.Native != 1 || caps.Warning != 1 || caps.Maintenance != 1 || caps.Policy != admission.WorkerAdmissionPolicy {
+	if json.Unmarshal(raw, &caps) != nil || caps.Protocol != hostProtocol || caps.Rolling != 1 || caps.Quota != 1 || caps.Native != 1 || caps.Maintenance != 1 || caps.Policy != admission.WorkerAdmissionPolicy {
 		return errors.New("target lacks compatible rolling Host and shared-quota contracts")
 	}
 	review, err := exec.CommandContext(ctx, binary, "host", "task", "review-capabilities").Output()
@@ -252,6 +251,9 @@ func (h *noodleHost) attachRolling(ctx context.Context, req hostRequest, state *
 	if h.rolling != nil {
 		if err := updateHostPool(h.rolling.root, func(p *hostPool) error {
 			owner, exists := p.Owners[req.RequestID]
+			if exists && (owner.State == "transfer-prepared" || owner.State == "transferred-unaccepted") {
+				return errors.New("original unaccepted admission has a fixed transfer; use its successor readback")
+			}
 			if exists && owner.MaintenanceHold != "" {
 				return errors.New("original task is held by restricted maintenance; business admission is disabled")
 			}

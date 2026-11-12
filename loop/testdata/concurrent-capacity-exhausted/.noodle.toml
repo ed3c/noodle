@@ -1,0 +1,2 @@
+[concurrency]
+max_concurrency = 4

@@ -24,7 +24,7 @@ func sharedTestBudget(t *testing.T, dir, owner string, max int) (*Budget, *time.
 	}
 	return b, &now
 }
-func TestSharedQuotaTwoGenerationsUseOneCeilingAndStartWindow(t *testing.T) {
+func TestSharedQuotaTwoGenerationsUseOneHostCeiling(t *testing.T) {
 	dir := t.TempDir()
 	old, nowA := sharedTestBudget(t, dir, "old", 2)
 	next, nowB := sharedTestBudget(t, dir, "new", 2)
@@ -32,14 +32,6 @@ func TestSharedQuotaTwoGenerationsUseOneCeilingAndStartWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = next.TryAcquire("new"); !errors.Is(err, ErrDeferred) {
-		t.Fatal("two generation startup credits became a burst")
-	}
-	if got := next.Snapshot(); got.SharedQuota.Error != "" {
-		t.Fatalf("normal quota wait was reported as an unknown effect: %+v", got)
-	}
-	*nowB = nowB.Add(PollInterval)
-	next.Observe(Sample{At: *nowB, Pressure: Normal}, nil)
 	q, err := next.TryAcquire("new")
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +39,7 @@ func TestSharedQuotaTwoGenerationsUseOneCeilingAndStartWindow(t *testing.T) {
 	*nowA = nowB.Add(PollInterval)
 	old.Observe(Sample{At: *nowA, Pressure: Normal}, nil)
 	if _, err = old.TryAcquire("old"); !errors.Is(err, ErrDeferred) {
-		t.Fatal("machine ceiling doubled")
+		t.Fatal("Host ceiling doubled")
 	}
 	if got := next.Snapshot(); got.Allocations != 2 || got.OwnedAllocations != 1 {
 		t.Fatalf("global vs owned: %+v", got)
@@ -156,53 +148,56 @@ func TestSharedQuotaHelperProcess(t *testing.T) {
 	}
 }
 
-func TestSharedQuotaWarningGrantCannotBypassOtherGenerationOrSwapCeiling(t *testing.T) {
-	dir := t.TempDir()
-	old, nowOld := sharedTestBudget(t, dir, "old", 4)
-	next, nowNext := sharedTestBudget(t, dir, "new", 4)
-	for range 4 {
-		*nowNext = nowNext.Add(PollInterval)
-		next.Observe(Sample{At: *nowNext, Pressure: Warning}, nil)
-	}
-	for nowOld.Before(*nowNext) {
-		*nowOld = nowOld.Add(PollInterval)
-		old.Observe(Sample{At: *nowOld, Pressure: Normal}, nil)
-	}
-	worker, err := old.TryAcquire("old")
+func TestIndependentHostsEachKeepNineWorkersWhileGenerationsShareOneCeiling(t *testing.T) {
+	rootA, rootB := t.TempDir(), t.TempDir()
+	old, _ := sharedTestBudget(t, rootA, "old-generation", 9)
+	next, _ := sharedTestBudget(t, rootA, "next-generation", 9)
+	other, _ := sharedTestBudget(t, rootB, "independent-host", 9)
+	resident, err := old.TryAcquireScopedResident("old-generation", "gateway")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = next.GrantWarning("new", "task"); err == nil {
-		t.Fatal("warning grant ignored another generation's live allocation")
+	defer resident.Release()
+	var permits []*Permit
+	defer func() {
+		for _, permit := range permits {
+			permit.Release()
+		}
+	}()
+	for i := range 9 {
+		b, id := old, "old-generation"
+		if i%2 == 1 {
+			b, id = next, "next-generation"
+		}
+		permit, err := b.TryAcquire(id)
+		if err != nil {
+			t.Fatalf("worker %d blocked: %v", i+1, err)
+		}
+		permits = append(permits, permit)
 	}
-	worker.Release()
-	if _, err = next.GrantWarning("new", "task"); err != nil {
-		t.Fatal(err)
+	for _, selected := range []struct {
+		b  *Budget
+		id string
+	}{{old, "old-generation"}, {next, "next-generation"}} {
+		if _, err := selected.b.TryAcquire(selected.id); !errors.Is(err, ErrDeferred) {
+			t.Fatal("generation exceeded the same Host's nine workers")
+		}
 	}
-	*nowNext = nowNext.Add(PollInterval)
-	next.Observe(Sample{At: *nowNext, Pressure: Warning}, nil)
-	permit, err := next.TryAcquireTask("new", "task")
-	if err != nil {
-		t.Fatal(err)
+	for range 9 {
+		permit, err := other.TryAcquire("independent-host")
+		if err != nil {
+			t.Fatal("full Host A blocked independent Host B:", err)
+		}
+		permits = append(permits, permit)
 	}
-	*nowOld = nowNext.Add(PollInterval)
-	old.Observe(Sample{At: *nowOld, Pressure: Normal}, nil)
-	if _, err = old.TryAcquire("old"); !errors.Is(err, ErrDeferred) {
-		t.Fatal("other generation bypassed the exclusive warning allocation")
+	if got := next.Snapshot(); got.Active != 9 || got.Residents != 1 || got.Allocations != 10 {
+		t.Fatalf("resident consumed a worker slot: %+v", got)
 	}
-	permit.Release()
-	if next.WarningGrants()[0].Status != "consumed" {
-		t.Fatal("shared permit did not consume original permission")
-	}
-	*nowNext = nowOld.Add(PollInterval)
-	next.Observe(Sample{At: *nowNext, Pressure: Warning, SwapUsedBytes: DefaultSwapUsedLimit + 1}, nil)
-	if _, err = next.GrantWarning("new", "another-task"); err == nil {
-		t.Fatal("explicit warning grant exceeded the 15 GB capacity ceiling")
-	}
-	if next.Snapshot().Allocations != 0 {
-		t.Fatal("native exit did not return the shared allocation")
+	if got := other.Snapshot(); got.Active != 9 || got.Residents != 0 {
+		t.Fatalf("independent Host ceiling changed: %+v", got)
 	}
 }
+
 func TestSharedQuotaSurvivesOwnerProcessBoundary(t *testing.T) {
 	dir := t.TempDir()
 	b, _ := sharedTestBudget(t, dir, "parent", 1)
@@ -243,6 +238,9 @@ func TestSharedQuotaReturnsAutomaticallyAfterStoreRecovery(t *testing.T) {
 	if _, err = b.TryAcquire("original-host"); !errors.Is(err, ErrDeferred) {
 		t.Fatal("unknown quota return admitted another worker")
 	}
+	if b.AdmissionError() == "" {
+		t.Fatal("unknown quota return was reported as healthy Host custody")
+	}
 	after, _ := os.ReadFile(filepath.Join(dir, "quota.json"))
 	if string(before) != string(after) {
 		t.Fatal("unknown return generated another reservation")
@@ -251,12 +249,12 @@ func TestSharedQuotaReturnsAutomaticallyAfterStoreRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	*now = now.Add(PollInterval)
-	b.Observe(Sample{At: *now, Pressure: Warning}, nil)
+	b.Observe(Sample{}, errors.New("sampler unavailable during quota recovery"))
 	if got := b.Snapshot(); got.OwnedAllocations != 0 || got.SharedQuota.Error != "" {
 		t.Fatalf("original Host did not return its slot after storage recovery: %+v", got)
 	}
-	if got := b.Snapshot(); got.Pressure != Warning || got.Limit < 1 {
-		t.Fatal("quota return lost valid warning-below-ceiling admission")
+	if got := b.Snapshot(); got.Pressure != Unknown || got.SampleError == nil || got.Limit != 2 || b.AdmissionError() != "" {
+		t.Fatalf("sample failure prevented original quota recovery: %+v", got)
 	}
 	permit.Release()
 	if b.Snapshot().Allocations != 0 {
@@ -310,7 +308,7 @@ func TestSharedQuotaRejectsPriorWorkerPolicyWithoutRewritingLedger(t *testing.T)
 	if err := os.WriteFile(path, original, 0600); err != nil {
 		t.Fatal(err)
 	}
-	b := NewBudgetWithSwapUsedLimit(4, DefaultSwapUsedLimit)
+	b := NewBudget(9)
 	if err := b.BindSharedQuota(dir, "candidate"); err == nil {
 		t.Fatal("mixed worker admission policies shared a ledger")
 	}
@@ -320,5 +318,60 @@ func TestSharedQuotaRejectsPriorWorkerPolicyWithoutRewritingLedger(t *testing.T)
 	}
 	if string(after) != string(original) {
 		t.Fatal("rejected admission rewrote the original quota ledger")
+	}
+}
+
+func TestSharedQuotaRejectsIncompleteLedgerWithoutInventingCapacity(t *testing.T) {
+	for _, original := range []string{
+		`{}`,
+		`{"schema":3,"maximum":9,"leases":{}}`,
+		`{"schema":3,"maximum":9,"worker_admission_policy":"host-workers-v1"}`,
+		`{"schema":3,"worker_admission_policy":"host-workers-v1","leases":{}}`,
+		`{"schema":3,"maximum":0,"worker_admission_policy":"host-workers-v1","leases":{}}`,
+		`{"schema":3,"maximum":10,"worker_admission_policy":"host-workers-v1","leases":{}}`,
+		`{"schema":2,"maximum":9,"worker_admission_policy":"host-workers-v1","leases":{}}`,
+	} {
+		t.Run(original, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "quota.json")
+			if err := os.WriteFile(path, []byte(original), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := NewBudget(0).BindSharedQuota(dir, "new-host"); err == nil {
+				t.Fatal("incomplete custody ledger became new capacity")
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || string(after) != original {
+				t.Fatalf("refusal changed original ledger: %s, %v", after, err)
+			}
+		})
+	}
+}
+
+func TestAdmissionErrorSeparatesCapacityAndObservationsFromCustody(t *testing.T) {
+	dir := t.TempDir()
+	b, _ := sharedTestBudget(t, dir, "owner", 1)
+	b.Observe(Sample{}, errors.New("sampler unavailable"))
+	permit, err := b.TryAcquire("owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer permit.Release()
+	if _, err = b.TryAcquire("owner"); !errors.Is(err, ErrDeferred) {
+		t.Fatal("full Host admitted another worker")
+	}
+	if got := b.AdmissionError(); got != "" {
+		t.Fatalf("capacity or observation became Host fault: %s", got)
+	}
+	b.SetUnresolvedResidents(1)
+	if b.AdmissionError() == "" {
+		t.Fatal("unknown resident owner was reported ready")
+	}
+	b.SetUnresolvedResidents(0)
+	if err = os.Remove(filepath.Join(dir, "quota.json")); err != nil {
+		t.Fatal(err)
+	}
+	if b.AdmissionError() == "" {
+		t.Fatal("missing shared custody ledger was reported ready")
 	}
 }

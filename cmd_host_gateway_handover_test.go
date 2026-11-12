@@ -44,11 +44,11 @@ func TestGatewayHandoverSharedPolicyRequiresExplicitFields(t *testing.T) {
 				sha = strings.Repeat("0", 64)
 			}
 			shutdown := map[string]any{"requested": false}
-			maximum := 4
+			maximum := admission.DefaultWorkerLimit
 			if fault == "wrong-quota" {
 				maximum = 5
 			}
-			row := map[string]any{"protocol": hostProtocol, "host_root": root, "host_instance_id": strings.Repeat("a", 32), "rolling_host_version": 1, "binary_path": binary, "binary_sha256": sha, "shutdown": shutdown, "resources": map[string]any{"worker_admission_policy": "swap-used-critical-guard-v2", "swap_used_limit_bytes": 15000000000, "shared_quota": map[string]any{"maximum": maximum}}}
+			row := map[string]any{"protocol": hostProtocol, "host_root": root, "host_instance_id": strings.Repeat("a", 32), "rolling_host_version": 1, "binary_path": binary, "binary_sha256": sha, "shutdown": shutdown, "resources": map[string]any{"worker_admission_policy": admission.WorkerAdmissionPolicy, "shared_quota": map[string]any{"maximum": maximum}}}
 			if fault == "shutdown-missing" {
 				delete(row, "shutdown")
 			}

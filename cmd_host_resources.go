@@ -35,7 +35,6 @@ func newHostResourcesCmd(app *App) *cobra.Command {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 	}}
 	cmd.AddCommand(newHostResidentsCmd(app))
-	cmd.AddCommand(newHostWarningGrantCmd(app))
 	return cmd
 }
 
@@ -56,7 +55,8 @@ func (h *noodleHost) resources() any {
 		shutdown["pending_finalizations"] = h.shutdown.pending
 		shutdown["diagnostic"] = h.shutdown.diagnostic
 	}
-	return map[string]any{"shutdown": shutdown, "host_root": h.controlRoot(), "host_dir": h.dir, "gateway_warning_grants": h.budget.GatewayWarningGrants(), "safe_host_switch": hostCapabilities(runtime.GOOS)["safe_host_switch"], "rolling_host_version": h.rollingVersion(), "warning_grants": h.budget.WarningGrants(), "rolling_error": h.rollingError(), "binary_path": h.binaryPath, "binary_sha256": h.binarySHA, "residents": residents, "schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot()}
+	admission := h.admissionDiagnostic()
+	return map[string]any{"admission": admission, "shutdown": shutdown, "host_root": h.controlRoot(), "host_dir": h.dir, "safe_host_switch": hostCapabilities(runtime.GOOS)["safe_host_switch"], "rolling_host_version": h.rollingVersion(), "rolling_error": h.rollingError(), "binary_path": h.binaryPath, "binary_sha256": h.binarySHA, "residents": residents, "schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot()}
 }
 
 func (h *noodleHost) rollingVersion() int {
@@ -71,4 +71,20 @@ func (h *noodleHost) rollingError() string {
 		return h.rolling.failure
 	}
 	return ""
+}
+
+func (h *noodleHost) admissionDiagnostic() map[string]any {
+	status, message := "ready", ""
+	if h.blocked {
+		status, message = "blocked", "prior context or receipt custody is unresolved"
+	} else if h.shutdown != nil {
+		status, message = "shutting_down", "original Host shutdown is pending"
+	} else if h.rolling != nil && h.rolling.retiring {
+		status, message = "retiring", "original Host version is draining"
+	} else if h.budget == nil {
+		status, message = "unavailable", "Host worker admission is absent"
+	} else if message = h.budget.AdmissionError(); message != "" {
+		status = "blocked"
+	}
+	return map[string]any{"status": status, "can_accept": status == "ready", "error": message}
 }

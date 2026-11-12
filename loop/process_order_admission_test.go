@@ -15,7 +15,7 @@ import (
 
 func TestProcessAdmissionCycleSkipsForeignAndSchedulerBeforeCapacity(t *testing.T) {
 	for _, warning := range []bool{false, true} {
-		t.Run(map[bool]string{false: "normal", true: "warning-grant"}[warning], func(t *testing.T) { checkProcessAdmissionCycle(t, warning) })
+		t.Run(map[bool]string{false: "normal", true: "critical-observation"}[warning], func(t *testing.T) { checkProcessAdmissionCycle(t, warning) })
 	}
 }
 
@@ -36,10 +36,7 @@ func checkProcessAdmissionCycle(t *testing.T, warning bool) {
 		b := resourceBudget(l, 1)
 		now := time.Now()
 		for i := 3; i >= 0; i-- {
-			b.Observe(admission.Sample{At: now.Add(-time.Duration(i) * admission.PollInterval), Pressure: admission.Warning}, nil)
-		}
-		if _, err := b.GrantWarning(l.projectDir, "allowed"); err != nil {
-			t.Fatal(err)
+			b.Observe(admission.Sample{At: now.Add(-time.Duration(i) * admission.PollInterval), Pressure: admission.Critical}, nil)
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
