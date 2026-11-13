@@ -42,7 +42,11 @@ func observeHostOperatorNativeScope(ctx context.Context, plan hostOperatorPlan) 
 	if err := json.Unmarshal(plan.Source, &source); err != nil {
 		return nil, err
 	}
-	spec, err := loopruntime.LoadOpenShellGatewaySpec(plan.Profile.Path)
+	profile, err := loopruntime.ReadSessionReadbackFile(plan.ProfileSource, nil)
+	if err != nil || profile != plan.Profile {
+		return nil, errors.New("original Source profile source differs from its file binding")
+	}
+	spec, err := loopruntime.LoadOpenShellGatewaySpec(plan.ProfileSource)
 	if err != nil {
 		return nil, err
 	}

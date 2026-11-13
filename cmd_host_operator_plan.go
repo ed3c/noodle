@@ -18,33 +18,36 @@ import (
 // This snapshot prepares the original owner's policy change. It does not fence
 // admission, retire a process, revise custody, or authorize those effects.
 type hostOperatorPlan struct {
-	Schema       int                                 `json:"schema"`
-	Request      loopruntime.SessionReadbackFileRef  `json:"request"`
-	Config       loopruntime.SessionReadbackFileRef  `json:"config"`
-	Profile      loopruntime.SessionReadbackFileRef  `json:"profile"`
-	History      loopruntime.SessionReadbackFileRef  `json:"context_history"`
-	Pool         loopruntime.SessionReadbackFileRef  `json:"pool"`
-	Custody      loopruntime.SessionReadbackFileRef  `json:"custody"`
-	Source       json.RawMessage                     `json:"native_source"`
-	Contexts     []hostReceipt                       `json:"contexts"`
-	Binding      loopruntime.OpenShellCustodyBinding `json:"original_binding"`
-	Resident     admission.Resident                  `json:"original_resident"`
-	NativeScope  *hostOperatorNativeScope            `json:"native_scope,omitempty"`
-	OperatorArgv []string                            `json:"proposed_resident_argv"`
-	Requires     []string                            `json:"requires"`
-	Executable   bool                                `json:"executable"`
-	Effects      []string                            `json:"effects"`
+	Schema         int                                        `json:"schema"`
+	Request        loopruntime.SessionReadbackFileRef         `json:"request"`
+	Config         loopruntime.SessionReadbackFileRef         `json:"config"`
+	Profile        loopruntime.SessionReadbackFileRef         `json:"profile"`
+	ProfileSource  string                                     `json:"profile_source"`
+	History        loopruntime.SessionReadbackFileRef         `json:"context_history"`
+	Pool           loopruntime.SessionReadbackFileRef         `json:"pool"`
+	Custody        loopruntime.SessionReadbackFileRef         `json:"custody"`
+	Source         json.RawMessage                            `json:"native_source"`
+	Contexts       []hostReceipt                              `json:"contexts"`
+	Binding        loopruntime.OpenShellCustodyBinding        `json:"original_binding"`
+	Resident       admission.Resident                         `json:"original_resident"`
+	NativeScope    *hostOperatorNativeScope                   `json:"native_scope,omitempty"`
+	OperatorPolicy *loopruntime.SourceOperatorPolicyCandidate `json:"operator_policy_candidate,omitempty"`
+	OperatorArgv   []string                                   `json:"proposed_resident_argv"`
+	Requires       []string                                   `json:"requires"`
+	Executable     bool                                       `json:"executable"`
+	Effects        []string                                   `json:"effects"`
 }
 
 func newHostOperatorPlanCmd() *cobra.Command {
 	var request string
 	var native bool
 	var holdSnapshot string
+	var profileOutput string
 	cmd := &cobra.Command{Use: "operator-plan", Short: "Read the original Source request and prepare its gateway operator policy; no service effects", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if holdSnapshot != "" {
-				if request != "" || native {
-					return errors.New("hold-plan-file cannot be combined with request-file or native-scope")
+				if request != "" || native || profileOutput != "" {
+					return errors.New("hold-plan-file cannot be combined with request-file, native-scope or operator-profile-output")
 				}
 				plan, err := prepareSourcePolicyHold(holdSnapshot)
 				if err != nil {
@@ -62,11 +65,22 @@ func newHostOperatorPlanCmd() *cobra.Command {
 					return err
 				}
 			}
+			if profileOutput != "" {
+				candidate, err := loopruntime.PrepareSourceOperatorPolicy(plan.Profile, plan.ProfileSource, profileOutput)
+				if err != nil {
+					return err
+				}
+				if candidate.BeforeBinding != plan.Binding {
+					return errors.New("Source operator candidate differs from original live custody binding")
+				}
+				plan.OperatorPolicy = &candidate
+			}
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(plan)
 		}}
 	cmd.Flags().StringVar(&request, "request-file", "", "Original accepted Source attach request")
 	cmd.Flags().BoolVar(&native, "native-scope", false, "Bind original Host/gateway/VM-driver kernel generations and declared namespace; no control or zero-compute claim")
 	cmd.Flags().StringVar(&holdSnapshot, "hold-plan-file", "", "Prepare only the original maintenance hold from a saved native-scope snapshot; no service effects")
+	cmd.Flags().StringVar(&profileOutput, "operator-profile-output", "", "Materialize only an auth-only Source profile candidate; original profile and service remain unchanged")
 	return cmd
 }
 
@@ -165,6 +179,7 @@ func planHostOperatorMaintenance(ctx context.Context, path string) (hostOperator
 	if err != nil {
 		return p, err
 	}
+	p.ProfileSource = cfg.Runtime.OpenShell.Profile
 	gateway, err := loopruntime.LoadOpenShellGatewaySpec(cfg.Runtime.OpenShell.Profile)
 	if err != nil {
 		return p, err

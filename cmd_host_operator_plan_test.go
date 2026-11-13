@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -151,13 +152,28 @@ func TestOperatorPlanDerivesOriginalSourceWithoutWorkerAdmission(t *testing.T) {
 					t.Error(err)
 				}
 			}()
-			plan, err := planHostOperatorMaintenance(context.Background(), requestPath)
+			var plan hostOperatorPlan
+			if fault == "" {
+				var output bytes.Buffer
+				cmd := newHostOperatorPlanCmd()
+				cmd.SetOut(&output)
+				cmd.SetArgs([]string{"--request-file", requestPath, "--operator-profile-output", filepath.Join(root, "operator-profile.json")})
+				err = cmd.ExecuteContext(context.Background())
+				if err == nil {
+					err = json.Unmarshal(output.Bytes(), &plan)
+				}
+			} else {
+				plan, err = planHostOperatorMaintenance(context.Background(), requestPath)
+			}
 			if fault == "" {
 				if err != nil {
 					t.Fatal(err)
 				}
 				if plan.Executable || len(plan.Effects) != 0 || len(plan.Contexts) != 1 || plan.Contexts[0].ContextState != "failed" || plan.Binding.StateRoot == "" || plan.Resident.GuardID != guardID || len(plan.Requires) == 0 || strings.Join(plan.OperatorArgv[len(plan.OperatorArgv)-2:], " ") != "--enable-operator-auth true" {
 					t.Fatalf("preparation lost its identity or effect boundary: %+v", plan)
+				}
+				if plan.OperatorPolicy == nil || plan.OperatorPolicy.Before != plan.Profile || plan.OperatorPolicy.BeforeBinding != plan.Binding || plan.OperatorPolicy.AfterBinding.ConfigFingerprint == plan.Binding.ConfigFingerprint {
+					t.Fatal("CLI did not produce the bound auth-only artifact")
 				}
 			} else if err == nil {
 				t.Fatal("preparation accepted changed original input", fault)
