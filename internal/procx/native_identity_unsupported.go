@@ -17,3 +17,7 @@ func SignalNativeIdentity(p NativeIdentity, force bool) error {
 func SetNativeSuspended(p NativeIdentity, suspended bool) error {
 	return fmt.Errorf("generation-bound process pause unavailable; PID signal fallback forbidden")
 }
+
+func ObserveNativeExitStatus(original NativeIdentity) (NativeExitStatus, error) {
+	return NativeExitStatus{}, fmt.Errorf("generation-bound kernel exit status unavailable; absence is not normal zero exit")
+}

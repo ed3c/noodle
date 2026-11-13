@@ -26,11 +26,19 @@ func TestNativeIdentityHelper(t *testing.T) {
 	}
 	for {
 		if _, err := os.Stat("exec"); err == nil {
+			if mode == "exec-exit" {
+				if err := syscall.Exec(os.Args[0], []string{os.Args[0], "-test.run=^TestNativeIdentityReplacementHelper$"}, os.Environ()); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if err := syscall.Exec("/bin/sleep", []string{"sleep", "30"}, os.Environ()); err != nil {
 				t.Fatal(err)
 			}
 		}
 		if _, err := os.Stat("exit"); err == nil {
+			if mode == "nonzero" {
+				os.Exit(23)
+			}
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

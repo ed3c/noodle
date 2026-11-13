@@ -83,7 +83,7 @@ func newHostRestrictedCmd() *cobra.Command {
 						raw, completion, readErr := readSourcePolicyStatus(cmd.Context(), p)
 						if readErr != nil {
 							observed["source_error"] = readErr.Error()
-						} else {
+						} else if len(raw) != 0 {
 							observed["source"] = raw
 						}
 						observed["source_gateway_normal_exit"] = completion
