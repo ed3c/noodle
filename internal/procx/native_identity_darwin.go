@@ -28,11 +28,12 @@ static int fixture_identity(int pid, struct proc_bsdinfo *info, audit_token_t *t
     if (audit_token_to_pid(*token) != pid || audit_token_to_euid(*token) != info->pbi_uid) return ESTALE;
     return 0;
 }
-static int fixture_signal(audit_token_t *token, int force) {
+static int fixture_signal(audit_token_t *token, int signal_number) {
+    if (signal_number != SIGTERM && signal_number != SIGKILL && signal_number != SIGSTOP && signal_number != SIGCONT) return EINVAL;
     typedef int (*signal_fn)(audit_token_t *, int);
     signal_fn fn = (signal_fn)dlsym(RTLD_DEFAULT, "proc_signal_with_audittoken");
     if (!fn) return ENOTSUP;
-    return fn(token, force ? SIGKILL : SIGTERM);
+    return fn(token, signal_number);
 }
 static int fixture_control_available(void) {return dlsym(RTLD_DEFAULT, "proc_signal_with_audittoken") != NULL;}
 */
@@ -60,7 +61,7 @@ func ObserveNativeIdentity(pid int) (NativeIdentity, error) {
 		return NativeIdentity{}, fmt.Errorf("kernel process identity: %w", syscall.Errno(code))
 	}
 	p := NativeIdentity{PID: pid, UID: int(info.pbi_uid), ParentPID: int(info.pbi_ppid), Group: int(info.pbi_pgid),
-		StartSec: uint64(info.pbi_start_tvsec), StartUsec: uint64(info.pbi_start_tvusec), Zombie: info.pbi_status == C.SZOMB}
+		StartSec: uint64(info.pbi_start_tvsec), StartUsec: uint64(info.pbi_start_tvusec), Zombie: info.pbi_status == C.SZOMB, Stopped: info.pbi_status == C.SSTOP}
 	if !p.Zombie {
 		p.Version = int(C.audit_token_to_pidversion(token))
 		p.Token = C.GoBytes(unsafe.Pointer(&token), C.int(C.sizeof_audit_token_t))
@@ -71,6 +72,25 @@ func ObserveNativeIdentity(pid int) (NativeIdentity, error) {
 // SignalNativeIdentity targets one kernel generation, never a process group.
 // The kernel validates PID version again when obtaining the target proc ref.
 func SignalNativeIdentity(p NativeIdentity, force bool) error {
+	signal := syscall.SIGTERM
+	if force {
+		signal = syscall.SIGKILL
+	}
+	return signalNativeIdentity(p, signal)
+}
+
+// SetNativeSuspended changes only the selected kernel generation. Maintenance
+// callers must persist their own intent and verify Stopped before relying on a
+// fence. This does not drain in-flight RPCs or suspend descendant processes.
+func SetNativeSuspended(p NativeIdentity, suspended bool) error {
+	signal := syscall.SIGCONT
+	if suspended {
+		signal = syscall.SIGSTOP
+	}
+	return signalNativeIdentity(p, signal)
+}
+
+func signalNativeIdentity(p NativeIdentity, signal syscall.Signal) error {
 	if p.PID <= 1 || p.Version == 0 || len(p.Token) != int(C.sizeof_audit_token_t) {
 		return fmt.Errorf("kernel audit token unavailable")
 	}
@@ -79,11 +99,7 @@ func SignalNativeIdentity(p NativeIdentity, force bool) error {
 	if int(C.audit_token_to_pid(token)) != p.PID || int(C.audit_token_to_pidversion(token)) != p.Version {
 		return fmt.Errorf("kernel audit token does not match process identity")
 	}
-	var hard C.int
-	if force {
-		hard = 1
-	}
-	if code := C.fixture_signal(&token, hard); code != 0 {
+	if code := C.fixture_signal(&token, C.int(signal)); code != 0 {
 		return fmt.Errorf("audit-token signal: %w", syscall.Errno(code))
 	}
 	return nil
