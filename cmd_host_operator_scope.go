@@ -96,36 +96,36 @@ func observeHostOperatorNativeScope(ctx context.Context, plan hostOperatorPlan) 
 	if err != nil {
 		return nil, err
 	}
-	observe := func(pid int, expected string) (hostOperatorActor, procx.NativeLaunch, error) {
+	observe := func(pid int, expected string) (hostOperatorActor, error) {
 		identity, err := procx.ObserveNativeIdentity(pid)
 		if err != nil {
-			return hostOperatorActor{}, procx.NativeLaunch{}, err
+			return hostOperatorActor{}, err
 		}
 		if identity.UID != os.Getuid() || identity.Zombie {
-			return hostOperatorActor{}, procx.NativeLaunch{}, errors.New("original native actor UID or lifetime differs")
+			return hostOperatorActor{}, errors.New("original native actor UID or lifetime differs")
 		}
-		launch, err := procx.ObserveNativeLaunch(identity)
+		image, err := procx.ObserveNativeImage(identity)
 		if err != nil {
-			return hostOperatorActor{}, procx.NativeLaunch{}, err
+			return hostOperatorActor{}, err
 		}
-		binary, err := hostReadbackBinaryRef(launch.Executable)
+		binary, err := hostReadbackBinaryRef(image)
 		if err != nil {
-			return hostOperatorActor{}, procx.NativeLaunch{}, err
+			return hostOperatorActor{}, err
 		}
 		expectedRef, err := hostReadbackBinaryRef(expected)
 		if err != nil || binary != expectedRef {
-			return hostOperatorActor{}, procx.NativeLaunch{}, errors.New("original native actor executable differs")
+			return hostOperatorActor{}, errors.New("original native actor executable differs")
 		}
-		return hostOperatorActor{Process: identity, Binary: binary}, launch, nil
+		return hostOperatorActor{Process: identity, Binary: binary}, nil
 	}
-	scope.Host, _, err = observe(source.PID, source.Binary)
+	scope.Host, err = observe(source.PID, source.Binary)
 	if err != nil {
 		return nil, err
 	}
 	if scope.Host.Binary.SHA256 != source.BinarySHA {
 		return nil, errors.New("original native Host executable digest differs")
 	}
-	scope.Gateway, _, err = observe(plan.Resident.PID, spec.Resident.Argv[0])
+	scope.Gateway, err = observe(plan.Resident.PID, spec.Resident.Argv[0])
 	if err != nil {
 		return nil, err
 	}
@@ -152,12 +152,16 @@ func observeHostOperatorNativeScope(ctx context.Context, plan hostOperatorPlan) 
 		if row.ParentPID != scope.Gateway.Process.PID {
 			continue
 		}
-		actor, launch, err := observe(row.PID, driverBinary.Path)
+		actor, err := observe(row.PID, driverBinary.Path)
 		if err != nil {
 			return nil, err
 		}
 		if scope.Driver.Process.PID != 0 || actor.Process.ParentPID != scope.Gateway.Process.PID {
 			return nil, errors.New("original Source has another or changed gateway child")
+		}
+		launch, err := procx.ObserveNativeLaunch(actor.Process)
+		if err != nil {
+			return nil, err
 		}
 		state, socket, peer, err := operatorDriverLaunchScope(launch.Arguments)
 		if err != nil {

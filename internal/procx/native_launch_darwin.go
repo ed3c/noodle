@@ -35,6 +35,46 @@ import (
 	"unsafe"
 )
 
+// ObserveNativeImage reads only the kernel image, without requiring mutable
+// argv to be readable. It does not establish a namespace or compute absence.
+func ObserveNativeImage(original NativeIdentity) (string, error) {
+	before, err := ObserveNativeIdentity(original.PID)
+	if err != nil {
+		return "", fmt.Errorf("original image generation unavailable: %w", err)
+	}
+	if !original.SameGeneration(before) || before.Zombie {
+		return "", fmt.Errorf("original image generation unavailable")
+	}
+	image, _, err := readNativeImage(original.PID)
+	if err != nil {
+		return "", err
+	}
+	after, err := ObserveNativeIdentity(original.PID)
+	if err != nil {
+		return "", fmt.Errorf("original image generation changed during readback: %w", err)
+	}
+	if !original.SameGeneration(after) || after.Zombie {
+		return "", fmt.Errorf("original image generation changed during readback")
+	}
+	return image, nil
+}
+
+func readNativeImage(pid int) (string, int, error) {
+	image := make([]byte, int(C.PROC_PIDPATHINFO_MAXSIZE))
+	var wordSize C.int
+	if code := C.native_launch_image(C.int(pid), unsafe.Pointer(&image[0]), C.int(len(image)), &wordSize); code != 0 {
+		return "", 0, fmt.Errorf("kernel launch image: %w", syscall.Errno(code))
+	}
+	imageEnd := 0
+	for imageEnd < len(image) && image[imageEnd] != 0 {
+		imageEnd++
+	}
+	if imageEnd == 0 || imageEnd == len(image) {
+		return "", 0, fmt.Errorf("kernel launch image path incomplete")
+	}
+	return string(image[:imageEnd]), int(wordSize), nil
+}
+
 // ObserveNativeLaunch binds argv to the same kernel generation on both sides
 // of its read. It refuses ambiguity and never returns the environment suffix.
 func ObserveNativeLaunch(original NativeIdentity) (NativeLaunch, error) {
@@ -45,17 +85,9 @@ func ObserveNativeLaunch(original NativeIdentity) (NativeLaunch, error) {
 	if !original.SameGeneration(before) || before.Zombie {
 		return NativeLaunch{}, fmt.Errorf("original launch generation unavailable")
 	}
-	image := make([]byte, int(C.PROC_PIDPATHINFO_MAXSIZE))
-	var wordSize C.int
-	if code := C.native_launch_image(C.int(original.PID), unsafe.Pointer(&image[0]), C.int(len(image)), &wordSize); code != 0 {
-		return NativeLaunch{}, fmt.Errorf("kernel launch image: %w", syscall.Errno(code))
-	}
-	imageEnd := 0
-	for imageEnd < len(image) && image[imageEnd] != 0 {
-		imageEnd++
-	}
-	if imageEnd == 0 || imageEnd == len(image) {
-		return NativeLaunch{}, fmt.Errorf("kernel launch image path incomplete")
+	image, wordSize, err := readNativeImage(original.PID)
+	if err != nil {
+		return NativeLaunch{}, err
 	}
 	var capacity C.int
 	if code := C.native_launch_capacity(&capacity); code != 0 {
@@ -73,7 +105,7 @@ func ObserveNativeLaunch(original NativeIdentity) (NativeLaunch, error) {
 		return NativeLaunch{}, fmt.Errorf("kernel launch size invalid")
 	}
 	data = data[:int(size)]
-	result, err := parseNativeLaunch(data, string(image[:imageEnd]), int(wordSize))
+	result, err := parseNativeLaunch(data, image, wordSize)
 	if err != nil {
 		return NativeLaunch{}, err
 	}
