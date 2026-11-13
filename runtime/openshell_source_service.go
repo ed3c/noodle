@@ -11,8 +11,34 @@ import (
 // Native health does not certify operator authorization, credential supply,
 // worker custody, full maintenance or any historical business outcome.
 type OpenShellSourceServiceObservation struct {
-	Resident   admission.Resident
-	ObservedAt time.Time
+	Resident                 admission.Resident
+	ObservedAt               time.Time
+	ServiceBinding           OpenShellCustodyBinding
+	HistoricalCustodyBinding OpenShellCustodyBinding
+}
+
+// The original maintenance caller must qualify retirement before starting.
+// This factory validates policy/provenance, not that external effect boundary.
+func NewOpenShellSourcePolicyService(residents *admission.Residents, budget *admission.Budget, policy SourceOperatorPolicyCandidate, custody SessionReadbackFileRef, controlRoot string) (*OpenShellGateway, error) {
+	verified, err := InspectSourceOperatorPolicy(policy.Before, policy.After, policy.BeforeSource)
+	if err != nil {
+		return nil, err
+	}
+	if verified != policy {
+		return nil, fmt.Errorf("Source service policy differs from original auth-only candidate")
+	}
+	spec, err := LoadOpenShellGatewaySpec(policy.After.Path)
+	if err != nil {
+		return nil, err
+	}
+	if spec.Binding != policy.AfterBinding || spec.CredentialSource != nil {
+		return nil, fmt.Errorf("Source service deployment differs from its auth-only policy")
+	}
+	if err := VerifySessionReadbackFiles(map[string]SessionReadbackFileRef{"source-policy": policy.After}); err != nil {
+		return nil, err
+	}
+	spec.ControlRoot = controlRoot
+	return newOpenShellGateway(residents, budget, spec, &sourceServiceReservation{custody, policy.BeforeBinding})
 }
 
 func (o *OpenShellGateway) AcquireSourceService(ctx context.Context, contextID string) (OpenShellSourceServiceObservation, error) {
@@ -41,7 +67,7 @@ func (o *OpenShellGateway) ReadSourceService(ctx context.Context) (OpenShellSour
 }
 
 func (o *OpenShellGateway) sourceServiceReadbackLocked(ctx context.Context) (OpenShellSourceServiceObservation, error) {
-	result := OpenShellSourceServiceObservation{Resident: o.resident, ObservedAt: time.Now().UTC()}
+	result := OpenShellSourceServiceObservation{Resident: o.resident, ObservedAt: time.Now().UTC(), ServiceBinding: o.spec.Binding}
 	if !o.serviceOnly || o.closed || o.generation == nil {
 		return result, fmt.Errorf("original Source service generation unavailable")
 	}
@@ -49,6 +75,7 @@ func (o *OpenShellGateway) sourceServiceReadbackLocked(ctx context.Context) (Ope
 		return result, fmt.Errorf("openshell custody operation in progress")
 	}
 	defer o.custody.mu.Unlock()
+	result.HistoricalCustodyBinding = o.custody.state.Binding
 	ctx, cancel := context.WithTimeout(ctx, o.spec.ReadinessTimeout)
 	defer cancel()
 	err := o.generation.Running()

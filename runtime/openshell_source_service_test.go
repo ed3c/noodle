@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"bytes"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,11 +47,116 @@ func sourceServiceFixture(t *testing.T, blocked string) (*managedFixture, Sessio
 	return f, ref, raw
 }
 
+func TestSourcePolicyServiceUsesNewDeploymentWithoutRewritingHistoricalCustody(t *testing.T) {
+	f, ref, _ := sourceServiceFixture(t, "original business uncertainty")
+	filename, profile := profileFixture(t)
+	root := filepath.Dir(filename)
+	key, err := x509.MarshalPKCS8PrivateKey(f.spec.TLS.Certificate.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materials := map[string][]byte{
+		"ca.pem":     pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: f.spec.TLS.Certificate.Certificate[1]}),
+		"client.pem": pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: f.spec.TLS.Certificate.Certificate[0]}),
+		"client.key": pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key}),
+	}
+	for name, data := range materials {
+		if err := os.WriteFile(filepath.Join(root, name), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, destination := range map[string]string{"ca.pem": "ca.crt", "client.pem": "tls.crt", "client.key": "tls.key"} {
+		if err := os.WriteFile(filepath.Join(root, "client", "openshell", "gateways", "dedicated", "mtls", destination), materials[name], 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	metadata := fmt.Sprintf(`{"name":"dedicated","gateway_endpoint":%q,"auth_mode":"mtls"}`, f.spec.Binding.Gateway)
+	if err := os.WriteFile(filepath.Join(root, "client", "openshell", "gateways", "dedicated", "metadata.json"), []byte(metadata), 0600); err != nil {
+		t.Fatal(err)
+	}
+	profile.Gateway.Resident = f.spec.Resident
+	// The fixture testing executable ignores native CLI arguments after --.
+	profile.Gateway.Resident.Argv = append(profile.Gateway.Resident.Argv, "--")
+	profile.Gateway.Binding.StateRoot = f.spec.Binding.StateRoot
+	profile.Gateway.Binding.Gateway = f.spec.Binding.Gateway
+	profile.Gateway.Binding.Workspace = f.spec.Binding.Workspace
+	profile.Gateway.Binding.Owner = f.spec.Binding.Owner
+	profile.Gateway.TLS.ServerName = f.spec.TLS.ServerName
+	profile.Gateway.Version, profile.Gateway.ComputeDriver = f.spec.Version, f.spec.ComputeDriver
+	profile.Gateway.ReadinessTimeoutSeconds = 3
+	writeProfileFixture(t, filename, profile)
+	oldSpec, err := LoadOpenShellGatewaySpec(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state OpenShellCustodyState
+	if _, err := ReadSessionReadbackFile(ref.Path, &state); err != nil {
+		t.Fatal(err)
+	}
+	state.Binding = oldSpec.Binding
+	for i := range state.Records {
+		state.Records[i].Worker.Identity.ConfigSource = oldSpec.Binding.ConfigSource
+	}
+	ref = storageFailureWrite(t, ref.Path, state)
+	before, err := os.ReadFile(ref.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeProfile, err := ReadSessionReadbackFile(filename, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := PrepareSourceOperatorPolicy(beforeProfile, filename, filepath.Join(t.TempDir(), "operator.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fault := range []string{"schema", "binding", "source"} {
+		changed := policy
+		switch fault {
+		case "schema":
+			changed.Schema++
+		case "binding":
+			changed.BeforeBinding.ConfigFingerprint = "another-history"
+		case "source":
+			changed.BeforeSource = changed.After.Path
+		}
+		if owner, err := NewOpenShellSourcePolicyService(f.residents, f.budget, changed, ref, f.spec.ControlRoot); err == nil || owner != nil {
+			t.Fatal("unbound Source policy accepted", fault, err)
+		}
+	}
+	f.spawns(t, 0)
+	o, err := NewOpenShellSourcePolicyService(f.residents, f.budget, policy, ref, f.spec.ControlRoot)
+	f.owner = o
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation, err := o.AcquireSourceService(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.ServiceBinding != policy.AfterBinding || observation.HistoricalCustodyBinding != policy.BeforeBinding || o.custody.state.Binding != oldSpec.Binding {
+		t.Fatal("historical binding substituted for actual Source deployment", observation)
+	}
+	oldSpec.ControlRoot = f.spec.ControlRoot
+	oldGuard, err := OpenShellGatewayGuardID(oldSpec)
+	if err != nil || oldGuard == observation.Resident.GuardID {
+		t.Fatal("Source retained the old deployment guard", err)
+	}
+	if custody, err := o.Readback(t.Context()); err == nil || custody != nil || o.custody.initialized || o.ready {
+		t.Fatal("Source policy factory yielded a worker")
+	}
+	after, err := os.ReadFile(ref.Path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("operator policy rewrote historical custody", err)
+	}
+	f.spawns(t, 1)
+}
+
 func TestSourceServiceHealthPreservesMissingBusinessHistory(t *testing.T) {
 	for _, blocked := range []string{"", "original business uncertainty"} {
 		t.Run(blocked, func(t *testing.T) {
 			f, ref, before := sourceServiceFixture(t, blocked)
-			o, err := NewOpenShellSourceService(f.residents, f.budget, f.spec, ref)
+			o, err := newOpenShellGateway(f.residents, f.budget, f.spec, &sourceServiceReservation{ref, f.spec.Binding})
 			f.owner = o
 			if err != nil {
 				t.Fatal(err)
@@ -101,7 +208,7 @@ func TestSourceServiceReadinessFailureKeepsBytesAndOriginalChild(t *testing.T) {
 		t.Run(fault, func(t *testing.T) {
 			f, ref, before := sourceServiceFixture(t, "original business uncertainty")
 			managedMarker(t, f.root, fault)
-			o, err := NewOpenShellSourceService(f.residents, f.budget, f.spec, ref)
+			o, err := newOpenShellGateway(f.residents, f.budget, f.spec, &sourceServiceReservation{ref, f.spec.Binding})
 			f.owner = o
 			if err != nil {
 				t.Fatal(err)
@@ -164,7 +271,7 @@ func TestSourceServiceConstructorRefusesWithoutBusinessWrites(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			o, err := NewOpenShellSourceService(f.residents, f.budget, f.spec, ref)
+			o, err := newOpenShellGateway(f.residents, f.budget, f.spec, &sourceServiceReservation{ref, f.spec.Binding})
 			f.owner = o
 			if err == nil || o != nil {
 				t.Fatal("Source constructor accepted invalid original binding", fault, err)

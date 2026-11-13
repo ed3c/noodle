@@ -76,17 +76,15 @@ func NewOpenShellGateway(residents *admission.Residents, budget *admission.Budge
 	return newOpenShellGateway(residents, budget, spec, nil)
 }
 
-// NewOpenShellSourceService is for the original maintenance startup owner.
-// It binds existing business bytes and cannot yield worker custody. The caller
-// must already validate the full original restore epoch and new generation.
-func NewOpenShellSourceService(residents *admission.Residents, budget *admission.Budget, spec OpenShellGatewaySpec, custody SessionReadbackFileRef) (*OpenShellGateway, error) {
-	if spec.CredentialSource != nil {
-		return nil, fmt.Errorf("Source service cannot be a Target credential consumer")
-	}
-	return newOpenShellGateway(residents, budget, spec, &custody)
+type sourceServiceReservation struct {
+	before  SessionReadbackFileRef
+	binding OpenShellCustodyBinding
 }
 
-func newOpenShellGateway(residents *admission.Residents, budget *admission.Budget, spec OpenShellGatewaySpec, expected *SessionReadbackFileRef) (*OpenShellGateway, error) {
+func newOpenShellGateway(residents *admission.Residents, budget *admission.Budget, spec OpenShellGatewaySpec, source *sourceServiceReservation) (*OpenShellGateway, error) {
+	if source != nil && spec.CredentialSource != nil {
+		return nil, fmt.Errorf("Source service cannot be a Target credential consumer")
+	}
 	if residents == nil || budget == nil || spec.ReadinessTimeout <= 0 || spec.ReadinessTimeout > 30*time.Second || strings.TrimSpace(spec.Version) == "" || strings.TrimSpace(spec.ComputeDriver) == "" || spec.Resident.Sharing != "shared" || spec.Resident.ForceAfterGrace {
 		return nil, fmt.Errorf("openshell gateway owner, shared foreground contract or bounded readiness configuration invalid")
 	}
@@ -124,12 +122,19 @@ func newOpenShellGateway(residents *admission.Residents, budget *admission.Budge
 	if err != nil {
 		return nil, err
 	}
-	c, err := reserveOpenShellCustodyBound(spec.Binding, conn, spec.Retained, spec.ControlRoot, spec.CredentialSource, expected)
+	binding := spec.Binding
+	var expected *SessionReadbackFileRef
+	if source != nil {
+		binding, expected = source.binding, &source.before
+	}
+	c, err := reserveOpenShellCustodyBound(binding, conn, spec.Retained, spec.ControlRoot, spec.CredentialSource, expected)
 	if c == nil {
 		return nil, err
 	}
 	c.managed, c.retryReadback = true, true
-	spec.Binding = c.state.Binding
+	if source == nil {
+		spec.Binding = c.state.Binding
+	}
 	o := &OpenShellGateway{residents: residents, budget: budget, spec: spec, custody: c, diagnostic: err, serviceOnly: expected != nil}
 	// The native identity also includes the original command via Residents' own
 	// executable/config fingerprint. Configuration source is never just a name.
