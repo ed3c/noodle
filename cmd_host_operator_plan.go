@@ -29,6 +29,7 @@ type hostOperatorPlan struct {
 	Contexts     []hostReceipt                       `json:"contexts"`
 	Binding      loopruntime.OpenShellCustodyBinding `json:"original_binding"`
 	Resident     admission.Resident                  `json:"original_resident"`
+	NativeScope  *hostOperatorNativeScope            `json:"native_scope,omitempty"`
 	OperatorArgv []string                            `json:"proposed_resident_argv"`
 	Requires     []string                            `json:"requires"`
 	Executable   bool                                `json:"executable"`
@@ -37,15 +38,23 @@ type hostOperatorPlan struct {
 
 func newHostOperatorPlanCmd() *cobra.Command {
 	var request string
+	var native bool
 	cmd := &cobra.Command{Use: "operator-plan", Short: "Read the original Source request and prepare its gateway operator policy; no service effects", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			plan, err := planHostOperatorMaintenance(cmd.Context(), request)
 			if err != nil {
 				return err
 			}
+			if native {
+				plan.NativeScope, err = observeHostOperatorNativeScope(cmd.Context(), plan)
+				if err != nil {
+					return err
+				}
+			}
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(plan)
 		}}
 	cmd.Flags().StringVar(&request, "request-file", "", "Original accepted Source attach request")
+	cmd.Flags().BoolVar(&native, "native-scope", false, "Bind original Host/gateway/VM-driver kernel generations and declared namespace; no control or zero-compute claim")
 	return cmd
 }
 
