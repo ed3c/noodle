@@ -79,6 +79,16 @@ func newHostRestrictedCmd() *cobra.Command {
 					if ownerDir == "" {
 						continue
 					}
+					if name == "source" && p.SourcePolicy != nil {
+						raw, completion, readErr := readSourcePolicyStatus(cmd.Context(), p)
+						if readErr != nil {
+							observed["source_error"] = readErr.Error()
+						} else {
+							observed["source"] = raw
+						}
+						observed["source_gateway_normal_exit"] = completion
+						continue
+					}
 					raw, readErr := nativeHostRPC(cmd.Context(), ownerDir, hostRequest{Operation: "resources"})
 					if readErr != nil {
 						observed[name+"_error"] = readErr.Error()
