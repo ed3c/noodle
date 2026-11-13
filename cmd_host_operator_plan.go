@@ -18,25 +18,27 @@ import (
 // This snapshot prepares the original owner's policy change. It does not fence
 // admission, retire a process, revise custody, or authorize those effects.
 type hostOperatorPlan struct {
-	Schema         int                                        `json:"schema"`
-	Request        loopruntime.SessionReadbackFileRef         `json:"request"`
-	Config         loopruntime.SessionReadbackFileRef         `json:"config"`
-	Profile        loopruntime.SessionReadbackFileRef         `json:"profile"`
-	ProfileSource  string                                     `json:"profile_source"`
-	History        loopruntime.SessionReadbackFileRef         `json:"context_history"`
-	Pool           loopruntime.SessionReadbackFileRef         `json:"pool"`
-	Custody        loopruntime.SessionReadbackFileRef         `json:"custody"`
-	Source         json.RawMessage                            `json:"native_source"`
-	Contexts       []hostReceipt                              `json:"contexts"`
-	Binding        loopruntime.OpenShellCustodyBinding        `json:"original_binding"`
-	Resident       admission.Resident                         `json:"original_resident"`
-	NativeScope    *hostOperatorNativeScope                   `json:"native_scope,omitempty"`
-	Quota          *hostSourceQuotaSnapshot                   `json:"source_quota,omitempty"`
-	OperatorPolicy *loopruntime.SourceOperatorPolicyCandidate `json:"operator_policy_candidate,omitempty"`
-	OperatorArgv   []string                                   `json:"proposed_resident_argv"`
-	Requires       []string                                   `json:"requires"`
-	Executable     bool                                       `json:"executable"`
-	Effects        []string                                   `json:"effects"`
+	Schema               int                                        `json:"schema"`
+	Request              loopruntime.SessionReadbackFileRef         `json:"request"`
+	Config               loopruntime.SessionReadbackFileRef         `json:"config"`
+	Profile              loopruntime.SessionReadbackFileRef         `json:"profile"`
+	ProfileSource        string                                     `json:"profile_source"`
+	History              loopruntime.SessionReadbackFileRef         `json:"context_history"`
+	Pool                 loopruntime.SessionReadbackFileRef         `json:"pool"`
+	Custody              loopruntime.SessionReadbackFileRef         `json:"custody"`
+	Source               json.RawMessage                            `json:"native_source"`
+	Contexts             []hostReceipt                              `json:"contexts"`
+	Binding              loopruntime.OpenShellCustodyBinding        `json:"original_binding"`
+	Resident             admission.Resident                         `json:"original_resident"`
+	NativeScope          *hostOperatorNativeScope                   `json:"native_scope,omitempty"`
+	Quota                *hostSourceQuotaSnapshot                   `json:"source_quota,omitempty"`
+	PhysicalHistory      *loopruntime.OpenShellPhysicalHistory      `json:"physical_history,omitempty"`
+	PhysicalHistoryError string                                     `json:"physical_history_error,omitempty"`
+	OperatorPolicy       *loopruntime.SourceOperatorPolicyCandidate `json:"operator_policy_candidate,omitempty"`
+	OperatorArgv         []string                                   `json:"proposed_resident_argv"`
+	Requires             []string                                   `json:"requires"`
+	Executable           bool                                       `json:"executable"`
+	Effects              []string                                   `json:"effects"`
 }
 
 func newHostOperatorPlanCmd() *cobra.Command {
@@ -68,6 +70,12 @@ func newHostOperatorPlanCmd() *cobra.Command {
 				plan.Quota, err = observeSourceQuota(plan)
 				if err != nil {
 					return err
+				}
+				history, historyErr := loopruntime.InspectOpenShellPhysicalHistory(plan.Custody)
+				if historyErr != nil {
+					plan.PhysicalHistoryError = historyErr.Error()
+				} else {
+					plan.PhysicalHistory = &history
 				}
 			}
 			if profileOutput != "" {
