@@ -209,6 +209,13 @@ func verifyColdBindings(p hostMaintenancePlan) error {
 // An intent is persisted before the only signal. Resumption reads the original
 // generation's outcome. A live generation after intent never triggers a replay.
 func retireColdActor(ctx context.Context, actor *loopruntime.OpenShellRetiredActor, save func() error) error {
+	return retireMaintenanceActor(ctx, actor, true, save)
+}
+
+// The caller selects force only for an already qualified cold retirement.
+// A credential gateway needs graceful shutdown so its native refresh lifetime
+// can persist rotated grants. A timeout never escalates or repeats its signal.
+func retireMaintenanceActor(ctx context.Context, actor *loopruntime.OpenShellRetiredActor, force bool, save func() error) error {
 	if !actor.ExitedAt.IsZero() {
 		return nil
 	}
@@ -232,7 +239,7 @@ func retireColdActor(ctx context.Context, actor *loopruntime.OpenShellRetiredAct
 	if err = save(); err != nil {
 		return err
 	}
-	if err = procx.SignalNativeIdentity(actor.Process, true); err != nil {
+	if err = procx.SignalNativeIdentity(actor.Process, force); err != nil {
 		return err
 	}
 	timer := time.NewTimer(3 * time.Second)
