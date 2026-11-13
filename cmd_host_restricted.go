@@ -99,6 +99,7 @@ func newHostRestrictedCmd() *cobra.Command {
 	cmd.Flags().StringVar(&path, "plan", "", "Original read-only maintenance plan file")
 	cmd.Flags().StringVar(&confirmation, "confirm-plan-sha256", "", "Digest approved for this exact source and target")
 	cmd.Flags().BoolVar(&inspect, "status", false, "Read the original maintenance journal without performing a step")
+	cmd.AddCommand(newHostOperatorPlanCmd())
 	return cmd
 }
 
