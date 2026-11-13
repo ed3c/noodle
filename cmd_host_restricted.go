@@ -60,10 +60,13 @@ func newHostRestrictedCmd() *cobra.Command {
 			dir := filepath.Join(root, "maintenance", p.PlanSHA)
 			if inspect {
 				j, err := readRestrictedMaintenance(dir)
-				if err != nil {
+				if err != nil && !(p.SourcePolicy != nil && os.IsNotExist(err)) {
 					return err
 				}
 				observed := map[string]any{"journal": j, "effects": []string{}}
+				if err != nil {
+					observed["journal"], observed["journal_state"] = nil, "absent"
+				}
 				sourceDir := filepath.Join(p.Root, "g", p.Source.Instance)
 				if p.Handover == nil {
 					sourceDir = restrictedSource(p).Directory
@@ -87,6 +90,7 @@ func newHostRestrictedCmd() *cobra.Command {
 							observed["source"] = raw
 						}
 						observed["source_gateway_normal_exit"] = completion
+						observed["source_compute"] = readSourceComputeStatus(cmd.Context(), p)
 						continue
 					}
 					raw, readErr := nativeHostRPC(cmd.Context(), ownerDir, hostRequest{Operation: "resources"})
