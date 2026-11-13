@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/poteto/noodle/internal/admission"
 	"github.com/poteto/noodle/internal/procx"
 	loopruntime "github.com/poteto/noodle/runtime"
 )
@@ -32,6 +33,23 @@ func TestSourceServiceTargetRequiresDedicatedRoleBeforeEffects(t *testing.T) {
 		if err := verifySourceServiceTarget(context.Background(), ref); err == nil {
 			t.Fatal("changed Source target accepted")
 		}
+	}
+}
+
+func TestSourceServiceNeverInheritsHistoricalFixtureRecovery(t *testing.T) {
+	root := t.TempDir()
+	generation := filepath.Join(root, "g", "source-service")
+	if err := os.MkdirAll(generation, 0700); err != nil {
+		t.Fatal(err)
+	}
+	residents, err := admission.OpenResidents(generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &noodleHost{dir: generation, residents: residents, rolling: &hostRolling{root: root}, sourceService: &loopruntime.SessionReadbackFileRef{Path: "original-retired-phase"}}
+	h.reconcileFixtureLifecycle(t.Context())
+	if _, err := os.Stat(filepath.Join(root, "fixture-recovery-claims")); !os.IsNotExist(err) {
+		t.Fatal("Source role entered historical fixture ownership", err)
 	}
 }
 
