@@ -127,22 +127,25 @@ type hostContext struct {
 }
 
 type noodleHost struct {
-	dir              string
-	instanceID       string
-	binaryPath       string
-	binarySHA        string
-	webURL           string
-	receipts         []hostReceipt
-	contexts         map[string]*hostContext
-	completed        chan string
-	budget           *admission.Budget
-	residents        *admission.Residents
-	openShell        *loopruntime.OpenShellGateway
-	openShellProfile *loopruntime.OpenShellProfile
-	blocked          bool
-	shutdown         *hostShutdown
-	newRuntime       func(string, string, config.Config, loop.Dependencies) hostRuntime
-	rolling          *hostRolling
+	sourceService           *loopruntime.SessionReadbackFileRef
+	sourceServiceDiagnostic string
+	sourceServiceScope      *hostOperatorNativeScope
+	dir                     string
+	instanceID              string
+	binaryPath              string
+	binarySHA               string
+	webURL                  string
+	receipts                []hostReceipt
+	contexts                map[string]*hostContext
+	completed               chan string
+	budget                  *admission.Budget
+	residents               *admission.Residents
+	openShell               *loopruntime.OpenShellGateway
+	openShellProfile        *loopruntime.OpenShellProfile
+	blocked                 bool
+	shutdown                *hostShutdown
+	newRuntime              func(string, string, config.Config, loop.Dependencies) hostRuntime
+	rolling                 *hostRolling
 }
 
 func newHostCmd(app *App) *cobra.Command {
@@ -222,7 +225,11 @@ func hostCapabilities(platform string) map[string]any {
 	if platform == "darwin" || platform == "linux" {
 		rolling = 1
 	}
-	return map[string]any{"schema": 1, "protocol": hostProtocol, "stateless_fixture_recovery": 1, "resident_request_binding": 1, "restricted_host_maintenance": 1, "existing_instance_admission": 1, "unaccepted_admission_transfer_readback": 1, "native_consumer_leases": 1, "native_consumer_worktrees": 1, "shared_service_adapter": "stateless_fixtures_only", "completed_context_cleanup": 1, "external_task_config": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1, "codex_native_runtime": force, "safe_host_switch": 0, "rolling_host_version": rolling, "shared_worker_quota": rolling, "openshell_pool_owner": rolling, "openshell_custody_version": 5, "openshell_custody_versions": []int{4, 5}, "openshell_credential_delivery": 1, "gateway_host_handover": 1, "gateway_custody_release": 3, "worker_admission_policy": admission.WorkerAdmissionPolicy}
+	sourceService := 0
+	if platform == "darwin" && procx.NativeFixtureControlAvailable() {
+		sourceService = 1
+	}
+	return map[string]any{"schema": 1, "protocol": hostProtocol, "stateless_fixture_recovery": 1, "resident_request_binding": 1, "restricted_host_maintenance": 1, "existing_instance_admission": 1, "unaccepted_admission_transfer_readback": 1, "native_consumer_leases": 1, "native_consumer_worktrees": 1, "shared_service_adapter": "stateless_fixtures_only", "completed_context_cleanup": 1, "external_task_config": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1, "codex_native_runtime": force, "safe_host_switch": 0, "rolling_host_version": rolling, "shared_worker_quota": rolling, "openshell_pool_owner": rolling, "openshell_custody_version": 5, "source_service_restore": sourceService, "openshell_custody_versions": []int{4, 5}, "openshell_credential_delivery": 1, "gateway_host_handover": 1, "gateway_custody_release": 3, "worker_admission_policy": admission.WorkerAdmissionPolicy}
 }
 
 func hostDirectory() (string, error) {
@@ -462,6 +469,9 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 	}
 	h.webURL = url
 	defer web.Close()
+	if err := h.startSourceService(ctx); err != nil {
+		return err
+	}
 	go func() { <-ctx.Done(); listener.Close() }()
 	go func() {
 		for {
@@ -513,7 +523,7 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 			h.applyShutdownResult(result)
 		case <-switchTick.C:
 			h.reconcileFixtureLifecycle(ctx)
-			if h.shutdown == nil && h.rolling != nil && h.advanceRolling(ctx) {
+			if h.shutdown == nil && h.rolling != nil && h.sourceService == nil && h.advanceRolling(ctx) {
 				return nil
 			}
 		case err := <-webDone:
@@ -539,6 +549,19 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 				}
 			}
 		case call := <-calls:
+			if h.sourceService != nil {
+				switch call.request.Operation {
+				case "source_service_readback":
+					call.reply <- h.sourceServiceReadback(ctx)
+				case "resources":
+					call.reply <- h.resources()
+				case "view_resources":
+					call.reply <- hostViewObservation{Resources: h.viewResources(), Receipts: []hostReceipt{}}
+				default:
+					call.reply <- hostError("refused", errors.New("Source service generation retains held business requests; task and queue mutations are disabled"))
+				}
+				continue
+			}
 			if h.shutdown != nil && h.handleShutdownCall(call.request, call.reply) {
 				continue
 			}

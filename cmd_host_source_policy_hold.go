@@ -68,13 +68,20 @@ func prepareSourcePolicyHold(path string) (hostMaintenancePlan, error) {
 }
 
 func validateSourcePolicyHold(p hostMaintenancePlan) error {
+	if p.SourcePolicy == nil || p.SourcePolicy.Operation != "admission-hold" {
+		return errors.New("Source admission-only operation differs")
+	}
+	return validateSourcePolicyPlan(p)
+}
+
+func validateSourcePolicyPlan(p hostMaintenancePlan) error {
 	digest := p.PlanSHA
 	p.PlanSHA = ""
 	raw, err := json.Marshal(p)
 	if err != nil {
 		return err
 	}
-	if digest == "" || digest != hostDigest(raw) || p.Schema != 1 || !p.Executable || len(p.Effects) != 0 || len(p.Blockers) != 0 || p.Handover != nil || p.SourcePolicy == nil || p.SourcePolicy.Operation != "admission-hold" || p.Policy != "" || p.Native == nil || !p.Native.SameGeneration(*p.Native) || p.Native.UID != os.Getuid() || !filepath.IsAbs(p.Root) || !validPoolID(p.Source.Instance) || p.Source.Protocol != hostProtocol || p.Source.Rolling != 1 || p.Native.PID != p.Source.PID || len(p.Contexts) == 0 || len(p.Contexts) != p.Source.Contexts {
+	if digest == "" || digest != hostDigest(raw) || p.Schema != 1 || !p.Executable || len(p.Effects) != 0 || len(p.Blockers) != 0 || p.Handover != nil || p.SourcePolicy == nil || p.Native == nil || !p.Native.SameGeneration(*p.Native) || p.Native.UID != os.Getuid() || !filepath.IsAbs(p.Root) || !validPoolID(p.Source.Instance) || p.Source.Protocol != hostProtocol || p.Source.Rolling != 1 || p.Native.PID != p.Source.PID || len(p.Contexts) == 0 || len(p.Contexts) != p.Source.Contexts {
 		return errors.New("Source hold plan is invalid, changed or outside its bounded effect")
 	}
 	op, err := readSourcePolicySnapshot(p.SourcePolicy.Snapshot)
@@ -85,8 +92,19 @@ func validateSourcePolicyHold(p hostMaintenancePlan) error {
 	var root struct {
 		Root string `json:"host_root"`
 	}
-	if json.Unmarshal(op.Source, &source) != nil || json.Unmarshal(op.Source, &root) != nil || !reflect.DeepEqual(source, p.Source) || root.Root != p.Root || !p.Native.SameGeneration(op.NativeScope.Host.Process) || p.Target != op.NativeScope.Host.Binary.Path || p.TargetSHA != op.NativeScope.Host.Binary.SHA256 || len(op.Contexts) != len(p.Contexts) {
+	if json.Unmarshal(op.Source, &source) != nil || json.Unmarshal(op.Source, &root) != nil || !reflect.DeepEqual(source, p.Source) || root.Root != p.Root || !p.Native.SameGeneration(op.NativeScope.Host.Process) || len(op.Contexts) != len(p.Contexts) {
 		return errors.New("Source hold differs from the original snapshot")
+	}
+	if p.SourcePolicy.Operation == "admission-hold" {
+		if p.Policy != "" || p.Target != op.NativeScope.Host.Binary.Path || p.TargetSHA != op.NativeScope.Host.Binary.SHA256 {
+			return errors.New("Source hold target or policy changed")
+		}
+	} else if p.SourcePolicy.Operation == "operator-service-restore" {
+		if err := validateSourceServiceRestorePlan(p, op); err != nil {
+			return err
+		}
+	} else {
+		return errors.New("unknown Source maintenance operation")
 	}
 	seen := map[string]bool{}
 	for i, cp := range p.Contexts {
@@ -394,6 +412,10 @@ func runSourcePolicyHold(ctx context.Context, p hostMaintenancePlan, dir string,
 		return err
 	}
 	defer lock.Close()
+	return runSourcePolicyHoldLocked(ctx, p, dir, out)
+}
+
+func runSourcePolicyHoldLocked(ctx context.Context, p hostMaintenancePlan, dir string, out *json.Encoder) error {
 	op, err := readSourcePolicySnapshot(p.SourcePolicy.Snapshot)
 	if err != nil {
 		return err

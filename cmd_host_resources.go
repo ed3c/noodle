@@ -56,7 +56,11 @@ func (h *noodleHost) resources() any {
 		shutdown["diagnostic"] = h.shutdown.diagnostic
 	}
 	admission := h.admissionDiagnostic()
-	return map[string]any{"admission": admission, "shutdown": shutdown, "host_root": h.controlRoot(), "host_dir": h.dir, "safe_host_switch": hostCapabilities(runtime.GOOS)["safe_host_switch"], "rolling_host_version": h.rollingVersion(), "rolling_error": h.rollingError(), "binary_path": h.binaryPath, "binary_sha256": h.binarySHA, "residents": residents, "schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot()}
+	result := map[string]any{"admission": admission, "shutdown": shutdown, "host_root": h.controlRoot(), "host_dir": h.dir, "safe_host_switch": hostCapabilities(runtime.GOOS)["safe_host_switch"], "rolling_host_version": h.rollingVersion(), "rolling_error": h.rollingError(), "binary_path": h.binaryPath, "binary_sha256": h.binarySHA, "residents": residents, "schema": 1, "protocol": hostProtocol, "host_pid": os.Getpid(), "host_instance_id": h.instanceID, "contexts": len(h.contexts), "web_url": h.webURL, "resources": h.budget.Snapshot()}
+	if h.sourceService != nil {
+		result["source_service"] = map[string]any{"retired_phase": h.sourceService, "diagnostic": h.sourceServiceDiagnostic}
+	}
+	return result
 }
 
 func (h *noodleHost) rollingVersion() int {
@@ -79,6 +83,8 @@ func (h *noodleHost) admissionDiagnostic() map[string]any {
 		status, message = "blocked", "prior context or receipt custody is unresolved"
 	} else if h.shutdown != nil {
 		status, message = "shutting_down", "original Host shutdown is pending"
+	} else if h.sourceService != nil {
+		status, message = "service_only", "Source credential service only; original business requests remain held"
 	} else if h.rolling != nil && h.rolling.retiring {
 		status, message = "retiring", "original Host version is draining"
 	} else if h.budget == nil {

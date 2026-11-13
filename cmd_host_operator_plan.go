@@ -46,8 +46,22 @@ func newHostOperatorPlanCmd() *cobra.Command {
 	var native bool
 	var holdSnapshot string
 	var profileOutput string
+	var restoreSnapshot, target string
 	cmd := &cobra.Command{Use: "operator-plan", Short: "Read the original Source request and prepare its gateway operator policy; no service effects", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if restoreSnapshot != "" {
+				if request != "" || native || profileOutput != "" || holdSnapshot != "" {
+					return errors.New("restore-plan-file requires only its immutable snapshot and target")
+				}
+				plan, err := prepareSourceServiceRestore(cmd.Context(), restoreSnapshot, target)
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(plan)
+			}
+			if target != "" {
+				return errors.New("target requires restore-plan-file")
+			}
 			if holdSnapshot != "" {
 				if request != "" || native || profileOutput != "" {
 					return errors.New("hold-plan-file cannot be combined with request-file, native-scope or operator-profile-output")
@@ -94,6 +108,8 @@ func newHostOperatorPlanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&native, "native-scope", false, "Bind original Host/gateway/VM-driver kernel generations and declared namespace; no control or zero-compute claim")
 	cmd.Flags().StringVar(&holdSnapshot, "hold-plan-file", "", "Prepare only the original maintenance hold from a saved native-scope snapshot; no service effects")
 	cmd.Flags().StringVar(&profileOutput, "operator-profile-output", "", "Materialize only an auth-only Source profile candidate; original profile and service remain unchanged")
+	cmd.Flags().StringVar(&restoreSnapshot, "restore-plan-file", "", "Prepare a full Source service maintenance epoch from its native/operator snapshot; no service effects")
+	cmd.Flags().StringVar(&target, "target", "", "Immutable Noodle executable for the new Source service generation")
 	return cmd
 }
 

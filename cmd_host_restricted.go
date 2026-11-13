@@ -29,12 +29,13 @@ type restrictedTask struct {
 }
 
 type restrictedMaintenance struct {
-	RuntimeLocks map[string]uint64   `json:"runtime_locks,omitempty"`
-	Schema       int                 `json:"schema"`
-	Plan         hostMaintenancePlan `json:"plan"`
-	Phase        string              `json:"phase"`
-	Tasks        []restrictedTask    `json:"tasks"`
-	Generation   *hostGeneration     `json:"generation,omitempty"`
+	SourceService *sourceServiceProgress `json:"source_service,omitempty"`
+	RuntimeLocks  map[string]uint64      `json:"runtime_locks,omitempty"`
+	Schema        int                    `json:"schema"`
+	Plan          hostMaintenancePlan    `json:"plan"`
+	Phase         string                 `json:"phase"`
+	Tasks         []restrictedTask       `json:"tasks"`
+	Generation    *hostGeneration        `json:"generation,omitempty"`
 }
 
 func newHostRestrictedCmd() *cobra.Command {
@@ -106,6 +107,9 @@ func newHostRestrictedCmd() *cobra.Command {
 				return errors.New("restricted maintenance requires the exact confirmed plan digest")
 			}
 			if p.SourcePolicy != nil {
+				if p.SourcePolicy.Operation == "operator-service-restore" {
+					return runSourceServiceRestore(cmd.Context(), p, dir, json.NewEncoder(cmd.OutOrStdout()))
+				}
 				return runSourcePolicyHold(cmd.Context(), p, dir, json.NewEncoder(cmd.OutOrStdout()))
 			}
 			if p.Handover != nil {
@@ -122,7 +126,7 @@ func newHostRestrictedCmd() *cobra.Command {
 
 func validateRestrictedPlan(p hostMaintenancePlan) error {
 	if p.SourcePolicy != nil {
-		return validateSourcePolicyHold(p)
+		return validateSourcePolicyPlan(p)
 	}
 	if p.Handover != nil {
 		return validateGatewayHandoverPlan(p)
@@ -160,7 +164,11 @@ func readRestrictedMaintenance(dir string) (restrictedMaintenance, error) {
 	}
 	if err == nil {
 		if j.Plan.SourcePolicy != nil {
-			if len(j.Tasks) != 0 || !slices.Contains([]string{"source-policy-prepared", "source-policy-fencing", "source-policy-admission-held"}, j.Phase) {
+			phases := []string{"source-policy-prepared", "source-policy-fencing", "source-policy-admission-held"}
+			if j.Plan.SourcePolicy.Operation == "operator-service-restore" {
+				phases = append(phases, sourceServicePhases...)
+			}
+			if len(j.Tasks) != 0 || !slices.Contains(phases, j.Phase) {
 				return j, errors.New("original Source admission maintenance phase or shape changed")
 			}
 			return j, nil
