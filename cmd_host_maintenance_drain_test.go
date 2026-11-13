@@ -74,18 +74,24 @@ func TestGracefulMaintenanceWaitsForDrainWithoutEscalationOrReplay(t *testing.T)
 	writes := 0
 	save := func() error {
 		writes++
-		if writes == 1 && (actor.IntentAt.IsZero() || !actor.ExitedAt.IsZero()) {
+		if writes == 1 && (actor.IntentAt.IsZero() || !actor.ExitedAt.IsZero() || actor.ControlMethod != "term" || !actor.ControlAcceptedAt.IsZero()) {
 			t.Fatal("graceful control preceded its durable intent")
+		}
+		if writes == 2 && (actor.ControlAcceptedAt.IsZero() || actor.ControlAcceptedAt.Before(actor.IntentAt) || !actor.ExitedAt.IsZero()) {
+			t.Fatal("accepted TERM was not recorded independently from shutdown")
 		}
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	if err = retireMaintenanceActor(ctx, &actor, false, save); !errors.Is(err, context.DeadlineExceeded) || writes != 1 || !actor.ExitedAt.IsZero() {
+	if err = retireMaintenanceActor(ctx, &actor, false, save); !errors.Is(err, context.DeadlineExceeded) || writes != 2 || !actor.ExitedAt.IsZero() {
 		t.Fatal("pending drain was escalated or declared complete", err, writes, actor)
 	}
-	if err = retireMaintenanceActor(context.Background(), &actor, false, save); err == nil || writes != 1 {
+	if err = retireMaintenanceActor(context.Background(), &actor, false, save); err == nil || writes != 2 {
 		t.Fatal("pending drain repeated control or lost its unknown state", err, writes)
+	}
+	if err = retireMaintenanceActor(context.Background(), &actor, true, save); err == nil || writes != 2 || actor.ControlMethod != "term" {
+		t.Fatal("unknown TERM intent was escalated or relabeled as KILL", err)
 	}
 	deadline = time.Now().Add(time.Second)
 	for {
@@ -116,10 +122,22 @@ func TestGracefulMaintenanceWaitsForDrainWithoutEscalationOrReplay(t *testing.T)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if err = retireMaintenanceActor(context.Background(), &actor, false, save); err != nil || writes != 2 || actor.ExitedAt.IsZero() {
+	if err = retireMaintenanceActor(context.Background(), &actor, false, save); err != nil || writes != 3 || actor.ExitedAt.IsZero() {
 		t.Fatal("graceful drain exit did not settle the original intent", err, writes, actor)
 	}
 	if data, err := os.ReadFile(filepath.Join(root, "terms")); err != nil || string(data) != "1" {
 		t.Fatal("graceful control was replayed during exit readback", string(data), err)
+	}
+}
+
+func TestMaintenanceRetirementDoesNotRelabelLegacyOrForcedExit(t *testing.T) {
+	forced := loopruntime.OpenShellRetiredActor{ControlMethod: "kill", IntentAt: time.Now(), ExitedAt: time.Now()}
+	writes := 0
+	if err := retireMaintenanceActor(context.Background(), &forced, false, func() error { writes++; return nil }); err == nil || writes != 0 || forced.ControlMethod != "kill" {
+		t.Fatal("completed forced exit was relabeled as graceful", err)
+	}
+	legacy := loopruntime.OpenShellRetiredActor{IntentAt: time.Now(), ExitedAt: time.Now()}
+	if err := retireMaintenanceActor(context.Background(), &legacy, false, func() error { writes++; return nil }); err != nil || writes != 0 || legacy.ControlMethod != "" || !legacy.ControlAcceptedAt.IsZero() {
+		t.Fatal("legacy unknown exit acquired new control provenance", err)
 	}
 }

@@ -216,6 +216,13 @@ func retireColdActor(ctx context.Context, actor *loopruntime.OpenShellRetiredAct
 // A credential gateway needs graceful shutdown so its native refresh lifetime
 // can persist rotated grants. A timeout never escalates or repeats its signal.
 func retireMaintenanceActor(ctx context.Context, actor *loopruntime.OpenShellRetiredActor, force bool, save func() error) error {
+	method := "term"
+	if force {
+		method = "kill"
+	}
+	if actor.ControlMethod != "" && actor.ControlMethod != "exit-observed" && actor.ControlMethod != method {
+		return errors.New("original retirement control method differs; no control or relabeling allowed")
+	}
 	if !actor.ExitedAt.IsZero() {
 		return nil
 	}
@@ -228,6 +235,7 @@ func retireMaintenanceActor(ctx context.Context, actor *loopruntime.OpenShellRet
 		return save()
 	}
 	if gone && err == nil {
+		actor.ControlMethod = "exit-observed"
 		actor.IntentAt = time.Now().UTC()
 		actor.ExitedAt = actor.IntentAt
 		return save()
@@ -236,10 +244,15 @@ func retireMaintenanceActor(ctx context.Context, actor *loopruntime.OpenShellRet
 		return errors.New("cold actor changed before its control intent")
 	}
 	actor.IntentAt = time.Now().UTC()
+	actor.ControlMethod = method
 	if err = save(); err != nil {
 		return err
 	}
 	if err = procx.SignalNativeIdentity(actor.Process, force); err != nil {
+		return err
+	}
+	actor.ControlAcceptedAt = time.Now().UTC()
+	if err = save(); err != nil {
 		return err
 	}
 	timer := time.NewTimer(3 * time.Second)
