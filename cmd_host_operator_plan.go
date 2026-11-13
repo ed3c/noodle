@@ -31,6 +31,7 @@ type hostOperatorPlan struct {
 	Binding        loopruntime.OpenShellCustodyBinding        `json:"original_binding"`
 	Resident       admission.Resident                         `json:"original_resident"`
 	NativeScope    *hostOperatorNativeScope                   `json:"native_scope,omitempty"`
+	Quota          *hostSourceQuotaSnapshot                   `json:"source_quota,omitempty"`
 	OperatorPolicy *loopruntime.SourceOperatorPolicyCandidate `json:"operator_policy_candidate,omitempty"`
 	OperatorArgv   []string                                   `json:"proposed_resident_argv"`
 	Requires       []string                                   `json:"requires"`
@@ -61,6 +62,10 @@ func newHostOperatorPlanCmd() *cobra.Command {
 			}
 			if native {
 				plan.NativeScope, err = observeHostOperatorNativeScope(cmd.Context(), plan)
+				if err != nil {
+					return err
+				}
+				plan.Quota, err = observeSourceQuota(plan)
 				if err != nil {
 					return err
 				}
