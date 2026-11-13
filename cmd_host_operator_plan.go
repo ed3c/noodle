@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/poteto/noodle/config"
+	"github.com/poteto/noodle/internal/admission"
 	loopruntime "github.com/poteto/noodle/runtime"
 	"github.com/spf13/cobra"
 )
@@ -27,6 +28,7 @@ type hostOperatorPlan struct {
 	Source       json.RawMessage                     `json:"native_source"`
 	Contexts     []hostReceipt                       `json:"contexts"`
 	Binding      loopruntime.OpenShellCustodyBinding `json:"original_binding"`
+	Resident     admission.Resident                  `json:"original_resident"`
 	OperatorArgv []string                            `json:"proposed_resident_argv"`
 	Requires     []string                            `json:"requires"`
 	Executable   bool                                `json:"executable"`
@@ -74,6 +76,10 @@ func planHostOperatorMaintenance(ctx context.Context, path string) (hostOperator
 		Directory string          `json:"host_dir"`
 		BinarySHA string          `json:"binary_sha256"`
 		Resources json.RawMessage `json:"resources"`
+		Residents *struct {
+			Records []admission.Resident `json:"records"`
+			Error   any                  `json:"error"`
+		} `json:"residents"`
 	}
 	if err = json.Unmarshal(p.Source, &source); err != nil {
 		return p, err
@@ -155,6 +161,28 @@ func planHostOperatorMaintenance(ctx context.Context, path string) (hostOperator
 	if (custody.Version != 4 && custody.Version != 5) || custody.Binding != gateway.Binding || custody.ControlRoot != request.HostDir {
 		return p, errors.New("Source profile differs from original custody deployment or Host control root")
 	}
+	guardID, err := loopruntime.OpenShellGatewayGuardID(gateway)
+	if err != nil {
+		return p, err
+	}
+	if source.Residents == nil || source.Residents.Error != nil || len(source.Residents.Records) != 1 {
+		return p, errors.New("original Source must expose exactly one observable gateway resident")
+	}
+	resident := source.Residents.Records[0]
+	if resident.ID != gateway.Resident.Name || resident.Name != gateway.Resident.Name || resident.Sharing != "shared" || resident.State != "running" || resident.PID <= 1 || resident.ProcessGroup != resident.PID || resident.Started == "" || resident.GuardID != guardID || len(resident.ConsumerLeases) != 0 {
+		return p, errors.New("original live Source resident differs from its gateway deployment")
+	}
+	selectedLease := false
+	for _, id := range resident.Contexts {
+		if !seen[id] {
+			return p, errors.New("Source gateway serves a context outside its original Host set")
+		}
+		selectedLease = selectedLease || id == selected.ContextID
+	}
+	if !selectedLease {
+		return p, errors.New("original Source request does not hold its live gateway resident")
+	}
+	p.Resident = resident
 	p.Binding = gateway.Binding
 	p.OperatorArgv = append(append([]string{}, gateway.Resident.Argv...), "--enable-operator-auth", "true")
 	for _, ref := range []loopruntime.SessionReadbackFileRef{p.Request, p.Config, p.Profile, p.History, p.Pool, p.Custody} {
