@@ -147,8 +147,16 @@ func readStorageFailureInputs(p StorageFailureStopPlan, profile OpenShellProfile
 	if err != nil {
 		return in, err
 	}
-	if d.Version != 1 || d.ProfileSHA256 != digest || d.ContextID != p.ContextID || d.OrderID == "" || d.AttemptID == "" || d.SessionID != filepath.Base(dir) || d.Baseline == nil || d.Worker == nil || d.Progress != nil || d.ProgressSource != nil || d.ProgressHead != "" || d.CandidateHead != "" || d.Delivery != nil || d.Maintenance != nil {
+	if d.Version != 1 || d.ContextID != p.ContextID || d.OrderID == "" || d.AttemptID == "" || d.SessionID != filepath.Base(dir) || d.Baseline == nil || d.Worker == nil || d.Progress != nil || d.ProgressSource != nil || d.ProgressHead != "" || d.CandidateHead != "" || d.Delivery != nil || d.Maintenance != nil {
 		return fail("dispatch is not an unreturned original attempt")
+	}
+	if d.ProfileSHA256 != digest {
+		if live {
+			return fail("dispatch profile changed before live Stop")
+		}
+		if err := verifyStorageFailureHistoricalProfile(profile, d.ProfileSHA256); err != nil {
+			return in, err
+		}
 	}
 	switch {
 	case d.Phase == "progress-unknown" && d.Error != "":

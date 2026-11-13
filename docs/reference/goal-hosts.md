@@ -57,6 +57,12 @@ Host 重啟後，持久的未知 credential 效果仍沿原 owner 讀回。未�
 
 這些是來源可追溯的實作行為。真正的模型登入、同 VM 跨 token 到期與 worker 返回，仍須原生驗收；本文件不代表已部署或驗收通過。
 
+### 歷史資源證據讀回
+
+當 worker payload 已改變，歷史 storage-failure receipt 的讀回不能把現行 payload 指紋當成原 dispatch 身分。此相容 Reader 沿用原 profile 同目錄已有的 legacy native `static-validation.json`。它只接受 schema 1 中唯一對應該 profile 的項目，並核對 gateway／client 身分。原 profile 相依來源摘要（`SourceSHA256`）與 payload 摘要必須能精確重建 before-image 固定的完整 dispatch 指紋；檔名或 snapshot 內容本身不授權釋放資源。缺件、重複項目、身分或指紋不符仍拒絕。
+
+此路徑只用於歷史證據讀回，不更改原 profile、payload、dispatch 或任務結果。新的 live Stop／Create／Exec 仍核對原 Frozen 輸入；資源停止與 actor 證據仍各自驗證。Native `NotFound` 不當成 `Stopped`。目前 Reader 仍需讀入可用的現行 profile，不提供遺失 payload 的還原或自動恢復。
+
 ## Control checkout
 
 ```sh
