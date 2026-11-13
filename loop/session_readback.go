@@ -71,8 +71,8 @@ func (l *Loop) SessionReadback(ctx context.Context, orderID, sessionID string) (
 	if !ok {
 		return result, fmt.Errorf("original runtime has no session readback capability")
 	}
-	target, err := canonicalDirectory(filepath.Join(l.projectDir, ".worktrees", attempt.WorktreeName))
-	if err != nil {
+	target := filepath.Join(l.projectDir, ".worktrees", attempt.WorktreeName)
+	if _, err := l.taskWorktreePhysical(target); err != nil {
 		return result, err
 	}
 	execution, err := reader.ReadCompletedSession(ctx, loopruntime.CompletedSessionBinding{OrderID: orderID, SessionID: sessionID, WorktreePath: target, Provider: stage.Provider, Model: stage.Model, StageIndex: stage.StageIndex, RetryCount: retry})

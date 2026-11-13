@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/poteto/noodle/internal/execution"
+	"github.com/poteto/noodle/internal/filex"
 )
 
 // StorageSource binds disposable aliases to the repository's durable bytes.
@@ -28,6 +29,10 @@ type Custody struct {
 }
 
 func ReadCustody(ctx context.Context, e *execution.Context, logical string) (Custody, error) {
+	return readCustody(ctx, e, logical, true)
+}
+
+func readCustody(ctx context.Context, e *execution.Context, logical string, requireBinding bool) (Custody, error) {
 	r := Custody{Logical: logical}
 	separator := string(filepath.Separator) + ".worktrees" + string(filepath.Separator)
 	boundary := strings.LastIndex(logical, separator)
@@ -85,14 +90,16 @@ func ReadCustody(ctx context.Context, e *execution.Context, logical string) (Cus
 		if physical != filepath.Join(storage, ".worktrees", relative) {
 			return r, fmt.Errorf("worker alias escapes original storage")
 		}
-		sum := sha256.Sum256([]byte(canonicalLogical))
-		raw, err = os.ReadFile(filepath.Join(storage, "worktree-bindings", hex.EncodeToString(sum[:])+".json"))
-		if err != nil {
-			return r, err
-		}
-		var binding map[string]string
-		if json.Unmarshal(raw, &binding) != nil || binding["original"] != canonicalLogical || binding["physical"] != physical || binding["git_admin"] != r.GitAdmin {
-			return r, fmt.Errorf("original worker custody binding changed")
+		if requireBinding {
+			sum := sha256.Sum256([]byte(canonicalLogical))
+			raw, err = os.ReadFile(filepath.Join(storage, "worktree-bindings", hex.EncodeToString(sum[:])+".json"))
+			if err != nil {
+				return r, err
+			}
+			var binding map[string]string
+			if json.Unmarshal(raw, &binding) != nil || binding["original"] != canonicalLogical || binding["physical"] != physical || binding["git_admin"] != r.GitAdmin {
+				return r, fmt.Errorf("original worker custody binding changed")
+			}
 		}
 	}
 	back, err := os.ReadFile(filepath.Join(r.GitAdmin, "gitdir"))
@@ -104,4 +111,46 @@ func ReadCustody(ctx context.Context, e *execution.Context, logical string) (Cus
 		return r, fmt.Errorf("worker Git backpointer changed")
 	}
 	return r, nil
+}
+
+// EnsureCustody resumes original worker preparation without dispatching a session.
+func (a *App) EnsureCustody(name string) error {
+	e, err := execution.New(a.Root, a.execution().Environ())
+	if err != nil {
+		return err
+	}
+	logical := WorktreePath(e.Root(), name)
+	custody, err := readCustody(context.Background(), e, logical, false)
+	if err != nil {
+		return err
+	}
+	if custody.Physical == logical {
+		return nil
+	}
+	runtimeDir, err := filepath.EvalSymlinks(filepath.Join(a.Root, ".noodle"))
+	if err != nil {
+		return err
+	}
+	data, err := json.Marshal(map[string]string{"original": logical, "physical": custody.Physical, "git_admin": custody.GitAdmin})
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256([]byte(logical))
+	directory := filepath.Join(filepath.Dir(runtimeDir), "worktree-bindings")
+	if err = os.MkdirAll(directory, 0700); err != nil {
+		return err
+	}
+	path := filepath.Join(directory, hex.EncodeToString(sum[:])+".json")
+	before, err := os.ReadFile(path)
+	if err == nil {
+		if string(before) != string(data) {
+			return fmt.Errorf("original worker custody binding changed")
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err = filex.WriteFileAtomicDurable(path, data); err != nil {
+		return err
+	}
+	return filex.SyncDir(filepath.Dir(directory))
 }

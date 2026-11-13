@@ -70,6 +70,21 @@ NOODLE_HOST_DIR=/absolute/selected/host noodle host control \
 原 checkout 遺失、branch 或 ancestry 不符時拒絕，不重建一份取代原證據。
 `prepared` 不代表 task admission、worker 執行或候選驗收。
 
+## Worker checkout custody
+
+Host 的 disposable checkout 可透過 `.noodle` 與 `.worktrees` alias 使用原 durable storage。
+原 `StorageSource` 固定 project、Git common directory 與 storage root；worker binding 另固定 logical path、physical path 與 Git admin directory。
+對使用 durable alias 的 worker，`App.Create` 在 Git worktree 建立成功後，沿原 `EnsureCustody` 驗證這些來源及 Git backpointer，再發布 worker binding。
+此驗證使用 App 已解析的 Git root 與原 environment，因此從 repository 子目錄啟動仍核對同一個 project。
+
+若 Git 建立成功但 binding publication 失敗，checkout 保留。原 Loop 重用 App 管理的既有 checkout 前，交回原 App 驗證並續完 publication。
+相同 binding bytes 仍完成 file、binding directory 與 storage directory 的同步；衝突 binding 或未知讀取錯誤會拒絕續行。
+這個 publication 步驟不修改 worker 內容。後續 spawn、reset 或 requeue 仍沿原 task policy 與恢復條件。
+
+完成讀回保留原 dispatch 的 logical worktree identity，並另沿原 custody 驗證 physical storage。
+當 worker 使用 durable alias 時，Reader 要求已發布的 worker binding。完成讀回只提供原 session 證據，不決定 task acceptance 或 provider delivery。
+此處描述來源邊界；真實 worker 完成、返回及中斷後續行仍需各自的原生觀察。
+
 ## 原未接納請求
 
 ```sh
