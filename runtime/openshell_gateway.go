@@ -54,6 +54,7 @@ type OpenShellGateway struct {
 	generation           *admission.ResidentGeneration
 	resident             admission.Resident
 	attempted            bool
+	serviceOnly          bool
 	ready                bool
 	closed               bool
 	diagnostic           error
@@ -72,6 +73,20 @@ type OpenShellGateway struct {
 // A non-nil owner on error retains diagnostic custody and must be closed through
 // this owner. No resident or remote VM is started by construction.
 func NewOpenShellGateway(residents *admission.Residents, budget *admission.Budget, spec OpenShellGatewaySpec) (*OpenShellGateway, error) {
+	return newOpenShellGateway(residents, budget, spec, nil)
+}
+
+// NewOpenShellSourceService is for the original maintenance startup owner.
+// It binds existing business bytes and cannot yield worker custody. The caller
+// must already validate the full original restore epoch and new generation.
+func NewOpenShellSourceService(residents *admission.Residents, budget *admission.Budget, spec OpenShellGatewaySpec, custody SessionReadbackFileRef) (*OpenShellGateway, error) {
+	if spec.CredentialSource != nil {
+		return nil, fmt.Errorf("Source service cannot be a Target credential consumer")
+	}
+	return newOpenShellGateway(residents, budget, spec, &custody)
+}
+
+func newOpenShellGateway(residents *admission.Residents, budget *admission.Budget, spec OpenShellGatewaySpec, expected *SessionReadbackFileRef) (*OpenShellGateway, error) {
 	if residents == nil || budget == nil || spec.ReadinessTimeout <= 0 || spec.ReadinessTimeout > 30*time.Second || strings.TrimSpace(spec.Version) == "" || strings.TrimSpace(spec.ComputeDriver) == "" || spec.Resident.Sharing != "shared" || spec.Resident.ForceAfterGrace {
 		return nil, fmt.Errorf("openshell gateway owner, shared foreground contract or bounded readiness configuration invalid")
 	}
@@ -109,13 +124,13 @@ func NewOpenShellGateway(residents *admission.Residents, budget *admission.Budge
 	if err != nil {
 		return nil, err
 	}
-	c, err := reserveOpenShellCustodyWithCredentials(spec.Binding, conn, spec.Retained, spec.ControlRoot, spec.CredentialSource)
+	c, err := reserveOpenShellCustodyBound(spec.Binding, conn, spec.Retained, spec.ControlRoot, spec.CredentialSource, expected)
 	if c == nil {
 		return nil, err
 	}
 	c.managed, c.retryReadback = true, true
 	spec.Binding = c.state.Binding
-	o := &OpenShellGateway{residents: residents, budget: budget, spec: spec, custody: c, diagnostic: err}
+	o := &OpenShellGateway{residents: residents, budget: budget, spec: spec, custody: c, diagnostic: err, serviceOnly: expected != nil}
 	// The native identity also includes the original command via Residents' own
 	// executable/config fingerprint. Configuration source is never just a name.
 	guardID, identityErr := OpenShellGatewayGuardID(spec)
@@ -128,7 +143,7 @@ func NewOpenShellGateway(residents *admission.Residents, budget *admission.Budge
 		o.diagnostic = errors.Join(err, identityErr)
 		return o, o.diagnostic
 	}
-	if err == nil && c.state.Blocked != "" {
+	if err == nil && c.state.Blocked != "" && expected == nil {
 		err = fmt.Errorf("openshell custody blocked: %s", c.state.Blocked)
 		o.diagnostic = err
 	}
@@ -184,54 +199,15 @@ func (o *OpenShellGateway) Acquire(ctx context.Context, contextID string) (*Open
 		return nil, fmt.Errorf("openshell gateway operation in progress")
 	}
 	defer o.mu.Unlock()
-	if o.closed {
-		return nil, fmt.Errorf("openshell gateway owner closed")
+	if o.serviceOnly {
+		return nil, fmt.Errorf("Source service owner cannot yield worker custody")
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if !o.attempted {
-		if o.diagnostic != nil {
-			return nil, o.diagnostic
-		}
-		if err := o.listenerAbsent(ctx); err != nil {
-			return nil, err
-		}
-	} else if o.generation == nil {
-		return nil, errors.Join(o.diagnostic, fmt.Errorf("openshell original generation unavailable; spawn replay refused"))
-	}
-	if o.attempted {
-		if err := o.generation.Running(); err != nil {
-			o.disable(err)
-			return nil, err
-		}
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	v, err := o.residents.AcquireGuarded(o.spec.Resident, contextID, o.budget, o.guard)
+	first, err := o.acquireResidentLocked(ctx, contextID)
 	if err != nil {
-		if v.ID != "" {
-			o.attempted = true
-			o.resident = v
-			o.diagnostic = err
-		}
 		return nil, err
 	}
-	o.resident = v
-	if !o.attempted {
-		o.attempted = true
-		o.generation, err = o.residents.OriginalGeneration(v, o.guard)
-		if err != nil {
-			o.diagnostic = err
-			return nil, err
-		}
-		o.custody.residentRunning = o.generation.Running
+	if first {
 		return o.readback(ctx)
-	}
-	if err := o.generation.Running(); err != nil {
-		o.disable(err)
-		return nil, err
 	}
 	if !o.ready {
 		return nil, errors.Join(o.diagnostic, fmt.Errorf("openshell gateway requires explicit original generation readback"))
@@ -244,6 +220,61 @@ func (o *OpenShellGateway) Acquire(ctx context.Context, contextID string) (*Open
 		return nil, err
 	}
 	return o.custody, nil
+}
+
+// Called only with owner.mu held. This retains the original once-start and
+// child-handle protocol without deciding worker or Source native readiness.
+func (o *OpenShellGateway) acquireResidentLocked(ctx context.Context, contextID string) (bool, error) {
+	if o.closed {
+		return false, fmt.Errorf("openshell gateway owner closed")
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if !o.attempted {
+		if o.diagnostic != nil {
+			return false, o.diagnostic
+		}
+		if err := o.listenerAbsent(ctx); err != nil {
+			return false, err
+		}
+	} else if o.generation == nil {
+		return false, errors.Join(o.diagnostic, fmt.Errorf("openshell original generation unavailable; spawn replay refused"))
+	}
+	if o.attempted {
+		if err := o.generation.Running(); err != nil {
+			o.disable(err)
+			return false, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	v, err := o.residents.AcquireGuarded(o.spec.Resident, contextID, o.budget, o.guard)
+	if err != nil {
+		if v.ID != "" {
+			o.attempted = true
+			o.resident = v
+			o.diagnostic = err
+		}
+		return false, err
+	}
+	o.resident = v
+	if !o.attempted {
+		o.attempted = true
+		o.generation, err = o.residents.OriginalGeneration(v, o.guard)
+		if err != nil {
+			o.diagnostic = err
+			return false, err
+		}
+		o.custody.residentRunning = o.generation.Running
+		return true, nil
+	}
+	if err := o.generation.Running(); err != nil {
+		o.disable(err)
+		return false, err
+	}
+	return false, nil
 }
 
 func (o *OpenShellGateway) listenerAbsent(ctx context.Context) error {
@@ -272,6 +303,9 @@ func (o *OpenShellGateway) Readback(ctx context.Context) (*OpenShellCustody, err
 		return nil, fmt.Errorf("openshell gateway operation in progress")
 	}
 	defer o.mu.Unlock()
+	if o.serviceOnly {
+		return nil, fmt.Errorf("Source service owner cannot yield worker custody")
+	}
 	if o.closed || o.generation == nil {
 		return nil, fmt.Errorf("openshell original gateway generation unavailable")
 	}
@@ -324,7 +358,19 @@ func (o *OpenShellGateway) readback(ctx context.Context) (*OpenShellCustody, err
 
 // Only original-start read-only probes may wait for startup; no VM replay,
 // process restart or automatic termination follows any failure.
+var errNativeGatewayBindingConflict = errors.New("gateway native version/compute driver conflicts with owner binding")
+
 func (o *OpenShellGateway) nativeReadiness(ctx context.Context) error {
+	err := o.probeNativeReadiness(ctx)
+	if errors.Is(err, errNativeGatewayBindingConflict) {
+		return o.custody.block(err.Error())
+	}
+	return err
+}
+
+// This probe has no custody writes. Worker readiness keeps its blocking
+// wrapper; Source service readiness cannot alter unrelated business history.
+func (o *OpenShellGateway) probeNativeReadiness(ctx context.Context) error {
 	c := o.custody
 	for {
 		health, err := c.client.Health(ctx, &pb.HealthRequest{}, grpc.WaitForReady(true))
@@ -337,7 +383,7 @@ func (o *OpenShellGateway) nativeReadiness(ctx context.Context) error {
 		}
 		drivers := info.GetComputeDrivers()
 		if health.GetVersion() != o.spec.Version || info.GetGatewayVersion() != o.spec.Version || len(drivers) != 1 || drivers[0].GetName() != o.spec.ComputeDriver {
-			return c.block("gateway native version/compute driver conflicts with owner binding")
+			return errNativeGatewayBindingConflict
 		}
 		if health.GetStatus() == pb.ServiceStatus_SERVICE_STATUS_HEALTHY && info.GetStatus() == pb.ServiceStatus_SERVICE_STATUS_HEALTHY {
 			return nil
@@ -355,6 +401,9 @@ func (o *OpenShellGateway) quiesce(ctx context.Context) error {
 		return fmt.Errorf("openshell gateway operation in progress")
 	}
 	defer o.mu.Unlock()
+	if o.serviceOnly {
+		return fmt.Errorf("Source service requires original full maintenance; worker release refused")
+	}
 	if o.closed || o.generation == nil {
 		return fmt.Errorf("openshell gateway native initialization incomplete; release refused")
 	}
