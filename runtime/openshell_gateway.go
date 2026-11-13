@@ -118,17 +118,12 @@ func NewOpenShellGateway(residents *admission.Residents, budget *admission.Budge
 	o := &OpenShellGateway{residents: residents, budget: budget, spec: spec, custody: c, diagnostic: err}
 	// The native identity also includes the original command via Residents' own
 	// executable/config fingerprint. Configuration source is never just a name.
-	data, identityErr := json.Marshal(struct {
-		Binding                     OpenShellCustodyBinding
-		Version, Driver, ServerName string
-		Certificates                [][]byte
-	}{spec.Binding, spec.Version, spec.ComputeDriver, spec.TLS.ServerName, spec.TLS.Certificate.Certificate})
+	guardID, identityErr := OpenShellGatewayGuardID(spec)
 	if identityErr != nil {
 		o.diagnostic = errors.Join(err, identityErr)
 		return o, o.diagnostic
 	}
-	sum := sha256.Sum256(data)
-	o.guard, identityErr = admission.NewResidentGuard(fmt.Sprintf("openshell/%x", sum), spec.ReadinessTimeout, o.quiesce)
+	o.guard, identityErr = admission.NewResidentGuard(guardID, spec.ReadinessTimeout, o.quiesce)
 	if identityErr != nil {
 		o.diagnostic = errors.Join(err, identityErr)
 		return o, o.diagnostic
@@ -138,6 +133,22 @@ func NewOpenShellGateway(residents *admission.Residents, budget *admission.Budge
 		o.diagnostic = err
 	}
 	return o, err
+}
+
+// OpenShellGatewayGuardID returns the deployment identity used by the original
+// resident guard. Identity readback neither acquires its callback nor transfers
+// a live process or custody to another owner.
+func OpenShellGatewayGuardID(spec OpenShellGatewaySpec) (string, error) {
+	data, err := json.Marshal(struct {
+		Binding                     OpenShellCustodyBinding
+		Version, Driver, ServerName string
+		Certificates                [][]byte
+	}{spec.Binding, spec.Version, spec.ComputeDriver, spec.TLS.ServerName, spec.TLS.Certificate.Certificate})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("openshell/%x", sum), nil
 }
 
 // Freeze the key as well as its certificate buffers; tls.Config.Clone alone
