@@ -376,12 +376,18 @@ func resetWorktreeState(worktreePath string, execCtx ...*execution.Context) {
 
 func (l *Loop) ensureWorktree(name string) (bool, error) {
 	path := l.worktreePath(name)
+	ensureCustody := func() error {
+		if owner, ok := l.deps.Worktree.(*worktree.App); ok {
+			return owner.EnsureCustody(name)
+		}
+		return nil
+	}
 	info, err := os.Stat(path)
 	if err == nil {
 		if !info.IsDir() {
 			return false, fmt.Errorf("worktree path %s is not a directory", path)
 		}
-		return false, nil
+		return false, ensureCustody()
 	}
 	if !os.IsNotExist(err) {
 		return false, fmt.Errorf("stat worktree path %s: %w", path, err)
@@ -389,7 +395,7 @@ func (l *Loop) ensureWorktree(name string) (bool, error) {
 
 	if err := l.deps.Worktree.Create(name); err != nil {
 		if isWorktreeAlreadyExistsError(err) {
-			return false, nil
+			return false, ensureCustody()
 		}
 		return false, err
 	}

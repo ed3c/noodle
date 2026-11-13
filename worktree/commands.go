@@ -53,6 +53,9 @@ func (a *App) Create(name string, opts ...CreateOpts) error {
 	}
 
 created:
+	if err := a.EnsureCustody(name); err != nil {
+		return fmt.Errorf("bind created worker custody: %w", err)
+	}
 	settingsPath := filepath.Join(a.Root, ".claude", "settings.local.json")
 	if _, err := os.Stat(settingsPath); err == nil {
 		wtClaudeDir := filepath.Join(wtPath, ".claude")
