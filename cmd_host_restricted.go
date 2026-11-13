@@ -91,6 +91,9 @@ func newHostRestrictedCmd() *cobra.Command {
 			if confirmation != p.PlanSHA {
 				return errors.New("restricted maintenance requires the exact confirmed plan digest")
 			}
+			if p.SourcePolicy != nil {
+				return runSourcePolicyHold(cmd.Context(), p, dir, json.NewEncoder(cmd.OutOrStdout()))
+			}
 			if p.Handover != nil {
 				return runGatewayHandover(cmd.Context(), p, dir, json.NewEncoder(cmd.OutOrStdout()))
 			}
@@ -104,6 +107,9 @@ func newHostRestrictedCmd() *cobra.Command {
 }
 
 func validateRestrictedPlan(p hostMaintenancePlan) error {
+	if p.SourcePolicy != nil {
+		return validateSourcePolicyHold(p)
+	}
 	if p.Handover != nil {
 		return validateGatewayHandoverPlan(p)
 	}
@@ -139,6 +145,12 @@ func readRestrictedMaintenance(dir string) (restrictedMaintenance, error) {
 		err = errors.New("original restricted maintenance journal is invalid")
 	}
 	if err == nil {
+		if j.Plan.SourcePolicy != nil {
+			if len(j.Tasks) != 0 || !slices.Contains([]string{"source-policy-prepared", "source-policy-fencing", "source-policy-admission-held"}, j.Phase) {
+				return j, errors.New("original Source admission maintenance phase or shape changed")
+			}
+			return j, nil
+		}
 		phases := []string{"prepared", "fencing", "holding", "detached", "stopping", "stopped", "imported", "launching", "active"}
 		taskPhases := []string{"prepared", "pausing", "checkpointing", "held", "detaching", "detached"}
 		if j.Plan.Handover != nil {
@@ -790,16 +802,20 @@ func restrictedImportedPool(old hostPool, source hostGeneration, j restrictedMai
 }
 
 func replaceRestrictedPool(root, custody, originalDigest string, next hostPool) error {
+	data, err := json.Marshal(next)
+	if err != nil {
+		return err
+	}
+	return replaceRestrictedPoolBytes(root, custody, originalDigest, data)
+}
+
+func replaceRestrictedPoolBytes(root, custody, originalDigest string, data []byte) error {
 	lock, err := lockfile.TryLock(filepath.Join(root, "pool.lock"))
 	if err != nil {
 		return err
 	}
 	defer lock.Close()
 	raw, err := os.ReadFile(filepath.Join(root, "pool.json"))
-	if err != nil {
-		return err
-	}
-	data, err := json.Marshal(next)
 	if err != nil {
 		return err
 	}

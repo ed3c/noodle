@@ -39,8 +39,19 @@ type hostOperatorPlan struct {
 func newHostOperatorPlanCmd() *cobra.Command {
 	var request string
 	var native bool
+	var holdSnapshot string
 	cmd := &cobra.Command{Use: "operator-plan", Short: "Read the original Source request and prepare its gateway operator policy; no service effects", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if holdSnapshot != "" {
+				if request != "" || native {
+					return errors.New("hold-plan-file cannot be combined with request-file or native-scope")
+				}
+				plan, err := prepareSourcePolicyHold(holdSnapshot)
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(plan)
+			}
 			plan, err := planHostOperatorMaintenance(cmd.Context(), request)
 			if err != nil {
 				return err
@@ -55,6 +66,7 @@ func newHostOperatorPlanCmd() *cobra.Command {
 		}}
 	cmd.Flags().StringVar(&request, "request-file", "", "Original accepted Source attach request")
 	cmd.Flags().BoolVar(&native, "native-scope", false, "Bind original Host/gateway/VM-driver kernel generations and declared namespace; no control or zero-compute claim")
+	cmd.Flags().StringVar(&holdSnapshot, "hold-plan-file", "", "Prepare only the original maintenance hold from a saved native-scope snapshot; no service effects")
 	return cmd
 }
 
