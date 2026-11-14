@@ -40,7 +40,8 @@ type OpenShellGatewaySpec struct {
 
 // OpenShellGateway belongs to a Host, outside any worker Runtime.Shutdown.
 // Residents alone spawns, waits, signals and returns the shared allocation.
-// Operations refuse immediately when another operation owns mu. Lock order is
+// Operations refuse immediately when another gateway operation owns mu. Acquire
+// waits for local custody observations within the readiness bound. Lock order is
 // owner -> custody -> Residents -> child (with intermediate locks released
 // when not nested). Residents drops its lock before invoking guard;
 // Release never holds owner.mu across that callback. Native RPCs are bounded.
@@ -217,10 +218,21 @@ func (o *OpenShellGateway) Acquire(ctx context.Context, contextID string) (*Open
 	if !o.ready {
 		return nil, errors.Join(o.diagnostic, fmt.Errorf("openshell gateway requires explicit original generation readback"))
 	}
-	if !o.custody.mu.TryLock() {
-		return nil, fmt.Errorf("openshell custody operation in progress")
+	ctx, cancel := context.WithTimeout(ctx, o.spec.ReadinessTimeout)
+	defer cancel()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for !o.custody.mu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("wait for openshell custody: %w", ctx.Err())
+		case <-ticker.C:
+		}
 	}
 	defer o.custody.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("acquire openshell custody: %w", err)
+	}
 	if err := o.custody.mutable(); err != nil {
 		return nil, err
 	}
