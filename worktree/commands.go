@@ -2,10 +2,13 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/poteto/noodle/internal/execution"
 )
 
 // CreateOpts holds optional parameters for Create.
@@ -22,14 +25,33 @@ func (a *App) Create(name string, opts ...CreateOpts) error {
 	}
 	wtPath := WorktreePath(a.Root, name)
 
-	if a.git("check-ignore", "-q", ".worktrees/").Run() != nil {
-		f, err := os.OpenFile(
-			filepath.Join(a.Root, ".gitignore"),
-			os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644,
-		)
-		if err == nil {
-			_, _ = f.WriteString(".worktrees/\n")
-			f.Close()
+	e, err := execution.New(a.Root, a.execution().Environ())
+	if err != nil {
+		return err
+	}
+	managed, err := PrepareStorageExcludes(context.Background(), e)
+	if err != nil {
+		return fmt.Errorf("prepare owned runtime excludes: %w", err)
+	}
+	if !managed {
+		out, err := a.git("check-ignore", "-q", ".worktrees/").CombinedOutput()
+		if err != nil {
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+				return fmt.Errorf("check worktree ignore: %w: %s", err, out)
+			}
+			f, err := os.OpenFile(filepath.Join(a.Root, ".gitignore"), os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+			if err != nil {
+				return fmt.Errorf("open worktree ignore: %w", err)
+			}
+			_, writeErr := f.WriteString(".worktrees/\n")
+			closeErr := f.Close()
+			if writeErr != nil {
+				return fmt.Errorf("write worktree ignore: %w", writeErr)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("close worktree ignore: %w", closeErr)
+			}
 		}
 	}
 
