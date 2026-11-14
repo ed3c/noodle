@@ -924,7 +924,59 @@ func TestStoppedLocalMergeRefusesDormantScheduleFaultsBeforePlan(t *testing.T) {
 				t.Fatal(err)
 			}
 			if fault == "missing-attempts" {
-				before = bytes.Replace(before, []byte(`"attempts": null`), []byte(`"merge": null`), 1)
+				original := append([]byte(nil), before...)
+				keys := []string{"state", "orders", "schedule", "stages"}
+				objects := make([]map[string]json.RawMessage, len(keys))
+				raw := json.RawMessage(before)
+				for i, key := range keys {
+					if err := json.Unmarshal(raw, &objects[i]); err != nil {
+						t.Fatal(err)
+					}
+					raw = objects[i][key]
+				}
+				var stages []map[string]json.RawMessage
+				if err := json.Unmarshal(raw, &stages); err != nil || len(stages) != 1 {
+					t.Fatal("schedule fixture has no unique stage", err)
+				}
+				attempts, present := stages[0]["attempts"]
+				if !present || !bytes.Equal(bytes.TrimSpace(attempts), []byte("null")) {
+					t.Fatal("schedule fixture has no explicit null attempts")
+				}
+				encode := func(value any) json.RawMessage {
+					raw, err := json.Marshal(value)
+					if err != nil {
+						t.Fatal(err)
+					}
+					return raw
+				}
+				encodeSnapshot := func() []byte {
+					raw := encode(stages)
+					for i := len(keys) - 1; i >= 0; i-- {
+						objects[i][keys[i]] = raw
+						raw = encode(objects[i])
+					}
+					return raw
+				}
+				delete(stages[0], "attempts")
+				before = encodeSnapshot()
+				raw = before
+				for i, key := range keys {
+					if err := json.Unmarshal(raw, &objects[i]); err != nil {
+						t.Fatal(err)
+					}
+					raw = objects[i][key]
+				}
+				stages = nil
+				if err := json.Unmarshal(raw, &stages); err != nil || len(stages) != 1 {
+					t.Fatal("mutated schedule fixture has no unique stage", err)
+				}
+				if _, present := stages[0]["attempts"]; present {
+					t.Fatal("schedule fixture still contains attempts")
+				}
+				stages[0]["attempts"] = attempts
+				if !stoppedTestSameJSON(t, json.RawMessage(original), json.RawMessage(encodeSnapshot())) {
+					t.Fatal("removing schedule attempts changed other snapshot facts")
+				}
 				stoppedTestBytes(t, path, before)
 				f.native.Observation.Execution.Sources["canonical_snapshot"], err = loopruntime.ReadSessionReadbackFile(path, nil)
 				if err != nil {
