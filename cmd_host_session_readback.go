@@ -16,6 +16,7 @@ import (
 )
 
 type hostSessionReadback struct {
+	Observer       *hostSessionObserver                          `json:"observer,omitempty"`
 	SchemaVersion  int                                           `json:"schema_version"`
 	Status         string                                        `json:"status"`
 	Error          string                                        `json:"error"`
@@ -60,9 +61,24 @@ func newHostSessionReadbackCmd(app *App) *cobra.Command {
 	return cmd
 }
 
-// This client never calls attach/status or rewrites a request file. Persisted
-// receipts select an exact owner; only that still-running Host can attest it.
+// Persisted receipts select the original actor. The executor uses its existing
+// session RPC; a separate Observer uses only official read-only status/resources.
+// Neither path attaches a context or rewrites the admitted request.
 func callHostSessionReadback(ctx context.Context, project, requestFile, orderID, sessionID string) (result hostSessionReadback, err error) {
+	// A different qualified CLI may observe an older executor without changing it.
+	if owner, readErr := readHostOwnerBinding(requestFile); readErr == nil {
+		executable, executableErr := os.Executable()
+		if executableErr != nil {
+			return result, executableErr
+		}
+		binary, binaryErr := hostReadbackBinaryRef(executable)
+		if binaryErr != nil {
+			return result, binaryErr
+		}
+		if binary != owner.ExecutionBinary {
+			return observeHostSession(ctx, project, requestFile, orderID, sessionID, owner, binary)
+		}
+	}
 	bound, err := originalHostTaskClient(project, requestFile, orderID, sessionID, "task_session_readback")
 	if err != nil {
 		return result, err

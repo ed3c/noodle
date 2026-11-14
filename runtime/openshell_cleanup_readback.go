@@ -56,18 +56,28 @@ func (r *OpenShellRuntime) ReadCleanupSession(ctx context.Context, b CompletedSe
 // The original archives remain recoverable even after the candidate worktree is
 // removed. Check their exact recorded bytes, without extracting or changing them.
 func verifyCleanupProgressArchives(ctx context.Context, dir string, receipt openShellDispatchReceipt) error {
+	_, err := retainedProgressArchiveSources(ctx, dir, receipt)
+	return err
+}
+
+func retainedProgressArchiveSources(ctx context.Context, dir string, receipt openShellDispatchReceipt) (map[string]SessionReadbackFileRef, error) {
+	refs := map[string]SessionReadbackFileRef{}
+	canonicalDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return nil, err
+	}
 	if receipt.Progress == nil || len(receipt.Progress.Archives) != 2 {
-		return fmt.Errorf("cleanup retained progress archives missing")
+		return nil, fmt.Errorf("cleanup retained progress archives missing")
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	names := map[string]bool{"noodle-result.tar": false, "noodle-session.tar": false}
 	for _, archive := range receipt.Progress.Archives {
 		seen, ok := names[archive.Name]
 		if !ok || seen || archive.Bytes <= 0 {
-			return fmt.Errorf("cleanup retained archive identity differs")
+			return nil, fmt.Errorf("cleanup retained archive identity differs")
 		}
 		names[archive.Name] = true
 		count := 0
@@ -76,7 +86,7 @@ func verifyCleanupProgressArchives(ctx context.Context, dir string, receipt open
 				continue
 			}
 			if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
-				return fmt.Errorf("cleanup archive directory is ambiguous")
+				return nil, fmt.Errorf("cleanup archive directory is ambiguous")
 			}
 			path := filepath.Join(dir, entry.Name(), archive.Name)
 			info, err := os.Lstat(path)
@@ -84,24 +94,42 @@ func verifyCleanupProgressArchives(ctx context.Context, dir string, receipt open
 				continue
 			}
 			if err != nil {
-				return err
+				return nil, err
 			}
 			count++
 			if !info.Mode().IsRegular() || info.Size() != archive.Bytes {
-				return fmt.Errorf("cleanup retained archive type or size differs")
+				return nil, fmt.Errorf("cleanup retained archive type or size differs")
+			}
+			canonical, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				return nil, err
+			}
+			if filepath.Dir(filepath.Dir(canonical)) != canonicalDir || filepath.Base(filepath.Dir(canonical)) != entry.Name() {
+				return nil, fmt.Errorf("retained archive escaped original session")
 			}
 			file, err := os.Open(path)
 			if err != nil {
-				return err
+				return nil, err
+			}
+			opened, err := file.Stat()
+			if err != nil || !os.SameFile(info, opened) {
+				_ = file.Close()
+				return nil, fmt.Errorf("cleanup retained archive changed before open")
 			}
 			hash := sha256.New()
 			buffer := make([]byte, 64<<10)
+			var total int64
 			for {
 				if err = ctx.Err(); err != nil {
 					break
 				}
 				var n int
 				n, err = file.Read(buffer)
+				total += int64(n)
+				if total > archive.Bytes {
+					err = fmt.Errorf("retained archive grew beyond original receipt")
+					break
+				}
 				if n > 0 {
 					_, _ = hash.Write(buffer[:n])
 				}
@@ -115,22 +143,31 @@ func verifyCleanupProgressArchives(ctx context.Context, dir string, receipt open
 			}
 			closeErr := file.Close()
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if closeErr != nil {
-				return closeErr
+				return nil, closeErr
 			}
 			after, err := os.Lstat(path)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			if !os.SameFile(info, after) || !after.Mode().IsRegular() || after.Size() != archive.Bytes || hex.EncodeToString(hash.Sum(nil)) != archive.SHA256 {
-				return fmt.Errorf("cleanup retained archive changed")
+			if !os.SameFile(info, after) || !info.ModTime().Equal(after.ModTime()) || total != archive.Bytes || !after.Mode().IsRegular() || after.Size() != archive.Bytes || hex.EncodeToString(hash.Sum(nil)) != archive.SHA256 {
+				return nil, fmt.Errorf("cleanup retained archive changed")
 			}
+			afterPath, err := filepath.EvalSymlinks(path)
+			if err != nil || afterPath != canonical {
+				return nil, fmt.Errorf("retained archive path changed during readback")
+			}
+			refs["progress_archive_"+archive.Name] = SessionReadbackFileRef{Path: canonical, SHA256: archive.SHA256}
 		}
 		if count != 1 {
-			return fmt.Errorf("cleanup retained archive missing or ambiguous: %s", archive.Name)
+			return nil, fmt.Errorf("cleanup retained archive missing or ambiguous: %s", archive.Name)
 		}
 	}
-	return nil
+	afterDir, err := filepath.EvalSymlinks(dir)
+	if err != nil || afterDir != canonicalDir {
+		return nil, fmt.Errorf("original archive session root changed")
+	}
+	return refs, nil
 }

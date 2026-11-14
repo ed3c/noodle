@@ -22,17 +22,17 @@ type CompletedInstructionEvidence struct {
 	Manifest       SessionReadbackFileRef `json:"manifest"`
 }
 
-func (r *OpenShellRuntime) instructionReadback(ctx context.Context, dir string, b CompletedSessionBinding, ref *dispatcher.InstructionBundleRef, command OpenShellCommand) (*CompletedInstructionEvidence, map[string]SessionReadbackFileRef, error) {
-	if r.config.Profile.ProgressSupervisor != "" {
+func (r openShellSessionEvidenceReader) instructionReadback(ctx context.Context, dir string, b CompletedSessionBinding, ref *dispatcher.InstructionBundleRef, command OpenShellCommand) (*CompletedInstructionEvidence, map[string]SessionReadbackFileRef, error) {
+	if r.profile.ProgressSupervisor != "" {
 		base, progress, err := unwrapOpenShellProgress(command)
-		if err != nil || progress.Binary != r.config.Profile.ProgressSupervisor || progress.SessionID != b.SessionID {
+		if err != nil || progress.Binary != r.profile.ProgressSupervisor || progress.SessionID != b.SessionID {
 			return nil, nil, fmt.Errorf("original progress supervisor binding differs")
 		}
 		command = base
 	}
 	mappingPath := filepath.Join(dir, "instruction-mapping.json")
 	if ref == nil {
-		route, ok := r.config.Profile.Routes[b.Provider]
+		route, ok := r.profile.Routes[b.Provider]
 		if !ok || len(command.Argv) == 0 || command.Argv[0] != route.Binary {
 			return nil, nil, fmt.Errorf("original native command requires missing instruction binding")
 		}
@@ -59,7 +59,7 @@ func (r *OpenShellRuntime) instructionReadback(ctx context.Context, dir string, 
 	if mapping.OriginalManifest != *ref || p == nil || p.Directory != directory || p.GuestDirectory != guest || p.ManifestSHA256 != ref.SHA256 || !reflect.DeepEqual(p.Manifest, manifest) {
 		return nil, nil, fmt.Errorf("original instruction mapping differs from transported inputs")
 	}
-	prefix, prefixErr := openShellInstructionCommandPrefix(r.config.Profile, b.Provider, b.OrderID, ref.SHA256)
+	prefix, prefixErr := openShellInstructionCommandPrefix(r.profile, b.Provider, b.OrderID, ref.SHA256)
 	if prefixErr != nil || len(command.Argv) < len(prefix) || !slices.Equal(command.Argv[:len(prefix)], prefix) {
 		return nil, nil, fmt.Errorf("original native command did not bind the instruction verifier")
 	}

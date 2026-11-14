@@ -286,21 +286,25 @@ func sameOpenShellRetained(state OpenShellCustodyState, retained []OpenShellReta
 // Validate only local ledger structure here; native identity is audited after
 // the original child starts. Corrupt receipts never justify a service spawn.
 func (c *OpenShellCustody) validateLedger() error {
-	if c.state.Version != openShellCredentialCustodyVersion && len(c.state.Credentials) != 0 {
+	return validateOpenShellCustodyLedger(c.state)
+}
+
+func validateOpenShellCustodyLedger(state OpenShellCustodyState) error {
+	if state.Version != openShellCredentialCustodyVersion && len(state.Credentials) != 0 {
 		return fmt.Errorf("openshell credential custody schema was downgraded")
 	}
-	if err := validateOpenShellCredentialLedger(c.state.Credentials); err != nil {
+	if err := validateOpenShellCredentialLedger(state.Credentials); err != nil {
 		return err
 	}
 	names, ids := map[string]bool{}, map[string]bool{}
-	for _, r := range c.state.Records {
+	for _, r := range state.Records {
 		if r.Name == "" || names[r.Name] {
 			return fmt.Errorf("invalid or duplicate custody ledger name")
 		}
 		names[r.Name] = true
 		if r.Retained || r.CreateAcknowledged {
 			id := r.Worker.Identity.Sandbox
-			if id.SandboxID == "" || ids[id.SandboxID] || id.Gateway != c.state.Binding.Gateway || id.Workspace != c.state.Binding.Workspace || r.Worker.Identity.SandboxName != r.Name || r.Worker.Identity.ConfigSource != c.state.Binding.ConfigSource {
+			if id.SandboxID == "" || ids[id.SandboxID] || id.Gateway != state.Binding.Gateway || id.Workspace != state.Binding.Workspace || r.Worker.Identity.SandboxName != r.Name || r.Worker.Identity.ConfigSource != state.Binding.ConfigSource {
 				return fmt.Errorf("custody ledger native identity/binding invalid")
 			}
 			ids[id.SandboxID] = true
@@ -313,13 +317,13 @@ func (c *OpenShellCustody) validateLedger() error {
 			if err := proto.Unmarshal(r.CreateIntent, &intent); err != nil {
 				return fmt.Errorf("custody ledger create intent invalid: %w", err)
 			}
-			if r.CreateRequestID == "" || intent.GetName() != r.Name || intent.GetRequestId() != r.CreateRequestID || intent.GetWorkspaceScope().GetWorkspace() != c.state.Binding.Workspace {
+			if r.CreateRequestID == "" || intent.GetName() != r.Name || intent.GetRequestId() != r.CreateRequestID || intent.GetWorkspaceScope().GetWorkspace() != state.Binding.Workspace {
 				return fmt.Errorf("custody ledger create intent binding invalid")
 			}
 		}
 	}
-	for _, ref := range c.state.PendingRetained {
-		if ref.Name == "" || ref.SandboxID == "" || ref.Workspace != c.state.Binding.Workspace || names[ref.Name] || ids[ref.SandboxID] {
+	for _, ref := range state.PendingRetained {
+		if ref.Name == "" || ref.SandboxID == "" || ref.Workspace != state.Binding.Workspace || names[ref.Name] || ids[ref.SandboxID] {
 			return fmt.Errorf("invalid retained sandbox receipt")
 		}
 		names[ref.Name], ids[ref.SandboxID] = true, true
