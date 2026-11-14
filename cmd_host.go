@@ -166,7 +166,7 @@ func newHostCmd(app *App) *cobra.Command {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema_version": 1, "local_task_review_recovery": true, "candidate_bound_merge": true, "local_task_merge_recovery": true, "local_task_completion_recovery": true, "local_task_completion_recovery_version": 2, "local_task_roles": 1, "local_task_directory_scope": 1, "openshell_local_task_review": 1, "openshell_instruction_materialization": 1, "openshell_role_tool_payload": 1, "openshell_saved_progress_attempt": 1, "local_task_worktree_custody": 1, "openshell_progress_maintenance": 1})
 	}})
 	task.AddCommand(newHostSessionReadbackCmd(app), newHostSavedProgressCmd(app, false), newHostSavedProgressCmd(app, true))
-	task.AddCommand(newHostCandidateReadbackCmd())
+	task.AddCommand(newHostCandidateReadbackCmd(), newHostSourceAuthPlanCmd())
 	cmd.AddCommand(task)
 	cmd.AddCommand(&cobra.Command{Use: "capabilities", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(hostCapabilities(runtime.GOOS))

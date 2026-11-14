@@ -19,7 +19,7 @@ func selectNativeFrontend() error {
 		if os.Args[i] == "host" && (os.Args[i+1] == "serve" || os.Args[i+1] == "capabilities" || os.Args[i+1] == "switch" || os.Args[i+1] == "maintenance") {
 			return nil
 		}
-		if i+2 < len(os.Args) && os.Args[i] == "host" && os.Args[i+1] == "task" && (os.Args[i+2] == "capabilities" || os.Args[i+2] == "review-capabilities" || os.Args[i+2] == "session-readback") {
+		if i+2 < len(os.Args) && os.Args[i] == "host" && os.Args[i+1] == "task" && (os.Args[i+2] == "capabilities" || os.Args[i+2] == "review-capabilities" || os.Args[i+2] == "session-readback" || os.Args[i+2] == "source-auth-plan") {
 			return nil
 		}
 	}
