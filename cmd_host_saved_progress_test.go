@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/poteto/noodle/loop"
+	loopruntime "github.com/poteto/noodle/runtime"
 )
 
 type savedProgressHostRuntime struct {
@@ -39,7 +40,7 @@ func hostSavedProgressFixture(t *testing.T) (*noodleHost, hostRequest, *savedPro
 	req.ExpectedVersion = strings.Repeat("a", 64)
 	rt := &savedProgressHostRuntime{}
 	rt.inspect = func() (loop.SavedProgressInspection, error) {
-		return loop.SavedProgressInspection{SchemaVersion: 1, Status: "retryable", Version: req.ExpectedVersion, OrderID: req.ReadbackOrderID, SessionID: req.ReadbackSessionID, AttemptID: "cancelled-original", AttemptStatus: "cancelled", Runtime: "openshell", Effects: []string{}}, nil
+		return loop.SavedProgressInspection{SchemaVersion: 1, Status: "retryable", Version: req.ExpectedVersion, OrderID: req.ReadbackOrderID, SessionID: req.ReadbackSessionID, AttemptID: "cancelled-original", AttemptStatus: "cancelled", Runtime: "openshell", Execution: loopruntime.SavedProgressReadback{Status: "saved"}, Effects: []string{}}, nil
 	}
 	rt.queue = func(v string) (loop.SavedProgressQueued, error) {
 		if v != req.ExpectedVersion {
@@ -275,5 +276,46 @@ func TestHostSavedProgressCLIRequiresExplicitConsent(t *testing.T) {
 		if queue && got.Status != "queued" || !queue && got.Status != "observed" {
 			t.Fatalf("CLI: %+v", got)
 		}
+	}
+}
+
+func TestHostNotStartedInspectionRemainsReadOnly(t *testing.T) {
+	for _, kind := range []string{"valid", "wrong-classification", "retryable-not-started", "empty-execution-status"} {
+		t.Run(kind, func(t *testing.T) {
+			h, req, rt, path := hostSavedProgressFixture(t)
+			original := rt.inspect
+			rt.inspect = func() (loop.SavedProgressInspection, error) {
+				i, err := original()
+				i.Status = "not_started"
+				i.AttemptStatus = "failed"
+				i.Execution.Status = "not_started"
+				i.Execution.BaselineHead = "original-baseline"
+				i.Execution.OriginalError = "original-upload-failure"
+				if kind == "wrong-classification" {
+					i.Execution.Status = "saved"
+				}
+				if kind == "retryable-not-started" {
+					i.Status = "retryable"
+				}
+				if kind == "empty-execution-status" {
+					i.Execution.Status = ""
+				}
+				return i, err
+			}
+			before, _ := os.ReadFile(path)
+			serveSavedProgressOnce(t, h, "")
+			got, err := callHostSavedProgress(t.Context(), req.ProjectDir, path, req.ReadbackOrderID, req.ReadbackSessionID, "", false)
+			if kind == "valid" {
+				if err != nil || got.Status != "observed" || got.Inspection.Status != "not_started" || got.Inspection.NativeResumeSupported {
+					t.Fatalf("not_started readback: %+v %v", got, err)
+				}
+			} else if err == nil {
+				t.Fatal("inconsistent classification accepted")
+			}
+			after, _ := os.ReadFile(path)
+			if !bytes.Equal(before, after) || rt.queues.Load() != 0 || len(got.Effects) != 0 {
+				t.Fatal("pre-exec inspection changed request or queued work")
+			}
+		})
 	}
 }

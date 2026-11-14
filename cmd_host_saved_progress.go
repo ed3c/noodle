@@ -176,7 +176,7 @@ func callHostSavedProgress(ctx context.Context, project, requestFile, orderID, s
 		}
 	} else {
 		i := result.Inspection
-		if result.Status != "observed" || result.Queued != nil || i == nil || i.SchemaVersion != 1 || i.Status != "retryable" || i.OrderID != orderID || i.SessionID != sessionID || i.Runtime != "openshell" || i.NativeResumeSupported || !validSavedProgressVersion(i.Version) || len(i.Effects) != 0 || len(result.Effects) != 0 {
+		if result.Status != "observed" || result.Queued != nil || i == nil || i.SchemaVersion != 1 || !((i.Status == "retryable" && i.Execution.Status == "saved") || (i.Status == "not_started" && i.Execution.Status == "not_started")) || i.OrderID != orderID || i.SessionID != sessionID || i.Runtime != "openshell" || i.NativeResumeSupported || !validSavedProgressVersion(i.Version) || len(i.Effects) != 0 || len(result.Effects) != 0 {
 			return unknown(fmt.Errorf("saved progress inspection binding differs"))
 		}
 	}

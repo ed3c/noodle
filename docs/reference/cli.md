@@ -242,9 +242,11 @@ noodle --project-dir /path/to/control host task new-attempt \
   --expected-version ORIGINAL_INSPECTION_VERSION
 ```
 
-這兩個入口只接受仍持有原 context 的 Host、原 binary／attach request／config，以及最新 failed 或 cancelled attempt 的已保存進度。`interruption-inspect` 的外層 `status=observed` 與內層 `inspection.status=retryable` 表示原 Loop 已核對原生停止與進度證據；`inspection.version` 綁定此次明確授權的來源。原生 session resume 仍不支援。
+這兩個入口只接受仍持有原 context 的 Host 與原 binary／attach request／config。已保存進度必須屬於最新 failed 或 cancelled attempt。`interruption-inspect` 的外層 `status=observed` 與內層 `inspection.status=retryable` 表示原 Loop 已核對原生停止與進度證據；`inspection.version` 綁定此次明確授權的來源。原生 session resume 仍不支援。
 
-`new-attempt` 將該版本送入原 Loop control queue。`status=queued` 僅表示排隊，並不表示 worker 已開始、候選已接受或資源條件已允許派工；後續仍由原 Loop 重新驗證版本並經既有 admission。ACK 遺失、可能寫入後失敗或來源漂移會回報 `unknown` 並保留已有 command／effects，不可自行重送。缺失、變更或已關閉的 owner 不會被啟動或接替；舊 retained VM 也不能藉此遷移到新 Host。`host task review-capabilities` 的 `openshell_saved_progress_attempt=1` 表示此入口存在。
+若最新 failed attempt 已有原 VM Create／Stop ACK，但原 custody 沒有 Exec 或 ProgressStop intent，`interruption-inspect` 可回傳 `inspection.status=not_started` 與 `execution.status=not_started`。原 Owner 會 fresh Get 同一 VM，核對 ID、spec、workspace、main process 與 STOPPED，再核原 clean worktree、baseline、terminal metadata 及 prepared instructions。輸出保留 `baseline_head`、`original_error` 與來源 FileRefs；`progress_head`、`command_sha256` 留空，`instructions` 不宣稱原生已消費。`prepared_manifest` 只表示已準備的本地輸入。這項唯讀分類保留原失敗及 VM 效果，不授權重試；原 queue 與 control consumer 都拒絕由它建立新 attempt。
+
+`new-attempt` 只將已保存進度的版本送入原 Loop control queue。`status=queued` 僅表示排隊，並不表示 worker 已開始、候選已接受或資源條件已允許派工；後續仍由原 Loop 重新驗證版本並經既有 admission。ACK 遺失、可能寫入後失敗或來源漂移會回報 `unknown` 並保留已有 command／effects，不可自行重送。缺失、變更或已關閉的 owner 不會被啟動或接替；舊 retained VM 也不能藉此遷移到新 Host。`host task review-capabilities` 的 `openshell_saved_progress_attempt=1` 表示此入口存在。
 
 ### Source client-auth proposal
 
