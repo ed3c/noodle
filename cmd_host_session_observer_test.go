@@ -27,7 +27,7 @@ func TestSessionObserverRequiresOriginalResourceFrameWithOtherWorkers(t *testing
 	}
 	owner := &hostOwnerBinding{HostRoot: "/original", GenerationDir: "/original/g/generation", ExecutionBinary: loopruntime.SessionReadbackFileRef{Path: "/original/noodle", SHA256: "original-sha"}, Current: hostReceipt{Schema: 1, Protocol: hostProtocol, HostPID: 123, HostInstanceID: "generation", ContextID: "context", RequestID: "request", ProjectDir: "/original/project", ConfigSHA256: "config", ContextState: "active", HostDir: "/original", BinaryPath: "/original/noodle", BinarySHA256: "original-sha"}}
 	resident := admission.Resident{ID: spec.Resident.Name, Name: spec.Resident.Name, Sharing: "shared", State: "running", PID: 456, ProcessGroup: 456, Started: "original start", Fingerprint: "original fingerprint", GuardID: guard, Contexts: []string{"context"}}
-	for _, fault := range []string{"", "other-worker", "other-generation-worker", "pressure-only", "resident-history", "host", "root", "binary", "context", "status", "active", "negative-active", "missing-active", "unknown-quota", "missing-quota", "quota-maximum", "quota-overflow", "unresolved", "resident-error", "missing-persist-result", "guard", "lease", "fingerprint", "resident-unknown", "shutting-down"} {
+	for _, fault := range []string{"", "other-worker", "other-generation-worker", "pressure-only", "resident-history", "host", "root", "binary", "context", "status", "active", "negative-active", "missing-active", "unknown-quota", "missing-quota", "quota-maximum", "quota-overflow", "unresolved", "resident-error", "missing-persist-result", "guard", "lease", "selected-released-only", "fingerprint", "resident-unknown", "shutting-down"} {
 		t.Run(fault, func(t *testing.T) {
 			status := hostResponse{hostReceipt: owner.Current, Status: "ok"}
 			quota := map[string]any{"maximum": 9, "allocations": 1, "residents": 1, "owned_allocations": 1, "error": ""}
@@ -84,6 +84,9 @@ func TestSessionObserverRequiresOriginalResourceFrameWithOtherWorkers(t *testing
 				row.GuardID = "foreign"
 			case "lease":
 				row.Contexts = nil
+			case "selected-released-only":
+				row.Contexts = nil
+				row.Released = []string{owner.Current.ContextID}
 			case "fingerprint":
 				row.Fingerprint = ""
 			case "resident-unknown":
@@ -225,16 +228,67 @@ func TestSessionObserverLoadsOriginalFileProfileWithoutConfusingDigests(t *testi
 	}
 }
 
+func TestSessionObserverQuotaUsesOriginalSharedResidentCreator(t *testing.T) {
+	spec, err := loopruntime.LoadOpenShellGatewaySpec(hostDeferralProfile(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, creatorReleased := range []bool{false, true} {
+		t.Run(fmt.Sprintf("creator-released-%t", creatorReleased), func(t *testing.T) {
+			owner := &hostOwnerBinding{Current: hostReceipt{HostInstanceID: "generation", ContextID: "selected"}}
+			budget := admission.NewBudget(admission.DefaultWorkerLimit)
+			directory := t.TempDir()
+			if err := budget.BindSharedQuota(directory, owner.Current.HostInstanceID); err != nil {
+				t.Fatal(err)
+			}
+			budget.Register("creator")
+			budget.Register(owner.Current.ContextID)
+			permit, err := budget.TryAcquireScopedResident("creator", spec.Resident.Name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(permit.Release)
+			var quota sessionObserverQuota
+			if _, err := loopruntime.ReadSessionReadbackFile(filepath.Join(directory, "quota.json"), &quota); err != nil {
+				t.Fatal(err)
+			}
+			if len(quota.Leases) != 1 {
+				t.Fatal("shared resident acquired more than its original allocation")
+			}
+			for _, lease := range quota.Leases {
+				if lease.Context != "creator" || lease.Owner != owner.Current.HostInstanceID || !lease.Resident || lease.Key != spec.Resident.Name {
+					t.Fatal("original producer changed resident creator identity")
+				}
+			}
+			// Residents.acquire reuses the original allocation when adding selected;
+			// release moves only the creator context, not that allocation.
+			resident := admission.Resident{Contexts: []string{"creator", owner.Current.ContextID}}
+			if creatorReleased {
+				resident.Contexts = []string{owner.Current.ContextID}
+				resident.Released = []string{"creator"}
+			}
+			raw, err := json.Marshal(map[string]any{"resources": budget.Snapshot()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			frame := hostSessionObserverFrame{Resident: resident, Resources: raw}
+			if err := validateSessionObserverQuota(owner, quota, frame, spec); err != nil {
+				t.Fatal("shared resident lost original creator allocation", err)
+			}
+		})
+	}
+}
+
 func TestSessionObserverQuotaPreservesNineAcrossGenerationsAndOwnLease(t *testing.T) {
 	spec, err := loopruntime.LoadOpenShellGatewaySpec(hostDeferralProfile(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	owner := &hostOwnerBinding{Current: hostReceipt{HostInstanceID: "generation", ContextID: "context"}}
-	for _, fault := range []string{"", "nine-workers", "schema", "policy", "maximum", "ten-workers", "unknown-count", "foreign-context", "foreign-owner", "released-only", "missing-key", "worker-key", "duplicate-resident"} {
+	for _, fault := range []string{"", "nine-workers", "schema", "policy", "maximum", "ten-workers", "unknown-count", "foreign-context", "foreign-owner", "creator-released", "missing-key", "worker-key", "duplicate-resident", "duplicate-shared-creator"} {
 		t.Run(fault, func(t *testing.T) {
 			quota := sessionObserverQuota{Schema: 3, Maximum: 9, Policy: admission.WorkerAdmissionPolicy, Leases: map[string]sessionObserverQuotaLease{
-				"resident": {Owner: "generation", Context: "context", Resident: true, Key: spec.Resident.Name},
+				"resident":     {Owner: "generation", Context: "context", Resident: true, Key: spec.Resident.Name},
 				"other-worker": {Owner: "older-generation", Context: "another-context"},
 			}}
 			resident := quota.Leases["resident"]
@@ -257,7 +311,7 @@ func TestSessionObserverQuotaPreservesNineAcrossGenerationsAndOwnLease(t *testin
 				resident.Context = "foreign"
 			case "foreign-owner":
 				resident.Owner = "foreign"
-			case "released-only":
+			case "creator-released":
 				resident.Context = "released"
 			case "missing-key":
 				resident.Key = ""
@@ -267,18 +321,26 @@ func TestSessionObserverQuotaPreservesNineAcrossGenerationsAndOwnLease(t *testin
 				quota.Leases["other-worker"] = worker
 			case "duplicate-resident":
 				quota.Leases["duplicate"] = resident
+			case "duplicate-shared-creator":
+				duplicate := resident
+				duplicate.Context = "released"
+				quota.Leases["duplicate"] = duplicate
 			}
 			quota.Leases["resident"] = resident
 			count := len(quota.Leases)
 			if fault == "unknown-count" {
 				count++
 			}
-			frame.Resources, err = json.Marshal(map[string]any{"resources": map[string]any{"shared_quota": admission.SharedQuotaSnapshot{Maximum: 9, Allocations: count, Residents: 1, Owned: 1}}})
+			residents, owned := 1, 1
+			if fault == "duplicate-shared-creator" {
+				residents, owned = 2, 2
+			}
+			frame.Resources, err = json.Marshal(map[string]any{"resources": map[string]any{"shared_quota": admission.SharedQuotaSnapshot{Maximum: 9, Allocations: count, Residents: residents, Owned: owned}}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			err = validateSessionObserverQuota(owner, quota, frame, spec)
-			if fault == "" || fault == "nine-workers" {
+			if fault == "" || fault == "nine-workers" || fault == "creator-released" {
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -339,18 +401,17 @@ func TestSessionObserverResponseConsumesSelectedProofWithOtherWorker(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			resident := admission.Resident{ID: profile.Gateway.Resident.Name, Name: profile.Gateway.Resident.Name, Sharing: "shared", State: "running", PID: 456, ProcessGroup: 456, Started: "original start", Fingerprint: "original fingerprint", GuardID: guard, Contexts: []string{"context", "other-context"}}
+			resident := admission.Resident{ID: profile.Gateway.Resident.Name, Name: profile.Gateway.Resident.Name, Sharing: "shared", State: "running", PID: 456, ProcessGroup: 456, Started: "original start", Fingerprint: "original fingerprint", GuardID: guard, Contexts: []string{"context", "other-context"}, Released: []string{"creator"}}
 			quota := sessionObserverQuota{Schema: 3, Maximum: 9, Policy: admission.WorkerAdmissionPolicy, Leases: map[string]sessionObserverQuotaLease{
-				"resident": {Owner: "generation", Context: "context", Resident: true, Key: resident.Name},
-				"resident-other": {Owner: "generation", Context: "other-context", Resident: true, Key: resident.Name},
-				"worker": {Owner: "generation", Context: "other-context"},
+				"resident": {Owner: "generation", Context: "creator", Resident: true, Key: resident.Name},
+				"worker":   {Owner: "generation", Context: "other-context"},
 			}}
 			quotaRaw, err := json.Marshal(quota)
 			if err != nil {
 				t.Fatal(err)
 			}
 			quotaRef := write(filepath.Join(root, "quota", "quota.json"), quotaRaw)
-			resources, err := json.Marshal(map[string]any{"protocol": hostProtocol, "host_root": root, "host_dir": owner.GenerationDir, "host_pid": 123, "host_instance_id": "generation", "binary_path": executor.Path, "binary_sha256": executor.SHA256, "shutdown": map[string]any{"requested": false}, "residents": map[string]any{"records": []admission.Resident{resident}, "error": nil}, "resources": map[string]any{"active_workers": 1, "unresolved_residents": 0, "shared_quota": admission.SharedQuotaSnapshot{Maximum: 9, Allocations: 3, Residents: 2, Owned: 3}}})
+			resources, err := json.Marshal(map[string]any{"protocol": hostProtocol, "host_root": root, "host_dir": owner.GenerationDir, "host_pid": 123, "host_instance_id": "generation", "binary_path": executor.Path, "binary_sha256": executor.SHA256, "shutdown": map[string]any{"requested": false}, "residents": map[string]any{"records": []admission.Resident{resident}, "error": nil}, "resources": map[string]any{"active_workers": 1, "unresolved_residents": 0, "shared_quota": admission.SharedQuotaSnapshot{Maximum: 9, Allocations: 2, Residents: 1, Owned: 2}}})
 			if err != nil {
 				t.Fatal(err)
 			}

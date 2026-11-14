@@ -314,9 +314,9 @@ func observeHostSessionWithReads(ctx context.Context, project, requestFile, orde
 }
 
 type sessionObserverQuota struct {
-	Schema  int    `json:"schema"`
-	Maximum int    `json:"maximum"`
-	Policy  string `json:"worker_admission_policy"`
+	Schema  int                                  `json:"schema"`
+	Maximum int                                  `json:"maximum"`
+	Policy  string                               `json:"worker_admission_policy"`
 	Leases  map[string]sessionObserverQuotaLease `json:"leases"`
 }
 
@@ -352,9 +352,8 @@ func validateSessionObserverQuota(owner *hostOwnerBinding, quota sessionObserver
 			if !(slices.Contains(frame.Resident.Contexts, lease.Context) || slices.Contains(frame.Resident.Released, lease.Context)) {
 				return fmt.Errorf("original gateway allocation context is not leased by resident")
 			}
-			if lease.Context == owner.Current.ContextID {
-				residentLeases++
-			}
+			// A shared resident retains its creator's allocation when contexts join.
+			residentLeases++
 		}
 	}
 	var resource sessionObserverResources
