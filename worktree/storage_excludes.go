@@ -19,6 +19,10 @@ import (
 // PrepareStorageExcludes keeps owned runtime aliases out of tracked source.
 // Git's info/exclude is repository-local and shared by its linked worktrees.
 func PrepareStorageExcludes(ctx context.Context, e *execution.Context) (bool, error) {
+	return prepareStorageExcludes(ctx, e, (*os.File).Sync, filex.SyncDir)
+}
+
+func prepareStorageExcludes(ctx context.Context, e *execution.Context, syncFile func(*os.File) error, syncDir func(string) error) (bool, error) {
 	var original []byte
 	readSource := func() (bool, error) {
 		raw, err := e.Command(ctx, e.Root(), "git", "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
@@ -122,33 +126,38 @@ func PrepareStorageExcludes(ctx context.Context, e *execution.Context) (bool, er
 			extra = append(extra, []byte(rule+"\n")...)
 		}
 	}
+	flags := os.O_RDONLY
 	if len(extra) != 0 {
+		flags = os.O_CREATE | os.O_WRONLY | os.O_APPEND
 		if len(before) != 0 && before[len(before)-1] != '\n' {
 			extra = append([]byte{'\n'}, extra...)
 		}
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err != nil {
-			return true, err
-		}
-		opened, statErr := f.Stat()
-		if statErr != nil || !opened.Mode().IsRegular() || (info != nil && !os.SameFile(info, opened)) {
-			f.Close()
-			return true, fmt.Errorf("repository-local excludes changed before append")
-		}
-		_, writeErr := f.Write(extra)
-		syncErr, closeErr := f.Sync(), f.Close()
-		if writeErr != nil {
-			return true, writeErr
-		}
-		if syncErr != nil {
-			return true, syncErr
-		}
-		if closeErr != nil {
-			return true, closeErr
-		}
-		if err = filex.SyncDir(filepath.Dir(path)); err != nil {
-			return true, err
-		}
+	}
+	f, err := os.OpenFile(path, flags, 0644)
+	if err != nil {
+		return true, err
+	}
+	opened, statErr := f.Stat()
+	if statErr != nil || !opened.Mode().IsRegular() || (info != nil && !os.SameFile(info, opened)) {
+		f.Close()
+		return true, fmt.Errorf("repository-local excludes changed before publication")
+	}
+	var writeErr error
+	if len(extra) != 0 {
+		_, writeErr = f.Write(extra)
+	}
+	syncErr, closeErr := syncFile(f), f.Close()
+	if writeErr != nil {
+		return true, writeErr
+	}
+	if syncErr != nil {
+		return true, syncErr
+	}
+	if closeErr != nil {
+		return true, closeErr
+	}
+	if err = syncDir(filepath.Dir(path)); err != nil {
+		return true, err
 	}
 	if _, err = readSource(); err != nil {
 		return true, err

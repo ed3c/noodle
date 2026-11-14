@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/poteto/noodle/internal/execution"
+	"github.com/poteto/noodle/internal/filex"
 )
 
 func managedExcludeFixture(t *testing.T) (*App, string) {
@@ -199,6 +201,86 @@ func TestOrdinaryCreateReportsIgnoreReadAndWriteErrors(t *testing.T) {
 			}
 			if branches := gitOutputIn(t, root, "branch", "--list", "must-not-create"); branches != "" {
 				t.Fatal("created branch after failed ignore preparation")
+			}
+		})
+	}
+}
+
+func TestManagedStorageExcludesRetryCompletesDurability(t *testing.T) {
+	for _, boundary := range []string{"file", "directory"} {
+		t.Run(boundary, func(t *testing.T) {
+			a, _ := managedExcludeFixture(t)
+			path := filepath.Join(a.CommonDir, "info", "exclude")
+			before := []byte("# original user excludes\nuser-cache\n")
+			if err := os.WriteFile(path, before, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(path, 0600); err != nil {
+				t.Fatal(err)
+			}
+			beforeInfo, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			failure := errors.New("fixture persistence unavailable")
+			unavailable := true
+			files, directories := 0, 0
+			syncFile := func(f *os.File) error {
+				files++
+				if err := f.Sync(); err != nil {
+					return err
+				}
+				if unavailable && boundary == "file" {
+					return failure
+				}
+				return nil
+			}
+			syncDir := func(path string) error {
+				directories++
+				if err := filex.SyncDir(path); err != nil {
+					return err
+				}
+				if unavailable && boundary == "directory" {
+					return failure
+				}
+				return nil
+			}
+			for attempt := range 3 {
+				if attempt == 2 {
+					unavailable = false
+				}
+				managed, err := prepareStorageExcludes(t.Context(), a.execution(), syncFile, syncDir)
+				if !managed || (unavailable && !errors.Is(err, failure)) || (!unavailable && err != nil) {
+					t.Errorf("attempt %d accepted unconfirmed persistence or failed recovery: managed=%v err=%v", attempt, managed, err)
+				}
+				got, err := os.ReadFile(path)
+				want := string(before) + "/.noodle\n/.worktrees\n"
+				if err != nil || string(got) != want {
+					t.Fatalf("attempt %d changed visible original bytes: %q %v", attempt, got, err)
+				}
+				info, err := os.Stat(path)
+				if err != nil || info.Mode().Perm() != 0600 || !os.SameFile(beforeInfo, info) {
+					t.Fatalf("attempt %d replaced original excludes or mode: %v", attempt, err)
+				}
+			}
+			wantDirectories := 3
+			if boundary == "file" {
+				wantDirectories = 1
+			}
+			if files != 3 || directories != wantDirectories {
+				t.Errorf("retry skipped persistence boundary: file=%d directory=%d", files, directories)
+			}
+			if err := os.Chmod(path, 0400); err != nil {
+				t.Fatal(err)
+			}
+			if managed, err := PrepareStorageExcludes(t.Context(), a.execution()); err != nil || !managed {
+				t.Fatalf("confirmed read-only rules were not reusable: %v %v", managed, err)
+			}
+			if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0400 || !os.SameFile(beforeInfo, info) {
+				t.Fatal("read-only retry rewrote original rules or mode", err)
+			}
+			if branches := gitOutputIn(t, a.Root, "branch", "--format=%(refname:short)"); branches != "main" {
+				t.Fatal("metadata retry created another worker branch", branches)
 			}
 		})
 	}
