@@ -10,11 +10,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/lockfile"
 	"github.com/poteto/noodle/internal/reducer"
@@ -724,5 +726,264 @@ func TestStoppedLocalMergePreservesOpaqueHistoryAndReadOnlyReceipt(t *testing.T)
 	stoppedTestBytes(t, receipt, []byte("{}\n"))
 	if _, err := stoppedMergeOperation(t.Context(), f.root, f.ref.Path, "", "inspect", nil); err == nil {
 		t.Fatal("foreign receipt silently adopted")
+	}
+}
+
+// This portable before-image uses the saved canonical shape. The loop tests
+// separately build it through bootstrapScheduleOrder and canonical synth/sync.
+func (f *stoppedMergeFixture) dormantSchedule() reducer.DurableSnapshot {
+	f.t.Helper()
+	raw, err := os.ReadFile(filepath.Join(f.storage, ".noodle", "state.snapshot.json"))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	var s reducer.DurableSnapshot
+	if err := json.Unmarshal(raw, &s); err != nil {
+		f.t.Fatal(err)
+	}
+	cfgRaw, err := config.ReadExplicitSource(f.receipt.ConfigPath)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	cfg, err := config.Parse(cfgRaw)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	s.State.Orders["schedule"] = state.OrderNode{OrderID: "schedule", Sequence: 0, Title: "scheduling tasks based on your backlog", Status: state.OrderActive, CreatedAt: s.GeneratedAt, UpdatedAt: s.GeneratedAt, Metadata: map[string]string{"title": "scheduling tasks based on your backlog", "plan": "", "rationale": "", "opaque": "original metadata"}, Stages: []state.StageNode{{StageIndex: 0, TaskKey: "schedule", Skill: "schedule", Provider: cfg.Routing.Defaults.Provider, Model: cfg.Routing.Defaults.Model, Runtime: "process", Status: state.StagePending, Extra: map[string]json.RawMessage{"opaque": json.RawMessage(`{"huge":900719925474099312345,"lexical":1e+20,"flag":false,"empty":null}`)}}}}
+	o := s.State.Orders["original"]
+	o.Sequence = 1
+	o.Stages[0].Extra["opaque_history"] = json.RawMessage(`{"huge":900719925474099312345,"lexical":1e+20,"status":"unknown"}`)
+	s.State.Orders["original"] = o
+	initialID := reducer.InitialAdmissionEffectID("original")
+	s.EffectLedger = append(s.EffectLedger, reducer.EffectLedgerRecord{EffectID: initialID, Effect: reducer.Effect{EffectID: initialID, Type: reducer.EffectInitialAdmission, Payload: json.RawMessage(`{"order_id":"original","initial_revision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}`)}, Status: reducer.EffectLedgerDone, Result: &reducer.EffectResult{EffectID: initialID, Status: reducer.EffectResultCompleted, Timestamp: s.GeneratedAt}})
+	for _, row := range []struct {
+		id, payload string
+		kind        reducer.EffectType
+	}{
+		{"event-4-effect-0", `{"order_id":"original","stage_index":0,"attempt_id":"attempt"}`, reducer.EffectDispatch},
+		{"event-9-effect-0", `{"order_id":"original","stage_index":0}`, reducer.EffectAck},
+	} {
+		s.EffectLedger = append(s.EffectLedger, reducer.EffectLedgerRecord{EffectID: row.id, Effect: reducer.Effect{EffectID: row.id, Type: row.kind, Payload: json.RawMessage(row.payload)}, Status: reducer.EffectLedgerPending})
+	}
+	f.native.Observation.Execution.Sources["canonical_snapshot"] = stoppedTestPut(f.t, filepath.Join(f.storage, ".noodle", "state.snapshot.json"), s)
+	return s
+}
+
+func stoppedTestSameJSON(t *testing.T, a, b any) bool {
+	t.Helper()
+	values := make([]any, 2)
+	for i, value := range []any{a, b} {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		if err := decoder.Decode(&values[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return reflect.DeepEqual(values[0], values[1])
+}
+
+func TestStoppedLocalMergePreparesDormantScheduleAndPreservesSameEffect(t *testing.T) {
+	f := newStoppedMergeFixture(t)
+	s := f.dormantSchedule()
+	path := filepath.Join(f.storage, ".noodle", "state.snapshot.json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := f.prepare()
+	if r.Status != "prepared" || r.EffectID != "event-8-effect-0" || r.Next["operation"] != "detach" {
+		t.Fatal(r)
+	}
+	var p stoppedMergePlan
+	if err := stoppedMergeRead(r.Plan, &p); err != nil {
+		t.Fatal(err)
+	}
+	archived, err := os.ReadFile(filepath.Join(filepath.Dir(r.Plan.Path), "before.json"))
+	if err != nil || !bytes.Equal(before, archived) || !bytes.Equal(before, p.Snapshot) {
+		t.Fatal("prepare did not retain the entire raw before-image", err)
+	}
+	f.detach()
+	result, err := stoppedMergeOperation(t.Context(), f.root, f.ref.Path, f.ref.SHA256, "continue", nil)
+	if err != nil || result.Status != "completed" || result.EffectID != r.EffectID || result.AuthorizesLanding {
+		t.Fatal(result, err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got reducer.DurableSnapshot
+	if err := json.Unmarshal(after, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !stoppedTestSameJSON(t, got.State.Orders["schedule"], s.State.Orders["schedule"]) || got.State.Orders["original"].Status != state.OrderCompleted || !reflect.DeepEqual(got.State.Orders["original"].Stages[0].Attempts, s.State.Orders["original"].Stages[0].Attempts) || got.OrderRevision != s.OrderRevision || len(got.EffectLedger) != len(s.EffectLedger) {
+		t.Fatal("completion changed dormant schedule or original custody")
+	}
+	for i, row := range got.EffectLedger {
+		if row.EffectID != r.EffectID && !stoppedTestSameJSON(t, row, s.EffectLedger[i]) {
+			t.Fatal("completion rewrote non-target effects")
+		}
+	}
+	if err := loop.CheckStoppedLocalMergeProjection(f.root, after); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(after, []byte("900719925474099312345")) || !bytes.Contains(after, []byte("1e+20")) || !bytes.Contains(after, []byte(`"unknown"`)) {
+		t.Fatal("completion lost opaque values or number spelling")
+	}
+	if repeat, err := stoppedMergeOperation(t.Context(), f.root, f.ref.Path, f.ref.SHA256, "continue", nil); err != nil || repeat.Status != "completed" || len(repeat.Effects) != 0 || f.detaches.Load() != 1 {
+		t.Fatal("same-effect completion replayed effects", repeat, err)
+	}
+	archived, err = os.ReadFile(filepath.Join(filepath.Dir(r.Plan.Path), "before.json"))
+	if err != nil || !bytes.Equal(before, archived) {
+		t.Fatal("completion changed the permanent before-image", err)
+	}
+}
+
+func TestStoppedLocalMergeRefusesDormantScheduleFaultsBeforePlan(t *testing.T) {
+	for _, fault := range []string{"name-only", "third-order", "attempt-completed", "attempt-failed", "attempt-running", "effect-pending", "effect-running", "effect-done", "effect-failed", "initial-admission", "review", "non-pending", "producer-drift", "execution-custody", "scope-empty", "scope-admitted", "scope-foreign", "scope-extra", "config-malformed", "config-missing", "config-drift", "missing-attempts"} {
+		t.Run(fault, func(t *testing.T) {
+			f := newStoppedMergeFixture(t)
+			s := f.dormantSchedule()
+			o := s.State.Orders["schedule"]
+			switch fault {
+			case "name-only":
+				o.Stages[0].TaskKey, o.Stages[0].Skill = "local-task", "local-task"
+			case "third-order":
+				s.State.Orders["foreign"] = s.State.Orders["original"]
+			case "attempt-completed", "attempt-failed", "attempt-running":
+				o.Stages[0].Attempts = []state.AttemptNode{{AttemptID: "foreign", SessionID: "foreign", Status: state.AttemptStatus(strings.TrimPrefix(fault, "attempt-"))}}
+			case "effect-pending", "effect-running", "effect-done", "effect-failed", "initial-admission":
+				row := reducer.EffectLedgerRecord{EffectID: "foreign", Effect: reducer.Effect{EffectID: "foreign", Type: reducer.EffectDispatch, Payload: json.RawMessage(`{"order_id":"schedule","stage_index":0}`)}, Status: reducer.EffectLedgerStatus(strings.TrimPrefix(fault, "effect-"))}
+				if fault == "initial-admission" {
+					row.Effect.Type, row.Status = reducer.EffectInitialAdmission, reducer.EffectLedgerDone
+					row.EffectID = reducer.InitialAdmissionEffectID("schedule")
+					row.Effect.EffectID = row.EffectID
+					row.Effect.Payload = json.RawMessage(`{"order_id":"schedule","initial_revision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}`)
+				}
+				if row.Status == reducer.EffectLedgerDone || row.Status == reducer.EffectLedgerFailed {
+					row.Result = &reducer.EffectResult{EffectID: row.EffectID, Status: reducer.EffectResultCompleted}
+					if row.Status == reducer.EffectLedgerFailed {
+						row.Result.Status = reducer.EffectResultFailed
+					}
+				}
+				s.EffectLedger = append(s.EffectLedger, row)
+			case "review":
+				s.State.PendingReviews["schedule"] = state.PendingReviewNode{OrderID: "schedule"}
+			case "non-pending":
+				o.Stages[0].Status = state.StageCompleted
+			case "producer-drift":
+				o.Stages[0].Model = "foreign"
+			case "execution-custody":
+				o.Stages[0].Extra["local_task_merge"] = json.RawMessage(`null`)
+			case "scope-empty", "scope-admitted", "scope-foreign", "scope-extra", "config-malformed":
+				cfg := "mode='manual'\n[runtime]\nadmitted_orders=[]\n"
+				switch fault {
+				case "scope-admitted":
+					cfg = "mode='manual'\n[runtime]\nadmitted_orders=['original','schedule']\n"
+				case "scope-foreign":
+					cfg = "mode='manual'\n[runtime]\nadmitted_orders=['foreign']\n"
+				case "scope-extra":
+					cfg = "mode='manual'\n[runtime]\nadmitted_orders=['original','foreign']\n"
+				case "config-malformed":
+					cfg = "[runtime\n"
+				}
+				// A distinct fixture admission is bound before prepare. Nothing
+				// edits a prepared plan's Frozen refs to make drift acceptable.
+				stoppedTestBytes(t, f.receipt.ConfigPath, []byte(cfg))
+				f.receipt.ConfigSHA256 = hostDigest([]byte(cfg))
+				var binding hostRequestBinding
+				if _, err := loopruntime.ReadSessionReadbackFile(f.request, &binding); err != nil {
+					t.Fatal(err)
+				}
+				binding.ConfigSHA256 = f.receipt.ConfigSHA256
+				stoppedTestPut(t, f.request, binding)
+				stoppedTestPut(t, filepath.Join(f.generation, "receipts.json"), []hostReceipt{f.receipt})
+				if err := updateHostPool(f.host, func(p *hostPool) error {
+					owner := p.Owners["request"]
+					owner.Original, owner.Current = f.receipt, f.receipt
+					p.Owners["request"] = owner
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			case "config-missing":
+				if err := os.Remove(f.receipt.ConfigPath); err != nil {
+					t.Fatal(err)
+				}
+			case "config-drift":
+				stoppedTestBytes(t, f.receipt.ConfigPath, []byte("mode='auto'\n"))
+			}
+			s.State.Orders["schedule"] = o
+			path := filepath.Join(f.storage, ".noodle", "state.snapshot.json")
+			f.native.Observation.Execution.Sources["canonical_snapshot"] = stoppedTestPut(t, path, s)
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fault == "missing-attempts" {
+				before = bytes.Replace(before, []byte(`"attempts": null`), []byte(`"merge": null`), 1)
+				stoppedTestBytes(t, path, before)
+				f.native.Observation.Execution.Sources["canonical_snapshot"], err = loopruntime.ReadSessionReadbackFile(path, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			head := f.git(f.root, "rev-parse", "HEAD")
+			r, err := prepareStoppedMerge(t.Context(), f.root, f.candidate.Path, func(context.Context, string, string, string, string) (hostSessionReadback, error) { return f.native, nil })
+			if err == nil || r.Status != "refused" || len(r.Effects) != 0 {
+				t.Fatal("unqualified schedule prepare accepted", fault, r, err)
+			}
+			if _, err := os.Stat(filepath.Join(f.admission, "stopped-local-merge")); !os.IsNotExist(err) {
+				t.Fatal("refusal published plan or before-image", err)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(got, before) || f.git(f.root, "rev-parse", "HEAD") != head || f.detaches.Load() != 0 {
+				t.Fatal("refused prepare changed original bytes or effects", err)
+			}
+		})
+	}
+}
+
+func TestStoppedLocalMergeDormantScheduleReentryRejectsFrozenDrift(t *testing.T) {
+	for _, operation := range []string{"inspect", "detach", "continue"} {
+		t.Run(operation, func(t *testing.T) {
+			f := newStoppedMergeFixture(t)
+			f.dormantSchedule()
+			f.prepare()
+			stoppedTestBytes(t, f.receipt.ConfigPath, []byte("mode='manual'\n[runtime]\nadmitted_orders=[]\n"))
+			before, _ := os.ReadFile(filepath.Join(f.storage, ".noodle", "state.snapshot.json"))
+			head := f.git(f.root, "rev-parse", "HEAD")
+			r, err := stoppedMergeOperation(t.Context(), f.root, f.ref.Path, f.ref.SHA256, operation, nil)
+			if err == nil || len(r.Effects) != 0 || f.detaches.Load() != 0 {
+				t.Fatal("reentry accepted Frozen drift", r, err)
+			}
+			after, _ := os.ReadFile(filepath.Join(f.storage, ".noodle", "state.snapshot.json"))
+			if !bytes.Equal(before, after) || f.git(f.root, "rev-parse", "HEAD") != head {
+				t.Fatal("Frozen drift refusal changed original state")
+			}
+		})
+	}
+}
+
+func TestStoppedLocalMergeSingletonKeepsOriginalCustodyGate(t *testing.T) {
+	f := newStoppedMergeFixture(t)
+	r := f.prepare()
+	var p stoppedMergePlan
+	if err := stoppedMergeRead(r.Plan, &p); err != nil {
+		t.Fatal(err)
+	}
+	var c stoppedMergeCandidate
+	if err := stoppedMergeRead(f.candidate, &c); err != nil {
+		t.Fatal(err)
+	}
+	// Stable-source verification remains separately owned. The old singleton
+	// qualification itself does not acquire the companion's new config gate.
+	p.Stable["config"] = stoppedMergeRef{}
+	p.Host.Current.ConfigPath, p.Host.Current.ConfigSHA256 = "", ""
+	if err := stoppedMergeValidateCustody(&p, c); err != nil {
+		t.Fatal("singleton acquired a new companion admission condition", err)
 	}
 }
