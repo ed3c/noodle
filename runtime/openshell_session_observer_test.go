@@ -2,15 +2,13 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
-	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -90,97 +88,34 @@ func TestOpenShellCompletedEvidenceObserverUsesOnlyGetWithoutOwner(t *testing.T)
 	}
 }
 
-// Forward the original child's mTLS bytes without terminating TLS. The next
-// connection is opened lazily by the standalone producer's native Get, after
-// its before-image read. No synthetic response replaces the original gateway.
-type completionGetProxy struct {
-	mu   sync.Mutex
-	hook func() error
-	err  error
-}
-
-func completionObserverProxy(t *testing.T, f *managedFixture) *completionGetProxy {
+// Enable the original child only; do not pre-bind its gateway endpoint.
+func prepareCompletionGetMutation(t *testing.T, f *managedFixture) {
 	t.Helper()
-	var child managedChildConfig
 	path := filepath.Join(f.root, "child.json")
+	var child managedChildConfig
 	if _, err := ReadSessionReadbackFile(path, &child); err != nil {
 		t.Fatal(err)
 	}
-	listener, err := net.Listen("tcp", child.Address)
+	root, err := filepath.EvalSymlinks(f.root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	backend, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		listener.Close()
-		t.Fatal(err)
-	}
-	child.Address = backend.Addr().String()
-	if err = backend.Close(); err != nil {
-		t.Fatal(err)
-	}
+	child.CompletionMutationRoot = filepath.Dir(root)
 	writeReadbackJSON(t, path, child)
-	p := &completionGetProxy{}
-	var workers sync.WaitGroup
-	var connections sync.Map
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for {
-			client, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			connections.Store(client, true)
-			workers.Add(1)
-			go func() {
-				defer workers.Done()
-				defer connections.Delete(client)
-				defer client.Close()
-				p.mu.Lock()
-				hook := p.hook
-				p.hook = nil
-				p.mu.Unlock()
-				if hook != nil {
-					if err := hook(); err != nil {
-						p.mu.Lock()
-						p.err = err
-						p.mu.Unlock()
-						return
-					}
-				}
-				upstream, err := net.DialTimeout("tcp", child.Address, time.Second)
-				if err != nil {
-					return
-				}
-				defer upstream.Close()
-				copied := make(chan struct{})
-				go func() {
-					defer close(copied)
-					_, _ = io.Copy(upstream, client)
-					_ = upstream.Close()
-				}()
-				_, _ = io.Copy(client, upstream)
-				_ = client.Close()
-				<-copied
-			}()
-		}
-	}()
-	t.Cleanup(func() {
-		_ = listener.Close()
-		<-done
-		connections.Range(func(key, _ any) bool {
-			_ = key.(net.Conn).Close()
-			return true
-		})
-		workers.Wait()
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		if p.err != nil {
-			t.Error(p.err)
-		}
-	})
-	return p
+}
+
+func stageCompletionGetMutation(t *testing.T, f *managedFixture, sandbox, path string, after []byte) {
+	t.Helper()
+	canonical, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeReadbackJSON(t, filepath.Join(f.root, "completion-get-write.json"),
+		completionGetMutation{SandboxName: sandbox, Path: canonical, BeforeSHA256: sha256.Sum256(before), After: after})
 }
 
 func otherCompletedCustodyRecord(t *testing.T, record OpenShellCustodyRecord) OpenShellCustodyRecord {
@@ -217,8 +152,7 @@ func otherCompletedCustodyRecord(t *testing.T, record OpenShellCustodyRecord) Op
 }
 
 func TestStandaloneObserverAllowsOtherRecordProgressDuringOriginalGet(t *testing.T) {
-	var proxy *completionGetProxy
-	r, b, f := completedReadbackFixtureWithPrepare(t, func(f *managedFixture) { proxy = completionObserverProxy(t, f) })
+	r, b, f := completedReadbackFixtureWithPrepare(t, func(f *managedFixture) { prepareCompletionGetMutation(t, f) })
 	profile := r.config.Profile
 	path := filepath.Join(profile.Gateway.Binding.StateRoot, "owner.json")
 	var custody OpenShellCustodyState
@@ -243,9 +177,7 @@ func TestStandaloneObserverAllowsOtherRecordProgressDuringOriginalGet(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy.mu.Lock()
-	proxy.hook = func() error { return os.WriteFile(path, changed, 0600) }
-	proxy.mu.Unlock()
+	stageCompletionGetMutation(t, f, custody.Records[0].Name, path, changed)
 	eventsBefore, err := os.ReadFile(filepath.Join(f.root, "events"))
 	if err != nil {
 		t.Fatal(err)
@@ -312,8 +244,7 @@ func TestManagedReaderRetainsWholeFileFenceDuringOriginalObservation(t *testing.
 }
 
 func TestStandaloneObserverRejectsDriftDuringOriginalGet(t *testing.T) {
-	var proxy *completionGetProxy
-	r, b, f := completedReadbackFixtureWithPrepare(t, func(f *managedFixture) { proxy = completionObserverProxy(t, f) })
+	r, b, f := completedReadbackFixtureWithPrepare(t, func(f *managedFixture) { prepareCompletionGetMutation(t, f) })
 	path := filepath.Join(r.config.Profile.Gateway.Binding.StateRoot, "owner.json")
 	metaPath := filepath.Join(r.config.RuntimeDir, "sessions", b.SessionID, "meta.json")
 	for _, fault := range []string{"selected-opaque", "root-opaque", "selected-command", "duplicate", "malformed-other", "blocked", "metadata"} {
@@ -352,14 +283,15 @@ func TestStandaloneObserverRejectsDriftDuringOriginalGet(t *testing.T) {
 					root["Blocked"] = "unresolved"
 				}
 			})
-			proxy.mu.Lock()
-			proxy.hook = func() error {
-				if fault == "metadata" {
-					return os.WriteFile(metaPath, append(meta, ' '), 0600)
-				}
-				return os.WriteFile(path, changed, 0600)
+			var custody OpenShellCustodyState
+			if err = json.Unmarshal(before, &custody); err != nil {
+				t.Fatal(err)
 			}
-			proxy.mu.Unlock()
+			target, mutation := path, changed
+			if fault == "metadata" {
+				target, mutation = metaPath, append(meta, ' ')
+			}
+			stageCompletionGetMutation(t, f, custody.Records[0].Name, target, mutation)
 			events, err := os.ReadFile(filepath.Join(f.root, "events"))
 			if err != nil {
 				t.Fatal(err)

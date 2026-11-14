@@ -206,6 +206,15 @@ func TestCompletionProjectionFreshQualificationAndStrictSources(t *testing.T) {
 func TestCompletionCustodyQualifiesFullCredentialAndRetainedLedger(t *testing.T) {
 	r, b, _ := completedReadbackFixture(t)
 	spec := r.config.Profile.Gateway
+	var err error
+	spec.Binding.StateRoot, err = filepath.EvalSymlinks(spec.Binding.StateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.ControlRoot, err = filepath.EvalSymlinks(spec.ControlRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(spec.Binding.StateRoot, "owner.json")
 	original, err := os.ReadFile(path)
 	if err != nil {
