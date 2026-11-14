@@ -52,5 +52,8 @@ func newReviewCmd(app *App) *cobra.Command {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 	}})
 	command.AddCommand(newLandedLocalMergeCmd(app, false), newLandedLocalMergeCmd(app, true))
+	for _, operation := range []string{"prepare", "inspect", "detach", "continue"} {
+		command.AddCommand(newStoppedLocalMergeCmd(app, operation))
+	}
 	return command
 }
