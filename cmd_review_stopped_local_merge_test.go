@@ -984,7 +984,9 @@ func TestStoppedLocalMergeRefusesDormantScheduleFaultsBeforePlan(t *testing.T) {
 				}
 			}
 			head := f.git(f.root, "rev-parse", "HEAD")
-			r, err := prepareStoppedMerge(t.Context(), f.root, f.candidate.Path, func(context.Context, string, string, string, string) (hostSessionReadback, error) { return f.native, nil })
+			r, err := prepareStoppedMerge(t.Context(), f.root, f.candidate.Path, func(context.Context, string, string, string, string) (hostSessionReadback, error) {
+				return f.native, nil
+			})
 			if err == nil || r.Status != "refused" || len(r.Effects) != 0 {
 				t.Fatal("unqualified schedule prepare accepted", fault, r, err)
 			}
