@@ -189,6 +189,15 @@ func (r *OpenShellRuntime) readNotStartedSession(ctx context.Context, b Complete
 // These are prepared local inputs. No exec command or native consumption is
 // inferred from them, so they never become CompletedInstructionEvidence.
 func preparedInstructionReadback(ctx context.Context, dir, order string, ref *dispatcher.InstructionBundleRef, sources map[string]SessionReadbackFileRef) (*SessionReadbackFileRef, error) {
+	prepared, err := preparedInstructionEvidence(ctx, dir, order, ref, sources)
+	if err != nil || prepared == nil {
+		return nil, err
+	}
+	manifest := sources["instruction_manifest"]
+	return &manifest, nil
+}
+
+func preparedInstructionEvidence(ctx context.Context, dir, order string, ref *dispatcher.InstructionBundleRef, sources map[string]SessionReadbackFileRef) (*instructionbundle.Prepared, error) {
 	mappingPath := filepath.Join(dir, "instruction-mapping.json")
 	if ref == nil {
 		if _, err := os.Lstat(mappingPath); !os.IsNotExist(err) {
@@ -237,5 +246,5 @@ func preparedInstructionReadback(ctx context.Context, dir, order string, ref *di
 		}
 		sources[name] = current
 	}
-	return &manifestRef, nil
+	return p, nil
 }

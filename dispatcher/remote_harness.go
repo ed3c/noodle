@@ -112,17 +112,10 @@ func PrepareRemoteHarness(runtimeDir string, resolver skill.Resolver, req Dispat
 		}
 	}
 	if req.Provider == "codex" {
-		p.argv = append([]string{binary}, codexBaseArgs(req)...)
-		p.argv = append(p.argv, "--dangerously-bypass-approvals-and-sandbox")
-		if req.ReasoningLevel != "" {
-			switch req.ReasoningLevel {
-			case "low", "medium", "high", "xhigh", "minimal", "none":
-			default:
-				return nil, fmt.Errorf("Codex reasoning level unsupported")
-			}
-			p.argv = append(p.argv, "-c", fmt.Sprintf("model_reasoning_effort=%q", req.ReasoningLevel))
+		p.argv, err = preparedCodexCommand(req, binary)
+		if err != nil {
+			return nil, err
 		}
-		p.argv = append(p.argv, "-")
 		p.startup, err = newCodexStartup(dir, id, len(prompt))
 	} else {
 		provider, model, _ := strings.Cut(req.Model, "/")
@@ -176,3 +169,17 @@ func (p *RemoteHarness) Start(ctx context.Context, process HarnessProcess, sink 
 }
 
 var _ HarnessProcess = (*ProcessHandle)(nil)
+
+func preparedCodexCommand(req DispatchRequest, binary string) ([]string, error) {
+	argv := append([]string{binary}, codexBaseArgs(req)...)
+	argv = append(argv, "--dangerously-bypass-approvals-and-sandbox")
+	if req.ReasoningLevel != "" {
+		switch req.ReasoningLevel {
+		case "low", "medium", "high", "xhigh", "minimal", "none":
+		default:
+			return nil, fmt.Errorf("Codex reasoning level unsupported")
+		}
+		argv = append(argv, "-c", fmt.Sprintf("model_reasoning_effort=%q", req.ReasoningLevel))
+	}
+	return append(argv, "-"), nil
+}

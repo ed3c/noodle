@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -56,4 +57,55 @@ func VerifyExtracted(ctx context.Context, archive, retained string) (resultErr e
 		return fmt.Errorf("retained extraction differs from original archive")
 	}
 	return ctx.Err()
+}
+
+// VerifyCapturedBaseline checks only the original transferable file manifest.
+// It never captures a new checkout or opens unrelated cache/unlisted bytes.
+func VerifyCapturedBaseline(ctx context.Context, baseline *Baseline) error {
+	if baseline == nil || baseline.Head == "" || baseline.IndexSHA256 == "" || baseline.Entries == nil {
+		return fmt.Errorf("captured baseline manifest missing")
+	}
+	root := baseline.Directory
+	info, err := os.Lstat(root)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("captured baseline is not its original directory")
+	}
+	for name, want := range baseline.Entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		got, _, err := readEntry(root, name)
+		if err != nil {
+			return err
+		}
+		if got != want {
+			return fmt.Errorf("captured baseline entry changed: %s", name)
+		}
+	}
+	return filepath.WalkDir(root, func(full string, item fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+		if full == root {
+			return nil
+		}
+		relative, err := filepath.Rel(root, full)
+		if err != nil {
+			return err
+		}
+		name := filepath.ToSlash(relative)
+		if item.IsDir() {
+			return nil
+		}
+		if _, ok := baseline.Entries[name]; !ok {
+			return fmt.Errorf("unexpected captured baseline entry: %s", name)
+		}
+		return nil
+	})
 }
