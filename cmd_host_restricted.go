@@ -29,12 +29,13 @@ type restrictedTask struct {
 }
 
 type restrictedMaintenance struct {
-	RuntimeLocks map[string]uint64   `json:"runtime_locks,omitempty"`
-	Schema       int                 `json:"schema"`
-	Plan         hostMaintenancePlan `json:"plan"`
-	Phase        string              `json:"phase"`
-	Tasks        []restrictedTask    `json:"tasks"`
-	Generation   *hostGeneration     `json:"generation,omitempty"`
+	SourceService *sourceServiceProgress `json:"source_service,omitempty"`
+	RuntimeLocks  map[string]uint64      `json:"runtime_locks,omitempty"`
+	Schema        int                    `json:"schema"`
+	Plan          hostMaintenancePlan    `json:"plan"`
+	Phase         string                 `json:"phase"`
+	Tasks         []restrictedTask       `json:"tasks"`
+	Generation    *hostGeneration        `json:"generation,omitempty"`
 }
 
 func newHostRestrictedCmd() *cobra.Command {
@@ -60,14 +61,14 @@ func newHostRestrictedCmd() *cobra.Command {
 			dir := filepath.Join(root, "maintenance", p.PlanSHA)
 			if inspect {
 				j, err := readRestrictedMaintenance(dir)
-				if err != nil {
+				if err != nil && !(p.SourcePolicy != nil && os.IsNotExist(err)) {
 					return err
 				}
 				observed := map[string]any{"journal": j, "effects": []string{}}
-				sourceDir := filepath.Join(p.Root, "g", p.Source.Instance)
-				if p.Handover == nil {
-					sourceDir = restrictedSource(p).Directory
+				if err != nil {
+					observed["journal"], observed["journal_state"] = nil, "absent"
 				}
+				sourceDir := filepath.Join(p.Root, "g", p.Source.Instance)
 				owners := map[string]string{"source": sourceDir}
 				if p.Handover != nil {
 					owners["shared"] = p.Handover.SharedRoot
@@ -77,6 +78,17 @@ func newHostRestrictedCmd() *cobra.Command {
 				}
 				for name, ownerDir := range owners {
 					if ownerDir == "" {
+						continue
+					}
+					if name == "source" && p.SourcePolicy != nil {
+						raw, completion, readErr := readSourcePolicyStatus(cmd.Context(), p)
+						if readErr != nil {
+							observed["source_error"] = readErr.Error()
+						} else if len(raw) != 0 {
+							observed["source"] = raw
+						}
+						observed["source_gateway_normal_exit"] = completion
+						observed["source_compute"] = readSourceComputeStatus(cmd.Context(), p)
 						continue
 					}
 					raw, readErr := nativeHostRPC(cmd.Context(), ownerDir, hostRequest{Operation: "resources"})
@@ -91,6 +103,12 @@ func newHostRestrictedCmd() *cobra.Command {
 			if confirmation != p.PlanSHA {
 				return errors.New("restricted maintenance requires the exact confirmed plan digest")
 			}
+			if p.SourcePolicy != nil {
+				if p.SourcePolicy.Operation == "operator-service-restore" || p.SourcePolicy.Operation == "operator-service-upgrade" {
+					return runSourceServiceRestore(cmd.Context(), p, dir, json.NewEncoder(cmd.OutOrStdout()))
+				}
+				return runSourcePolicyHold(cmd.Context(), p, dir, json.NewEncoder(cmd.OutOrStdout()))
+			}
 			if p.Handover != nil {
 				return runGatewayHandover(cmd.Context(), p, dir, json.NewEncoder(cmd.OutOrStdout()))
 			}
@@ -104,6 +122,9 @@ func newHostRestrictedCmd() *cobra.Command {
 }
 
 func validateRestrictedPlan(p hostMaintenancePlan) error {
+	if p.SourcePolicy != nil {
+		return validateSourcePolicyPlan(p)
+	}
 	if p.Handover != nil {
 		return validateGatewayHandoverPlan(p)
 	}
@@ -139,6 +160,16 @@ func readRestrictedMaintenance(dir string) (restrictedMaintenance, error) {
 		err = errors.New("original restricted maintenance journal is invalid")
 	}
 	if err == nil {
+		if j.Plan.SourcePolicy != nil {
+			phases := []string{"source-policy-prepared", "source-policy-fencing", "source-policy-admission-held"}
+			if j.Plan.SourcePolicy.Operation == "operator-service-restore" || j.Plan.SourcePolicy.Operation == "operator-service-upgrade" {
+				phases = append(phases, sourceServicePhases...)
+			}
+			if len(j.Tasks) != 0 || !slices.Contains(phases, j.Phase) {
+				return j, errors.New("original Source admission maintenance phase or shape changed")
+			}
+			return j, nil
+		}
 		phases := []string{"prepared", "fencing", "holding", "detached", "stopping", "stopped", "imported", "launching", "active"}
 		taskPhases := []string{"prepared", "pausing", "checkpointing", "held", "detaching", "detached"}
 		if j.Plan.Handover != nil {
@@ -244,10 +275,25 @@ func verifyRestrictedOwner(ctx context.Context, p hostMaintenancePlan, dir strin
 	return nil
 }
 
-func restrictedSource(p hostMaintenancePlan) hostGeneration {
-	r := p.Contexts[0].Original
+func restrictedSource(p hostMaintenancePlan) (hostGeneration, error) {
+	if p.Native == nil {
+		return hostGeneration{}, errors.New("maintenance Source native identity is missing")
+	}
+	var r hostReceipt
+	if len(p.Contexts) > 0 {
+		r = p.Contexts[0].Original
+	} else {
+		if p.SourcePolicy == nil || p.SourcePolicy.Operation != "operator-service-upgrade" {
+			return hostGeneration{}, errors.New("maintenance Source context is missing")
+		}
+		op, err := readSourcePolicySnapshot(p.SourcePolicy.Snapshot)
+		if err != nil {
+			return hostGeneration{}, err
+		}
+		r.BinaryPath, r.BinarySHA256 = op.NativeScope.Host.Binary.Path, op.NativeScope.Host.Binary.SHA256
+	}
 	return hostGeneration{ID: p.Source.Instance, Directory: filepath.Join(p.Root, "g", p.Source.Instance), Binary: r.BinaryPath, SHA: r.BinarySHA256, State: "active",
-		Process: procx.ProcessRecord{PID: p.Source.PID, SessionID: p.Source.Instance, StartedAt: time.Unix(int64(p.Native.StartSec), int64(p.Native.StartUsec)*1000)}}
+		Process: procx.ProcessRecord{PID: p.Source.PID, SessionID: p.Source.Instance, StartedAt: time.Unix(int64(p.Native.StartSec), int64(p.Native.StartUsec)*1000)}}, nil
 }
 
 func runRestrictedMaintenance(ctx context.Context, p hostMaintenancePlan, dir string, out *json.Encoder) error {
@@ -286,7 +332,10 @@ func runRestrictedMaintenance(ctx context.Context, p hostMaintenancePlan, dir st
 	if j.Plan.PlanSHA != p.PlanSHA {
 		return errors.New("another original maintenance plan is already recorded")
 	}
-	source := restrictedSource(p)
+	source, err := restrictedSource(p)
+	if err != nil {
+		return err
+	}
 	if j.Phase == "active" {
 		return out.Encode(j)
 	}
@@ -790,16 +839,20 @@ func restrictedImportedPool(old hostPool, source hostGeneration, j restrictedMai
 }
 
 func replaceRestrictedPool(root, custody, originalDigest string, next hostPool) error {
+	data, err := json.Marshal(next)
+	if err != nil {
+		return err
+	}
+	return replaceRestrictedPoolBytes(root, custody, originalDigest, data)
+}
+
+func replaceRestrictedPoolBytes(root, custody, originalDigest string, data []byte) error {
 	lock, err := lockfile.TryLock(filepath.Join(root, "pool.lock"))
 	if err != nil {
 		return err
 	}
 	defer lock.Close()
 	raw, err := os.ReadFile(filepath.Join(root, "pool.json"))
-	if err != nil {
-		return err
-	}
-	data, err := json.Marshal(next)
 	if err != nil {
 		return err
 	}

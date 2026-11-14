@@ -99,3 +99,83 @@ func (p hostContextInputs) MarshalJSON() ([]byte, error) {
 	type fields hostContextInputs
 	return marshalHostMetadata(fields(p), p.unknown)
 }
+
+func (p *hostPool) UnmarshalJSON(data []byte) error {
+	type fields hostPool
+	var value fields
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	unknown, err := hostMetadataUnknown(data, "schema", "active", "generations", "owners", "queue")
+	if err != nil {
+		return err
+	}
+	*p = hostPool(value)
+	p.unknown = unknown
+	return nil
+}
+
+func (p hostPool) MarshalJSON() ([]byte, error) {
+	type fields hostPool
+	return marshalHostMetadata(fields(p), p.unknown)
+}
+
+func (p *hostGeneration) UnmarshalJSON(data []byte) error {
+	type fields hostGeneration
+	var value fields
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	unknown, err := hostMetadataUnknown(data, "source_service", "id", "directory", "binary_path", "binary_sha256", "state", "process", "error")
+	if err != nil {
+		return err
+	}
+	*p = hostGeneration(value)
+	p.unknown = unknown
+	return nil
+}
+
+func (p hostGeneration) MarshalJSON() ([]byte, error) {
+	type fields hostGeneration
+	return marshalHostMetadata(fields(p), p.unknown)
+}
+
+func (p *hostTaskOwner) UnmarshalJSON(data []byte) error {
+	type fields hostTaskOwner
+	var value fields
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	unknown, err := hostMetadataUnknown(data, "not_admitted", "maintenance_hold", "execution_profile", "controller_only", "context_inputs", "rebuild_error", "last_admission", "round_state", "admission_only", "original", "current", "state", "environment_sha256", "runtime_environment_sha256", "previous")
+	if err != nil {
+		return err
+	}
+	*p = hostTaskOwner(value)
+	p.unknown = unknown
+	return nil
+}
+
+func (p hostTaskOwner) MarshalJSON() ([]byte, error) {
+	type fields hostTaskOwner
+	return marshalHostMetadata(fields(p), p.unknown)
+}
+
+func (p *hostVersionRequest) UnmarshalJSON(data []byte) error {
+	type fields hostVersionRequest
+	var value fields
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	unknown, err := hostMetadataUnknown(data, "maintenance_previous_state", "id", "binary_path", "binary_sha256", "state", "generation", "error")
+	if err != nil {
+		return err
+	}
+	*p = hostVersionRequest(value)
+	p.unknown = unknown
+	return nil
+}
+
+func (p hostVersionRequest) MarshalJSON() ([]byte, error) {
+	type fields hostVersionRequest
+	return marshalHostMetadata(fields(p), p.unknown)
+}

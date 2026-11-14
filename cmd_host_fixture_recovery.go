@@ -10,7 +10,7 @@ import (
 // Reuse the original Host lifecycle event. Separate generation journals avoid
 // concurrent writers; only records whose original owner exited are inherited.
 func (h *noodleHost) reconcileFixtureLifecycle(ctx context.Context) {
-	if h.residents == nil {
+	if h.sourceService != nil || h.residents == nil {
 		return
 	}
 	if err := h.residents.ReconcileConsumerLeases(ctx); err != nil {

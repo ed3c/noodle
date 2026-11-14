@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,11 +11,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/poteto/noodle/internal/admission"
 	loopruntime "github.com/poteto/noodle/runtime"
 )
 
 func TestOperatorPlanDerivesOriginalSourceWithoutWorkerAdmission(t *testing.T) {
-	for _, fault := range []string{"", "request-not-accepted", "generation-changed", "context-missing", "pool-identity-changed", "config-changed", "operator-already-explicit", "custody-binding-changed", "custody-control-root-changed"} {
+	for _, fault := range []string{"", "request-not-accepted", "generation-changed", "context-missing", "pool-identity-changed", "config-changed", "operator-already-explicit", "custody-binding-changed", "custody-control-root-changed", "resident-missing", "resident-guard-changed", "resident-extra-context", "source-not-leased"} {
 		t.Run(fault, func(t *testing.T) {
 			root, err := os.MkdirTemp("/tmp", "n-op-")
 			if err != nil {
@@ -57,6 +59,24 @@ func TestOperatorPlanDerivesOriginalSourceWithoutWorkerAdmission(t *testing.T) {
 			custodyPath := filepath.Join(gateway.Binding.StateRoot, "owner.json")
 			custodyBytes := write(custodyPath, custody)
 			generation, requestID, contextID := strings.Repeat("a", 32), strings.Repeat("b", 32), strings.Repeat("c", 32)
+			guardID, err := loopruntime.OpenShellGatewayGuardID(gateway)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resident := admission.Resident{ID: gateway.Resident.Name, Name: gateway.Resident.Name, GuardID: guardID, Sharing: "shared", State: "running", PID: 123, ProcessGroup: 123, Started: "original-start", Contexts: []string{contextID}}
+			if fault == "resident-guard-changed" {
+				resident.GuardID = "different-deployment"
+			}
+			if fault == "resident-extra-context" {
+				resident.Contexts = append(resident.Contexts, strings.Repeat("e", 32))
+			}
+			if fault == "source-not-leased" {
+				resident.Contexts = nil
+			}
+			residents := []admission.Resident{resident}
+			if fault == "resident-missing" {
+				residents = nil
+			}
 			directory := filepath.Join(root, "g", generation)
 			if err := os.MkdirAll(directory, 0700); err != nil {
 				t.Fatal(err)
@@ -127,18 +147,33 @@ func TestOperatorPlanDerivesOriginalSourceWithoutWorkerAdmission(t *testing.T) {
 				if fault == "context-missing" {
 					contexts = 2
 				}
-				response := map[string]any{"protocol": hostProtocol, "host_root": root, "host_dir": directory, "host_instance_id": instance, "host_pid": receipt.HostPID, "rolling_host_version": 1, "binary_sha256": receipt.BinarySHA256, "contexts": contexts, "resources": map[string]any{"active_workers": 0}}
+				response := map[string]any{"protocol": hostProtocol, "host_root": root, "host_dir": directory, "host_instance_id": instance, "host_pid": receipt.HostPID, "rolling_host_version": 1, "binary_sha256": receipt.BinarySHA256, "contexts": contexts, "resources": map[string]any{"active_workers": 0}, "residents": map[string]any{"records": residents, "error": nil}}
 				if err = json.NewEncoder(conn).Encode(response); err != nil {
 					t.Error(err)
 				}
 			}()
-			plan, err := planHostOperatorMaintenance(context.Background(), requestPath)
+			var plan hostOperatorPlan
+			if fault == "" {
+				var output bytes.Buffer
+				cmd := newHostOperatorPlanCmd()
+				cmd.SetOut(&output)
+				cmd.SetArgs([]string{"--request-file", requestPath, "--operator-profile-output", filepath.Join(root, "operator-profile.json")})
+				err = cmd.ExecuteContext(context.Background())
+				if err == nil {
+					err = json.Unmarshal(output.Bytes(), &plan)
+				}
+			} else {
+				plan, err = planHostOperatorMaintenance(context.Background(), requestPath)
+			}
 			if fault == "" {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if plan.Executable || len(plan.Effects) != 0 || len(plan.Contexts) != 1 || plan.Contexts[0].ContextState != "failed" || plan.Binding.StateRoot == "" || len(plan.Requires) == 0 || strings.Join(plan.OperatorArgv[len(plan.OperatorArgv)-2:], " ") != "--enable-operator-auth true" {
+				if plan.Executable || len(plan.Effects) != 0 || len(plan.Contexts) != 1 || plan.Contexts[0].ContextState != "failed" || plan.Binding.StateRoot == "" || plan.Resident.GuardID != guardID || len(plan.Requires) == 0 || strings.Join(plan.OperatorArgv[len(plan.OperatorArgv)-2:], " ") != "--enable-operator-auth true" {
 					t.Fatalf("preparation lost its identity or effect boundary: %+v", plan)
+				}
+				if plan.OperatorPolicy == nil || plan.OperatorPolicy.Before != plan.Profile || plan.OperatorPolicy.BeforeBinding != plan.Binding || plan.OperatorPolicy.AfterBinding.ConfigFingerprint == plan.Binding.ConfigFingerprint {
+					t.Fatal("CLI did not produce the bound auth-only artifact")
 				}
 			} else if err == nil {
 				t.Fatal("preparation accepted changed original input", fault)

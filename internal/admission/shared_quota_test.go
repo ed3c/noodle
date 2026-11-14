@@ -1,6 +1,7 @@
 package admission
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
@@ -8,6 +9,41 @@ import (
 	"testing"
 	"time"
 )
+
+func TestSharedQuotaBindPreservesExistingLedgerBytes(t *testing.T) {
+	for _, leases := range []string{`{}`, `{"original":{"owner":"old","context":"source-service","resident":true,"resident_key":"gateway","opaque":{"number":9007199254740993}}}`} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "quota.json")
+		raw := []byte("{\n  \"leases\": " + leases + ",\n  \"opaque\": 9007199254740993, \"worker_admission_policy\": \"host-workers-v1\",\n  \"maximum\": 9, \"schema\": 3\n}\n")
+		if err := os.WriteFile(path, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		before, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		budget := NewBudget(DefaultWorkerLimit)
+		if err = budget.BindSharedQuota(dir, "new"); err != nil {
+			t.Fatal(err)
+		}
+		after, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(raw, after) {
+			t.Fatal("binding rewrote the original ledger", err)
+		}
+		afterInfo, err := os.Stat(path)
+		if err != nil || !os.SameFile(before, afterInfo) {
+			t.Fatal("binding replaced the original ledger", err)
+		}
+		got := budget.shared.snapshot()
+		wantAllocations := 0
+		if leases != `{}` {
+			wantAllocations = 1
+		}
+		if got.Error != "" || got.Maximum != DefaultWorkerLimit || got.Allocations != wantAllocations || got.Residents != wantAllocations || got.Owned != 0 {
+			t.Fatalf("bound ledger lost its allocation facts: %+v", got)
+		}
+	}
+}
 
 func sharedTestBudget(t *testing.T, dir, owner string, max int) (*Budget, *time.Time) {
 	t.Helper()
