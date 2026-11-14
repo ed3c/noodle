@@ -15,7 +15,16 @@ import (
 
 func completedReadbackFixture(t *testing.T, environment ...string) (*OpenShellRuntime, CompletedSessionBinding, *managedFixture) {
 	t.Helper()
-	r, f, target := openShellRuntimeFixture(t)
+	return completedReadbackFixtureWithPrepare(t, nil, environment...)
+}
+
+func completedReadbackFixtureWithPrepare(t *testing.T, prepare func(*managedFixture), environment ...string) (*OpenShellRuntime, CompletedSessionBinding, *managedFixture) {
+	t.Helper()
+	r, f, target := openShellRuntimeFixture(t, func(f *managedFixture) {
+		if prepare != nil {
+			prepare(f)
+		}
+	})
 	r.config.Profile.Environment = append(r.config.Profile.Environment, environment...)
 	managedMarker(t, f.root, "completion-observation")
 	h, err := r.Dispatch(t.Context(), DispatchRequest{Name: "readback", Provider: "codex", Model: "fixture", Prompt: "produce result", SystemPrompt: "test", Runtime: "openshell", WorktreePath: target, AllowPrimaryCheckout: true, EnvVars: map[string]string{"NOODLE_ORDER_ID": "readback", "NOODLE_STAGE_INDEX": "0"}})
