@@ -14,6 +14,15 @@ For refused, preserve evidence and report next.required. Rejected means local
 non-delivery only: it neither closes a provider Issue nor reconciles an outer
 supervisor checkpoint. Initial proposals still use admission inspect/retire.`
 
+// ReturnRecoveryGuide describes only the original bounded return transport.
+const ReturnRecoveryGuide = `For interruption recovery use review prepare-return-recovery with the original
+Host request, order, event and retained native frame. Consume the owner's exact
+next.argv unchanged. Prepare and inspect never deliver worker packets. Continue
+requires original Dial-before-Encode no-delivery and fresh qualified absent
+custody at the same Frozen endpoint. Existing intent or unknown only reads back;
+never resend or rebuild a tuple. ACK proves carrier custody only. Main native
+wake, consumption and product acceptance require their original Soodles owner.`
+
 // AdmissionRecoveryGuide is shared by CLI help and the generated P-class skill.
 const AdmissionRecoveryGuide = `Use the existing Noodle owner with a known project and a stopped loop.
 Run noodle --project-dir <known-project> admission inspect and consume its JSON.
@@ -91,6 +100,9 @@ func Commands() []Command {
 			}},
 		}},
 		{Name: "review", Short: "Inspect or reject one exact stopped completed review", Subcommands: []Command{
+			{Name: "prepare-return-recovery", Short: "Bind one original return event and protected Dial-before-Encode evidence"},
+			{Name: "inspect-return-recovery", Short: "Read exact original return custody without packet delivery"},
+			{Name: "continue-return-recovery", Short: "Continue one qualified original return transport once"},
 			{Name: "prepare-stopped-local-merge", Short: "Capture the original completed execution and one refused local merge effect"},
 			{Name: "inspect-stopped-local-merge", Short: "Read the original same-effect continuation without replay"},
 			{Name: "detach-stopped-local-merge", Short: "Release only the original Context through its original Host"},
