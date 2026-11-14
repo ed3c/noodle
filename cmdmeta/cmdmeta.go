@@ -15,9 +15,10 @@ non-delivery only: it neither closes a provider Issue nor reconciles an outer
 supervisor checkpoint. Initial proposals still use admission inspect/retire.`
 
 // ReturnRecoveryGuide describes only the original bounded return transport.
-const ReturnRecoveryGuide = `For interruption recovery use review prepare-return-recovery with the original
-Host request, order, event and retained native frame. Consume the owner's exact
-next.argv unchanged. Prepare and inspect never deliver worker packets. Continue
+const ReturnRecoveryGuide = `For interruption recovery pass the retained original owner readback to
+review prepare-return-recovery ORIGINAL_READBACK. The producer derives the Host
+request, original event and frame prefix. Consume its exact next.argv unchanged.
+Prepare and inspect never deliver worker packets. Continue
 requires original Dial-before-Encode no-delivery and fresh qualified absent
 custody at the same Frozen endpoint. Existing intent or unknown only reads back;
 never resend or rebuild a tuple. ACK proves carrier custody only. Main native

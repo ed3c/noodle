@@ -34,6 +34,21 @@ type returnRecoveryIntent struct {
 	Controller stoppedMergeRef            `json:"actual_controller"`
 	Readback   loop.ReturnCustodyReadback  `json:"qualified_absent"`
 }
+type returnRecoveryReceipt struct {
+	Intent stoppedMergeRef `json:"intent"`
+	Status string          `json:"status"`
+}
+type returnRecoveryFrame struct {
+	Owner   string               `json:"owner"`
+	Request config.RuntimeSource `json:"request"`
+	Inner struct {
+		Native struct {
+			Owner *hostOwnerBinding `json:"owner_binding"`
+		} `json:"native_host"`
+		Order   state.OrderNode                     `json:"order"`
+		Reviews map[string]state.PendingReviewNode `json:"pending_reviews"`
+	} `json:"inner"`
+}
 func returnRecoveryActual() (stoppedMergeRef, error) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -52,9 +67,27 @@ func returnRecoveryDirectory(project string, subject loop.ReturnRecoverySubject)
 	}
 	return filepath.Join(runtimeDir, "return-handoff", hostDigest(raw))
 }
-func prepareReturnRecovery(project, requestPath, orderID, eventID, framePath string) (returnRecoveryResult, error) {
+func prepareReturnRecovery(project, framePath string) (returnRecoveryResult, error) {
 	r := returnRecoveryBase()
-	project, err := filepath.EvalSymlinks(project)
+	frame, frameRaw, err := loop.ReadReturnRecoveryPrefix(framePath, nil)
+	if err != nil {
+		return r, err
+	}
+	var input returnRecoveryFrame
+	if json.Unmarshal(frameRaw, &input) != nil || input.Owner != "soodles.loop" || input.Inner.Native.Owner == nil || len(input.Inner.Order.Stages) != 1 || input.Inner.Order.Stages[0].StageIndex != 0 {
+		return r, fmt.Errorf("original return readback unavailable")
+	}
+	requestPath, orderID := input.Inner.Native.Owner.Request.Path, input.Inner.Order.OrderID
+	eventID, count := "", 0
+	for _, attempt := range input.Inner.Order.Stages[0].Attempts {
+		if attempt.ReturnHandoff != nil && attempt.ReturnHandoff.Status == "unknown" {
+			eventID, count = attempt.ReturnHandoff.EventID, count+1
+		}
+	}
+	if count != 1 || eventID == "" || orderID == "" {
+		return r, fmt.Errorf("original return readback event missing or ambiguous")
+	}
+	project, err = filepath.EvalSymlinks(project)
 	if err != nil {
 		return r, err
 	}
@@ -105,21 +138,14 @@ func prepareReturnRecovery(project, requestPath, orderID, eventID, framePath str
 	if err = stoppedMergeRead(stoppedMergeRef{Path: binding.Request.Path, SHA256: binding.Request.SHA256}, nil); err != nil {
 		return r, err
 	}
-	frame, frameRaw, err := loop.ReadReturnRecoveryPrefix(framePath, nil)
-	if err != nil {
-		return r, err
-	}
 	if err = validateReturnRecoveryFrame(frameRaw, original, *owner); err != nil {
-		return r, err
-	}
-	if err = returnRecoveryUniqueHost(*owner); err != nil {
 		return r, err
 	}
 	logPrefix, logRaw, err := loop.ReadReturnRecoveryPrefix(filepath.Join(owner.GenerationDir, "host.log"), nil)
 	if err != nil {
 		return r, err
 	}
-	if err = loop.QualifyReturnDialPrefix(logRaw, original, returnRecoverySource(controller)); err != nil {
+	if err = validateReturnRecoveryDial(*owner, original, controller, frameRaw, logRaw); err != nil {
 		return r, err
 	}
 	if _, _, err = loop.ReadReturnRecoveryPrefix(frame.Path, &frame); err != nil {
@@ -180,15 +206,7 @@ func prepareReturnRecovery(project, requestPath, orderID, eventID, framePath str
 }
 
 func validateReturnRecoveryFrame(raw []byte, original loop.ReturnRecoveryEvent, owner hostOwnerBinding) error {
-	var frame struct {
-		Owner string `json:"owner"`
-		Request config.RuntimeSource `json:"request"`
-		Inner struct {
-			Native struct { Owner *hostOwnerBinding `json:"owner_binding"` } `json:"native_host"`
-			Order state.OrderNode `json:"order"`
-			Reviews map[string]state.PendingReviewNode `json:"pending_reviews"`
-		} `json:"inner"`
-	}
+	var frame returnRecoveryFrame
 	if json.Unmarshal(raw, &frame) != nil || frame.Owner != "soodles.loop" || frame.Request != original.Subject.Request || frame.Inner.Native.Owner == nil {
 		return fmt.Errorf("original native event frame unavailable")
 	}
@@ -200,27 +218,96 @@ func validateReturnRecoveryFrame(raw []byte, original loop.ReturnRecoveryEvent, 
 	if frame.Inner.Order.OrderID != p.OrderID || len(frame.Inner.Order.Stages) != 1 {
 		return fmt.Errorf("original event frame order differs")
 	}
-	count, returns := 0, 0
-	for _, a := range frame.Inner.Order.Stages[0].Attempts {
-		if a.ReturnHandoff != nil { returns++ }
-		if a.AttemptID == p.AttemptID && a.SessionID == p.SessionID && a.ReturnHandoff != nil && a.ReturnHandoff.EventID == p.EventID && *a.ReturnHandoff == *original.Attempt.ReturnHandoff && a.CompletedAt.Equal(original.Attempt.CompletedAt) && a.StartedAt.Equal(original.Attempt.StartedAt) { count++ }
+	count, index := 0, -1
+	for i, a := range frame.Inner.Order.Stages[0].Attempts {
+		if a.AttemptID == p.AttemptID && a.SessionID == p.SessionID && !a.ReturnHandoffUnattempted && a.ReturnHandoff != nil && a.ReturnHandoff.EventID == p.EventID && *a.ReturnHandoff == *original.Attempt.ReturnHandoff && a.CompletedAt.Equal(original.Attempt.CompletedAt) && a.StartedAt.Equal(original.Attempt.StartedAt) {
+			count++
+			index = i
+		}
 	}
 	review, ok := frame.Inner.Reviews[p.OrderID]
-	if count != 1 || returns != 1 || !ok || review.SessionID != p.SessionID || review.OrderID != p.OrderID || review.StageIndex != 0 || review.ReturnHandoff == nil || *review.ReturnHandoff != *original.Attempt.ReturnHandoff || review.WorktreeName != original.Review.WorktreeName || review.WorktreePath != original.Review.WorktreePath {
+	if count != 1 {
+		return fmt.Errorf("original unique event frame differs")
+	}
+	if !ok || review.SessionID != p.SessionID {
+		var archive struct {
+			Binding struct {
+				Attempt      int    `json:"attempt"`
+				AttemptID    string `json:"attempt_id"`
+				SessionID    string `json:"session_id"`
+				Reason       string `json:"reason"`
+				WorktreeName string `json:"worktree_name"`
+				WorktreePath string `json:"worktree_path"`
+			} `json:"binding"`
+			Review state.PendingReviewNode `json:"review"`
+		}
+		stage := frame.Inner.Order.Stages[0]
+		framed := stage.Attempts[index]
+		if json.Unmarshal(stage.Extra["request_changes_requeued"], &archive) != nil || framed.Status != state.AttemptFailed || framed.Error != original.Attempt.Error || archive.Binding.Attempt != index || archive.Binding.AttemptID != p.AttemptID || archive.Binding.SessionID != p.SessionID || archive.Binding.Reason != original.Attempt.Error || archive.Binding.WorktreeName != original.Attempt.WorktreeName || archive.Binding.WorktreePath != original.Review.WorktreePath || index+1 >= len(stage.Attempts) {
+			return fmt.Errorf("original archived event frame differs")
+		}
+		review = archive.Review
+	}
+	if review.SessionID != p.SessionID || review.OrderID != p.OrderID || review.StageIndex != 0 || review.ReturnHandoff == nil || *review.ReturnHandoff != *original.Attempt.ReturnHandoff || review.WorktreeName != original.Review.WorktreeName || review.WorktreePath != original.Review.WorktreePath {
 		return fmt.Errorf("original unique event/review frame differs")
 	}
 	return nil
 }
-func returnRecoveryUniqueHost(owner hostOwnerBinding) error {
+func validateReturnRecoveryDial(owner hostOwnerBinding, original loop.ReturnRecoveryEvent, controller stoppedMergeRef, frameRaw, logRaw []byte) error {
+	legacy, err := loop.QualifyReturnDialPrefix(logRaw, original, returnRecoverySource(controller))
+	if err != nil || !legacy {
+		return err
+	}
+	var frame returnRecoveryFrame
+	if err = json.Unmarshal(frameRaw, &frame); err != nil {
+		return err
+	}
+	returns := 0
+	for _, attempt := range frame.Inner.Order.Stages[0].Attempts {
+		if attempt.ReturnHandoff != nil {
+			returns++
+		}
+	}
+	if returns != 1 {
+		return fmt.Errorf("legacy return frame has ambiguous events")
+	}
 	pool, err := readHostPool(owner.HostRoot)
 	if err != nil {
 		return err
 	}
 	for id, other := range pool.Owners {
-		if id == owner.Current.RequestID { continue }
+		if id == owner.Current.RequestID {
+			continue
+		}
 		for _, receipt := range append([]hostReceipt{other.Original, other.Current}, other.Previous...) {
 			if receipt.HostInstanceID == owner.Current.HostInstanceID {
-				return fmt.Errorf("legacy return log has ambiguous generation producers")
+				ref := stoppedMergeRef{Path: receipt.ConfigPath, SHA256: receipt.ConfigSHA256}
+				if err = stoppedMergeRead(ref, nil); err != nil {
+					return err
+				}
+				cfg, diagnostics, loadErr := config.Load(ref.Path)
+				if loadErr != nil || !diagnostics.CanSpawn() {
+					return fmt.Errorf("legacy return producer config unavailable")
+				}
+				if cfg.Runtime.ReturnHandoff.Path == "" && cfg.Runtime.ReturnHandoff.SHA256 == "" {
+					continue
+				}
+				var target struct {
+					Schema   int                  `json:"schema"`
+					Binding  config.RuntimeSource `json:"binding"`
+					Endpoint string               `json:"endpoint"`
+					Producer config.RuntimeSource `json:"producer"`
+					Host     string               `json:"host_instance_id"`
+				}
+				if err = stoppedMergeRead(stoppedMergeRef{Path: cfg.Runtime.ReturnHandoff.Path, SHA256: cfg.Runtime.ReturnHandoff.SHA256}, &target); err != nil {
+					return err
+				}
+				if target.Schema != 1 || target.Host != receipt.HostInstanceID || target.Producer.Path != receipt.BinaryPath || target.Producer.SHA256 != receipt.BinarySHA256 || !filepath.IsAbs(target.Endpoint) || target.Endpoint == original.Endpoint {
+					return fmt.Errorf("legacy return log has ambiguous endpoint producers")
+				}
+				if err = stoppedMergeRead(stoppedMergeRef{Path: target.Binding.Path, SHA256: target.Binding.SHA256}, nil); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -262,7 +349,7 @@ func validateReturnRecoveryPlan(p returnRecoveryPlan) error {
 	if err != nil {
 		return err
 	}
-	if err = loop.QualifyReturnDialPrefix(log, event, returnRecoverySource(p.Controller)); err != nil {
+	if err = validateReturnRecoveryDial(p.Host, event, p.Controller, frame, log); err != nil {
 		return err
 	}
 	owner, err := readHostOwnerBinding(p.Host.Request.Path)
@@ -271,9 +358,6 @@ func validateReturnRecoveryPlan(p returnRecoveryPlan) error {
 	}
 	if owner.Request != p.Host.Request || owner.ExecutionBinary != p.Host.ExecutionBinary || owner.GenerationDir != p.Host.GenerationDir || owner.Current.ContextID != p.Host.Current.ContextID || owner.Current.HostInstanceID != p.Host.Current.HostInstanceID || owner.Current.ProjectDir != p.Project {
 		return fmt.Errorf("original return Host changed")
-	}
-	if err = returnRecoveryUniqueHost(*owner); err != nil {
-		return err
 	}
 	return nil
 }
@@ -359,10 +443,11 @@ func operateReturnRecovery(project, planPath, expected, operation string, barrie
 	}
 	intentPath, receiptPath := filepath.Join(dir, "intent.json"), filepath.Join(dir, "receipt.json")
 	var prior returnRecoveryIntent
+	var intentRef stoppedMergeRef
 	intentExists := false
 	if _, err = os.Lstat(intentPath); err == nil {
 		intentExists = true
-		if _, err = loopruntime.ReadSessionReadbackFile(intentPath, &prior); err != nil {
+		if intentRef, err = loopruntime.ReadSessionReadbackFile(intentPath, &prior); err != nil {
 			return r, err
 		}
 		if prior.Schema != 1 || prior.Plan != ref || prior.Subject != p.Event.Subject || prior.Controller != p.Controller || prior.Readback.Status != "absent" || loop.ValidateReturnCustody(prior.Readback, prior.Subject, returnRecoverySource(p.Controller)) != nil {
@@ -380,11 +465,11 @@ func operateReturnRecovery(project, planPath, expected, operation string, barrie
 		if !intentExists {
 			return r, fmt.Errorf("original return receipt lacks intent")
 		}
-		var receipt struct { Intent returnRecoveryIntent `json:"intent"`; Status string `json:"status"` }
+		var receipt returnRecoveryReceipt
 		if _, err = loopruntime.ReadSessionReadbackFile(receiptPath, &receipt); err != nil {
 			return r, err
 		}
-		if !reflect.DeepEqual(receipt.Intent, prior) || receipt.Status != "acknowledged" {
+		if receipt.Intent != intentRef || receipt.Status != "acknowledged" {
 			return r, fmt.Errorf("original return receipt differs")
 		}
 		if operation == "continue" {
@@ -449,7 +534,7 @@ func operateReturnRecovery(project, planPath, expected, operation string, barrie
 			return r, err
 		}
 	}
-	if _, err = stoppedMergeSave(intentPath, intent); err != nil {
+	if intentRef, err = stoppedMergeSave(intentPath, intent); err != nil {
 		return r, err
 	}
 	if barrier != nil {
@@ -466,7 +551,7 @@ func operateReturnRecovery(project, planPath, expected, operation string, barrie
 			return r, err
 		}
 	}
-	if _, err = stoppedMergeSave(receiptPath, struct { Intent returnRecoveryIntent `json:"intent"`; Status string `json:"status"` }{intent, "acknowledged"}); err != nil {
+	if _, err = stoppedMergeSave(receiptPath, returnRecoveryReceipt{intentRef, "acknowledged"}); err != nil {
 		return r, err
 	}
 	if barrier != nil {

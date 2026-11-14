@@ -97,7 +97,7 @@ func (f recoveryEventFixture) historical(t *testing.T) (reducer.DurableSnapshot,
 func TestReturnRecoveryOriginalProducerAndHistoricalAttempt(t *testing.T) {
 	f := newRecoveryEventFixture(t)
 	if f.event.Subject.Packet.EventID != "6" || f.event.Subject.Packet.AttemptID != dispatchAttemptID(f.cook.orderID, 0, 0) { t.Fatal("original packet identity changed") }
-	if err := QualifyReturnDialPrefix(f.log, f.event, f.event.Subject.Packet.Producer); err != nil { t.Fatal(err) }
+	if legacy, err := QualifyReturnDialPrefix(f.log, f.event, f.event.Subject.Packet.Producer); err != nil || legacy { t.Fatal("original typed producer proof missing",legacy,err) }
 	s, history := f.historical(t)
 	before, _ := json.Marshal(s)
 	e, err := f.materialize(t, s, history, "6")
@@ -124,7 +124,7 @@ func TestReturnRecoveryOriginalProducerAndHistoricalAttempt(t *testing.T) {
 }
 func TestReturnRecoveryDialEvidenceDiscriminators(t *testing.T) {
 	f := newRecoveryEventFixture(t)
-	for _, mode := range []string{"missing", "foreign-endpoint", "write", "ack", "lost-ack", "duplicate", "truncated", "time", "tuple", "source", "phase"} {
+	for _, mode := range []string{"missing", "foreign-endpoint", "write", "ack", "lost-ack", "duplicate", "truncated", "time", "tuple", "source", "phase", "producer-path", "order", "host", "binding", "missing-source"} {
 		t.Run(mode, func(t *testing.T) {
 			raw := append([]byte(nil), f.log...); e := f.event
 			switch mode {
@@ -139,14 +139,19 @@ func TestReturnRecoveryDialEvidenceDiscriminators(t *testing.T) {
 			case "tuple": e.Subject.Packet.SessionID = "foreign-session"
 			case "source": e.Subject.Packet.Producer.SHA256 = strings.Repeat("1", 64)
 			case "phase": raw = bytes.ReplaceAll(raw, []byte("dial_before_encode"), []byte("ack_unknown"))
+			case "producer-path": e.Subject.Packet.Producer.Path = "/foreign-producer"
+			case "order": e.Subject.Packet.OrderID = "foreign-order"
+			case "host": e.Subject.Packet.HostInstanceID = "foreign-host"
+			case "binding": e.Subject.Packet.Binding.SHA256 = strings.Repeat("e",64)
+			case "missing-source": raw = bytes.ReplaceAll(raw, []byte("producer_sha256="+e.Subject.Packet.Producer.SHA256), []byte("unbound_source=unknown"))
 			}
-			if err := QualifyReturnDialPrefix(raw, e, f.event.Subject.Packet.Producer); err == nil { t.Fatal("uncertain transport qualified", mode) }
+			if _, err := QualifyReturnDialPrefix(raw, e, f.event.Subject.Packet.Producer); err == nil { t.Fatal("uncertain transport qualified", mode) }
 		})
 	}
 	legacy := []byte(fmt.Sprintf("time=%s level=WARN msg=%q error=%q\n", f.event.Attempt.CompletedAt.Format(time.RFC3339Nano), "return handoff unknown; original owner readback required", "dial unix "+f.event.Endpoint+": connect: connection refused"))
-	if QualifyReturnDialPrefix(legacy, f.event, f.event.Subject.Packet.Producer) == nil { t.Fatal("unsupported legacy implementation qualified") }
+	if _, err := QualifyReturnDialPrefix(legacy, f.event, f.event.Subject.Packet.Producer); err == nil { t.Fatal("unsupported legacy implementation qualified") }
 	e := f.event; e.Subject.Packet.Producer.SHA256 = "d990ef416ffdfae2d1891f7bc96d22c478148788599a9282d87bf8ae8b71da56"
-	if err := QualifyReturnDialPrefix(legacy, e, f.event.Subject.Packet.Producer); err != nil { t.Fatal("inspected legacy source refused", err) }
+	if unscoped, err := QualifyReturnDialPrefix(legacy, e, f.event.Subject.Packet.Producer); err != nil || !unscoped { t.Fatal("inspected legacy source requires endpoint/frame exclusion",unscoped,err) }
 }
 func TestReturnRecoveryProtectedGrowingPrefix(t *testing.T) {
 	f := newRecoveryEventFixture(t)

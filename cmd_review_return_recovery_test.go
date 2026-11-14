@@ -17,10 +17,12 @@ import (
 	"time"
 
 	"github.com/poteto/noodle/config"
+	"github.com/poteto/noodle/event"
 	"github.com/poteto/noodle/internal/reducer"
 	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/internal/statever"
 	"github.com/poteto/noodle/loop"
+	loopruntime "github.com/poteto/noodle/runtime"
 )
 
 type returnRecoveryFixture struct {
@@ -82,7 +84,7 @@ func newReturnRecoveryFixture(t *testing.T) *returnRecoveryFixture {
 	stoppedTestBytes(t, filepath.Join(f.root,".noodle","control-ack.ndjson"), []byte("original ACK history\n"))
 	f.frame = filepath.Join(base,"frame.json")
 	stoppedTestPut(t, f.frame, map[string]any{"owner":"soodles.loop", "request":returnRecoverySource(request), "inner":map[string]any{"native_host":map[string]any{"owner_binding":owner}, "order":order, "pending_reviews":map[string]state.PendingReviewNode{"original":review}}})
-	line := fmt.Sprintf("time=%s level=WARN msg=%q error=%q transport_phase=dial_before_encode event_id=6 attempt_id=%s session_id=%s\n", at.Add(time.Millisecond).Format(time.RFC3339Nano), "return handoff unknown; original owner readback required", "dial unix "+f.endpoint+": connect: connection refused", attempt.AttemptID, attempt.SessionID)
+	line := fmt.Sprintf("time=%s level=WARN msg=%q error=%q transport_phase=dial_before_encode event_id=6 attempt_id=%s session_id=%s endpoint=%q order_id=%s stage_index=0 host_instance_id=%s producer_path=%q producer_sha256=%s binding_path=%q binding_sha256=%s\n", at.Add(time.Millisecond).Format(time.RFC3339Nano), "return handoff unknown; original owner readback required", "dial unix "+f.endpoint+": connect: connection refused", attempt.AttemptID, attempt.SessionID, f.endpoint, "original", id, executor.Path, executor.SHA256, binding.Path, binding.SHA256)
 	stoppedTestBytes(t, filepath.Join(f.generation,"host.log"), []byte(line))
 	raw, _ := json.Marshal(snapshot)
 	f.original, err = loop.MaterializeReturnRecovery(raw,nil,"original","6",returnRecoverySource(descriptor),returnRecoverySource(request),id,returnRecoverySource(executor))
@@ -92,7 +94,7 @@ func newReturnRecoveryFixture(t *testing.T) *returnRecoveryFixture {
 }
 func (f *returnRecoveryFixture) prepare() returnRecoveryResult {
 	f.t.Helper()
-	r, err := prepareReturnRecovery(f.root, f.request,"original","6",f.frame)
+	r, err := prepareReturnRecovery(f.root, f.frame)
 	if err != nil { f.t.Fatal(err) }
 	f.plan = r.Plan
 	return r
@@ -133,7 +135,7 @@ func (f *returnRecoveryFixture) serve(receiver *returnRecoveryReceiver) {
 			if request.Operation == "worker_return_custody_readback" {
 				receiver.reads++
 				status := receiver.status; if receiver.custodied { status = "custodied" }
-				result := loop.ReturnCustodyReadback{Operation:request.Operation, Schema:1, Owner:"soodles.loop", Status:status, ConsumerQualified:receiver.qualified, Subject:request.Subject, ActualController:request.ActualController, OriginalTargetReceiver:json.RawMessage(`{"instance":"original"}`), ActualCurrentConsumer:json.RawMessage(fmt.Sprintf(`{"instance":%q}`,receiver.consumer)), Effects:[]string{}}
+				result := loop.ReturnCustodyReadback{Operation:request.Operation, Schema:1, Owner:"soodles.loop", Status:status, ConsumerQualified:receiver.qualified, Subject:request.Subject, ActualController:request.ActualController, OriginalTargetReceiver:json.RawMessage(`{"instance":"original"}`), ActualCurrentConsumer:json.RawMessage(fmt.Sprintf(`{"instance":%q,"native":{"connection":{"id":"same-Main"}}}`,receiver.consumer)), Effects:[]string{}}
 				if status == "custodied" { result.Custody = &loop.ReturnCustody{Registry:config.RuntimeSource{Path:filepath.Join(f.host,"isolated-custody.json"),SHA256:strings.Repeat("c",64)}, ReceiverInstance:receiver.consumer, Event:f.original.Subject.Packet} }
 				_ = json.NewEncoder(c).Encode(result)
 				if receiver.replaceOnRead { receiver.consumer = "fresh-independently-qualified"; receiver.qualified = !receiver.refuseReplacement; receiver.replaceOnRead = false }
@@ -247,12 +249,98 @@ func TestReturnRecoveryCLIProducerNext(t *testing.T) {
 	f:=newReturnRecoveryFixture(t)
 	app:=&App{projectDir:f.root}
 	cmd:=newReviewCmd(app);var output bytes.Buffer;cmd.SetOut(&output);cmd.SetErr(&output)
-	cmd.SetArgs([]string{"prepare-return-recovery",f.request,"original","6",f.frame})
+	cmd.SetArgs([]string{"prepare-return-recovery",f.frame})
 	if err:=cmd.Execute();err!=nil {t.Fatal(err,output.String())}
 	var result returnRecoveryResult;if err:=json.Unmarshal(output.Bytes(),&result);err!=nil {t.Fatal(err)}
 	want:=[]string{result.ActualController.Path,"--project-dir",f.root,"review","continue-return-recovery",result.Plan.Path,"--expected-version",result.Plan.SHA256}
 	raw,_:=json.Marshal(result.Next["argv"]);var got []string;_ = json.Unmarshal(raw,&got)
 	if !reflect.DeepEqual(got,want) {t.Fatal("producer next differs",got,want)}
+	if result.Subject != f.original.Subject || result.Producer != f.original.Subject.Packet.Producer || result.ActualController == f.owner.ExecutionBinary || len(result.Effects) != 0 { t.Fatal("first prepare did not derive original subject/controller",result) }
+	f.unchanged()
+}
+
+func TestReturnRecoveryCLIHistoricalReadback(t *testing.T) {
+	for _, mode := range []string{"retained-frame", "archived-frame", "archived-inconsistent-attempt", "missing-archive", "missing-history", "current-attempt", "ambiguous-event", "foreign-request"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newReturnRecoveryFixture(t)
+			snapshotPath := filepath.Join(f.root,".noodle","state.snapshot.json")
+			var snapshot reducer.DurableSnapshot
+			if _, err := loopruntime.ReadSessionReadbackFile(snapshotPath,&snapshot); err != nil { t.Fatal(err) }
+			order := snapshot.State.Orders["original"]
+			attempt := order.Stages[0].Attempts[0]
+			attempt.Status, attempt.Error = state.AttemptFailed, "changes requested: original revision"
+			order.Stages[0].Attempts[0] = attempt
+			review := snapshot.State.PendingReviews[order.OrderID]
+			archive, err := json.Marshal(map[string]any{"binding":map[string]any{"attempt":0, "attempt_id":attempt.AttemptID, "session_id":attempt.SessionID, "reason":attempt.Error, "worktree_name":attempt.WorktreeName, "worktree_path":review.WorktreePath}, "review":review})
+			if err != nil { t.Fatal(err) }
+			order.Stages[0].Extra = map[string]json.RawMessage{"request_changes_requeued":archive}
+			order.Stages[0].Attempts = append(order.Stages[0].Attempts,state.AttemptNode{AttemptID:"original-0-attempt-1", SessionID:"running-session-1", Status:state.AttemptRunning, StartedAt:attempt.CompletedAt.Add(time.Second), ReturnHandoffUnattempted:true})
+			order.Stages[0].Status = state.StageRunning
+			snapshot.State.Orders[order.OrderID] = order
+			delete(snapshot.State.PendingReviews,order.OrderID)
+			snapshot.State.LastEventID = "9"
+			stageIndex := 0
+			mistake := loop.AgentMistakeEnvelope{FailureClass:"agent_mistake", Owner:"cook_agent", Scope:"order", Recoverability:"recoverable", CookReason:loop.CookMistakeReasonRequestChanges, OrderID:order.OrderID, StageIndex:&stageIndex}
+			failure := loop.EventFailureMetadata{FailureProjection:loop.FailureProjection{Class:mistake.FailureClass, Owner:mistake.Owner, Scope:mistake.Scope, Recoverability:mistake.Recoverability}, CycleClass:loop.CycleFailureClassOrderHard, OrderClass:loop.OrderFailureClassStageTerminal}
+			var history bytes.Buffer
+			for i, entry := range []struct { kind event.LoopEventType; payload any }{
+				{event.LoopEventStageFailed,loop.StageFailedPayload{OrderID:order.OrderID, StageIndex:0, SessionID:&attempt.SessionID, Reason:attempt.Error, AgentMistake:&mistake, Failure:&failure}},
+				{event.LoopEventOrderFailed,loop.OrderFailedPayload{OrderID:order.OrderID, Reason:attempt.Error, AgentMistake:&mistake, Failure:&failure}},
+				{event.LoopEventOrderRequeued,loop.OrderRequeuedPayload{OrderID:order.OrderID}},
+			} {
+				raw, err := json.Marshal(entry.payload)
+				if err != nil { t.Fatal(err) }
+				if err = json.NewEncoder(&history).Encode(event.LoopEvent{Seq:uint64(i+7), Type:entry.kind, At:attempt.CompletedAt.Add(time.Second), Payload:raw}); err != nil { t.Fatal(err) }
+			}
+			var frame returnRecoveryFrame
+			if _, err = loopruntime.ReadSessionReadbackFile(f.frame,&frame); err != nil { t.Fatal(err) }
+			if strings.HasPrefix(mode,"archived-") {
+				raw, err := json.Marshal(order)
+				if err != nil { t.Fatal(err) }
+				if err = json.Unmarshal(raw,&frame.Inner.Order); err != nil { t.Fatal(err) }
+				frame.Inner.Reviews = snapshot.State.PendingReviews
+			}
+			switch mode {
+			case "archived-inconsistent-attempt": frame.Inner.Order.Stages[0].Attempts[0].Status = state.AttemptCompleted
+			case "missing-archive": delete(order.Stages[0].Extra,"request_changes_requeued")
+			case "missing-history": history.Reset()
+			case "current-attempt": frame.Inner.Order.Stages[0].Attempts = []state.AttemptNode{order.Stages[0].Attempts[1]}
+			case "ambiguous-event": frame.Inner.Order.Stages[0].Attempts = append(frame.Inner.Order.Stages[0].Attempts,frame.Inner.Order.Stages[0].Attempts[0])
+			case "foreign-request": frame.Request.SHA256 = strings.Repeat("f",64)
+			}
+			stoppedTestPut(t,snapshotPath,snapshot)
+			historyPath := filepath.Join(f.root,".noodle","loop-events.ndjson")
+			stoppedTestBytes(t,historyPath,history.Bytes())
+			stoppedTestPut(t,f.frame,frame)
+			for _, path := range []string{snapshotPath,historyPath,f.frame} { f.before[path],err = os.ReadFile(path); if err != nil { t.Fatal(err) } }
+			receiver := &returnRecoveryReceiver{status:"absent", qualified:true, consumer:"fresh-qualified"}
+			f.serve(receiver)
+			cmd := newReviewCmd(&App{projectDir:f.root})
+			var output bytes.Buffer
+			cmd.SetOut(&output); cmd.SetErr(&output)
+			cmd.SetArgs([]string{"prepare-return-recovery",f.frame})
+			err = cmd.Execute()
+			if mode != "retained-frame" && mode != "archived-frame" {
+				if err == nil { t.Fatal("incomplete historical producer accepted",mode,output.String()) }
+				f.unchanged()
+				return
+			}
+			if err != nil { t.Fatal("original historical readback refused",mode,err,output.String()) }
+			var result returnRecoveryResult
+			if err = json.Unmarshal(output.Bytes(),&result); err != nil { t.Fatal(err) }
+			if result.Subject != f.original.Subject || result.Subject.Packet.EventID != "6" || result.Subject.Packet.AttemptID != attempt.AttemptID { t.Fatal("producer selected running attempt",result) }
+			argvRaw, err := json.Marshal(result.Next["argv"])
+			if err != nil { t.Fatal(err) }
+			var argv []string
+			if err = json.Unmarshal(argvRaw,&argv); err != nil || len(argv) != 8 { t.Fatal("missing producer continuation",err,argv) }
+			cmd = newReviewCmd(&App{projectDir:f.root}); output.Reset(); cmd.SetOut(&output); cmd.SetErr(&output); cmd.SetArgs(argv[4:])
+			if err = cmd.Execute(); err != nil { t.Fatal("producer continuation refused",err,output.String()) }
+			if err = json.Unmarshal(output.Bytes(),&result); err != nil || result.Status != "acknowledged" || result.MainWake != "NOT_OBSERVED" || result.Acceptance != "NOT_RUN" { t.Fatal("transport claimed native completion",result,err) }
+			receiver.mu.Lock(); packets, events := receiver.packets, receiver.events; receiver.mu.Unlock()
+			if packets != 1 || events != 1 { t.Fatal("historical event was replayed",packets,events) }
+			f.unchanged()
+		})
+	}
 }
 func TestReturnRecoverySourceQualificationRefusesDrift(t *testing.T) {
 	for _, mode:=range []string{"missing-log","foreign-endpoint","duplicate-log","truncated-log","write-after","lost-ACK","unsupported-producer","frame-source","frame-tuple","frame-host","descriptor-source","request-source","foreign-generation-owner"} {
@@ -273,10 +361,10 @@ func TestReturnRecoverySourceQualificationRefusesDrift(t *testing.T) {
 			case "frame-source": stoppedTestBytes(t,f.frame,[]byte("{}"))
 			case "frame-tuple": frame,readErr:=os.ReadFile(f.frame);if readErr!=nil {t.Fatal(readErr)};stoppedTestBytes(t,f.frame,bytes.ReplaceAll(frame,[]byte("original-session"),[]byte("attempt1-session")))
 			case "frame-host": frame,readErr:=os.ReadFile(f.frame);if readErr!=nil {t.Fatal(readErr)};stoppedTestBytes(t,f.frame,bytes.ReplaceAll(frame,[]byte(f.owner.Current.HostInstanceID),[]byte(strings.Repeat("d",32))))
-			case "foreign-generation-owner": pool,readErr:=readHostPool(f.host);if readErr!=nil {t.Fatal(readErr)};pool.Owners["foreign"]=hostTaskOwner{Original:f.owner.Current};stoppedTestPut(t,filepath.Join(f.host,"pool.json"),pool)
+			case "foreign-generation-owner": pool,readErr:=readHostPool(f.host);if readErr!=nil {t.Fatal(readErr)};pool.Owners["foreign"]=hostTaskOwner{Original:f.owner.Current};stoppedTestPut(t,filepath.Join(f.host,"pool.json"),pool);stoppedTestBytes(t,logPath,append(raw,bytes.ReplaceAll(raw,[]byte(f.original.Subject.Packet.Producer.SHA256),[]byte(strings.Repeat("e",64)))...))
 			}
 			if err!=nil {t.Fatal(err)}
-			r,err:=prepareReturnRecovery(f.root,f.request,"original","6",f.frame)
+			r,err:=prepareReturnRecovery(f.root,f.frame)
 			if err==nil || r.Status!="unknown" || len(r.Effects)!=0 {t.Fatal("unqualified source permitted",mode,r,err)}
 		})
 	}
@@ -326,4 +414,86 @@ func TestReturnRecoveryOriginalStorageAlias(t *testing.T) {
 	r,err:=operateReturnRecovery(f.root,f.plan.Path,f.plan.SHA256,"continue",nil)
 	if err!=nil || r.Status!="acknowledged" {t.Fatal("bound runtime alias refused",r,err)}
 	f.unchanged()
+}
+
+func TestReturnRecoveryTwoContextsShareOriginalHost(t *testing.T) {
+	for _, mode := range []string{"distinct-endpoint", "same-endpoint-missing-source", "same-endpoint-foreign-source"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newReturnRecoveryFixture(t)
+			pool, err := readHostPool(f.host)
+			if err != nil { t.Fatal(err) }
+			other := f.owner.Current
+			other.RequestID, other.ContextID = "other-request", "other-context"
+			other.ProjectDir = filepath.Join(f.host, "other-project")
+			if err = os.MkdirAll(other.ProjectDir,0700); err != nil { t.Fatal(err) }
+			endpoint := filepath.Join(f.host, "other.sock")
+			if mode != "distinct-endpoint" { endpoint = f.endpoint }
+			request := stoppedTestPut(t, filepath.Join(f.host,"other-request.json"),map[string]any{"schema":1,"fixture":"isolated-other-request"})
+			binding := stoppedTestPut(t, filepath.Join(f.host, "other-binding.json"), map[string]any{"schema":1, "request":returnRecoverySource(request), "goal":"isolated-Q12-control", "main":map[string]string{"threadId":"same-Main","hostId":"local"}, "connection_instance":"other-original", "consumer_revision":"v1", "producer":f.original.Subject.Packet.Producer, "host_instance_id":other.HostInstanceID})
+			descriptor := stoppedTestPut(t, filepath.Join(f.host, "other-descriptor.json"), map[string]any{"schema":1, "binding":binding, "endpoint":endpoint, "producer":f.original.Subject.Packet.Producer, "host_instance_id":other.HostInstanceID})
+			other.ConfigPath = filepath.Join(f.host, "other.toml")
+			stoppedTestBytes(t, other.ConfigPath, []byte(fmt.Sprintf("mode=\"manual\"\n[runtime]\nadmitted_orders=[\"other\"]\n[runtime.return_handoff]\npath=%q\nsha256=%q\n", descriptor.Path, descriptor.SHA256)))
+			cfg, err := hostReadbackBinaryRef(other.ConfigPath)
+			if err != nil { t.Fatal(err) }
+			other.ConfigSHA256 = cfg.SHA256
+			pool.Owners[other.RequestID] = hostTaskOwner{Original:other, Current:other, State:"owned", EnvironmentSHA:"other-fixture"}
+			stoppedTestPut(t, filepath.Join(f.host,"pool.json"), pool)
+			stoppedTestPut(t, filepath.Join(f.generation,"receipts.json"), []hostReceipt{f.owner.Current, other})
+			admission := filepath.Join(f.host,"other-host-request.json")
+			stoppedTestPut(t,admission,hostRequestBinding{Schema:1, Operation:"attach", ProjectDir:other.ProjectDir, HostDir:f.host, RequestID:other.RequestID, ConfigPath:other.ConfigPath, ConfigSHA256:other.ConfigSHA256, Mode:other.Mode, BinarySHA256:other.BinarySHA256, EnvironmentSHA256:"other-fixture", Status:"accepted"})
+			otherOwner, err := readHostOwnerBinding(admission)
+			if err != nil || otherOwner.Current.HostInstanceID != f.owner.Current.HostInstanceID || otherOwner.Current.ContextID == f.owner.Current.ContextID { t.Fatal("second original context is not independently bound on the same Host",otherOwner,err) }
+			logPath := filepath.Join(f.generation,"host.log")
+			raw, err := os.ReadFile(logPath)
+			if err != nil { t.Fatal(err) }
+			foreign := bytes.ReplaceAll(raw, []byte(f.endpoint), []byte(endpoint))
+			foreign = bytes.ReplaceAll(foreign, []byte("original-session"), []byte("other-session"))
+			foreign = bytes.ReplaceAll(foreign, []byte("attempt_id=original-0-attempt-0"), []byte("attempt_id=other-0-attempt-0"))
+			foreign = bytes.ReplaceAll(foreign, []byte("order_id=original"), []byte("order_id=other"))
+			foreign = bytes.ReplaceAll(foreign, []byte(f.original.Subject.Packet.Binding.Path), []byte(binding.Path))
+			foreign = bytes.ReplaceAll(foreign, []byte(f.original.Subject.Packet.Binding.SHA256), []byte(binding.SHA256))
+			if mode == "same-endpoint-missing-source" { foreign = []byte(fmt.Sprintf("time=%s level=WARN msg=%q error=%q\n",f.original.Attempt.CompletedAt.Format(time.RFC3339Nano),"return handoff unknown; original owner readback required","dial unix "+endpoint+": connect: connection refused")) }
+			if mode == "same-endpoint-foreign-source" { foreign = bytes.ReplaceAll(foreign, []byte(f.original.Subject.Packet.Producer.SHA256), []byte(strings.Repeat("e",64))) }
+			stoppedTestBytes(t, logPath, append(raw,foreign...))
+			for _, path := range []string{request.Path,binding.Path,descriptor.Path,other.ConfigPath,admission,filepath.Join(f.host,"pool.json"),filepath.Join(f.generation,"receipts.json")} { f.before[path],err = os.ReadFile(path); if err != nil { t.Fatal(err) } }
+			r, err := prepareReturnRecovery(f.root, f.frame)
+			if mode == "distinct-endpoint" {
+				if err != nil || r.Status != "prepared" || r.Subject != f.original.Subject { t.Fatal("normal multi-context Host refused",r,err) }
+			} else if err == nil || r.Status != "unknown" { t.Fatal("ambiguous endpoint/source qualified",r,err) }
+			if len(r.Effects) != 0 { t.Fatal("prepare performed effects",r) }
+			f.unchanged()
+		})
+	}
+}
+
+func TestReturnRecoveryReceiptBindsImmutableIntent(t *testing.T) {
+	for _, mode := range []string{"nested-consumer", "intent-bytes", "subject", "controller", "consumer", "receipt-intent"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newReturnRecoveryFixture(t); f.prepare()
+			receiver := &returnRecoveryReceiver{status:"absent", qualified:true, consumer:"current"}
+			f.serve(receiver)
+			if _, err := operateReturnRecovery(f.root,f.plan.Path,f.plan.SHA256,"continue",nil); err != nil { t.Fatal(err) }
+			intentPath := filepath.Join(filepath.Dir(f.plan.Path),"intent.json")
+			receiptPath := filepath.Join(filepath.Dir(f.plan.Path),"receipt.json")
+			var intent returnRecoveryIntent
+			intentRef, err := loopruntime.ReadSessionReadbackFile(intentPath,&intent)
+			if err != nil { t.Fatal(err) }
+			var receipt struct { Intent stoppedMergeRef `json:"intent"`; Status string `json:"status"` }
+			if _, err = loopruntime.ReadSessionReadbackFile(receiptPath,&receipt); err != nil { t.Fatal(err) }
+			if receipt.Intent != intentRef { t.Fatal("receipt does not bind exact immutable intent",receipt,intentRef) }
+			switch mode {
+			case "intent-bytes": raw, readErr := os.ReadFile(intentPath); if readErr != nil { t.Fatal(readErr) }; stoppedTestBytes(t,intentPath,append(raw,' '))
+			case "subject": intent.Subject.Packet.SessionID = "foreign"; stoppedTestPut(t,intentPath,intent)
+			case "controller": intent.Controller.Path = "/foreign"; stoppedTestPut(t,intentPath,intent)
+			case "consumer": intent.Readback.ActualCurrentConsumer = json.RawMessage(`{"instance":"foreign"}`); stoppedTestPut(t,intentPath,intent)
+			case "receipt-intent": receipt.Intent.Path = f.frame; stoppedTestPut(t,receiptPath,receipt)
+			}
+			r, err := operateReturnRecovery(f.root,f.plan.Path,f.plan.SHA256,"continue",nil)
+			if mode == "nested-consumer" {
+				if err != nil || r.Status != "custodied" { t.Fatal("indented consumer metadata rejected same intent",r,err) }
+			} else if err == nil { t.Fatal("changed intent accepted",mode,r) }
+			receiver.mu.Lock(); packets, events := receiver.packets, receiver.events; receiver.mu.Unlock()
+			if packets != 1 || events != 1 { t.Fatal("receipt validation repeated packet",packets,events) }
+		})
+	}
 }

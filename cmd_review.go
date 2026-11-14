@@ -65,13 +65,13 @@ func newReviewCmd(app *App) *cobra.Command {
 
 func newReturnRecoveryCmd(app *App, operation string) *cobra.Command {
 	var expected string
-	args, usage := 1, operation+"-return-recovery PLAN"
-	if operation == "prepare" { args, usage = 4, "prepare-return-recovery HOST_REQUEST ORDER_ID EVENT_ID ORIGINAL_FRAME" }
-	cmd := &cobra.Command{Use: usage, Short: cmdmeta.Short("review", operation+"-return-recovery"), Args: cobra.ExactArgs(args), RunE: func(cmd *cobra.Command, args []string) error {
+	usage := operation+"-return-recovery PLAN"
+	if operation == "prepare" { usage = "prepare-return-recovery ORIGINAL_READBACK" }
+	cmd := &cobra.Command{Use: usage, Short: cmdmeta.Short("review", operation+"-return-recovery"), Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		var r returnRecoveryResult
 		var err error
 		if operation == "prepare" {
-			r, err = prepareReturnRecovery(app.projectDir, args[0], args[1], args[2], args[3])
+			r, err = prepareReturnRecovery(app.projectDir, args[0])
 		} else {
 			r, err = operateReturnRecovery(app.projectDir, args[0], expected, operation, nil)
 		}

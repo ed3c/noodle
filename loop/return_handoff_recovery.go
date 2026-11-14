@@ -234,41 +234,73 @@ func ReadReturnRecoveryPrefix(path string, prior *ReturnRecoveryPrefix) (ReturnR
 	return p, raw, nil
 }
 
-// The legacy warning has no tuple. It is usable only with an independently
-// retained original event/review frame and a unique first return in that frame.
-func QualifyReturnDialPrefix(raw []byte, original ReturnRecoveryEvent, controller config.RuntimeSource) error {
+// Legacy evidence also requires the caller to exclude other producers of this
+// endpoint and other first returns in the retained event/review frame.
+func QualifyReturnDialPrefix(raw []byte, original ReturnRecoveryEvent, controller config.RuntimeSource) (legacy bool, err error) {
 	if len(raw) == 0 || raw[len(raw)-1] != '\n' {
-		return fmt.Errorf("original normal log prefix incomplete")
+		return false, fmt.Errorf("original normal log prefix incomplete")
 	}
 	count := 0
+	p := original.Subject.Packet
+	exact := map[string]string{
+		"endpoint":         original.Endpoint,
+		"event_id":         p.EventID,
+		"order_id":         p.OrderID,
+		"stage_index":      strconv.Itoa(p.StageIndex),
+		"attempt_id":       p.AttemptID,
+		"session_id":       p.SessionID,
+		"host_instance_id": p.HostInstanceID,
+		"producer_path":    p.Producer.Path,
+		"producer_sha256":  p.Producer.SHA256,
+		"binding_path":     p.Binding.Path,
+		"binding_sha256":   p.Binding.SHA256,
+	}
 	for _, line := range bytes.Split(raw, []byte{'\n'}) {
 		if !bytes.Contains(line, []byte("return handoff")) { continue }
-		count++
 		fields, err := returnLogFields(string(line))
 		if err != nil {
-			return err
+			return false, err
 		}
+		if endpoint := fields["endpoint"]; endpoint != "" && endpoint != original.Endpoint {
+			if fields["error"] != "dial unix "+endpoint+": connect: connection refused" || fields["transport_phase"] != "dial_before_encode" {
+				return false, fmt.Errorf("original return log endpoint ambiguous")
+			}
+			continue
+		}
+		count++
 		if fields["level"] != "WARN" || fields["msg"] != "return handoff unknown; original owner readback required" || fields["error"] != "dial unix "+original.Endpoint+": connect: connection refused" {
-			return fmt.Errorf("original transport result is unknown")
+			return false, fmt.Errorf("original transport result is unknown")
 		}
 		phase, typed := fields["transport_phase"]
 		if typed {
-			if original.Subject.Packet.Producer.SHA256 != controller.SHA256 || phase != "dial_before_encode" || fields["event_id"] != original.Subject.Packet.EventID || fields["attempt_id"] != original.Subject.Packet.AttemptID || fields["session_id"] != original.Subject.Packet.SessionID {
-				return fmt.Errorf("original typed Dial source/tuple differs")
+			if p.Producer.SHA256 != controller.SHA256 || phase != "dial_before_encode" {
+				return false, fmt.Errorf("original typed Dial implementation differs")
 			}
-		} else if original.Subject.Packet.Producer.SHA256 != "d990ef416ffdfae2d1891f7bc96d22c478148788599a9282d87bf8ae8b71da56" {
-			// Only the frozen 5c30 source was inspected for this legacy warning.
-			return fmt.Errorf("original legacy Dial implementation unsupported")
+			for key, value := range exact {
+				if fields[key] != value {
+					return false, fmt.Errorf("original typed Dial source/tuple differs: %s", key)
+				}
+			}
+		} else {
+			for key := range exact {
+				if _, exists := fields[key]; exists {
+					return false, fmt.Errorf("original typed Dial phase missing")
+				}
+			}
+			if p.Producer.SHA256 != "d990ef416ffdfae2d1891f7bc96d22c478148788599a9282d87bf8ae8b71da56" {
+				return false, fmt.Errorf("original legacy Dial implementation unsupported")
+			}
+			legacy = true
 		}
 		at, err := time.Parse(time.RFC3339Nano, fields["time"])
 		if err != nil || at.Before(original.Attempt.CompletedAt.Truncate(time.Millisecond)) || at.Sub(original.Attempt.CompletedAt) > time.Second {
-			return fmt.Errorf("original Dial event time ambiguous")
+			return false, fmt.Errorf("original Dial event time ambiguous")
 		}
 	}
 	if count != 1 {
-		return fmt.Errorf("original Dial log missing or ambiguous")
+		return false, fmt.Errorf("original Dial log missing or ambiguous")
 	}
-	return nil
+	return legacy, nil
 }
 
 func returnLogFields(line string) (map[string]string, error) {
