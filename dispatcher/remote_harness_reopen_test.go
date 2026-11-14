@@ -41,10 +41,10 @@ func prepareSavedHarnessFixture(t *testing.T, instructions bool) savedHarnessFix
 		t.Fatal(err)
 	}
 	saved := PreparedRemoteHarnessInput{
-		Spawn: readHarnessFixtureFile(t, filepath.Join(plan.Directory, "spawn.json")),
-		Startup: readHarnessFixtureFile(t, plan.startup.path),
-		Input: readHarnessFixtureFile(t, inputPath(plan.Directory)),
-		Prompt: readHarnessFixtureFile(t, filepath.Join(plan.Directory, "prompt.txt")),
+		Spawn:        readHarnessFixtureFile(t, filepath.Join(plan.Directory, "spawn.json")),
+		Startup:      readHarnessFixtureFile(t, plan.startup.path),
+		Input:        readHarnessFixtureFile(t, inputPath(plan.Directory)),
+		Prompt:       readHarnessFixtureFile(t, filepath.Join(plan.Directory, "prompt.txt")),
 		Instructions: plan.Instructions,
 	}
 	binding := PreparedRemoteHarnessBinding{OrderID: "original-order", SessionID: plan.ID, WorktreePath: root, Binary: filepath.Join(root, "codex"), InstructionVerifier: "/sandbox/payload/noodle-instructions"}
