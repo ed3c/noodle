@@ -131,13 +131,27 @@ func (l *Loop) inspectSavedProgress(ctx context.Context, orderID, sessionID stri
 	if err != nil {
 		return result, snapshot, err
 	}
-	if execution.Status != "saved" || string(execution.OutcomeStatus) != string(attempt.Status) || !execution.StopAcknowledged || execution.ProgressHead == "" || execution.ProfileSHA256 == "" || execution.CommandSHA256 == "" || execution.Sources == nil {
+	if string(execution.OutcomeStatus) != string(attempt.Status) || !execution.StopAcknowledged || execution.ProfileSHA256 == "" || execution.Sources == nil {
 		return result, snapshot, fmt.Errorf("original stopped progress evidence is incomplete")
+	}
+	inspectionStatus := "retryable"
+	switch execution.Status {
+	case "saved":
+		if execution.ProgressHead == "" || execution.CommandSHA256 == "" {
+			return result, snapshot, fmt.Errorf("original saved progress evidence is incomplete")
+		}
+	case "not_started":
+		if attempt.Status != state.AttemptFailed || execution.BaselineHead == "" || execution.OriginalError == "" || execution.ProgressHead != "" || execution.CommandSHA256 != "" || execution.Instructions != nil {
+			return result, snapshot, fmt.Errorf("original pre-exec failure evidence is incomplete")
+		}
+		inspectionStatus = "not_started"
+	default:
+		return result, snapshot, fmt.Errorf("original stopped execution classification unavailable")
 	}
 	if err = l.validateSavedProgressInputs(snapshot, order, stage, sessionID, &execution); err != nil {
 		return result, snapshot, err
 	}
-	result = SavedProgressInspection{SchemaVersion: 1, Status: "retryable", OrderID: orderID, StageIndex: 0, AttemptID: attempt.AttemptID, SessionID: sessionID, AttemptStatus: attempt.Status, Runtime: stage.Runtime, Provider: stage.Provider, Model: stage.Model, WorktreePath: target, Execution: execution, Effects: []string{}}
+	result = SavedProgressInspection{SchemaVersion: 1, Status: inspectionStatus, OrderID: orderID, StageIndex: 0, AttemptID: attempt.AttemptID, SessionID: sessionID, AttemptStatus: attempt.Status, Runtime: stage.Runtime, Provider: stage.Provider, Model: stage.Model, WorktreePath: target, Execution: execution, Effects: []string{}}
 	// Ignore only the checkpoint clock. Definition, attempts, review, effects and
 	// every runtime source remain part of the consent version.
 	semantic := struct {
@@ -185,7 +199,14 @@ func (l *Loop) validateSavedProgressInputs(snapshot reducer.DurableSnapshot, ord
 	if err != nil {
 		return err
 	}
-	if !recoveryJSONEqual(bundle, spawn.InstructionBundle) || effort != spawn.ReasoningLevel || role != spawn.TaskRole || skill != spawn.Skill || execution.Instructions == nil || execution.Instructions.Manifest.SHA256 != bundle.SHA256 {
+	if !recoveryJSONEqual(bundle, spawn.InstructionBundle) || effort != spawn.ReasoningLevel || role != spawn.TaskRole || skill != spawn.Skill || bundle == nil {
+		return fmt.Errorf("saved progress task instructions or reasoning selection changed")
+	}
+	if execution.Status == "not_started" {
+		if execution.PreparedManifest == nil || execution.PreparedManifest.SHA256 != bundle.SHA256 || execution.Sources["instruction_manifest"] != *execution.PreparedManifest {
+			return fmt.Errorf("pre-exec prepared instruction manifest differs")
+		}
+	} else if execution.Instructions == nil || execution.Instructions.Manifest.SHA256 != bundle.SHA256 {
 		return fmt.Errorf("saved progress task instructions or reasoning selection changed")
 	}
 	expectedSpawn, ok := execution.Sources["spawn.json"]
@@ -240,6 +261,9 @@ func (l *Loop) QueueSavedProgressAttempt(ctx context.Context, orderID, sessionID
 	if err != nil {
 		return SavedProgressQueued{}, err
 	}
+	if inspected.Execution.Status != "saved" {
+		return SavedProgressQueued{}, fmt.Errorf("pre-exec failure is observation only; no new attempt was queued")
+	}
 	if inspected.Version != version {
 		return SavedProgressQueued{}, fmt.Errorf("saved progress consent version changed")
 	}
@@ -285,6 +309,9 @@ func (l *Loop) controlRetrySavedProgress(cmd ControlCommand) error {
 	cancel()
 	if err != nil {
 		return err
+	}
+	if inspected.Execution.Status != "saved" {
+		return fmt.Errorf("pre-exec failure is observation only; no new attempt was dispatched")
 	}
 	if cmd.Value != inspected.Version {
 		return fmt.Errorf("saved progress consent version changed")
