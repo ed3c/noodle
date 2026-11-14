@@ -56,8 +56,23 @@ func readReturnSource(ref config.RuntimeSource, value any) error {
 	return nil
 }
 func (l *Loop) prepareReturnHandoff(cook *cookHandle) (*returnDescriptor, error) {
+	payload := l.reviewPayloadForCook(cook, "")
+	intent, unattempted, err := l.canonical.ReturnHandoffForAttempt(cook.orderID, cook.stageIndex, payload["attempt_id"].(string), payload["session_id"].(string))
+	if err != nil {
+		return nil, err
+	}
+	if intent != nil {
+		return nil, nil
+	}
 	ref := l.config.Runtime.ReturnHandoff
 	if ref.Path == "" && ref.SHA256 == "" {
+		return nil, nil
+	}
+	if len(l.config.Runtime.AdmittedOrders) != 1 || l.config.Runtime.AdmittedOrders[0] != cook.orderID || cook.stageIndex != 0 {
+		return nil, fmt.Errorf("return handoff requires original single admitted order and stage")
+	}
+	if !unattempted {
+		l.logger.Warn("return handoff history unavailable; original Owner readback required", "order", cook.orderID)
 		return nil, nil
 	}
 	var target returnDescriptor
@@ -99,10 +114,6 @@ func (l *Loop) prepareReturnHandoff(cook *cookHandle) (*returnDescriptor, error)
 		target.Producer != binding.Producer || target.Producer.Path != exe || target.Producer.SHA256 != hex.EncodeToString(sum[:]) ||
 		len(l.config.Runtime.AdmittedOrders) != 1 || l.config.Runtime.AdmittedOrders[0] != cook.orderID || cook.stageIndex != 0 {
 		return nil, fmt.Errorf("return handoff requires original opt-in Main, Host, binary and single admitted order")
-	}
-	// Frozen/current review intent is read back, never resent by completion recovery.
-	if previous, ok := l.canonical.PendingReviews[cook.orderID]; ok && previous.ReturnHandoff != nil {
-		return nil, fmt.Errorf("return handoff already unknown; original Owner readback required")
 	}
 	return &target, nil
 }
