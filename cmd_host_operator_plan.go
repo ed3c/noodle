@@ -47,8 +47,27 @@ func newHostOperatorPlanCmd() *cobra.Command {
 	var holdSnapshot string
 	var profileOutput string
 	var restoreSnapshot, target string
+	var upgrade bool
+	var upgradeSnapshot string
 	cmd := &cobra.Command{Use: "operator-plan", Short: "Read the original Source request and prepare its gateway operator policy; no service effects", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if upgrade {
+				if request != "" || native || profileOutput != "" || holdSnapshot != "" || restoreSnapshot != "" {
+					return errors.New("service-upgrade requires only target and snapshot-output")
+				}
+				root, err := existingHostDirectory()
+				if err != nil {
+					return err
+				}
+				plan, err := prepareSourceServiceUpgrade(cmd.Context(), root, target, upgradeSnapshot)
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(plan)
+			}
+			if upgradeSnapshot != "" {
+				return errors.New("snapshot-output requires service-upgrade")
+			}
 			if restoreSnapshot != "" {
 				if request != "" || native || profileOutput != "" || holdSnapshot != "" {
 					return errors.New("restore-plan-file requires only its immutable snapshot and target")
@@ -104,6 +123,8 @@ func newHostOperatorPlanCmd() *cobra.Command {
 			}
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(plan)
 		}}
+	cmd.Flags().BoolVar(&upgrade, "service-upgrade", false, "Prepare a new epoch for the current Source-only service; preserve original held work")
+	cmd.Flags().StringVar(&upgradeSnapshot, "snapshot-output", "", "Immutable current Source-only snapshot output")
 	cmd.Flags().StringVar(&request, "request-file", "", "Original accepted Source attach request")
 	cmd.Flags().BoolVar(&native, "native-scope", false, "Bind original Host/gateway/VM-driver kernel generations and declared namespace; no control or zero-compute claim")
 	cmd.Flags().StringVar(&holdSnapshot, "hold-plan-file", "", "Prepare only the original maintenance hold from a saved native-scope snapshot; no service effects")

@@ -14,7 +14,7 @@ import (
 
 func verifySourceServiceRetirement(j restrictedMaintenance) error {
 	p, progress := j.Plan, j.SourceService
-	if p.SourcePolicy == nil || p.SourcePolicy.Operation != "operator-service-restore" || j.Phase != "source-policy-retired" || progress == nil || progress.Compute == nil || progress.GatewayExit == nil || progress.Quota == nil {
+	if p.SourcePolicy == nil || (p.SourcePolicy.Operation != "operator-service-restore" && p.SourcePolicy.Operation != "operator-service-upgrade") || j.Phase != "source-policy-retired" || progress == nil || progress.Compute == nil || progress.GatewayExit == nil || progress.Quota == nil {
 		return errors.New("original Source retirement phase is incomplete")
 	}
 	if err := validateSourcePolicyPlan(p); err != nil {
@@ -36,8 +36,12 @@ func verifySourceServiceRetirement(j restrictedMaintenance) error {
 		Maximum int                        `json:"maximum"`
 		Leases  map[string]json.RawMessage `json:"leases"`
 	}
+	quotaName := "source-quota-migrated.json"
+	if p.SourcePolicy.Operation == "operator-service-upgrade" {
+		quotaName = "source-quota-empty.json"
+	}
 	ref, err := loopruntime.ReadSessionReadbackFile(progress.Quota.Path, &quota)
-	if err != nil || ref != *progress.Quota || progress.Quota.Path != filepath.Join(p.Root, "maintenance", p.PlanSHA, "source-quota-migrated.json") || quota.Schema != 3 || quota.Policy != admission.WorkerAdmissionPolicy || quota.Maximum != admission.DefaultWorkerLimit || quota.Leases == nil || len(quota.Leases) != 0 {
+	if err != nil || ref != *progress.Quota || progress.Quota.Path != filepath.Join(p.Root, "maintenance", p.PlanSHA, quotaName) || quota.Schema != 3 || quota.Policy != admission.WorkerAdmissionPolicy || quota.Maximum != admission.DefaultWorkerLimit || quota.Leases == nil || len(quota.Leases) != 0 {
 		return errors.New("original Source migrated empty quota differs")
 	}
 	if err = verifySourcePolicyHoldFiles(op); err != nil {
@@ -76,6 +80,18 @@ func verifySourceServiceDrain(j restrictedMaintenance) error {
 }
 
 func sourceServicePoolHeld(pool hostPool, p hostMaintenancePlan) error {
+	if p.SourcePolicy != nil && p.SourcePolicy.Operation == "operator-service-upgrade" {
+		base, err := sourceServiceBusinessPlan(p)
+		if err != nil {
+			return err
+		}
+		for _, owner := range pool.Owners {
+			if owner.Current.HostInstanceID == p.Source.Instance && owner.Current.ContextState != "detached" {
+				return errors.New("Source-only upgrade has an unexpected business owner")
+			}
+		}
+		p = base
+	}
 	for _, cp := range p.Contexts {
 		owner, ok := pool.Owners[cp.Original.RequestID]
 		request := bootstrapTaskRequest(hostBootstrapTask{Original: cp.Original})
@@ -159,7 +175,11 @@ func (h *noodleHost) startSourceService(ctx context.Context) error {
 	if err = sourceServicePoolHeld(pool, p); err != nil {
 		return err
 	}
-	op, err := readSourcePolicySnapshot(p.SourcePolicy.Snapshot)
+	business, err := sourceServiceBusinessPlan(p)
+	if err != nil {
+		return err
+	}
+	op, err := readSourcePolicySnapshot(business.SourcePolicy.Snapshot)
 	if err != nil {
 		return err
 	}

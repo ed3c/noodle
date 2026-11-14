@@ -211,7 +211,7 @@ func sourceServiceQuotaWritersRetired(p hostMaintenancePlan, sourceMayBeLive boo
 }
 
 func runSourceServiceRestore(ctx context.Context, p hostMaintenancePlan, dir string, out *json.Encoder) error {
-	if err := verifySourceServiceTarget(ctx, loopruntime.SessionReadbackFileRef{Path: p.Target, SHA256: p.TargetSHA}); err != nil {
+	if err := verifySourceServiceMaintenanceTarget(ctx, p); err != nil {
 		return err
 	}
 	lock, err := lockfile.TryLock(filepath.Join(p.Root, "maintenance.lock"))
@@ -225,7 +225,7 @@ func runSourceServiceRestore(ctx context.Context, p hostMaintenancePlan, dir str
 	}
 	j, err := readRestrictedMaintenance(dir)
 	if os.IsNotExist(err) || (err == nil && (j.Phase == "source-policy-prepared" || j.Phase == "source-policy-fencing" || j.Phase == "source-policy-admission-held")) {
-		if err = runSourcePolicyHoldLocked(ctx, p, dir, json.NewEncoder(io.Discard)); err != nil {
+		if err = initializeSourceServiceMaintenance(ctx, p, dir, json.NewEncoder(io.Discard)); err != nil {
 			return err
 		}
 		j, err = readRestrictedMaintenance(dir)
@@ -249,7 +249,7 @@ func runSourceServiceRestore(ctx context.Context, p hostMaintenancePlan, dir str
 		if err = sourceServiceQuotaWritersRetired(p, true); err != nil {
 			return err
 		}
-		if err = verifySourcePolicyAdmissionHold(p.Root, p); err != nil {
+		if err = verifySourceServiceAdmissionHold(p); err != nil {
 			return err
 		}
 		if err = verifySourcePolicyHoldFiles(op); err != nil {
@@ -298,7 +298,7 @@ func runSourceServiceRestore(ctx context.Context, p hostMaintenancePlan, dir str
 		}
 	}
 	if j.Phase == "source-compute-qualification" {
-		if err = verifySourcePolicyAdmissionHold(p.Root, p); err != nil {
+		if err = verifySourceServiceAdmissionHold(p); err != nil {
 			return err
 		}
 		if err = advance("source-gateway-term-intent"); err != nil {
@@ -310,7 +310,7 @@ func runSourceServiceRestore(ctx context.Context, p hostMaintenancePlan, dir str
 			return err
 		}
 		if _, err := os.Lstat(filepath.Join(dir, "source-gateway-term.json")); os.IsNotExist(err) {
-			if err = verifySourcePolicyAdmissionHold(p.Root, p); err != nil {
+			if err = verifySourceServiceAdmissionHold(p); err != nil {
 				return err
 			}
 			compute := readSourceComputeStatus(ctx, p)
@@ -372,7 +372,7 @@ func runSourceServiceRestore(ctx context.Context, p hostMaintenancePlan, dir str
 		if err = verifySourceServiceDrain(j); err != nil {
 			return err
 		}
-		if err = verifySourcePolicyAdmissionHold(p.Root, p); err != nil {
+		if err = verifySourceServiceAdmissionHold(p); err != nil {
 			return err
 		}
 		gone, err := procx.ObserveNativeExit(op.NativeScope.Driver.Process)
@@ -406,7 +406,7 @@ func runSourceServiceRestore(ctx context.Context, p hostMaintenancePlan, dir str
 		if err != nil || hostDigest(before) != op.Quota.Ledger.SHA256 {
 			return errors.New("original Source quota before-image differs")
 		}
-		if err = admission.ReturnSourceResidentQuota(ctx, filepath.Join(p.Root, "quota"), dir, before, *op.Quota.ResidentReturn); err != nil {
+		if err = returnSourceServiceQuota(ctx, p, dir, before, *op.Quota.ResidentReturn); err != nil {
 			return err
 		}
 		empty, err := os.ReadFile(op.Quota.Ledger.Path)
@@ -416,7 +416,16 @@ func runSourceServiceRestore(ctx context.Context, p hostMaintenancePlan, dir str
 		if err = saveHostStorageBytes(filepath.Join(dir, "source-quota-empty.json"), empty); err != nil {
 			return err
 		}
-		if err = advance("source-quota-migrate"); err != nil {
+		if p.SourcePolicy.Operation == "operator-service-upgrade" {
+			ref, readErr := loopruntime.ReadSessionReadbackFile(filepath.Join(dir, "source-quota-empty.json"), nil)
+			if readErr != nil {
+				return readErr
+			}
+			j.SourceService.Quota = &ref
+			if err = advance("source-policy-retired"); err != nil {
+				return err
+			}
+		} else if err = advance("source-quota-migrate"); err != nil {
 			return err
 		}
 	}

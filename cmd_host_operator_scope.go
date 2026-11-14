@@ -34,6 +34,35 @@ type hostOperatorNativeScope struct {
 }
 
 func observeHostOperatorNativeScope(ctx context.Context, plan hostOperatorPlan) (*hostOperatorNativeScope, error) {
+	scope, err := collectSourceNativeScope(ctx, plan)
+	if err != nil {
+		return nil, err
+	}
+	var source struct {
+		PID int `json:"host_pid"`
+	}
+	if err = json.Unmarshal(plan.Source, &source); err != nil {
+		return nil, err
+	}
+	// Reuse the original reader to detect changes in Host/resident custody while
+	// collecting kernel metadata; a newly observed PID is not the original lease.
+	fresh, err := planHostOperatorMaintenance(ctx, plan.Request.Path)
+	if err != nil {
+		return nil, err
+	}
+	var currentSource struct {
+		PID int `json:"host_pid"`
+	}
+	if err = json.Unmarshal(fresh.Source, &currentSource); err != nil {
+		return nil, err
+	}
+	if currentSource.PID != source.PID || fresh.Request != plan.Request || fresh.Config != plan.Config || fresh.Profile != plan.Profile || fresh.History != plan.History || fresh.Pool != plan.Pool || fresh.Custody != plan.Custody || !reflect.DeepEqual(fresh.Contexts, plan.Contexts) || !reflect.DeepEqual(fresh.Resident, plan.Resident) {
+		return nil, errors.New("original Source or resident custody changed during native scope readback")
+	}
+	return scope, nil
+}
+
+func collectSourceNativeScope(ctx context.Context, plan hostOperatorPlan) (*hostOperatorNativeScope, error) {
 	var source struct {
 		PID       int    `json:"host_pid"`
 		Binary    string `json:"binary_path"`
@@ -191,21 +220,6 @@ func observeHostOperatorNativeScope(ctx context.Context, plan hostOperatorPlan) 
 		if err != nil || current != ref {
 			return nil, errors.New("original Source deployment changed during native scope readback")
 		}
-	}
-	// Reuse the original reader to detect changes in Host/resident custody while
-	// collecting kernel metadata; a newly observed PID is not the original lease.
-	fresh, err := planHostOperatorMaintenance(ctx, plan.Request.Path)
-	if err != nil {
-		return nil, err
-	}
-	var currentSource struct {
-		PID int `json:"host_pid"`
-	}
-	if err = json.Unmarshal(fresh.Source, &currentSource); err != nil {
-		return nil, err
-	}
-	if currentSource.PID != source.PID || fresh.Request != plan.Request || fresh.Config != plan.Config || fresh.Profile != plan.Profile || fresh.History != plan.History || fresh.Pool != plan.Pool || fresh.Custody != plan.Custody || !reflect.DeepEqual(fresh.Contexts, plan.Contexts) || !reflect.DeepEqual(fresh.Resident, plan.Resident) {
-		return nil, errors.New("original Source or resident custody changed during native scope readback")
 	}
 	return scope, nil
 }

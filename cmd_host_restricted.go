@@ -69,9 +69,6 @@ func newHostRestrictedCmd() *cobra.Command {
 					observed["journal"], observed["journal_state"] = nil, "absent"
 				}
 				sourceDir := filepath.Join(p.Root, "g", p.Source.Instance)
-				if p.Handover == nil {
-					sourceDir = restrictedSource(p).Directory
-				}
 				owners := map[string]string{"source": sourceDir}
 				if p.Handover != nil {
 					owners["shared"] = p.Handover.SharedRoot
@@ -107,7 +104,7 @@ func newHostRestrictedCmd() *cobra.Command {
 				return errors.New("restricted maintenance requires the exact confirmed plan digest")
 			}
 			if p.SourcePolicy != nil {
-				if p.SourcePolicy.Operation == "operator-service-restore" {
+				if p.SourcePolicy.Operation == "operator-service-restore" || p.SourcePolicy.Operation == "operator-service-upgrade" {
 					return runSourceServiceRestore(cmd.Context(), p, dir, json.NewEncoder(cmd.OutOrStdout()))
 				}
 				return runSourcePolicyHold(cmd.Context(), p, dir, json.NewEncoder(cmd.OutOrStdout()))
@@ -165,7 +162,7 @@ func readRestrictedMaintenance(dir string) (restrictedMaintenance, error) {
 	if err == nil {
 		if j.Plan.SourcePolicy != nil {
 			phases := []string{"source-policy-prepared", "source-policy-fencing", "source-policy-admission-held"}
-			if j.Plan.SourcePolicy.Operation == "operator-service-restore" {
+			if j.Plan.SourcePolicy.Operation == "operator-service-restore" || j.Plan.SourcePolicy.Operation == "operator-service-upgrade" {
 				phases = append(phases, sourceServicePhases...)
 			}
 			if len(j.Tasks) != 0 || !slices.Contains(phases, j.Phase) {
@@ -278,10 +275,25 @@ func verifyRestrictedOwner(ctx context.Context, p hostMaintenancePlan, dir strin
 	return nil
 }
 
-func restrictedSource(p hostMaintenancePlan) hostGeneration {
-	r := p.Contexts[0].Original
+func restrictedSource(p hostMaintenancePlan) (hostGeneration, error) {
+	if p.Native == nil {
+		return hostGeneration{}, errors.New("maintenance Source native identity is missing")
+	}
+	var r hostReceipt
+	if len(p.Contexts) > 0 {
+		r = p.Contexts[0].Original
+	} else {
+		if p.SourcePolicy == nil || p.SourcePolicy.Operation != "operator-service-upgrade" {
+			return hostGeneration{}, errors.New("maintenance Source context is missing")
+		}
+		op, err := readSourcePolicySnapshot(p.SourcePolicy.Snapshot)
+		if err != nil {
+			return hostGeneration{}, err
+		}
+		r.BinaryPath, r.BinarySHA256 = op.NativeScope.Host.Binary.Path, op.NativeScope.Host.Binary.SHA256
+	}
 	return hostGeneration{ID: p.Source.Instance, Directory: filepath.Join(p.Root, "g", p.Source.Instance), Binary: r.BinaryPath, SHA: r.BinarySHA256, State: "active",
-		Process: procx.ProcessRecord{PID: p.Source.PID, SessionID: p.Source.Instance, StartedAt: time.Unix(int64(p.Native.StartSec), int64(p.Native.StartUsec)*1000)}}
+		Process: procx.ProcessRecord{PID: p.Source.PID, SessionID: p.Source.Instance, StartedAt: time.Unix(int64(p.Native.StartSec), int64(p.Native.StartUsec)*1000)}}, nil
 }
 
 func runRestrictedMaintenance(ctx context.Context, p hostMaintenancePlan, dir string, out *json.Encoder) error {
@@ -320,7 +332,10 @@ func runRestrictedMaintenance(ctx context.Context, p hostMaintenancePlan, dir st
 	if j.Plan.PlanSHA != p.PlanSHA {
 		return errors.New("another original maintenance plan is already recorded")
 	}
-	source := restrictedSource(p)
+	source, err := restrictedSource(p)
+	if err != nil {
+		return err
+	}
 	if j.Phase == "active" {
 		return out.Encode(j)
 	}

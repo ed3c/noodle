@@ -318,7 +318,11 @@ func TestSourcePolicyAdmissionRunnerResumesNativeOutcomeWithoutLoopControl(t *te
 			t.Fatal(err)
 		}
 	}
-	bootstrap := hostBootstrap{Schema: 1, Phase: "active", Target: p.Target, TargetSHA: p.TargetSHA, Source: restrictedSource(p), ProcessIdentity: "original-fixture"}
+	source, err := restrictedSource(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap := hostBootstrap{Schema: 1, Phase: "active", Target: p.Target, TargetSHA: p.TargetSHA, Source: source, ProcessIdentity: "original-fixture"}
 	if err = saveHostBootstrap(p.Root, bootstrap); err != nil {
 		t.Fatal(err)
 	}

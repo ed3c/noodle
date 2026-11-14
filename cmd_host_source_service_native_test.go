@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -51,6 +52,15 @@ func TestSourceServiceNativeChainChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	if role == "driver" {
+		namespace, err := os.ReadFile(filepath.Join(root, "native-namespace"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		listener, err := net.Listen("unix", filepath.Join(string(namespace), "run", "compute-driver.sock"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
 		time.Sleep(60 * time.Second)
 		return
 	}
@@ -60,6 +70,13 @@ func TestSourceServiceNativeChainChild(t *testing.T) {
 	}
 	child := exec.Command(os.Args[0], "-test.run=^TestSourceServiceNativeChainChild$")
 	child.Env = append(os.Environ(), "NOODLE_SOURCE_CHAIN_ROLE="+childRole)
+	if role == "gateway" {
+		namespace, err := os.ReadFile(filepath.Join(root, "native-namespace"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		child.Args = append(child.Args, "--", "--bind-socket", filepath.Join(string(namespace), "run", "compute-driver.sock"), "--state-dir", string(namespace), "--expected-peer-pid", fmt.Sprint(os.Getpid()))
+	}
 	if role == "host" {
 		child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
@@ -174,6 +191,9 @@ drain:
 		_ = child.Process.Kill()
 		<-done
 	}
+	if namespace, err := os.ReadFile(filepath.Join(root, "native-namespace")); err == nil {
+		_ = os.Remove(filepath.Join(string(namespace), "run", "compute-driver.sock"))
+	}
 }
 
 func sourceNativeFullPlan(t *testing.T, target string) (hostMaintenancePlan, []byte, *exec.Cmd, <-chan error) {
@@ -189,6 +209,27 @@ func sourceNativeFullPlan(t *testing.T, target string) (hostMaintenancePlan, []b
 	}
 	profile := hostDeferralProfile(t)
 	profileRoot := filepath.Dir(profile)
+	namespaceRoot, err := os.MkdirTemp("/tmp", "noodle-source-native-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(namespaceRoot) })
+	namespaceRoot, err = filepath.EvalSymlinks(namespaceRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	namespace := &hostOperatorNativeScope{StateDirectory: namespaceRoot}
+	for _, name := range []string{"sandboxes", "images/preparations"} {
+		if err = os.MkdirAll(filepath.Join(namespaceRoot, name), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = os.MkdirAll(filepath.Join(namespace.StateDirectory, "run"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(root, "native-namespace"), []byte(namespace.StateDirectory), 0600); err != nil {
+		t.Fatal(err)
+	}
 	var profileDoc map[string]json.RawMessage
 	raw, err := os.ReadFile(profile)
 	if err != nil {
@@ -217,6 +258,19 @@ func sourceNativeFullPlan(t *testing.T, target string) (hostMaintenancePlan, []b
 	if err != nil {
 		t.Fatal(err)
 	}
+	driverDir := filepath.Join(root, "fixture-driver")
+	if err = os.MkdirAll(driverDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink(exe, filepath.Join(driverDir, "openshell-driver-vm")); err != nil {
+		t.Fatal(err)
+	}
+	nativeConfig := fmt.Sprintf("[openshell.gateway]\ncompute_driver='vm'\n[openshell.drivers.vm]\ndriver_dir=%q\nstate_dir=%q\n", driverDir, namespace.StateDirectory)
+	if err = os.WriteFile(filepath.Join(profileRoot, "native.toml"), []byte(nativeConfig), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gateway["identity_source"] = sourcePolicyTestJSON(t, "native.toml")
+	gateway["config_files"] = sourcePolicyTestJSON(t, []string{"native.toml", "address"})
 	gateway["resident"] = sourcePolicyTestJSON(t, admission.ResidentSpec{Name: "host-openshell", Argv: []string{exe, "-test.run=^TestSourceServiceNativeChainChild$", "--"}, Directory: profileRoot, Environment: []string{"NOODLE_SOURCE_CHAIN_ROLE=gateway", "NOODLE_SOURCE_CHAIN_ROOT=" + root, "NOODLE_SOURCE_CHAIN_PROFILE=" + profileRoot}, Sharing: "shared", Transport: "network"})
 	profileDoc["gateway"] = sourcePolicyTestJSON(t, gateway)
 	if err = os.WriteFile(profile, sourcePolicyTestJSON(t, profileDoc), 0600); err != nil {
@@ -284,8 +338,8 @@ func sourceNativeFullPlan(t *testing.T, target string) (hostMaintenancePlan, []b
 			t.Fatal(err)
 		}
 	}
-	namespace, _ := sourceComputeLocalFixture(t)
 	scope.StateDirectory = namespace.StateDirectory
+	scope.Socket = filepath.Join(namespace.StateDirectory, "run", "compute-driver.sock")
 	spec, err := loopruntime.LoadOpenShellGatewaySpec(profile)
 	if err != nil {
 		t.Fatal(err)
@@ -406,6 +460,9 @@ func TestSourceServiceNativeMaintenanceAndReplacement(t *testing.T) {
 					}
 				}
 			}
+			if raw, readErr := os.ReadFile(filepath.Join(p.Root, "native-fixture.log")); readErr == nil {
+				t.Log(string(raw))
+			}
 			t.Fatal("full fixture maintenance", err)
 		}
 		if err := json.Unmarshal(output.Bytes(), &j); err != nil {
@@ -463,6 +520,134 @@ func TestSourceServiceNativeMaintenanceAndReplacement(t *testing.T) {
 	var rejected hostResponse
 	if json.Unmarshal(raw, &rejected) != nil || rejected.Status != "refused" {
 		t.Fatal("Source role accepted business dispatch", string(raw))
+	}
+	if os.Getenv("NOODLE_SOURCE_UPGRADE_FIXTURE") != "" {
+		originalPlan := p
+		var originalJournal restrictedMaintenance
+		if err = json.Unmarshal(sourcePolicyTestJSON(t, j), &originalJournal); err != nil {
+			t.Fatal(err)
+		}
+		quotaPath := filepath.Join(p.Root, "quota", "quota.json")
+		quotaBefore, err := os.ReadFile(quotaPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		markerBefore, err := os.ReadFile(filepath.Join(p.Root, "bootstrap.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, fault := range []string{"foreign-allocation", "wrong-ceiling"} {
+			var q map[string]any
+			if err = json.Unmarshal(quotaBefore, &q); err != nil {
+				t.Fatal(err)
+			}
+			if fault == "foreign-allocation" {
+				q["leases"].(map[string]any)["foreign-unknown"] = map[string]any{"owner": "old-unknown-generation", "context": "unknown-worker", "resident": false}
+			} else {
+				q["maximum"] = 4
+			}
+			changed := sourcePolicyTestJSON(t, q)
+			if err = os.WriteFile(quotaPath, changed, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = prepareSourceServiceUpgrade(t.Context(), p.Root, target, filepath.Join(p.Root, "refused-upgrade.json")); err == nil {
+				t.Fatal("unsafe quota accepted", fault)
+			}
+			after, readErr := os.ReadFile(quotaPath)
+			if readErr != nil || !bytes.Equal(after, changed) {
+				t.Fatal("preflight changed foreign quota", readErr)
+			}
+			markerAfter, readErr := os.ReadFile(filepath.Join(p.Root, "bootstrap.json"))
+			if readErr != nil || !bytes.Equal(markerBefore, markerAfter) {
+				t.Fatal("preflight changed maintenance marker", readErr)
+			}
+			if err = os.WriteFile(quotaPath, quotaBefore, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		next, err := prepareSourceServiceUpgrade(t.Context(), p.Root, target, filepath.Join(p.Root, "upgrade-snapshot.json"))
+		if err != nil {
+			t.Fatal("prepare current Source-only upgrade", err)
+		}
+		if next.Source.Instance != j.Generation.ID || next.Source.PID != j.Generation.Process.PID || next.SourcePolicy.Base == nil || *next.SourcePolicy.Base != *j.Generation.SourceService || len(next.Contexts) != 0 {
+			t.Fatal("upgrade changed original/current provenance")
+		}
+		upgradeDir := filepath.Join(next.Root, "maintenance", next.PlanSHA)
+		for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(30 * time.Millisecond) {
+			var output bytes.Buffer
+			if err = runSourceServiceRestore(t.Context(), next, upgradeDir, json.NewEncoder(&output)); err != nil {
+				t.Fatal("Source-only upgrade", err)
+			}
+			if err = json.Unmarshal(output.Bytes(), &j); err != nil {
+				t.Fatal(err)
+			}
+			if j.Phase == "source-service-active" {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("upgrade did not converge", j.Phase)
+			}
+		}
+		if _, err = os.Stat(filepath.Join(upgradeDir, "source-quota-migrated.json")); !os.IsNotExist(err) {
+			t.Fatal("schema3 upgrade performed a quota migration", err)
+		}
+		if j.Generation.ID == originalJournal.Generation.ID || *j.Generation.SourceService == *originalJournal.Generation.SourceService {
+			t.Fatal("upgrade reused retired generation")
+		}
+		after, err = os.ReadFile(op.Custody.Path)
+		if err != nil || !bytes.Equal(after, custody) {
+			t.Fatal("upgrade changed historical custody", err)
+		}
+		pool, err = readHostPool(p.Root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = sourceServicePoolHeld(pool, originalPlan); err != nil {
+			t.Fatal("upgrade rewrote original holds", err)
+		}
+		if len(pool.Queue) != 1 || pool.Queue[0].State != "queued" {
+			t.Fatal("upgrade changed old queue")
+		}
+		resources, err = nativeHostRPC(t.Context(), j.Generation.Directory, hostRequest{Operation: "resources"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = verifySourceUpgradeResources(resources, *j.Generation, *j.Generation.SourceService); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = os.Stat(filepath.Join(p.Root, "fixture-recovery-claims")); !os.IsNotExist(err) {
+			t.Fatal("new Source role inherited historical fixture recovery", err)
+		}
+		// Re-entry reads the completed epoch and cannot start a third generation.
+		var replay bytes.Buffer
+		if err = runSourceServiceRestore(t.Context(), next, upgradeDir, json.NewEncoder(&replay)); err != nil {
+			t.Fatal(err)
+		}
+		replayPool, err := readHostPool(p.Root)
+		if err != nil || len(replayPool.Generations) != len(pool.Generations) || replayPool.Active != pool.Active {
+			t.Fatal("upgrade completion replayed launch", err)
+		}
+		if path := os.Getenv("NOODLE_SOURCE_UPGRADE_FIXTURE_EVIDENCE"); path != "" {
+			files := map[string]json.RawMessage{}
+			entries, err := os.ReadDir(upgradeDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				if filepath.Ext(entry.Name()) == ".json" {
+					raw, err := os.ReadFile(filepath.Join(upgradeDir, entry.Name()))
+					if err != nil {
+						t.Fatal(err)
+					}
+					files[entry.Name()] = raw
+				}
+			}
+			evidence := map[string]any{"scope": "synthetic native gateway/store and driver; real Source-only to Source-only Noodle upgrade and kernel controls; no production worker/model claim", "base": originalJournal, "upgrade": j, "files": files, "resources": resources, "custody_unchanged": bytes.Equal(after, custody), "pool": pool}
+			if err = os.WriteFile(path, sourcePolicyTestJSON(t, evidence), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		p, dir = next, upgradeDir
 	}
 	if output := os.Getenv("NOODLE_SOURCE_RESTORE_FIXTURE_EVIDENCE"); output != "" {
 		observations := map[string]json.RawMessage{}

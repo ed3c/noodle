@@ -22,18 +22,25 @@ type SourceResidentQuotaReturn struct {
 	Lease []byte
 }
 
-func sourceQuotaDocument(raw []byte) (map[string]json.RawMessage, map[string]json.RawMessage, error) {
+func sourceQuotaDocument(raw []byte, schema int) (map[string]json.RawMessage, map[string]json.RawMessage, error) {
 	var q struct {
 		Schema    int                        `json:"schema"`
 		Maximum   int                        `json:"maximum"`
 		SwapLimit uint64                     `json:"swap_used_limit_bytes"`
+		Policy    string                     `json:"worker_admission_policy"`
 		Leases    map[string]json.RawMessage `json:"leases"`
 	}
 	if err := json.Unmarshal(raw, &q); err != nil {
 		return nil, nil, err
 	}
-	if q.Schema != 2 || q.Maximum <= 0 || q.SwapLimit != 15_000_000_000 || q.Leases == nil {
-		return nil, nil, errors.New("Source quota return requires the original schema2 ledger and policy")
+	if q.Schema != schema || q.Maximum <= 0 || q.Leases == nil {
+		return nil, nil, errors.New("Source quota return requires the original ledger schema and policy")
+	}
+	if schema == 2 && q.SwapLimit != 15_000_000_000 {
+		return nil, nil, errors.New("Source quota return requires the original schema2 policy")
+	}
+	if schema == sharedQuotaSchema && (q.Policy != WorkerAdmissionPolicy || q.Maximum > DefaultWorkerLimit) {
+		return nil, nil, errors.New("Source quota return requires the current Host worker policy")
 	}
 	var document map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &document); err != nil {
@@ -45,11 +52,21 @@ func sourceQuotaDocument(raw []byte) (map[string]json.RawMessage, map[string]jso
 // PrepareSourceResidentQuotaReturn reads only. The nonce row key comes from the
 // original quota, never from a caller-generated replacement allocation.
 func PrepareSourceResidentQuotaReturn(original []byte, owner string, contexts []string, key string) (SourceResidentQuotaReturn, error) {
+	return prepareSourceResidentQuotaReturn(original, owner, contexts, key, 2)
+}
+
+// PrepareSourceResidentQuotaReturnV3 binds a resident in an already adopted
+// Host ledger. It does not migrate the ledger or qualify native retirement.
+func PrepareSourceResidentQuotaReturnV3(original []byte, owner string, contexts []string, key string) (SourceResidentQuotaReturn, error) {
+	return prepareSourceResidentQuotaReturn(original, owner, contexts, key, sharedQuotaSchema)
+}
+
+func prepareSourceResidentQuotaReturn(original []byte, owner string, contexts []string, key string, schema int) (SourceResidentQuotaReturn, error) {
 	var result SourceResidentQuotaReturn
 	if owner == "" || key == "" || len(contexts) == 0 {
 		return result, errors.New("original Source generation, contexts and resident key required")
 	}
-	_, leases, err := sourceQuotaDocument(original)
+	_, leases, err := sourceQuotaDocument(original, schema)
 	if err != nil {
 		return result, err
 	}
@@ -72,12 +89,12 @@ func PrepareSourceResidentQuotaReturn(original []byte, owner string, contexts []
 	return result, nil
 }
 
-func sourceQuotaAfterReturn(original []byte, selected SourceResidentQuotaReturn) ([]byte, error) {
-	document, leases, err := sourceQuotaDocument(original)
+func sourceQuotaAfterReturn(original []byte, selected SourceResidentQuotaReturn, schema int) ([]byte, error) {
+	document, leases, err := sourceQuotaDocument(original, schema)
 	if err != nil {
 		return nil, err
 	}
-	derived, err := PrepareSourceResidentQuotaReturn(original, selected.Owner, []string{selected.Context}, selected.ResidentKey)
+	derived, err := prepareSourceResidentQuotaReturn(original, selected.Owner, []string{selected.Context}, selected.ResidentKey, schema)
 	if err != nil || derived.LeaseID != selected.LeaseID || !bytes.Equal(derived.Lease, selected.Lease) {
 		return nil, errors.New("Source quota return differs from the original exact resident row")
 	}
@@ -95,10 +112,21 @@ func sourceQuotaAfterReturn(original []byte, selected SourceResidentQuotaReturn)
 // does not perform that qualification or certify drain/business completion.
 // Existing intent permits exact-after readback only, never another write.
 func ReturnSourceResidentQuota(ctx context.Context, dir, epoch string, original []byte, selected SourceResidentQuotaReturn) error {
+	return returnSourceResidentQuota(ctx, dir, epoch, original, selected, 2)
+}
+
+// ReturnSourceResidentQuotaV3 consumes the same exact-row, intent-before-write
+// protocol for an already adopted Host ledger. It leaves its policy unchanged.
+// Native qualification remains the original full maintenance owner's duty.
+func ReturnSourceResidentQuotaV3(ctx context.Context, dir, epoch string, original []byte, selected SourceResidentQuotaReturn) error {
+	return returnSourceResidentQuota(ctx, dir, epoch, original, selected, sharedQuotaSchema)
+}
+
+func returnSourceResidentQuota(ctx context.Context, dir, epoch string, original []byte, selected SourceResidentQuotaReturn, schema int) error {
 	if !filepath.IsAbs(dir) || !filepath.IsAbs(epoch) {
 		return errors.New("Source quota and original maintenance epoch must be absolute")
 	}
-	next, err := sourceQuotaAfterReturn(original, selected)
+	next, err := sourceQuotaAfterReturn(original, selected, schema)
 	if err != nil {
 		return err
 	}

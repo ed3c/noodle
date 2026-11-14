@@ -18,8 +18,9 @@ import (
 // Only new admission is held. This does not pause a Loop, control a process,
 // certify empty compute or perform the unfinished policy revision.
 type hostSourcePolicyPlan struct {
-	Operation string                             `json:"operation"`
-	Snapshot  loopruntime.SessionReadbackFileRef `json:"snapshot"`
+	Base      *loopruntime.SessionReadbackFileRef `json:"base_retired_phase,omitempty"`
+	Operation string                              `json:"operation"`
+	Snapshot  loopruntime.SessionReadbackFileRef  `json:"snapshot"`
 }
 
 func readSourcePolicySnapshot(ref loopruntime.SessionReadbackFileRef) (hostOperatorPlan, error) {
@@ -81,8 +82,11 @@ func validateSourcePolicyPlan(p hostMaintenancePlan) error {
 	if err != nil {
 		return err
 	}
-	if digest == "" || digest != hostDigest(raw) || p.Schema != 1 || !p.Executable || len(p.Effects) != 0 || len(p.Blockers) != 0 || p.Handover != nil || p.SourcePolicy == nil || p.Native == nil || !p.Native.SameGeneration(*p.Native) || p.Native.UID != os.Getuid() || !filepath.IsAbs(p.Root) || !validPoolID(p.Source.Instance) || p.Source.Protocol != hostProtocol || p.Source.Rolling != 1 || p.Native.PID != p.Source.PID || len(p.Contexts) == 0 || len(p.Contexts) != p.Source.Contexts {
+	if digest == "" || digest != hostDigest(raw) || p.Schema != 1 || !p.Executable || len(p.Effects) != 0 || len(p.Blockers) != 0 || p.Handover != nil || p.SourcePolicy == nil || p.Native == nil || !p.Native.SameGeneration(*p.Native) || p.Native.UID != os.Getuid() || !filepath.IsAbs(p.Root) || !validPoolID(p.Source.Instance) || p.Source.Protocol != hostProtocol || p.Source.Rolling != 1 || p.Native.PID != p.Source.PID || (len(p.Contexts) == 0 && p.SourcePolicy.Operation != "operator-service-upgrade") || len(p.Contexts) != p.Source.Contexts {
 		return errors.New("Source hold plan is invalid, changed or outside its bounded effect")
+	}
+	if p.SourcePolicy.Operation != "operator-service-upgrade" && p.SourcePolicy.Base != nil {
+		return errors.New("original Source maintenance cannot accept upgrade provenance")
 	}
 	op, err := readSourcePolicySnapshot(p.SourcePolicy.Snapshot)
 	if err != nil {
@@ -101,6 +105,10 @@ func validateSourcePolicyPlan(p hostMaintenancePlan) error {
 		}
 	} else if p.SourcePolicy.Operation == "operator-service-restore" {
 		if err := validateSourceServiceRestorePlan(p, op); err != nil {
+			return err
+		}
+	} else if p.SourcePolicy.Operation == "operator-service-upgrade" {
+		if err := validateSourceServiceUpgradePlan(p, op); err != nil {
 			return err
 		}
 	} else {
@@ -325,7 +333,11 @@ func sourcePolicyMarker(root, dir string, p hostMaintenancePlan) error {
 	if err != nil {
 		return err
 	}
-	marker := hostBootstrap{Schema: 1, Phase: "source-policy-" + p.PlanSHA, Source: restrictedSource(p), Target: p.Target, TargetSHA: p.TargetSHA, ProcessIdentity: hostDigest(identity)}
+	source, err := restrictedSource(p)
+	if err != nil {
+		return err
+	}
+	marker := hostBootstrap{Schema: 1, Phase: "source-policy-" + p.PlanSHA, Source: source, Target: p.Target, TargetSHA: p.TargetSHA, ProcessIdentity: hostDigest(identity)}
 	want, err := json.MarshalIndent(marker, "", "  ")
 	if err != nil {
 		return err
