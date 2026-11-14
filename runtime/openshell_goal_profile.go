@@ -316,7 +316,7 @@ func MaterializeGoalOpenShellProfile(template, hostRoot, address string) (GoalPr
 	f.Gateway.TLS.CertificateFile = path("tls/client.crt")
 	f.Gateway.TLS.KeyFile = path("tls/client.key")
 	f.Gateway.TLS.ServerName = ""
-	metadata, err := json.Marshal(map[string]any{"name": name, "gateway_endpoint": endpoint, "auth_mode": "mtls"})
+	metadata, err := json.Marshal(map[string]any{"name": name, "gateway_endpoint": endpoint, "is_remote": false, "gateway_port": number, "auth_mode": "mtls"})
 	if err != nil {
 		return result, err
 	}
