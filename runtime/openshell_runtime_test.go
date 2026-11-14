@@ -22,6 +22,45 @@ import (
 	"github.com/poteto/noodle/internal/guestprogress"
 )
 
+// Transfers finish all I/O synchronously. Only this short-lived fixture child
+// skips the race runtime's default one-second exit sleep per transfer; the
+// parent's instrumentation and inherited race options remain intact.
+func openShellTransferFixtureScript(executable string) []byte {
+	return []byte("#!/bin/sh\nGORACE=\"${GORACE:+$GORACE }atexit_sleep_ms=0\" exec " + strconv.Quote(executable) + " -test.run=^TestOpenShellTransferChild$ -- \"$@\"\n")
+}
+
+func TestOpenShellTransferFixturePreservesParentAndChildRaceOptions(t *testing.T) {
+	for _, options := range []string{"", "history_size=3 exitcode=71", "atexit_sleep_ms=1000 strip_path_prefix=/original/"} {
+		t.Run(options, func(t *testing.T) {
+			t.Setenv("GORACE", options)
+			root := t.TempDir()
+			child := filepath.Join(root, "child")
+			if err := os.WriteFile(child, []byte("#!/bin/sh\nprintf '%s' \"$GORACE\"\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			shim := filepath.Join(root, "transfer")
+			if err := os.WriteFile(shim, openShellTransferFixtureScript(child), 0700); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := exec.Command(shim).Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := options
+			if want != "" {
+				want += " "
+			}
+			want += "atexit_sleep_ms=0"
+			if string(raw) != want {
+				t.Fatalf("child race options: got %q, want %q", raw, want)
+			}
+			if os.Getenv("GORACE") != options {
+				t.Fatal("transfer shim changed parent race options")
+			}
+		})
+	}
+}
+
 func TestOpenShellTransferChild(t *testing.T) {
 	if os.Getenv("NOODLE_TRANSFER_CHILD") != "1" {
 		return
@@ -160,7 +199,7 @@ func openShellRuntimeFixture(t *testing.T, prepare ...func(*managedFixture)) (*O
 		t.Fatal(err)
 	}
 	cli := filepath.Join(root, "transfer")
-	if err = os.WriteFile(cli, []byte("#!/bin/sh\nexec "+strconv.Quote(executable)+" -test.run=^TestOpenShellTransferChild$ -- \"$@\"\n"), 0700); err != nil {
+	if err = os.WriteFile(cli, openShellTransferFixtureScript(executable), 0700); err != nil {
 		t.Fatal(err)
 	}
 	payload := filepath.Join(root, "payload")

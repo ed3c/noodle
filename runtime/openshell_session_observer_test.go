@@ -5,7 +5,6 @@ import (
 	"encoding/pem"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -120,7 +119,7 @@ func fileProfileObserverFixture(t *testing.T) (*OpenShellRuntime, CompletedSessi
 		if err != nil {
 			t.Fatal(err)
 		}
-		write("transfer", []byte("#!/bin/sh\nexec "+strconv.Quote(executable)+" -test.run=^TestOpenShellTransferChild$ -- \"$@\"\n"))
+		write("transfer", openShellTransferFixtureScript(executable))
 		doc.CLI = "transfer"
 		write("spec.json", []byte(`{"template":{"image":"image@sha256:example"},"providers":["provider-one"],"command":["sleep","infinity"]}`))
 		doc.Gateway.Resident = f.spec.Resident
