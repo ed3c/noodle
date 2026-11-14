@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -552,6 +553,76 @@ func TestStoppedLocalMergeCommandsKeepReadOnlyInspectionAndExplicitEffectVersion
 				t.Fatal("effect path read input before requiring explicit version", name, err)
 			}
 		}
+	}
+}
+
+func TestStoppedLocalMergeForeignControllerHelper(t *testing.T) {
+	plan := os.Getenv("NOODLE_TEST_STOPPED_FOREIGN_PLAN")
+	if plan == "" {
+		return
+	}
+	r, err := stoppedMergeOperation(t.Context(), os.Getenv("NOODLE_TEST_STOPPED_FOREIGN_PROJECT"), plan, os.Getenv("NOODLE_TEST_STOPPED_FOREIGN_VERSION"), os.Getenv("NOODLE_TEST_STOPPED_FOREIGN_OPERATION"), nil)
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"result": r, "error": message}); err != nil {
+		os.Exit(2)
+	}
+	os.Exit(0)
+}
+
+func TestStoppedLocalMergeRejectsActualForeignControllerBeforeAnyEffect(t *testing.T) {
+	original, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := filepath.Join(t.TempDir(), "foreign-controller")
+	source, err := os.Open(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := os.OpenFile(foreign, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0700)
+	if err != nil {
+		_ = source.Close()
+		t.Fatal(err)
+	}
+	_, copyErr := io.Copy(target, source)
+	if err = errors.Join(copyErr, target.Close(), source.Close()); err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []string{"inspect", "detach", "continue"} {
+		t.Run(operation, func(t *testing.T) {
+			f := newStoppedMergeFixture(t)
+			f.prepare()
+			if operation == "continue" {
+				f.detach()
+			} else if operation == "detach" {
+				f.serve(false)
+			}
+			head := f.git(f.root, "rev-parse", "HEAD")
+			snapshot, _ := os.ReadFile(filepath.Join(f.storage, ".noodle", "state.snapshot.json"))
+			planBytes, _ := os.ReadFile(f.ref.Path)
+			detaches := f.detaches.Load()
+			command := exec.Command(foreign, "-test.run=^TestStoppedLocalMergeForeignControllerHelper$")
+			command.Env = append(os.Environ(), "NOODLE_TEST_STOPPED_FOREIGN_PLAN="+f.ref.Path, "NOODLE_TEST_STOPPED_FOREIGN_PROJECT="+f.root, "NOODLE_TEST_STOPPED_FOREIGN_VERSION="+f.ref.SHA256, "NOODLE_TEST_STOPPED_FOREIGN_OPERATION="+operation)
+			out, err := command.CombinedOutput()
+			if err != nil {
+				t.Fatalf("foreign helper failed before product readback: %v %s", err, out)
+			}
+			var observed struct {
+				Result stoppedMergeResult `json:"result"`
+				Error  string             `json:"error"`
+			}
+			if err = json.Unmarshal(out, &observed); err != nil || !strings.Contains(observed.Error, "actual stopped controller differs") || observed.Result.Status != "refused" || len(observed.Result.Effects) != 0 {
+				t.Fatal("foreign executable borrowed the selected controller identity", observed.Error, observed.Result.Status, err)
+			}
+			current, _ := os.ReadFile(filepath.Join(f.storage, ".noodle", "state.snapshot.json"))
+			currentPlan, _ := os.ReadFile(f.ref.Path)
+			if f.git(f.root, "rev-parse", "HEAD") != head || f.detaches.Load() != detaches || !bytes.Equal(current, snapshot) || !bytes.Equal(currentPlan, planBytes) {
+				t.Fatal("foreign controller changed original custody or effect")
+			}
+		})
 	}
 }
 

@@ -38,6 +38,14 @@ func stoppedMergeOperation(ctx context.Context, project, planPath, expected, ope
 	if p.Schema != 1 || p.Project != project || p.Host.Current.ProjectDir != project || p.Host.Current.ContextState != "active" || ref.Path != filepath.Join(filepath.Dir(p.Stable["task_envelope"].Path), "stopped-local-merge", p.Candidate.SHA256, "plan.json") {
 		return r, fmt.Errorf("original stopped merge plan location/identity differs")
 	}
+	executable, err := os.Executable()
+	if err != nil {
+		return r, err
+	}
+	actual, err := hostReadbackBinaryRef(executable)
+	if err != nil || actual != p.Controller {
+		return r, fmt.Errorf("actual stopped controller differs from the original selected controller")
+	}
 	if operation != "inspect" && expected != ref.SHA256 {
 		return r, fmt.Errorf("stopped merge expected version changed")
 	}
