@@ -7,11 +7,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
-
 )
 
-// Native file transfer is name based. The dedicated gateway contract excludes
-// external lifecycle writers; fresh original-ID reads fence each transfer.
+// Keep the bound endpoint explicit while the original name selects mTLS files.
+// Fresh original-ID reads fence each transfer.
 func (s *openShellSession) transfer(direction, source, destination string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -34,7 +33,7 @@ func (s *openShellSession) transfer(direction, source, destination string) error
 	if err := VerifyOpenShellClient(profile); err != nil {
 		return err
 	}
-	args := []string{"--gateway", profile.GatewayName, "--workspace", s.worker.Record().Identity.Sandbox.Workspace, "--color", "never", "sandbox", direction}
+	args := []string{"--gateway", profile.GatewayName, "--gateway-endpoint", profile.Gateway.Binding.Gateway, "--workspace", s.worker.Record().Identity.Sandbox.Workspace, "--color", "never", "sandbox", direction}
 	if direction == "upload" {
 		args = append(args, "--no-git-ignore")
 	} else if direction != "download" {
