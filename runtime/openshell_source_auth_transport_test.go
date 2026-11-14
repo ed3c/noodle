@@ -155,9 +155,8 @@ func sourceAuthTransportPKI(t *testing.T, root string) (*tls.Config, map[string]
 		}
 		if name == "wrong-ca" {
 			otherKey := newKey()
-			other := *ca
-			other.Subject.CommonName = "foreign CA"
-			otherDER := issue(&other, &other, otherKey, otherKey)
+			other := &x509.Certificate{Subject: pkix.Name{CommonName: "foreign CA"}, IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign, NotBefore: ca.NotBefore, NotAfter: ca.NotAfter}
+			otherDER := issue(other, other, otherKey, otherKey)
 			parent, err = x509.ParseCertificate(otherDER)
 			if err != nil {
 				t.Fatal(err)
@@ -200,7 +199,17 @@ type sourceAuthTransportFixture struct {
 func newSourceAuthTransportFixture(t *testing.T) *sourceAuthTransportFixture {
 	t.Helper()
 	path, template, dispatch, file := sourceAuthFixture(t)
-	f := &sourceAuthTransportFixture{path: path, template: template, dispatch: dispatch, root: filepath.Dir(path)}
+	root, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path = filepath.Join(root, filepath.Base(path))
+	template = filepath.Join(root, filepath.Base(template))
+	dispatch = filepath.Join(root, filepath.Base(dispatch))
+	file.Gateway.Resident.Argv[0] = filepath.Join(root, "gateway")
+	file.Gateway.Resident.Directory = root
+	file.Environment = []string{"XDG_CONFIG_HOME=" + filepath.Join(root, "client")}
+	f := &sourceAuthTransportFixture{path: path, template: template, dispatch: dispatch, root: root}
 	security, pairs := sourceAuthTransportPKI(t, f.root)
 	f.sourceGuard = &sourceAuthTransportGuard{getter: true, fingerprint: sha256.Sum256(pairs["operator"].Certificate[0])}
 	f.targetGuard = &sourceAuthTransportGuard{fingerprint: sha256.Sum256(pairs["client"].Certificate[0])}
@@ -227,7 +236,6 @@ func newSourceAuthTransportFixture(t *testing.T) *sourceAuthTransportFixture {
 	origin.TLS.CertificateFile, origin.TLS.KeyFile = "operator.pem", "operator.key"
 	candidate.CredentialSource = &origin
 	writeProfileFixture(t, template, candidate)
-	var err error
 	f.profile, err = LoadOpenShellProfile(path)
 	if err != nil {
 		t.Fatal(err)
