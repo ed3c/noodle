@@ -4,6 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"net"
+	"time"
 	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/internal/state"
 	"log/slog"
@@ -83,4 +86,37 @@ func TestReturnHandoffProducerGuards(t *testing.T) {
 	if _, err := l.prepareReturnHandoff(cook); err == nil {
 		t.Fatal("unknown intent replay")
 	}
+}
+
+type returnTestConnection struct {
+	net.Conn
+	read *strings.Reader
+	writes int
+	writeError error
+	deadlineError error
+}
+func (c *returnTestConnection) Write(p []byte) (int, error) {
+	c.writes++
+	if c.writeError != nil { return 0, c.writeError }
+	return len(p), nil
+}
+func (c *returnTestConnection) Read(p []byte) (int, error) { return c.read.Read(p) }
+func (c *returnTestConnection) SetDeadline(time.Time) error { return c.deadlineError }
+
+func TestReturnHandoffTransportPhases(t *testing.T) {
+	for _, mode := range []string{"before_encode_unknown", "write_unknown", "ack_unknown", "acknowledged"} {
+		t.Run(mode, func(t *testing.T) {
+			c := &returnTestConnection{read: strings.NewReader("")}
+			switch mode {
+			case "before_encode_unknown": c.deadlineError = errors.New("deadline unavailable")
+			case "write_unknown": c.writeError = errors.New("partial write outcome unknown")
+			case "acknowledged": c.read = strings.NewReader("{\"status\":\"acknowledged\"}\n")
+			}
+			err := encodeReturnHandoff(c, returnPacket{EventID: "6"})
+			if mode == "acknowledged" { if err != nil { t.Fatal(err) } } else if returnTransportPhase(err) != mode { t.Fatal("transport phase", mode, err) }
+			if mode == "before_encode_unknown" && c.writes != 0 { t.Fatal("encoded before deadline") }
+			if mode != "before_encode_unknown" && c.writes != 1 { t.Fatal("unexpected encode count", c.writes) }
+		})
+	}
+	if err := sendReturnHandoff(filepath.Join(t.TempDir(), "missing.sock"), returnPacket{}); returnTransportPhase(err) != "dial_before_encode" { t.Fatal("original Dial did not preserve phase", err) }
 }

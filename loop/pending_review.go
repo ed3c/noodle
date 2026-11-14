@@ -88,15 +88,16 @@ func (l *Loop) parkPendingReviewAttempt(cook *cookHandle, reason string, status 
 		return err
 	}
 	if target != nil {
-		packet := returnPacket{Operation: "worker_return", Schema: 1, Binding: target.Binding,
-			EventID: l.canonical.PendingReviews[cook.orderID].ReturnHandoff.EventID,
-			Type:    "stage_review_parked", OrderID: cook.orderID, StageIndex: cook.stageIndex,
-			AttemptID: payload["attempt_id"].(string), SessionID: payload["session_id"].(string),
-			HostInstanceID: l.deps.ReturnHostInstance, Producer: target.Producer}
+		packet := originalReturnPacket(target, l.canonical.PendingReviews[cook.orderID].ReturnHandoff, cook.orderID, cook.stageIndex, payload["attempt_id"].(string), payload["session_id"].(string))
 		// A single bounded attempt after the checkpoint. Restart never resends unknown intent.
 		go func() {
 			if err := sendReturnHandoff(target.Endpoint, packet); err != nil {
-				l.logger.Warn("return handoff unknown; original owner readback required", "error", err)
+				l.logger.Warn("return handoff unknown; original owner readback required", "error", err,
+					"transport_phase", returnTransportPhase(err), "endpoint", target.Endpoint,
+					"event_id", packet.EventID, "order_id", packet.OrderID, "stage_index", packet.StageIndex,
+					"attempt_id", packet.AttemptID, "session_id", packet.SessionID, "host_instance_id", packet.HostInstanceID,
+					"producer_path", packet.Producer.Path, "producer_sha256", packet.Producer.SHA256,
+					"binding_path", packet.Binding.Path, "binding_sha256", packet.Binding.SHA256)
 			}
 		}()
 	}
