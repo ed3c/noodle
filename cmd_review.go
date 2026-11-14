@@ -121,4 +121,3 @@ func returnRecoveryNext(r returnRecoveryResult, p returnRecoveryPlan, ref stoppe
 	r.Next["argv"] = []string{p.Controller.Path, "--project-dir", p.Project, "review", "continue-return-recovery", ref.Path, "--expected-version", ref.SHA256}
 	return r
 }
-
