@@ -2,6 +2,8 @@ package loop
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -140,8 +142,15 @@ func durableReadbackFixture(t *testing.T, project string) (*execution.Context, *
 		}
 	}
 	source, _ := json.Marshal(worktree.StorageSource{Project: project, CommonDir: app.CommonDir, StorageRoot: storage})
-	if err = os.WriteFile(filepath.Join(storage, "source.json"), source, 0600); err != nil {
+	sum := sha256.Sum256([]byte(owner.Root()))
+	ownerDir := filepath.Join(app.CommonDir, "noodle-contexts", hex.EncodeToString(sum[:]))
+	if err = os.MkdirAll(ownerDir, 0700); err != nil {
 		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(storage, "source.json"), filepath.Join(ownerDir, "source.json")} {
+		if err = os.WriteFile(path, source, 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return owner, app, storage
 }
