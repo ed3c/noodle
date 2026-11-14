@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
@@ -26,6 +27,7 @@ type SourceAuthPending struct {
 	TargetReceiptCount    int    `json:"target_receipt_count"`
 }
 type SourceAuthPlan struct {
+	SavedInputClosure    *SourceAuthSavedInputClosure      `json:"saved_input_closure,omitempty"`
 	Schema               int                               `json:"schema"`
 	Status               string                            `json:"status"`
 	Executable           bool                              `json:"executable"`
@@ -199,8 +201,10 @@ func InspectSourceAuthPlan(profilePath, templatePath, dispatchPath, contextID, c
 	result.FrozenProfileSHA256, result.CustodyVersion = dispatchSHA, state.Version
 	// A readable proposal is not a no-effect ACK or a supported live handoff.
 	result.Requires = []string{"original_owner_auth_handoff_capability", "original_pending_effect_readback", "current_effect_authorization"}
+	saved := inspectSourceAuthSavedInputs(context.Background(), original, receipt, result.Sources["dispatch"])
+	result.SavedInputClosure = &saved
 	result.Status = "unknown"
-	if err = VerifySessionReadbackFiles(result.Sources); err != nil {
+	if err = verifySourceAuthPlanSources(&result); err != nil {
 		result.Status = "refused"
 		return result, err
 	}
