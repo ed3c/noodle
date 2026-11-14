@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/internal/state"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,8 +48,9 @@ func TestReturnHandoffProducerGuards(t *testing.T) {
 		"goal": "fixture", "main": map[string]string{"threadId": "Main", "hostId": "local"}, "connection_instance": "original", "consumer_revision": "v1", "producer": producer, "host_instance_id": "host"}
 	pin := save("binding.json", binding)
 	target := returnDescriptor{Schema: 1, Binding: pin, Endpoint: filepath.Join(dir, "never-opened.sock"), Producer: producer, HostInstanceID: "host"}
-	l := &Loop{config: config.DefaultConfig(), deps: Dependencies{ReturnHostInstance: "host"}}
-	cook := &cookHandle{cookIdentity: cookIdentity{orderID: "o", stageIndex: 0}}
+	l := &Loop{config: config.DefaultConfig(), deps: Dependencies{ReturnHostInstance: "host"}, logger: slog.Default()}
+	cook := &cookHandle{cookIdentity: cookIdentity{orderID: "o", stageIndex: 0}, session: &adoptedSession{id: "s"}}
+	l.canonical.Orders = map[string]state.OrderNode{"o": {OrderID: "o", Status: state.OrderActive, Stages: []state.StageNode{{StageIndex: 0, Attempts: []state.AttemptNode{{AttemptID: dispatchAttemptID("o", 0, 0), SessionID: "s", ReturnHandoffUnattempted: true}}}}}}
 	if got, err := l.prepareReturnHandoff(cook); err != nil || got != nil {
 		t.Fatal("legacy default", err)
 	}

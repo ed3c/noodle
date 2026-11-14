@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"github.com/poteto/noodle/config"
+	"github.com/poteto/noodle/internal/ingest"
 	"github.com/poteto/noodle/internal/reducer"
 	loopruntime "github.com/poteto/noodle/runtime"
 	"os"
@@ -13,7 +14,8 @@ import (
 	"time"
 )
 
-func TestUpgradeReturnCheckpointAndReentry(t *testing.T) {
+func returnHandoffTestLoop(t *testing.T, endpoint string) (*Loop, *cookHandle) {
+	t.Helper()
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -54,9 +56,23 @@ func TestUpgradeReturnCheckpointAndReentry(t *testing.T) {
 	sum := sha256.Sum256(raw)
 	producer := config.RuntimeSource{Path: exe, SHA256: hex.EncodeToString(sum[:])}
 	binding := save("binding.json", map[string]any{"schema": 1, "request": config.RuntimeSource{Path: "/fixture/request", SHA256: hex.EncodeToString(sum[:])}, "goal": "fixture", "main": map[string]string{"threadId": "fixture-Main", "hostId": "local"}, "connection_instance": "fixture", "consumer_revision": "v1", "producer": producer, "host_instance_id": "fixture-host"})
-	cfg.Runtime.ReturnHandoff = save("descriptor.json", returnDescriptor{Schema: 1, Binding: binding, Endpoint: filepath.Join(dir, "absent.sock"), Producer: producer, HostInstanceID: "fixture-host"})
+	if endpoint == "" {
+		endpoint = filepath.Join(dir, "absent.sock")
+	}
+	cfg.Runtime.ReturnHandoff = save("descriptor.json", returnDescriptor{Schema: 1, Binding: binding, Endpoint: endpoint, Producer: producer, HostInstanceID: "fixture-host"})
 	l := New(dir, "noodle", cfg, Dependencies{Runtimes: map[string]loopruntime.Runtime{"process": newMockRuntime()}, Worktree: &fakeWorktree{}, Adapter: &fakeAdapterRunner{}, Mise: &fakeMise{}, Monitor: fakeMonitor{}, Registry: testLoopRegistry(), Now: time.Now, ReturnHostInstance: "fixture-host"})
 	cook := &cookHandle{cookIdentity: cookIdentity{orderID: "42", stage: Stage{TaskKey: "execute", Skill: "execute"}}, session: &adoptedSession{id: "old-worker", status: "completed"}, worktreeName: "42", worktreePath: filepath.Join(dir, "worktree")}
+	if err := l.ensureCanonicalOrderFromOrders(cook.orderID); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.emitEventChecked(ingest.EventDispatchCompleted, map[string]any{"order_id": cook.orderID, "stage_index": 0, "attempt_id": dispatchAttemptID(cook.orderID, 0, 0), "session_id": cook.session.ID(), "worktree_name": cook.worktreeName}); err != nil {
+		t.Fatal(err)
+	}
+	return l, cook
+}
+
+func TestUpgradeReturnCheckpointAndReentry(t *testing.T) {
+	l, cook := returnHandoffTestLoop(t, "")
 	if err := l.parkPendingReview(cook, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -68,20 +84,16 @@ func TestUpgradeReturnCheckpointAndReentry(t *testing.T) {
 	if intent == nil || intent.EventID == "" || intent.Status != "unknown" {
 		t.Fatal("checkpoint missing original unknown", intent)
 	}
-	before, err := os.ReadFile(l.canonicalSnapshotPath())
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, worker := range []string{"new-opt-in", "legacy-opt-out"} {
 		if worker == "legacy-opt-out" {
 			l.config.Runtime.ReturnHandoff = config.RuntimeSource{}
 		}
-		if err := l.parkPendingReview(cook, ""); err == nil {
-			t.Fatal("reentry admitted", worker)
+		if err := l.parkPendingReview(cook, ""); err != nil {
+			t.Fatal("native repark refused", worker, err)
 		}
-		after, err := os.ReadFile(l.canonicalSnapshotPath())
-		if err != nil || string(before) != string(after) {
-			t.Fatal("reentry rewrote checkpoint", worker, err)
+		after, err := reducer.ReadSnapshot(l.canonicalSnapshotPath())
+		if err != nil || *after.State.PendingReviews["42"].ReturnHandoff != *intent {
+			t.Fatal("repark replaced original callback intent", worker, err)
 		}
 	}
 }
