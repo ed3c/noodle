@@ -6,15 +6,100 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"time"
 
+	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/internal/ingest"
 	"github.com/poteto/noodle/internal/orderx"
 	"github.com/poteto/noodle/internal/reducer"
 	"github.com/poteto/noodle/internal/state"
 	loopruntime "github.com/poteto/noodle/runtime"
 )
+
+// ValidateStoppedLocalMergeCompanion qualifies canonical data, not dispatch.
+// The caller supplies only the original Host-bound, digest-checked config.
+func ValidateStoppedLocalMergeCompanion(before []byte, orderID string, cfg config.Config) error {
+	var s reducer.DurableSnapshot
+	if err := decodeStoppedReview(before, &s); err != nil {
+		return err
+	}
+	if orderID == scheduleOrderID || len(s.State.Orders) != 2 || len(cfg.Runtime.AdmittedOrders) != 1 || cfg.Runtime.AdmittedOrders[0] != orderID {
+		return fmt.Errorf("stopped merge has foreign order/admission custody")
+	}
+	if _, ok := s.State.Orders[orderID]; !ok {
+		return fmt.Errorf("original stopped merge order missing")
+	}
+	companion, ok := s.State.Orders[scheduleOrderID]
+	if !ok || len(companion.Stages) != 1 || companion.CreatedAt.IsZero() || companion.UpdatedAt.IsZero() || companion.Sequence < 0 {
+		return fmt.Errorf("stopped merge dormant schedule missing or incomplete")
+	}
+	// Use the actual producer and canonical conversion, including routing and
+	// the implicit process runtime. Timestamps and metadata are retained data.
+	want := synthesizeCanonicalState(bootstrapScheduleOrder(cfg), nil, state.RunMode(cfg.Mode), companion.CreatedAt).Orders[scheduleOrderID]
+	if companion.OrderID != want.OrderID || companion.Title != want.Title || !reflect.DeepEqual(companion.Plan, want.Plan) || companion.Rationale != want.Rationale || companion.Status != want.Status {
+		return fmt.Errorf("stopped merge companion differs from built-in schedule producer")
+	}
+	stage := companion.Stages[0]
+	if len(stage.Attempts) != 0 || stage.Merge != nil {
+		return fmt.Errorf("stopped merge schedule has execution custody")
+	}
+	for _, key := range []string{localTaskMergeKey, localTaskMergeRecoveryKey, localTaskCompletionRecoveryKey, requestChangesKey, requestChangesRequeuedKey, savedProgressAttemptsKey, interruptionKey, interruptionHistoryKey, nativeDegradationKey, "merge_worktree", "merge_mode", "merge_branch", "stopped_local_merge_continuation"} {
+		if _, exists := stage.Extra[key]; exists {
+			return fmt.Errorf("stopped merge schedule has execution custody: %s", key)
+		}
+	}
+	stage.Attempts, stage.Extra = nil, nil
+	if !reflect.DeepEqual(stage, want.Stages[0]) {
+		return fmt.Errorf("stopped merge companion stage differs from built-in schedule producer")
+	}
+	// A missing attempts field cannot prove the producer's explicit null/empty
+	// history. Require its ordinary emitted fields, even when their value is zero.
+	var raw struct {
+		State struct {
+			Orders map[string]struct {
+				Stages []map[string]json.RawMessage `json:"stages"`
+			} `json:"orders"`
+		} `json:"state"`
+	}
+	if err := json.Unmarshal(before, &raw); err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(want.Stages[0])
+	if err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		return err
+	}
+	for key := range fields {
+		if _, present := raw.State.Orders[scheduleOrderID].Stages[0][key]; !present {
+			return fmt.Errorf("stopped merge schedule stage evidence missing: %s", key)
+		}
+	}
+	if len(s.State.PendingReviews) != 1 {
+		return fmt.Errorf("stopped merge has foreign review custody")
+	}
+	for key, review := range s.State.PendingReviews {
+		if key != orderID || review.OrderID != orderID {
+			return fmt.Errorf("stopped merge has foreign review custody")
+		}
+	}
+	if s.EffectLedger == nil {
+		return fmt.Errorf("stopped merge schedule effect evidence missing")
+	}
+	for _, row := range s.EffectLedger {
+		var subject struct {
+			OrderID string `json:"order_id"`
+		}
+		if json.Unmarshal(row.Effect.Payload, &subject) != nil || subject.OrderID == "" || subject.OrderID == scheduleOrderID || row.EffectID == initialAdmissionEffectID(scheduleOrderID) || row.Effect.EffectID == initialAdmissionEffectID(scheduleOrderID) {
+			return fmt.Errorf("stopped merge schedule has effect custody or unknown subject")
+		}
+	}
+	return nil
+}
 
 // CompleteStoppedLocalMerge computes only the original effect's completion.
 // The stopped caller must already prove the bound Git HEAD/tree landed.
