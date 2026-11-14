@@ -79,9 +79,35 @@ func prepareReturnRecovery(project, framePath string) (returnRecoveryResult, err
 	}
 	requestPath, orderID := input.Inner.Native.Owner.Request.Path, input.Inner.Order.OrderID
 	eventID, count := "", 0
-	for _, attempt := range input.Inner.Order.Stages[0].Attempts {
-		if attempt.ReturnHandoff != nil && attempt.ReturnHandoff.Status == "unknown" {
+	if review, current := input.Inner.Reviews[orderID]; current {
+		if review.OrderID != orderID || review.StageIndex != 0 || review.SessionID == "" || review.WorktreeName == "" || review.WorktreePath == "" || review.ReturnHandoff == nil || review.ReturnHandoff.Status != "unknown" || input.Inner.Order.Stages[0].Status != state.StageReview {
+			return r, fmt.Errorf("original current return review differs")
+		}
+		for _, attempt := range input.Inner.Order.Stages[0].Attempts {
+			if attempt.ReturnHandoff != nil && attempt.ReturnHandoff.EventID == review.ReturnHandoff.EventID && attempt.SessionID != review.SessionID {
+				return r, fmt.Errorf("original current return review event/session differs")
+			}
+			if attempt.SessionID != review.SessionID {
+				continue
+			}
+			if attempt.AttemptID == "" || attempt.WorktreeName != review.WorktreeName || attempt.ReturnHandoffUnattempted || attempt.ReturnHandoff == nil || *attempt.ReturnHandoff != *review.ReturnHandoff {
+				return r, fmt.Errorf("original current return review/attempt differs")
+			}
+			switch attempt.Status {
+			case state.AttemptCompleted, state.AttemptFailed, state.AttemptCancelled:
+			default:
+				return r, fmt.Errorf("original current return review attempt is not terminal")
+			}
 			eventID, count = attempt.ReturnHandoff.EventID, count+1
+		}
+		if count != 1 || eventID == "" {
+			return r, fmt.Errorf("original current return review attempt missing or ambiguous")
+		}
+	} else {
+		for _, attempt := range input.Inner.Order.Stages[0].Attempts {
+			if attempt.ReturnHandoff != nil && attempt.ReturnHandoff.Status == "unknown" {
+				eventID, count = attempt.ReturnHandoff.EventID, count+1
+			}
 		}
 	}
 	if count != 1 || eventID == "" || orderID == "" {

@@ -342,6 +342,111 @@ func TestReturnRecoveryCLIHistoricalReadback(t *testing.T) {
 		})
 	}
 }
+func TestReturnRecoveryCLICurrentReviewWithHistoricalUnknown(t *testing.T) {
+	for _, mode := range []string{"current-event", "wrong-order", "wrong-stage", "missing-session", "missing-intent", "wrong-event", "wrong-binding", "wrong-worktree", "duplicate-session", "duplicate-event", "running-current", "missing-current-attempt", "no-current-two-unknown"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newReturnRecoveryFixture(t)
+			snapshotPath := filepath.Join(f.root, ".noodle", "state.snapshot.json")
+			var snapshot reducer.DurableSnapshot
+			if _, err := loopruntime.ReadSessionReadbackFile(snapshotPath, &snapshot); err != nil {
+				t.Fatal(err)
+			}
+			order := snapshot.State.Orders["original"]
+			old := order.Stages[0].Attempts[0]
+			old.Status, old.Error = state.AttemptFailed, "changes requested: original revision"
+			oldReview := snapshot.State.PendingReviews[order.OrderID]
+			archive, err := json.Marshal(map[string]any{"binding": map[string]any{"attempt": 0, "attempt_id": old.AttemptID, "session_id": old.SessionID, "reason": old.Error, "worktree_name": old.WorktreeName, "worktree_path": oldReview.WorktreePath}, "review": oldReview})
+			if err != nil {
+				t.Fatal(err)
+			}
+			intent := *old.ReturnHandoff
+			intent.EventID = "10"
+			current := old
+			current.AttemptID, current.SessionID, current.Status, current.Error = "original-0-attempt-1", "current-session-1", state.AttemptCompleted, ""
+			current.StartedAt, current.CompletedAt, current.ReturnHandoff = old.CompletedAt.Add(time.Second), old.CompletedAt.Add(time.Minute), &intent
+			review := oldReview
+			review.SessionID, review.ReturnHandoff = current.SessionID, &intent
+			order.Stages[0].Attempts = []state.AttemptNode{old, current}
+			order.Stages[0].Extra = map[string]json.RawMessage{"request_changes_requeued": archive}
+			snapshot.State.Orders[order.OrderID], snapshot.State.PendingReviews[order.OrderID], snapshot.State.LastEventID = order, review, "10"
+			stoppedTestPut(t, snapshotPath, snapshot)
+			var frame returnRecoveryFrame
+			if _, err = loopruntime.ReadSessionReadbackFile(f.frame, &frame); err != nil {
+				t.Fatal(err)
+			}
+			frame.Inner.Order, frame.Inner.Reviews = order, map[string]state.PendingReviewNode{order.OrderID: review}
+			switch mode {
+			case "wrong-order":
+				review.OrderID = "foreign"
+			case "wrong-stage":
+				review.StageIndex = 1
+			case "missing-session":
+				review.SessionID = ""
+			case "missing-intent":
+				review.ReturnHandoff = nil
+			case "wrong-event":
+				changed := intent
+				changed.EventID = "11"
+				review.ReturnHandoff = &changed
+			case "wrong-binding":
+				changed := intent
+				changed.BindingSHA256 = strings.Repeat("f", 64)
+				review.ReturnHandoff = &changed
+			case "wrong-worktree":
+				review.WorktreeName = "foreign"
+			case "duplicate-session":
+				frame.Inner.Order.Stages[0].Attempts = append(frame.Inner.Order.Stages[0].Attempts, current)
+			case "duplicate-event":
+				duplicate := current
+				duplicate.AttemptID, duplicate.SessionID = "foreign-attempt", "foreign-session"
+				frame.Inner.Order.Stages[0].Attempts = append(frame.Inner.Order.Stages[0].Attempts, duplicate)
+			case "running-current":
+				frame.Inner.Order.Stages[0].Attempts[1].Status = state.AttemptRunning
+			case "missing-current-attempt":
+				frame.Inner.Order.Stages[0].Attempts = []state.AttemptNode{old}
+			}
+			frame.Inner.Reviews[order.OrderID] = review
+			if mode == "no-current-two-unknown" {
+				delete(frame.Inner.Reviews, order.OrderID)
+			}
+			stoppedTestPut(t, f.frame, frame)
+			// Typed evidence isolates event selection; the original legacy-log guards remain unchanged.
+			line := fmt.Sprintf("time=%s level=WARN msg=%q error=%q transport_phase=dial_before_encode event_id=10 attempt_id=%s session_id=%s endpoint=%q order_id=original stage_index=0 host_instance_id=%s producer_path=%q producer_sha256=%s binding_path=%q binding_sha256=%s\n", current.CompletedAt.Add(time.Millisecond).Format(time.RFC3339Nano), "return handoff unknown; original owner readback required", "dial unix "+f.endpoint+": connect: connection refused", current.AttemptID, current.SessionID, f.endpoint, f.owner.Current.HostInstanceID, f.owner.ExecutionBinary.Path, f.owner.ExecutionBinary.SHA256, intent.BindingPath, intent.BindingSHA256)
+			logPath := filepath.Join(f.generation, "host.log")
+			stoppedTestBytes(t, logPath, []byte(line))
+			for _, path := range []string{snapshotPath, f.frame, logPath} {
+				f.before[path], err = os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd := newReviewCmd(&App{projectDir: f.root})
+			var output bytes.Buffer
+			cmd.SetOut(&output)
+			cmd.SetErr(&output)
+			cmd.SetArgs([]string{"prepare-return-recovery", f.frame})
+			err = cmd.Execute()
+			if mode == "current-event" {
+				if err != nil {
+					t.Fatal("unique current event refused because historical unknown remains", err, output.String())
+				}
+				var result returnRecoveryResult
+				if err = json.Unmarshal(output.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				p := result.Subject.Packet
+				if result.Status != "prepared" || p.EventID != "10" || p.AttemptID != current.AttemptID || p.SessionID != current.SessionID || len(result.Effects) != 0 {
+					t.Fatal("current producer tuple/effects differs", result)
+				}
+			} else if err == nil {
+				t.Fatal("inconsistent current or ambiguous historical events accepted", mode, output.String())
+			} else if mode == "missing-current-attempt" && !strings.Contains(err.Error(), "original current return review") {
+				t.Fatal("invalid current review fell back to the historical event", err)
+			}
+			f.unchanged()
+		})
+	}
+}
 func TestReturnRecoverySourceQualificationRefusesDrift(t *testing.T) {
 	for _, mode:=range []string{"missing-log","foreign-endpoint","duplicate-log","truncated-log","write-after","lost-ACK","unsupported-producer","frame-source","frame-tuple","frame-host","descriptor-source","request-source","foreign-generation-owner"} {
 		t.Run(mode,func(t *testing.T) {
