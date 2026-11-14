@@ -69,8 +69,8 @@ type OpenShellGateway struct {
 	credentialClient     pb.OpenShellClient
 	// Effective Source authentication is separate from logical bindings and
 	// the Target key used for credential replay. Only the auth factory sets it.
-	credentialTLS        *OpenShellTLS
-	credentialNow        func() time.Time
+	credentialTLS *OpenShellTLS
+	credentialNow func() time.Time
 }
 
 // NewOpenShellGateway reserves canonical local custody before any service spawn.
