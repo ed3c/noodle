@@ -209,3 +209,41 @@ func TestOpenShellObserverPreservesDistinctProducerDigests(t *testing.T) {
 		t.Fatal("observer did more than Get")
 	}
 }
+
+func TestOpenShellCompletedEvidenceObserverUsesManagedRuntimeLink(t *testing.T) {
+	r, b, f := fileProfileObserverFixture(t)
+	link := filepath.Join(t.TempDir(), ".noodle")
+	if err := os.Symlink(r.config.RuntimeDir, link); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(f.root, "events"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadOpenShellCompletedEvidence(t.Context(), r.config.Profile, link, r.config.ContextID, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CandidateHead == "" || !got.StopAcknowledged {
+		t.Fatal("managed runtime alias lost the original completion")
+	}
+	for _, name := range []string{"openshell-dispatch.json", "delivery/result.json", "delivery/changes.patch", "delivery/publish.json"} {
+		physical, err := filepath.EvalSymlinks(filepath.Join(link, "sessions", b.SessionID, name))
+		if err != nil || got.Sources[name].Path != physical {
+			t.Fatal("readback lost the original physical source", name, err)
+		}
+	}
+	after, err := os.ReadFile(filepath.Join(f.root, "events"))
+	if err != nil || string(after[len(before):]) != "get\n" {
+		t.Fatal("managed runtime observer did more than Get", err)
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadOpenShellCompletedEvidence(t.Context(), r.config.Profile, link, r.config.ContextID, b); err == nil {
+		t.Fatal("accepted a managed runtime alias pointing outside the original session")
+	}
+}

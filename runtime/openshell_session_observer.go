@@ -17,8 +17,13 @@ func ReadOpenShellCompletedEvidence(ctx context.Context, profile OpenShellProfil
 	if !filepath.IsAbs(runtimeDir) || contextID == "" {
 		return CompletedSessionReadback{}, fmt.Errorf("original observer runtime/context missing")
 	}
-	spec := profile.Gateway
+	runtimeSource := runtimeDir
 	var err error
+	runtimeDir, err = filepath.EvalSymlinks(runtimeSource)
+	if err != nil {
+		return CompletedSessionReadback{}, err
+	}
+	spec := profile.Gateway
 	spec.Binding.StateRoot, err = filepath.EvalSymlinks(spec.Binding.StateRoot)
 	if err != nil {
 		return CompletedSessionReadback{}, err
@@ -88,6 +93,10 @@ func ReadOpenShellCompletedEvidence(ctx context.Context, profile OpenShellProfil
 	afterRoot, err := filepath.EvalSymlinks(profile.Gateway.Binding.StateRoot)
 	if err != nil || afterRoot != spec.Binding.StateRoot {
 		return CompletedSessionReadback{}, fmt.Errorf("original observer custody root changed")
+	}
+	afterRuntime, err := filepath.EvalSymlinks(runtimeSource)
+	if err != nil || afterRuntime != runtimeDir {
+		return CompletedSessionReadback{}, fmt.Errorf("original observer runtime root changed")
 	}
 	return result.completed, nil
 }
