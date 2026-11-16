@@ -148,6 +148,7 @@ func (r *OpenShellRuntime) Dispatch(ctx context.Context, req DispatchRequest) (S
 
 type openShellDispatchReceipt struct {
 	CredentialWaitError                                            string `json:",omitempty"`
+	PublicationScratchError                                        string `json:",omitempty"`
 	ProfileSHA256                                                  string
 	CandidateHead                                                  string
 	ProgressHead                                                   string
@@ -493,15 +494,22 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 		}
 	}
 	worker.RecordModelOutcome(s.Outcome())
+	if s.Outcome().Status == StatusCompleted && !s.interrupted() && s.receipt.Delivery != nil {
+		if err = workspaceartifacts.ReleasePublicationScratch(context.Background(), req.WorktreePath, s.receipt.Baseline, s.receipt.Delivery, s.receipt.CandidateHead); err != nil {
+			if !errors.Is(err, workspaceartifacts.ErrPublicationScratchHeld) {
+				s.fail(err)
+				return
+			}
+			// Publication is already durable. Preserve a refused scratch cleanup
+			// separately; it cannot invalidate the task or strand a settled handle.
+			s.mu.Lock()
+			s.receipt.PublicationScratchError = err.Error()
+			s.mu.Unlock()
+		}
+	}
 	if err = s.phase("settled"); err != nil {
 		s.fail(err)
 		return
-	}
-	if s.Outcome().Status == StatusCompleted && !s.interrupted() && s.receipt.Delivery != nil {
-		if err = workspaceartifacts.ReleasePublicationScratch(context.Background(), req.WorktreePath, s.receipt.Baseline, s.receipt.Delivery, s.receipt.CandidateHead); err != nil {
-			s.fail(err)
-			return
-		}
 	}
 	s.complete()
 }

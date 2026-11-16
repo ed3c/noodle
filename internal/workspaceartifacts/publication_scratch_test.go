@@ -3,6 +3,7 @@ package workspaceartifacts
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -86,8 +87,13 @@ func TestPublicationScratchRefusesFailedTamperedForeignOrReloaded(t *testing.T) 
 			case "returned":
 				put(t, r.ReturnedDirectory, "file.txt", []byte("changed evidence"), 0644)
 			}
-			if err := ReleasePublicationScratch(context.Background(), root, b, r, head); err == nil {
+			err := ReleasePublicationScratch(context.Background(), root, b, r, head)
+			if err == nil {
 				t.Fatal("unqualified scratch release accepted")
+			}
+			onlyScratch := variant == "tampered" || variant == "foreign" || variant == "reloaded"
+			if errors.Is(err, ErrPublicationScratchHeld) != onlyScratch {
+				t.Fatal("required publication failure confused with held scratch", variant, err)
 			}
 			if _, err := os.Lstat(scratch); err != nil {
 				t.Fatal("refused scratch was changed", err)

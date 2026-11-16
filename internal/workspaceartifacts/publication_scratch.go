@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -12,6 +13,10 @@ import (
 	"path/filepath"
 	"reflect"
 )
+
+// ErrPublicationScratchHeld retains only rebuildable scratch. A failed required
+// publication/readback check is a different error and cannot complete the task.
+var ErrPublicationScratchHeld = errors.New("publication scratch cleanup remains held")
 
 // This capability stays with the original Apply caller. Reloading a result does
 // not grant ownership of a directory that may have acquired another consumer.
@@ -112,16 +117,13 @@ func (r *Result) sealScratch() error {
 // ReleasePublicationScratch removes only this caller's completed diff workspace.
 // Baselines, returned bytes and all publication/failed evidence stay in place.
 func ReleasePublicationScratch(ctx context.Context, repository string, baseline *Baseline, result *Result, head string) error {
-	if result == nil || result.Error != "" || result.scratch == nil || result.scratch.entries == nil {
-		return fmt.Errorf("publication scratch has no original producer ownership")
+	if result == nil || result.Error != "" {
+		return fmt.Errorf("publication scratch has no successful original result")
 	}
 	if err := VerifyRetainedPublication(ctx, repository, baseline, result, head); err != nil {
 		return err
 	}
 	evidence := filepath.Dir(result.PatchPath)
-	if result.scratch.path != filepath.Join(evidence, "patch-repository") {
-		return fmt.Errorf("publication scratch is outside original delivery")
-	}
 	var saved Result
 	raw, err := os.ReadFile(filepath.Join(evidence, "result.json"))
 	if err != nil || json.Unmarshal(raw, &saved) != nil || saved.Applied != result.Applied || saved.State != result.State || saved.Error != result.Error || saved.PatchPath != result.PatchPath || saved.ReturnedDirectory != result.ReturnedDirectory {
@@ -132,15 +134,24 @@ func ReleasePublicationScratch(ctx context.Context, repository string, baseline 
 	if err != nil || json.Unmarshal(raw, &receipt) != nil || receipt.Phase != result.State || receipt.Parent != baseline.Head || receipt.ObservedHead != head || receipt.Error != "" {
 		return fmt.Errorf("publication scratch has no original successful publication")
 	}
+	if result.scratch == nil || result.scratch.entries == nil {
+		return fmt.Errorf("%w: no original producer ownership", ErrPublicationScratchHeld)
+	}
+	if result.scratch.path != filepath.Join(evidence, "patch-repository") {
+		return fmt.Errorf("%w: outside original delivery", ErrPublicationScratchHeld)
+	}
 	current, err := result.scratch.snapshot(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrPublicationScratchHeld, err)
 	}
 	if !reflect.DeepEqual(current, result.scratch.entries) {
-		return fmt.Errorf("publication scratch changed after original apply")
+		return fmt.Errorf("%w: scratch changed after original apply", ErrPublicationScratchHeld)
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrPublicationScratchHeld, err)
 	}
-	return os.RemoveAll(result.scratch.path)
+	if err := os.RemoveAll(result.scratch.path); err != nil {
+		return fmt.Errorf("%w: %w", ErrPublicationScratchHeld, err)
+	}
+	return nil
 }
