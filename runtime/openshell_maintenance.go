@@ -199,7 +199,7 @@ func maintenanceInputs(p ProgressMaintenance, profile OpenShellProfile) (OpenShe
 	}
 	token := sha256.Sum256([]byte(binding.Token))
 	id := guestprogress.Identity{SessionID: d.SessionID, CommandSHA256: binding.CommandSHA256, TokenSHA256: hex.EncodeToString(token[:])}
-	if err := guestprogress.ValidateReceipt(saved, id, record.ProgressStop.Command.RequestID); err != nil {
+	if err := guestprogress.ValidateReceiptForPolicy(saved, id, record.ProgressStop.Command.RequestID, binding.ArchivePolicy); err != nil {
 		return fail(err)
 	}
 	if err := verifyMaintenanceArchives(context.Background(), p.Archives, saved); err != nil {

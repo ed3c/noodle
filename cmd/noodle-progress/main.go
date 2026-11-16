@@ -36,6 +36,7 @@ func run(args []string) (int, error) {
 	request := flags.String("request-id", "", "one-shot native stop operation UUID")
 	repository := flags.String("repository", "", "guest repository")
 	sessionDirectory := flags.String("session-directory", "", "guest harness session directory")
+	archivePolicy := flags.String("archive-policy", "", "original Host dependency rebuild proof")
 	grace := flags.Duration("grace", 10*time.Second, "TERM grace before owned descendants receive KILL")
 	if err := flags.Parse(args[1:]); err != nil {
 		return -1, err
@@ -45,7 +46,7 @@ func run(args []string) (int, error) {
 	identity := guestprogress.Identity{SessionID: *session, CommandSHA256: *command, TokenSHA256: hex.EncodeToString(tokenHash[:])}
 	switch operation {
 	case "run":
-		return guestprogress.Run(guestprogress.Config{Directory: *directory, Repository: *repository, SessionDirectory: *sessionDirectory, Identity: identity, Token: token, Argv: flags.Args(), Grace: *grace})
+		return guestprogress.Run(guestprogress.Config{Directory: *directory, Repository: *repository, SessionDirectory: *sessionDirectory, Identity: identity, Token: token, Argv: flags.Args(), Grace: *grace, ArchivePolicy: *archivePolicy})
 	case "stop":
 		if len(flags.Args()) != 0 {
 			return -1, fmt.Errorf("stop has unexpected arguments")

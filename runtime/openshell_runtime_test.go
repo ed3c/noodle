@@ -121,6 +121,14 @@ func TestOpenShellTransferChild(t *testing.T) {
 		}
 		tokenHash := sha256.Sum256([]byte(binding.Token))
 		receipt := guestprogress.Receipt{Schema: 1, Identity: guestprogress.Identity{SessionID: binding.SessionID, CommandSHA256: binding.CommandSHA256, TokenSHA256: hex.EncodeToString(tokenHash[:])}, Status: "archived", ChildrenReaped: true}
+		if binding.ArchivePolicy != "" && os.Getenv("NOODLE_PROGRESS_FIXTURE_OLD_SUPERVISOR") != "1" {
+			receipt.Schema = 2
+			receipt.ArchivePolicySHA256, err = guestprogress.ArchivePolicySHA256(binding.ArchivePolicy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			receipt.ExcludedDependencies = []string{"node_modules"}
+		}
 		if record.ProgressStop != nil {
 			receipt.RequestID = record.ProgressStop.Command.RequestID
 			receipt.ExitCode = 143
@@ -163,6 +171,16 @@ func progressFixtureArchive(t *testing.T, archive string) []byte {
 	}
 	if _, err := tw.Write([]byte(data)); err != nil {
 		t.Fatal(err)
+	}
+	if archive != "noodle-session.tar" && os.Getenv("NOODLE_PROGRESS_FIXTURE_DEPENDENCIES") == "1" {
+		for _, item := range []struct{ name, data string }{{"package.json", `{"dependencies":{"updated":"2"}}`}, {"pnpm-lock.yaml", "legitimately updated lockfile\n"}} {
+			if err := tw.WriteHeader(&tar.Header{Name: item.name, Size: int64(len(item.data)), Mode: 0644}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tw.Write([]byte(item.data)); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	if archive == "noodle-session.tar" {
 		if err := tw.WriteHeader(&tar.Header{Name: "codex/tmp/arg0-linux/codex-arg0fixture/apply_patch", Typeflag: tar.TypeSymlink, Linkname: "/sandbox/payload/codex/bin/codex", Mode: 0777}); err != nil {
