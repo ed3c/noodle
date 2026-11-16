@@ -268,6 +268,9 @@ func TestOpenShellRuntimeReturnsArtifactsAfterOriginalStop(t *testing.T) {
 	if s.worker.Record().Boundary != OpenShellBoundaryStopped {
 		t.Fatal("delivery preceded original stopped boundary")
 	}
+	if _, err := os.Lstat(filepath.Join(s.dir, "delivery", "patch-repository")); !os.IsNotExist(err) {
+		t.Fatal("completed publisher retained its diff scratch", err)
+	}
 	if !r.CapacityAvailable() {
 		t.Fatal("settled attempt retained capacity")
 	}

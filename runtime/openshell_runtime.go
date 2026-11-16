@@ -480,6 +480,12 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 		s.fail(err)
 		return
 	}
+	if s.Outcome().Status == StatusCompleted && !s.interrupted() && s.receipt.Delivery != nil {
+		if err = workspaceartifacts.ReleasePublicationScratch(context.Background(), req.WorktreePath, s.receipt.Baseline, s.receipt.Delivery, s.receipt.CandidateHead); err != nil {
+			s.fail(err)
+			return
+		}
+	}
 	s.complete()
 }
 
