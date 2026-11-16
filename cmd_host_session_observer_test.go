@@ -354,7 +354,7 @@ func TestSessionObserverQuotaPreservesNineAcrossGenerationsAndOwnLease(t *testin
 // Native qualification and kernel reads are isolated here. Runtime tests drive
 // the real Get-only producer; this control exercises the complete Host consumer.
 func TestSessionObserverResponseConsumesSelectedProofWithOtherWorker(t *testing.T) {
-	for _, fault := range []string{"", "missing-proof", "completion-refused", "actor-generation", "quota-source", "profile-source"} {
+	for _, fault := range []string{"", "missing-proof", "completion-refused", "actor-generation", "quota-source", "profile-source", "payload-source", "client-source"} {
 		t.Run(fault, func(t *testing.T) {
 			project, err := filepath.EvalSymlinks(t.TempDir())
 			if err != nil {
@@ -460,6 +460,10 @@ func TestSessionObserverResponseConsumesSelectedProofWithOtherWorker(t *testing.
 						t.Fatal(err)
 					}
 					write(profilePath, append(raw, ' '))
+				case "payload-source":
+					write(filepath.Join(p.PayloadDirectory, "changed"), []byte("foreign payload"))
+				case "client-source":
+					write(filepath.Join(filepath.Dir(profilePath), "client-config", "openshell", "gateways", p.GatewayName, "metadata.json"), []byte("{}"))
 				}
 				return loop.SessionReadback{SchemaVersion: 1, Status: "observed", OrderID: orderID, SessionID: sessionID, AttemptID: "canonical-attempt", AttemptStatus: "failed", Runtime: "openshell", Execution: produced, Effects: []string{}}, nil
 			}
@@ -471,7 +475,9 @@ func TestSessionObserverResponseConsumesSelectedProofWithOtherWorker(t *testing.
 				if fault == "completion-refused" {
 					return fmt.Errorf("original selected completion changed")
 				}
-				return nil
+				// Qualification is isolated, but the real independent verifier's
+				// complete profile/source/payload/client checks remain in scope.
+				return loopruntime.VerifyOpenShellProfile(p)
 			}
 			result, err := observeHostSessionWithReads(t.Context(), project, "original-request", "order", "session", owner, binary, reads)
 			if fault != "" {

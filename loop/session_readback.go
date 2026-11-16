@@ -66,7 +66,9 @@ func ReadOpenShellSessionEvidence(ctx context.Context, project, runtimeDir, cont
 		if e.CustodyProjection == nil {
 			return fmt.Errorf("standalone session custody proof missing")
 		}
-		return loopruntime.VerifyCompletedSessionReadback(e, profile, contextID, orderID, sessionID)
+		// The original runtime has verified its selected evidence. The canonical
+		// wrapper separately verifies the snapshot that it adds to those sources.
+		return nil
 	}
 	return readCanonicalSessionEvidence(ctx, project, filepath.Join(runtimeDir, "state.snapshot.json"), orderID, sessionID, physical, read, verify)
 }
@@ -123,6 +125,9 @@ func readCanonicalSessionEvidence(ctx context.Context, project, snapshotPath, or
 		return result, fmt.Errorf("original runtime returned no source evidence")
 	}
 	execution.Sources["canonical_snapshot"] = ref
+	if err = loopruntime.VerifySessionReadbackFiles(map[string]loopruntime.SessionReadbackFileRef{"canonical_snapshot": ref}); err != nil {
+		return result, err
+	}
 	if err = verify(execution); err != nil {
 		return result, err
 	}

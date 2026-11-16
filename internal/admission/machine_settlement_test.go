@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/poteto/noodle/internal/filex"
@@ -69,6 +70,69 @@ func TestMachineSettlementSameOriginalLeaseReturnsExactlyOnce(t *testing.T) {
 	}
 	if rows, err := b.MachineSessionLeases(proof.Binding.ContextID, proof.Binding.ProjectDir); err != nil || len(rows) != 0 {
 		t.Fatal("settled original lease remained actionable", rows, err)
+	}
+}
+
+func TestMachineSettlementPolicyChangeRequiresAllResourcesReturned(t *testing.T) {
+	for _, kind := range []string{"unstarted-returned", "held", "settled"} {
+		t.Run(kind, func(t *testing.T) {
+			var b *Budget
+			var root string
+			var originalID string
+			var tombstone machineLease
+			if kind == "settled" {
+				var lease MachineSessionLease
+				var proof MachineReclamation
+				b, _, lease, proof = settlementFixture(t)
+				root, originalID = proof.Binding.ProjectDir, lease.ID
+				if err := b.SettleMachineSession(lease, proof); err != nil {
+					t.Fatal(err)
+				}
+				if err := b.machine.access(false, func(state *machineState) (bool, error) {
+					tombstone = state.Leases[originalID]
+					return false, nil
+				}); err != nil || tombstone.Settlement == nil {
+					t.Fatal("original settlement tombstone missing", err)
+				}
+			} else {
+				root = capacityFixtureRoot(t)
+				b, _ = capacityFixtureBudget(t, filepath.Join(root, "machine"), filepath.Join(root, "original-quota"), "original", capacityFixtureClaim(root))
+				permit, err := b.TryAcquireTask("original", "old-task", "openshell")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if kind == "held" {
+					if err := permit.StartResourceEffects(); err != nil {
+						t.Fatal(err)
+					}
+				}
+				permit.Release()
+			}
+			claim := capacityFixtureClaim(root)
+			claim.Source, claim.Policy.MemoryBytes = "new-unfrozen-profile", 40
+			next, _ := capacityFixtureBudget(t, b.machine.dir, filepath.Join(root, "next-quota"), "next-host", claim)
+			permit, err := next.TryAcquireTask("next-host", "new-task", "openshell")
+			if kind == "held" {
+				if permit != nil || !errors.Is(err, ErrDeferred) || !strings.Contains(err.Error(), "machine_operator_policy_differs_with_held_leases") {
+					t.Fatal("policy update bypassed original held resources", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal("returned resources still block fresh policy", err)
+			}
+			permit.Release()
+			if kind == "settled" {
+				if err := b.machine.access(false, func(state *machineState) (bool, error) {
+					if !reflect.DeepEqual(state.Leases[originalID], tombstone) || state.Capacity == nil || *state.Capacity != claim.Policy {
+						t.Fatal("policy update changed settlement history or failed to adopt policy")
+					}
+					return false, nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
 	}
 }
 

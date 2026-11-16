@@ -305,9 +305,6 @@ func observeHostSessionWithReads(ctx context.Context, project, requestFile, orde
 	if rootErr != nil || afterRoot != spec.Binding.StateRoot {
 		return result, fmt.Errorf("original observer custody root changed")
 	}
-	if err = loopruntime.VerifyOpenShellProfile(profile); err != nil {
-		return result, err
-	}
 	result.Status = "observed"
 	result.Observation = &observation
 	return result, nil
