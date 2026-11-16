@@ -17,6 +17,7 @@ import (
 	"reflect"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/poteto/noodle/internal/filex"
@@ -181,16 +182,40 @@ func (m *machineCapacity) access(initialize bool, apply func(*machineState) (boo
 	if err := canonicalCapacityPath(m.dir); err != nil { return err }
 	if err := capacityFileIdentity(m.dir, true); err != nil { return err }
 	lockPath := filepath.Join(m.dir, "capacity.lock")
-	_, priorLock := os.Lstat(lockPath)
-	if priorLock == nil {
-		if err := capacityFileIdentity(lockPath, false); err != nil { return err }
-	} else if !os.IsNotExist(priorLock) { return priorLock }
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
+	created := false
+	if initialize {
+		// Only the exclusive creator may initialize. The lock file is durable
+		// evidence of an attempted creation, even if the first state write fails.
+		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
+		if err == nil {
+			created = true
+			syncErr := file.Sync()
+			closeErr := file.Close()
+			if syncErr != nil { return syncErr }
+			if closeErr != nil { return closeErr }
+			if err = filex.SyncDir(m.dir); err != nil { return err }
+		} else if !os.IsExist(err) { return err }
+	}
+	if err := capacityFileIdentity(lockPath, false); err != nil { return err }
+	path := filepath.Join(m.dir, "capacity.json")
+	if initialize && !created {
+		// A first caller can publish the lock before taking flock. Let that
+		// caller finish without allowing a peer to recreate unknown state.
+		for {
+			if _, err := os.Lstat(path); err == nil { break
+			} else if !os.IsNotExist(err) { return err }
+			select {
+			case <-ctx.Done(): return errors.New("machine capacity state missing; original owner readback required")
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}
 	lock, err := lockfile.Acquire(ctx, lockPath)
 	if err != nil { return fmt.Errorf("machine capacity lock: %w", err) }
 	defer lock.Close()
-	path := filepath.Join(m.dir, "capacity.json")
+	if err = capacityFileIdentity(lockPath, false); err != nil { return err }
 	raw, err := os.ReadFile(path)
 	var s machineState
 	changed := false
@@ -202,7 +227,7 @@ func (m *machineCapacity) access(initialize bool, apply func(*machineState) (boo
 		if err = decoder.Decode(&s); err != nil { return fmt.Errorf("machine capacity state corrupt: %w", err) }
 		if err = decoder.Decode(new(any)); err != io.EOF { return errors.New("machine capacity state has trailing content") }
 	} else if !os.IsNotExist(err) { return err
-	} else if !initialize || !os.IsNotExist(priorLock) {
+	} else if !created {
 		return errors.New("machine capacity state missing; original owner readback required")
 	} else {
 		s = machineState{Schema: 1, Identity: m.identity, Policy: MachineAdmissionPolicy, Leases: map[string]machineLease{}}
@@ -422,6 +447,27 @@ func capacityIdentity(machine string, uid int) (string, error) {
 	if machine == "" || uid < 0 { return "", errors.New("physical machine or user identity unavailable") }
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s/uid:%d", machine, uid)))
 	return hex.EncodeToString(sum[:]), nil
+}
+
+const platformUUIDOutputLimit = 64 * 1024
+
+func parseDarwinPlatformUUID(data []byte) (string, error) {
+	if len(data) > platformUUIDOutputLimit { return "", errors.New("IOPlatformUUID observation exceeds output limit") }
+	value := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		key, raw, ok := strings.Cut(strings.TrimSpace(line), " = ")
+		if !ok || key != `"IOPlatformUUID"` { continue }
+		if value != "" { return "", errors.New("IOPlatformUUID observation is ambiguous") }
+		var err error
+		value, err = strconv.Unquote(raw)
+		if err != nil || len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' {
+			return "", errors.New("IOPlatformUUID observation is invalid")
+		}
+		id, err := hex.DecodeString(strings.ReplaceAll(value, "-", ""))
+		if err != nil || len(id) != 16 || bytes.Equal(id, make([]byte, 16)) { return "", errors.New("IOPlatformUUID observation is invalid") }
+	}
+	if value == "" { return "", errors.New("IOPlatformUUID observation is missing") }
+	return strings.ToLower(value), nil
 }
 
 func capacityProbePath(path string) (string, error) {
