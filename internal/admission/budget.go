@@ -20,6 +20,7 @@ const (
 	PollInterval                   = 5 * time.Second
 	SampleTimeout                  = time.Second
 	MaxSampleAge                   = 15 * time.Second
+	MaxRecoverySamples             = 12
 )
 
 var ErrDeferred = errors.New("worker resource admission deferred")

@@ -55,3 +55,32 @@ func TestHostControlPublicProducerDefersMissingSourceBeforeEffects(t *testing.T)
 		}
 	}
 }
+
+func TestHostPreparationUnsupportedEntriesHaveNoHostEffects(t *testing.T) {
+	root := filepath.Join(hostCapacityRoot(t), "not-created")
+	t.Setenv("NOODLE_HOST_DIR", root)
+	t.Setenv("NOODLE_HOST_POOL_ROOT", "")
+	t.Setenv("NOODLE_HOST_GENERATION", "")
+	if err := serveHostWithSampler(context.Background(), hostShutdownTestSampler{}); !errors.Is(err, admission.ErrDeferred) {
+		t.Fatal("unpooled serve bypassed native preparation", err)
+	}
+	cmd := newStartCmd(&App{})
+	if err := cmd.Execute(); !errors.Is(err, admission.ErrDeferred) {
+		t.Fatal("standalone start bypassed native preparation", err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatal("unsupported entry materialized a Host", err)
+	}
+}
+
+func TestHostGoalPublicOwnerDefersMissingBudgetBeforeProfileOrProcess(t *testing.T) {
+	root, goal, template, binary := goalHostFixture(t)
+	launched := false
+	_, err := ensureGoalHost(context.Background(), root, goal, template, binary, "", func(context.Context, string, string) error { launched = true; return nil })
+	if !errors.Is(err, admission.ErrDeferred) || launched {
+		t.Fatal("Goal substituted missing lifetime budget", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "h")); !os.IsNotExist(err) {
+		t.Fatal("missing budget materialized profile or Host", err)
+	}
+}

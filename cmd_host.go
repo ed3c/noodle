@@ -234,7 +234,7 @@ func hostCapabilities(platform string) map[string]any {
 	if platform == "darwin" && procx.NativeFixtureControlAvailable() {
 		sourceService = 1
 	}
-	return map[string]any{"schema": 1, "protocol": hostProtocol, "stateless_fixture_recovery": 1, "resident_request_binding": 1, "restricted_host_maintenance": 1, "existing_instance_admission": 1, "unaccepted_admission_transfer_readback": 1, "native_consumer_leases": 1, "native_consumer_worktrees": 1, "shared_service_adapter": "stateless_fixtures_only", "completed_context_cleanup": 1, "external_task_config": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1, "codex_native_runtime": force, "safe_host_switch": 0, "rolling_host_version": rolling, "shared_worker_quota": rolling, "openshell_pool_owner": rolling, "openshell_custody_version": 5, "openshell_session_readback_observer": sourceService, "openshell_session_archive_streams": 1, "source_service_restore": sourceService, "source_service_upgrade": sourceService, "openshell_custody_versions": []int{4, 5}, "openshell_credential_delivery": 1, "gateway_host_handover": 1, "gateway_custody_release": 3, "worker_admission_policy": admission.WorkerAdmissionPolicy, "machine_worker_admission": 1, "machine_admission_policy": admission.MachineAdmissionPolicy, "machine_native_sample": machineMonitor, "machine_filesystem_sample": rolling, "machine_pre_control_admission": 0, "machine_gc_release": 0, "machine_safe_pause": 0, "local_task_branch_retention": 1}
+	return map[string]any{"schema": 1, "protocol": hostProtocol, "stateless_fixture_recovery": 1, "resident_request_binding": 1, "restricted_host_maintenance": 1, "existing_instance_admission": 1, "unaccepted_admission_transfer_readback": 1, "native_consumer_leases": 1, "native_consumer_worktrees": 1, "shared_service_adapter": "stateless_fixtures_only", "completed_context_cleanup": 1, "external_task_config": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1, "codex_native_runtime": force, "safe_host_switch": 0, "rolling_host_version": rolling, "shared_worker_quota": rolling, "openshell_pool_owner": rolling, "openshell_custody_version": 5, "openshell_session_readback_observer": sourceService, "openshell_session_archive_streams": 1, "source_service_restore": sourceService, "source_service_upgrade": sourceService, "openshell_custody_versions": []int{4, 5}, "openshell_credential_delivery": 1, "gateway_host_handover": 1, "gateway_custody_release": 3, "worker_admission_policy": admission.WorkerAdmissionPolicy, "machine_worker_admission": 1, "machine_admission_policy": admission.MachineAdmissionPolicy, "machine_native_sample": machineMonitor, "machine_filesystem_sample": rolling, "machine_pre_control_admission": 0, "machine_preparation_observation_window_seconds": int(admission.MaxPreparationObservationWindow / time.Second), "machine_gc_release": 0, "machine_safe_pause": 0, "local_task_branch_retention": 1}
 }
 
 func hostDirectory() (string, error) {
@@ -367,6 +367,11 @@ func serveHost(shutdownRequested context.Context) error {
 }
 
 func serveHostWithSampler(shutdownRequested context.Context, sampler admission.Sampler, preparation ...hostPreparationReader) error {
+	if len(preparation) == 0 || preparation[0] == nil {
+		if err := verifyServingResident(shutdownRequested); err != nil {
+			return err
+		}
+	}
 	ctx, cancel := context.WithCancel(context.WithoutCancel(shutdownRequested))
 	defer cancel()
 	dir, err := hostDirectory()
@@ -517,6 +522,9 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 	for {
 		if h.shutdown != nil {
 			if err := h.shutdownReady(); err == nil {
+				if err := h.saveResidentExitWitness(); err != nil {
+					return err
+				}
 				h.releaseShutdownLocks()
 				return nil
 			} else {
@@ -533,6 +541,9 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 		case <-switchTick.C:
 			h.reconcileFixtureLifecycle(ctx)
 			if h.shutdown == nil && h.rolling != nil && h.sourceService == nil && h.advanceRolling(ctx) {
+				if err := h.saveResidentExitWitness(); err != nil {
+					return err
+				}
 				return nil
 			}
 		case err := <-webDone:

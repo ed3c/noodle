@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
@@ -24,10 +25,31 @@ type PreparationRef struct {
 	SHA256 string `json:"source_sha256"`
 }
 
+const MaxPreparationObservationWindow = time.Duration(MaxRecoverySamples)*PollInterval + time.Duration(MaxRecoverySamples+1)*SampleTimeout + time.Second
+
 type machinePreparation struct {
 	Source PreparationSource `json:"source"`
 	Claim  ResourceClaim     `json:"claim"`
 	SHA256 string            `json:"source_sha256"`
+}
+
+// ReadPreparation returns only the original pool's bound lifetime for native
+// generation/Goal readback. It neither adopts nor starts an unknown lifetime.
+func (b *Budget) ReadPreparation(ref PreparationRef) (source PreparationSource, claim ResourceClaim, effects bool, err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.machine == nil {
+		return source, claim, false, errors.New("original preparation owner unavailable")
+	}
+	err = b.machine.access(false, func(state *machineState) (bool, error) {
+		lease, exists := state.Leases[ref.ID]
+		if !exists || lease.Preparation == nil || lease.Preparation.SHA256 != ref.SHA256 || lease.Settlement != nil || lease.PreparationClosed != nil {
+			return false, errors.New("original preparation lifetime missing or closed")
+		}
+		source, claim, effects = lease.Preparation.Source, lease.Preparation.Claim, lease.EffectsPossible
+		return false, nil
+	})
+	return source, claim, effects, err
 }
 
 // VerifyPreparationSource is a readback for the original native producer and
@@ -86,7 +108,7 @@ func preparationBinding(source PreparationSource, claim ResourceClaim) (*machine
 
 func validateMachinePreparation(lease machineLease) error {
 	if lease.Preparation == nil {
-		if lease.PreparationPromoted {
+		if lease.PreparationPromoted || lease.PreparationClosed != nil {
 			return errors.New("promoted preparation source missing")
 		}
 		return nil
@@ -101,7 +123,50 @@ func validateMachinePreparation(lease machineLease) error {
 	if lease.PreparationPromoted && (lease.ContextID == "" || lease.OrderID == "" || lease.Runtime == "" || !lease.EffectsPossible) {
 		return errors.New("promoted preparation original worker identity missing")
 	}
+	if lease.PreparationClosed != nil {
+		if lease.Preparation.Source.Purpose != "host-resident" || !lease.EffectsPossible || lease.PreparationPromoted || len(lease.PreparationClosed) != 1 {
+			return errors.New("original resident closure lifetime differs")
+		}
+		ref := lease.PreparationClosed["resident_exit"]
+		digest, err := hex.DecodeString(ref.SHA256)
+		if !filepath.IsAbs(ref.Path) || filepath.Clean(ref.Path) != ref.Path || err != nil || len(digest) != sha256.Size {
+			return errors.New("original resident exit source missing")
+		}
+	}
 	return nil
+}
+
+// The original pool owner reads its own exit witness and freshly confirms the
+// native process-group absence inside this return operation. No caller JSON
+// can replace that native readback or turn a running/unknown lifetime into GC.
+func (b *Budget) CloseResidentPreparation(ref PreparationRef, readback func(PreparationSource) (map[string]MachineSettlementFile, error)) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.machine == nil || readback == nil {
+		return errors.New("original resident exit reader missing")
+	}
+	return b.machine.access(false, func(state *machineState) (bool, error) {
+		lease, exists := state.Leases[ref.ID]
+		if !exists || lease.Owner != b.machine.owner || lease.Preparation == nil || lease.Preparation.SHA256 != ref.SHA256 || lease.Preparation.Source.Purpose != "host-resident" || !lease.EffectsPossible || lease.ContextID != "" {
+			return false, errors.New("original resident lifetime differs")
+		}
+		if lease.PreparationClosed != nil {
+			return false, nil
+		}
+		refs, err := readback(lease.Preparation.Source)
+		if err != nil {
+			return false, err
+		}
+		lease.PreparationClosed = refs
+		if err = validateMachinePreparation(lease); err != nil {
+			return false, err
+		}
+		if err = verifyMachineSettlementFiles(refs); err != nil {
+			return false, err
+		}
+		state.Leases[ref.ID] = lease
+		return true, nil
+	})
 }
 
 // BindPreparation is called by the native Host after verifying its original
@@ -318,7 +383,7 @@ func (b *Budget) StartPreparationEffects(ref PreparationRef) error {
 	}
 	return b.machine.access(false, func(state *machineState) (bool, error) {
 		lease, exists := state.Leases[ref.ID]
-		if !exists || lease.Owner != b.machine.owner || lease.Preparation == nil || lease.Preparation.SHA256 != ref.SHA256 || lease.ContextID != "" || lease.Settlement != nil {
+		if !exists || lease.Owner != b.machine.owner || lease.Preparation == nil || lease.Preparation.SHA256 != ref.SHA256 || lease.ContextID != "" || lease.Settlement != nil || lease.PreparationClosed != nil {
 			return false, errors.New("original machine preparation effect owner differs")
 		}
 		if lease.EffectsPossible {
