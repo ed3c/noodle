@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -201,7 +202,7 @@ func maintenanceInputs(p ProgressMaintenance, profile OpenShellProfile) (OpenShe
 	if err := guestprogress.ValidateReceipt(saved, id, record.ProgressStop.Command.RequestID); err != nil {
 		return fail(err)
 	}
-	if err := VerifySessionReadbackFiles(p.Archives); err != nil {
+	if err := verifyMaintenanceArchives(context.Background(), p.Archives, saved); err != nil {
 		return fail(err)
 	}
 	if len(p.Archives) != 3 {
