@@ -24,6 +24,8 @@ const (
 	completedObservation openShellObservationKind = iota
 	savedObservation
 	notStartedObservation
+	cleanupCompletedObservation
+	cleanupSavedObservation
 )
 
 // OpenShellCompletedObservation contains native custody evidence only. Neither
@@ -42,6 +44,7 @@ type OpenShellCompletedObservation struct {
 	Phase                     string
 	CreateAcknowledged        bool
 	StopAcknowledged          bool
+	Retirement                *CleanupSessionRetirement `json:"retirement,omitempty"`
 }
 
 // OpenShellCommandSHA256 binds every command field without exposing argv or env.
@@ -102,6 +105,12 @@ func (c *OpenShellCustody) observeSettled(ctx context.Context, expected OpenShel
 	if count != 1 {
 		return OpenShellCompletedObservation{}, fmt.Errorf("openshell original completion identity is missing or ambiguous")
 	}
+	cleanup := kind == cleanupCompletedObservation || kind == cleanupSavedObservation
+	if kind == cleanupCompletedObservation {
+		kind = completedObservation
+	} else if kind == cleanupSavedObservation {
+		kind = savedObservation
+	}
 	validate := validateCompletedRecord
 	if kind == savedObservation {
 		validate = validateProgressRecord
@@ -110,6 +119,12 @@ func (c *OpenShellCustody) observeSettled(ctx context.Context, expected OpenShel
 	}
 	if err := validate(record, expected); err != nil {
 		return OpenShellCompletedObservation{}, err
+	}
+	if record.Retirement != nil {
+		if !cleanup {
+			return OpenShellCompletedObservation{}, fmt.Errorf("original VM retirement requires cleanup evidence readback")
+		}
+		return c.observeRetiring(ctx, record)
 	}
 	response, err := c.client.GetSandbox(ctx, &pb.GetSandboxRequest{Name: record.Name, WorkspaceScope: c.scope()})
 	if err != nil {
@@ -148,6 +163,10 @@ func settledNativeObservation(record OpenShellCustodyRecord, expected OpenShellI
 	if kind == notStartedObservation {
 		return OpenShellCompletedObservation{Identity: record.Worker.Identity, Task: record.Task, MainProcessInstanceID: record.MainProcessInstanceID, Phase: "Stopped", CreateAcknowledged: true, StopAcknowledged: true}, nil
 	}
+	return savedSettledObservation(record)
+}
+
+func savedSettledObservation(record OpenShellCustodyRecord) (OpenShellCompletedObservation, error) {
 	commandSHA256, err := OpenShellCommandSHA256(record.Exec.Command)
 	if err != nil {
 		return OpenShellCompletedObservation{}, err

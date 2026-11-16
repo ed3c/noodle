@@ -27,7 +27,7 @@ type CompletedSessionBinding struct {
 }
 type CompletedSessionReadback struct {
 	custodyQualification  *completionCustodyQualification
-	CustodyProjection     *SessionCustodyProjection          `json:"custody_projection,omitempty"`
+	CustodyProjection     *SessionCustodyProjection         `json:"custody_projection,omitempty"`
 	ProfileSHA256         string                            `json:"profile_sha256"`
 	CommandSHA256         string                            `json:"command_sha256"`
 	Instructions          *CompletedInstructionEvidence     `json:"instructions"`
@@ -36,6 +36,7 @@ type CompletedSessionReadback struct {
 	NativeExecExitCode    int                               `json:"native_exec_exit_code"`
 	NativePhase           string                            `json:"native_phase"`
 	StopAcknowledged      bool                              `json:"stop_acknowledged"`
+	Retirement            *CleanupSessionRetirement         `json:"retirement,omitempty"`
 	MainProcessInstanceID string                            `json:"main_process_instance_id"`
 	Sources               map[string]SessionReadbackFileRef `json:"sources"`
 }
@@ -326,7 +327,15 @@ func (r openShellSessionEvidenceReader) read(ctx context.Context, b CompletedSes
 	if err != nil {
 		return result, err
 	}
-	if observed.Identity != identity || observed.Task != (OpenShellTask{b.OrderID, receipt.AttemptID, b.SessionID}) || observed.ExecExitCode != 0 || observed.Phase != "Stopped" || !observed.StopAcknowledged || !observed.CreateAcknowledged || observed.MainProcessInstanceID == "" || observed.MainProcessInstanceID != original.MainProcessInstanceID || observed.ExecAttemptID != original.Exec.AttemptID || observed.ExecRequestID != original.Exec.Command.RequestID {
+	validPhase := observed.Phase == "Stopped" && observed.Retirement == nil
+	if retained != nil && observed.Retirement != nil {
+		retirement := observed.Retirement
+		validPhase = retirement.SessionID == b.SessionID && retirement.NativeAttemptID == receipt.AttemptID && retirement.SandboxID == identity.Sandbox.SandboxID && ((observed.Phase == "Retired" && retirement.State == CleanupSessionRetired) || (observed.Phase == "Retiring" && retirement.State != CleanupSessionRetired))
+	}
+	if !validPhase {
+		return result, fmt.Errorf("OpenShell cleanup retirement phase differs")
+	}
+	if observed.Identity != identity || observed.Task != (OpenShellTask{b.OrderID, receipt.AttemptID, b.SessionID}) || observed.ExecExitCode != 0 || !observed.StopAcknowledged || !observed.CreateAcknowledged || observed.MainProcessInstanceID == "" || observed.MainProcessInstanceID != original.MainProcessInstanceID || observed.ExecAttemptID != original.Exec.AttemptID || observed.ExecRequestID != original.Exec.Command.RequestID {
 		return result, fmt.Errorf("OpenShell native completion differs")
 	}
 	commandSHA256, err := OpenShellCommandSHA256(original.Exec.Command)
@@ -408,7 +417,7 @@ func (r openShellSessionEvidenceReader) read(ctx context.Context, b CompletedSes
 	if err = VerifyOpenShellProfile(r.profile); err != nil {
 		return result, err
 	}
-	completed := CompletedSessionReadback{CustodyProjection: projection, ProfileSHA256: profileSHA, CommandSHA256: commandSHA256, Instructions: instructions, NativeAttemptID: receipt.AttemptID, CandidateHead: receipt.CandidateHead, NativeExecExitCode: observed.ExecExitCode, NativePhase: observed.Phase, StopAcknowledged: observed.StopAcknowledged, MainProcessInstanceID: observed.MainProcessInstanceID, Sources: sources}
+	completed := CompletedSessionReadback{CustodyProjection: projection, ProfileSHA256: profileSHA, CommandSHA256: commandSHA256, Instructions: instructions, NativeAttemptID: receipt.AttemptID, CandidateHead: receipt.CandidateHead, NativeExecExitCode: observed.ExecExitCode, NativePhase: observed.Phase, Retirement: observed.Retirement, StopAcknowledged: observed.StopAcknowledged, MainProcessInstanceID: observed.MainProcessInstanceID, Sources: sources}
 	completed.custodyQualification = qualification
 	return settledSessionEvidence{completed: completed, progressHead: receipt.ProgressHead, harnessExitCode: receipt.Progress.ExitCode, status: receipt.Outcome.Status}, nil
 }

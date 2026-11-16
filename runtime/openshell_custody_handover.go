@@ -48,7 +48,7 @@ func validateOpenShellControlRoot(root string) error {
 }
 
 func verifyCustodyHandover(ref SessionReadbackFileRef, state OpenShellCustodyState) error {
-	if state.Version != openShellCredentialCustodyVersion && len(state.Credentials) != 0 {
+	if state.Version != openShellCredentialCustodyVersion && state.Version != openShellCredentialRetirementCustodyVersion && len(state.Credentials) != 0 {
 		return fmt.Errorf("openshell handover credential custody schema was downgraded")
 	}
 	var proof OpenShellCustodyHandover

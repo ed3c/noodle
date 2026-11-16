@@ -104,7 +104,7 @@ func (c *OpenShellCustody) owned(ref OpenShellSandboxRef) (*OpenShellCustodyReco
 	for i := range c.state.Records {
 		r := &c.state.Records[i]
 		if r.Worker.Identity.Sandbox == ref {
-			if r.Retained || !r.CreateAcknowledged {
+			if r.Retained || !r.CreateAcknowledged || r.Retirement != nil {
 				return nil, fmt.Errorf("sandbox is retained read-only or create unresolved")
 			}
 			return r, nil
