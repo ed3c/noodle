@@ -88,3 +88,34 @@ func TestLocalTaskRetentionRejectsCandidateDriftBeforeCommit(t *testing.T) {
 		t.Fatal("refused retention changed canonical disposition")
 	}
 }
+
+func TestLocalTaskRetentionKeepsDispositionAcrossInterruptedCompletion(t *testing.T) {
+	l, cook, cmd := localTaskReviewFixture(t)
+	localTaskRealWorktree(t, l)
+	original := l.canonical.Orders[cook.orderID]
+	stage := original.Stages[0]
+	stage.Extra = cloneLegacyExtra(stage.Extra)
+	if stage.Extra == nil {
+		stage.Extra = map[string]json.RawMessage{}
+	}
+	pending := l.cooks.pendingReview[cook.orderID]
+	review := l.canonical.PendingReviews[cook.orderID]
+	cmd.Action = "retain-local-task"
+	if err := l.dispatchControlCommand(cmd); err != nil {
+		t.Fatal(err)
+	}
+	stage.Extra[localTaskRetentionKey] = l.canonical.Orders[cook.orderID].Stages[0].Extra[localTaskRetentionKey]
+	original.Stages[0] = stage
+	l.canonical.Orders[cook.orderID] = original
+	l.canonical.PendingReviews[cook.orderID] = review
+	l.cooks.pendingReview[cook.orderID] = pending
+	if err := l.dispatchControlCommand(ControlCommand{ID: "conflicting-review", Action: "request-changes", OrderID: cook.orderID, Prompt: "change disposition"}); err == nil {
+		t.Fatal("request-changes replaced saved retention")
+	}
+	if err := l.dispatchControlCommand(cmd); err != nil {
+		t.Fatal("original saved retention did not resume completion", err)
+	}
+	if l.canonical.Orders[cook.orderID].Status != state.OrderCompleted {
+		t.Fatal("saved retention remained active")
+	}
+}
