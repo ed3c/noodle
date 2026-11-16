@@ -51,6 +51,15 @@ func readLocalTaskCandidate(ref localTaskFileRef) (localTaskCandidate, error) {
 }
 
 func (l *Loop) controlMergeLocalTask(cmd ControlCommand) error {
+	return l.controlReviewedLocalTask(cmd, false)
+}
+
+func (l *Loop) controlReviewedLocalTask(cmd ControlCommand, retain bool) error {
+	if retain {
+		if found, err := l.continueRetainedLocalTask(cmd); found || err != nil {
+			return err
+		}
+	}
 	ref := localTaskFileRef{Path: cmd.Value, SHA256: cmd.Target}
 	c, err := readLocalTaskCandidate(ref)
 	if err != nil {
@@ -68,6 +77,9 @@ func (l *Loop) controlMergeLocalTask(cmd ControlCommand) error {
 	}
 	if _, exists := stage.Extra[localTaskMergeKey]; exists {
 		return fmt.Errorf("local task merge already prepared; original merge readback required")
+	}
+	if len(stage.Extra[localTaskRetentionKey]) != 0 {
+		return fmt.Errorf("local task already has a different retained disposition")
 	}
 	b, err := l.captureRequestChanges(pending)
 	if err != nil {
@@ -207,6 +219,9 @@ func (l *Loop) controlMergeLocalTask(cmd ControlCommand) error {
 		if name != "" && (!reviewed || !localTaskPathAllowed(prompt.WritePaths, name)) {
 			return fmt.Errorf("local task commit includes unreviewed path: %s", name)
 		}
+	}
+	if retain {
+		return l.saveRetainedLocalTask(cmd, ref, head, tree, order, stage, b.WorktreePath)
 	}
 	raw, err := json.Marshal(localTaskMergeBinding{Candidate: ref, Head: head, Tree: tree})
 	if err != nil {

@@ -105,6 +105,17 @@ func (l *Loop) checkCompletedLocalTask(order state.OrderNode, stage state.StageN
 	if !l.isAdmittedLocalTask(order, stage) {
 		return fmt.Errorf("local task completion admission is unresolved: %s", order.OrderID)
 	}
+	if len(stage.Extra[localTaskRetentionKey]) != 0 {
+		retained, _, err := retainedLocalTask(order)
+		if err != nil {
+			return fmt.Errorf("local task retained branch evidence is invalid: %w", err)
+		}
+		head, err := recoveryGitWithExecution(l.deps.Execution, l.projectDir, "rev-parse", retained.Branch)
+		if err != nil || head != retained.Head {
+			return fmt.Errorf("local task retained branch moved or is missing: %s", order.OrderID)
+		}
+		return l.checkRetainedControlACK(retained.ControlID)
+	}
 	raw := stage.Extra[localTaskMergeKey]
 	if len(raw) == 0 {
 		return fmt.Errorf("%w: local task %s still requires candidate acceptance or completion recovery", ErrReleaseBusy, order.OrderID)

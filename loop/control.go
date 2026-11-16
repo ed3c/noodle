@@ -331,6 +331,8 @@ func (l *Loop) dispatchControlCommand(cmd ControlCommand) error {
 		return l.controlRecoverLocalTaskMerge(cmd)
 	case "merge-local-task":
 		return l.controlMergeLocalTask(cmd)
+	case "retain-local-task":
+		return l.controlRetainLocalTask(cmd)
 	case "recover-local-task-review":
 		return l.controlRecoverLocalTaskReview(cmd)
 	case "recover-request-changes":
