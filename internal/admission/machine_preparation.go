@@ -30,6 +30,35 @@ type machinePreparation struct {
 	SHA256 string            `json:"source_sha256"`
 }
 
+// VerifyPreparationSource is a readback for the original native producer and
+// Host consumer. The FileRef in a caller's JSON alone cannot select a lifetime.
+func (b *Budget) VerifyPreparationSource(ref PreparationRef, source PreparationSource, claim ResourceClaim) error {
+	observed, exists, err := b.preparationRead(source, claim)
+	if err != nil {
+		return err
+	}
+	if !exists || observed != ref {
+		return errors.New("original preparation source or nonce differs")
+	}
+	return nil
+}
+
+func (b *Budget) CancelUnstartedPreparation(ref PreparationRef) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.machine == nil {
+		return errors.New("original preparation owner unavailable")
+	}
+	return b.machine.access(false, func(state *machineState) (bool, error) {
+		lease, exists := state.Leases[ref.ID]
+		if !exists || lease.Owner != b.machine.owner || lease.Preparation == nil || lease.Preparation.SHA256 != ref.SHA256 || lease.EffectsPossible {
+			return false, errors.New("original preparation cannot be proved unstarted")
+		}
+		delete(state.Leases, ref.ID)
+		return true, nil
+	})
+}
+
 func preparationBinding(source PreparationSource, claim ResourceClaim) (*machinePreparation, error) {
 	if source.Purpose != "task-preparation" && source.Purpose != "host-resident" {
 		return nil, errors.New("machine preparation lifetime unsupported")

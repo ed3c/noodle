@@ -145,6 +145,7 @@ type noodleHost struct {
 	blocked                 bool
 	shutdown                *hostShutdown
 	newRuntime              func(string, string, config.Config, loop.Dependencies) hostRuntime
+	prepareContext          hostPreparationReader
 	rolling                 *hostRolling
 }
 
@@ -218,7 +219,9 @@ func newHostCmd(app *App) *cobra.Command {
 
 func hostCapabilities(platform string) map[string]any {
 	machineMonitor := 0
-	if platform == "darwin" { machineMonitor = 1 }
+	if platform == "darwin" {
+		machineMonitor = 1
+	}
 	force := 1
 	if platform == "windows" {
 		force = 0
@@ -363,7 +366,7 @@ func serveHost(shutdownRequested context.Context) error {
 	return serveHostWithSampler(shutdownRequested, admission.NewSampler())
 }
 
-func serveHostWithSampler(shutdownRequested context.Context, sampler admission.Sampler) error {
+func serveHostWithSampler(shutdownRequested context.Context, sampler admission.Sampler, preparation ...hostPreparationReader) error {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(shutdownRequested))
 	defer cancel()
 	dir, err := hostDirectory()
@@ -410,6 +413,9 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 	h := &noodleHost{budget: budget, contexts: make(map[string]*hostContext), completed: make(chan string, 16), dir: dir, instanceID: id, binaryPath: path, binarySHA: hostDigest(data), newRuntime: func(dir, bin string, cfg config.Config, deps loop.Dependencies) hostRuntime {
 		return loop.New(dir, bin, cfg, deps)
 	}}
+	if len(preparation) != 0 {
+		h.prepareContext = preparation[0]
+	}
 	h.residents, err = admission.OpenResidents(dir)
 	if err != nil {
 		return err

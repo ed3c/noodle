@@ -31,7 +31,7 @@ func TestRequiredExistingHostNeverStartsReplacement(t *testing.T) {
 	}
 }
 func TestRequiredExistingHostRejectsReplacementBeforeAdmission(t *testing.T) {
-	h := &noodleHost{instanceID: "replacement", binarySHA: "binary"}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, instanceID: "replacement", binarySHA: "binary"}
 	result := h.handle(context.Background(), hostRequest{Operation: "attach", RequiredHostInstanceID: "original", BinarySHA256: "binary"})
 	if result.Status != "refused" || len(h.contexts) != 0 || len(h.receipts) != 0 {
 		t.Fatalf("replacement admitted request: %+v", result)

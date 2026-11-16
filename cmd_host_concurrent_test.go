@@ -55,7 +55,7 @@ func TestHostConcurrentNativeChildrenKeepPrivateEnvironment(t *testing.T) {
 	}
 	t.Setenv("CONTEXT_SECRET", "host")
 	before, _ := os.Getwd()
-	h := &noodleHost{dir: t.TempDir(), instanceID: "concurrent", binarySHA: "test-binary"}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), instanceID: "concurrent", binarySHA: "test-binary"}
 	var runtimes []*environmentHostRuntime
 	h.newRuntime = func(_, _ string, _ config.Config, deps loop.Dependencies) hostRuntime {
 		f := &environmentHostRuntime{fakeHostRuntime: fakeHostRuntime{ready: make(chan struct{})}, execution: deps.Execution}
@@ -107,7 +107,7 @@ func TestHostConcurrentNativeChildrenKeepPrivateEnvironment(t *testing.T) {
 func TestHostRejectsRemoteBeforeRuntimeAndReceipts(t *testing.T) {
 	for _, name := range []string{"sprites", "cursor"} {
 		t.Run(name, func(t *testing.T) {
-			h := &noodleHost{dir: t.TempDir(), instanceID: "local", binarySHA: "test-binary", newRuntime: func(string, string, config.Config, loop.Dependencies) hostRuntime {
+			h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), instanceID: "local", binarySHA: "test-binary", newRuntime: func(string, string, config.Config, loop.Dependencies) hostRuntime {
 				t.Fatal("refused remote request constructed runtime")
 				return nil
 			}}
@@ -161,7 +161,7 @@ func TestHostRecoveryPreflightRefusesLiveAndUnknown(t *testing.T) {
 }
 
 func TestHostFailureDoesNotBlockSiblingOrReplay(t *testing.T) {
-	h := &noodleHost{dir: t.TempDir(), instanceID: "siblings", binarySHA: "test-binary"}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), instanceID: "siblings", binarySHA: "test-binary"}
 	h.newRuntime = func(string, string, config.Config, loop.Dependencies) hostRuntime {
 		return &fakeHostRuntime{ready: make(chan struct{}), released: make(chan struct{})}
 	}
@@ -191,7 +191,7 @@ func TestHostFailureDoesNotBlockSiblingOrReplay(t *testing.T) {
 }
 
 func TestHostContextLimitAndSameRootRefuseBeforeRuntime(t *testing.T) {
-	h := &noodleHost{dir: t.TempDir(), instanceID: "limit", binarySHA: "test-binary", contexts: make(map[string]*hostContext)}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), instanceID: "limit", binarySHA: "test-binary", contexts: make(map[string]*hostContext)}
 	for i := 0; i < 16; i++ {
 		id := fmt.Sprint(i)
 		h.contexts[id] = &hostContext{receipt: hostReceipt{ContextID: id, ProjectDir: "/fixture/" + id}}

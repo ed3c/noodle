@@ -35,7 +35,7 @@ func unacceptedAdmissionFixture(t *testing.T) (*noodleHost, hostRequest) {
 	if err := updateHostPool(root, func(pool *hostPool) error { pool.Active = req.RequiredHostInstanceID; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	h := &noodleHost{dir: root, instanceID: req.RequiredHostInstanceID, binarySHA: req.BinarySHA256,
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: root, instanceID: req.RequiredHostInstanceID, binarySHA: req.BinarySHA256,
 		binaryPath: "/fixture/noodle", blocked: true, rolling: &hostRolling{root: root}}
 	return h, req
 }

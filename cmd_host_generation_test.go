@@ -61,7 +61,7 @@ func TestRestrictedHeldPublicRequestsNeverCreateRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	// There is deliberately no runtime factory: a resumed attach would fail.
-	h := &noodleHost{instanceID: newID, binarySHA: "new-binary", rolling: &hostRolling{root: root, generation: newID}}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, instanceID: newID, binarySHA: "new-binary", rolling: &hostRolling{root: root, generation: newID}}
 	req := hostRequest{RequestID: original.RequestID, ProjectDir: original.ProjectDir, ConfigSHA256: original.ConfigSHA256, Mode: original.Mode, BinarySHA256: "new-binary"}
 	for _, op := range []string{"attach", "once", "detach"} {
 		req.Operation = op

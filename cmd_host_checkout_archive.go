@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 
 	"github.com/poteto/noodle/internal/execution"
@@ -31,40 +30,14 @@ func prepareHostCheckoutArchive(ctx context.Context, e *execution.Context) (*arc
 	if err != nil {
 		return nil, fmt.Errorf("original Creator checkout base unavailable: %w", err)
 	}
-	if selected, ok := e.Lookup("NOODLE_WORKTREE_ARCHIVE_CONFIG"); ok && selected != "" {
-		path, err := e.ResolvePath(selected)
-		if err != nil {
-			return nil, err
-		}
-		return boundCheckoutArchivePolicy(path, base)
-	}
-	home, _ := e.Lookup("HOME")
-	if filepath.IsAbs(home) {
-		original := filepath.Join(home, ".config", "noodle", "worktree-archive.json")
-		if _, err := os.Lstat(original); err == nil {
-			return boundCheckoutArchivePolicy(original, base)
-		} else if !os.IsNotExist(err) {
-			return nil, err
-		}
-	}
-	data := filepath.Join(home, ".local", "share")
-	if runtime.GOOS == "darwin" {
-		data = filepath.Join(home, "Library", "Application Support")
-	} else if xdg, ok := e.Lookup("XDG_DATA_HOME"); ok && xdg != "" {
-		data = xdg
-	}
-	if !filepath.IsAbs(home) || !filepath.IsAbs(data) {
-		return nil, fmt.Errorf("original Host archive data source is unavailable")
-	}
-	storageBase := filepath.Join(data, "noodle")
-	if err = os.MkdirAll(storageBase, 0700); err != nil {
-		return nil, err
-	}
-	storageBase, err = filepath.EvalSymlinks(storageBase)
+	plan, err := planHostCheckoutArchive(ctx, e, base)
 	if err != nil {
 		return nil, err
 	}
-	root := filepath.Join(storageBase, "checkout-archives")
+	if plan.Bound != "" {
+		return boundCheckoutArchivePolicy(plan.Bound, base)
+	}
+	root := filepath.Dir(filepath.Dir(plan.Path))
 	if err = os.MkdirAll(root, 0700); err != nil {
 		return nil, err
 	}
@@ -77,15 +50,8 @@ func prepareHostCheckoutArchive(ctx context.Context, e *execution.Context) (*arc
 		return nil, err
 	}
 	defer lock.Close()
-	codec := e.Command(ctx, e.Root(), "zstd")
-	if codec.Err != nil {
-		return nil, fmt.Errorf("original archive codec is unavailable: %w", codec.Err)
-	}
-	// Policies are specific to the Creator base; immutable blobs and Git pools
-	// remain shared across all policies in this original user storage.
-	key := hostDigest([]byte(base))
-	cfg := archive.Config{Roots: []string{base}, ArchiveRoot: filepath.Join(root, "archive"), BlobRoot: filepath.Join(root, "blobs"), StateDir: filepath.Join(root, "owners", key), Codec: codec.Path, MaxItems: 1, ItemTimeoutSeconds: 120}
-	policyDir := filepath.Join(root, "policies")
+	cfg := plan.Config
+	policyDir := filepath.Dir(plan.Path)
 	for _, dir := range []string{cfg.ArchiveRoot, cfg.BlobRoot, cfg.StateDir, policyDir} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return nil, err
@@ -95,7 +61,7 @@ func prepareHostCheckoutArchive(ctx context.Context, e *execution.Context) (*arc
 		}
 	}
 	keyPath := filepath.Join(cfg.StateDir, "owner.key")
-	path := filepath.Join(policyDir, key+".json")
+	path := plan.Path
 	if info, err := os.Lstat(keyPath); err == nil {
 		if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() != 32 {
 			return nil, fmt.Errorf("original archive owner key differs; preserve and reconcile")

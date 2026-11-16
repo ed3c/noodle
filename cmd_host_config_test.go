@@ -33,7 +33,7 @@ func TestHostExternalConfigSurvivesExitWithoutChangingProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.ConfigSHA256 = hostDigest(data)
-	h := &noodleHost{dir: t.TempDir(), instanceID: "host", binaryPath: "/native/noodle", binarySHA: req.BinarySHA256}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), instanceID: "host", binaryPath: "/native/noodle", binarySHA: req.BinarySHA256}
 	started := 0
 	h.newRuntime = func(_, _ string, cfg config.Config, _ loop.Dependencies) hostRuntime {
 		started++
@@ -91,7 +91,7 @@ func TestHostExternalConfigDriftRefusesBeforeRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.ConfigSHA256 = hostDigest(data)
-	h := &noodleHost{binarySHA: req.BinarySHA256}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, binarySHA: req.BinarySHA256}
 	if err := os.WriteFile(req.ConfigPath, append(data, '\n'), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestHostReceiptFailureRollsBackOnlyNewConfigBinding(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		h := &noodleHost{dir: filepath.Join(t.TempDir(), "absent"), binarySHA: req.BinarySHA256,
+		h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: filepath.Join(t.TempDir(), "absent"), binarySHA: req.BinarySHA256,
 			newRuntime: func(string, string, config.Config, loop.Dependencies) hostRuntime {
 				t.Fatal("failed receipt started runtime")
 				return nil
