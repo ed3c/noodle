@@ -86,6 +86,7 @@ type MachineSnapshot struct {
 }
 
 type machineLease struct {
+	Preparation *machinePreparation `json:"preparation,omitempty"`
 	ContextID string `json:"context_id,omitempty"`
 	OrderID string `json:"order_id,omitempty"`
 	Runtime string `json:"runtime,omitempty"`
@@ -246,6 +247,7 @@ func (m *machineCapacity) access(initialize bool, apply func(*machineState) (boo
 		if err := validateCapacityPolicy(*s.Capacity); err != nil { return err }
 	}
 	for id, lease := range s.Leases {
+		if err := validateMachinePreparation(lease); err != nil { return err }
 		if err := validateMachineLeaseSettlement(lease); err != nil { return err }
 		if id == "" || lease.Owner == "" || lease.Source == "" || lease.MemoryBytes == 0 || lease.CPUs == 0 || len(lease.Disks) == 0 {
 			return errors.New("machine capacity lease corrupt")
@@ -303,6 +305,13 @@ func validateCapacityPolicy(p CapacityPolicy) error {
 func (m *machineCapacity) acquire(id, contextID, orderID, runtime string, c ResourceClaim, sample Sample, rate float64, rateValid bool, normals int, now time.Time) error {
 	if err := validateResourceClaim(c); err != nil { return err }
 	return m.access(false, func(s *machineState) (bool, error) {
+		return m.reserve(s, id, contextID, orderID, runtime, c, sample, rate, rateValid, normals, now)
+	})
+}
+
+// The caller owns the same machine journal lock for lookup, nonce creation,
+// volume observation and reservation. Preparation cannot race worker claims.
+func (m *machineCapacity) reserve(s *machineState, id, contextID, orderID, runtime string, c ResourceClaim, sample Sample, rate float64, rateValid bool, normals int, now time.Time) (bool, error) {
 		lease := machineLease{ContextID: contextID, OrderID: orderID, Runtime: runtime, Owner: m.owner, Source: c.Source, MemoryBytes: c.MemoryBytes, CPUs: c.CPUs, Disks: map[string]uint64{}}
 		available := map[string]uint64{}
 		for _, path := range c.DiskPaths {
@@ -359,7 +368,6 @@ func (m *machineCapacity) acquire(id, contextID, orderID, runtime string, c Reso
 		s.Capacity = &policy
 		s.Leases[id] = lease
 		return true, nil
-	})
 }
 
 func (m *machineCapacity) start(id string) error {
