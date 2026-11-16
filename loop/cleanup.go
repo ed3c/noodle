@@ -44,6 +44,9 @@ func (l *Loop) cleanupCompleted(apply bool) (err error) {
 	if err := l.checkCompletedTasks(); err != nil {
 		return err
 	}
+	if err := l.cleanupOwnedCheckouts(apply); err != nil {
+		return err
+	}
 	if !apply {
 		l.cleanupUnknown = nil
 		return nil

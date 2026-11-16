@@ -78,6 +78,13 @@ created:
 	if err := a.EnsureCustody(name); err != nil {
 		return fmt.Errorf("bind created worker custody: %w", err)
 	}
+	physical, err := filepath.EvalSymlinks(wtPath)
+	if err != nil {
+		return fmt.Errorf("resolve created worker checkout: %w", err)
+	}
+	if err := a.enrollIncarnation(physical, name); err != nil {
+		return err
+	}
 	settingsPath := filepath.Join(a.Root, ".claude", "settings.local.json")
 	if _, err := os.Stat(settingsPath); err == nil {
 		wtClaudeDir := filepath.Join(wtPath, ".claude")
@@ -98,6 +105,11 @@ func (a *App) Exec(name string, args []string) error {
 	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
 		return fmt.Errorf("worktree '%s' does not exist at %s", name, wtPath)
 	}
+	guard, err := a.AcquireCheckoutUse(context.Background(), wtPath)
+	if err != nil {
+		return err
+	}
+	defer guard.Close()
 
 	cmd := a.execution().Command(context.Background(), wtPath, args[0], args[1:]...)
 	cmd.Stdin = os.Stdin

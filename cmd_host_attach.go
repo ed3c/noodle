@@ -138,13 +138,19 @@ func (h *noodleHost) attachContinuation(ctx context.Context, req hostRequest, co
 	if err != nil {
 		return failBeforeRuntime(err)
 	}
+	deps := loop.Dependencies{ReturnHostInstance: h.instanceID, ModeOverride: state.RunMode(req.Mode), Execution: e, Admission: h.budget, AdmissionContext: id, CleanupCompleted: req.CleanupCompleted, HostContinuation: continuation, DispatchBlocked: req.DispatchBlocked}
+	if req.CleanupCompleted && len(cfg.Runtime.AdmittedOrders) != 0 {
+		deps.CheckoutArchivePolicy, err = prepareHostCheckoutArchive(ctx, e)
+		if err != nil {
+			return failBeforeRuntime(fmt.Errorf("original checkout archive policy unavailable: %w", err))
+		}
+	}
 	h.receipts = append(h.receipts, r)
 	if err = h.save(); err != nil {
 		h.receipts = h.receipts[:len(h.receipts)-1]
 		return failBeforeRuntime(err)
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	deps := loop.Dependencies{ReturnHostInstance: h.instanceID, ModeOverride: state.RunMode(req.Mode), Execution: e, Admission: h.budget, AdmissionContext: id, CleanupCompleted: req.CleanupCompleted, HostContinuation: continuation, DispatchBlocked: req.DispatchBlocked}
 	if cfg.Runtime.OpenShell.Profile != "" {
 		deps.OpenShellGateway, deps.OpenShellProfile = h.openShell, selectedOpenShell
 	}

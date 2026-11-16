@@ -144,6 +144,13 @@ func (l *Loop) continueRetainedLocalTask(cmd ControlCommand) (bool, error) {
 }
 
 func (l *Loop) checkRetainedControlACK(id string) error {
+	return l.checkDispositionControlACK(id, "retain-local-task")
+}
+
+func (l *Loop) checkDispositionControlACK(id, action string) error {
+	if id == "" {
+		return fmt.Errorf("original disposition control is missing")
+	}
 	_, path, _ := l.controlPaths()
 	f, err := os.Open(path)
 	if err != nil {
@@ -157,7 +164,7 @@ func (l *Loop) checkRetainedControlACK(id string) error {
 			return fmt.Errorf("retained disposition ACK history is invalid: %w", err)
 		}
 		if ack.ID == id {
-			if ack.Action != "retain-local-task" || ack.Status != "ok" {
+			if ack.Action != action || ack.Status != "ok" {
 				return fmt.Errorf("original retained disposition ACK did not succeed")
 			}
 			return nil
