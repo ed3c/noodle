@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,6 +24,15 @@ func capacityFixtureRoot(t *testing.T) string {
 	return root
 }
 
+func TestMachineCapacityNativeIdentitySurvivesHostEnvironmentChanges(t *testing.T) {
+	before, err := nativeMachineIdentity()
+	if err != nil { t.Fatal(err) }
+	t.Setenv("HOME", capacityFixtureRoot(t))
+	t.Setenv("XDG_CACHE_HOME", capacityFixtureRoot(t))
+	after, err := nativeMachineIdentity()
+	if err != nil || before == "" || before != after { t.Fatal("native physical machine/user identity changed with Host environment", err) }
+}
+
 func capacityFixtureClaim(root string) ResourceClaim {
 	return ResourceClaim{Source: "frozen-operator-profile", MemoryBytes: 10, CPUs: 1, DiskBytes: 20, DiskPaths: []string{root}, Policy: CapacityPolicy{MemoryBytes: 30, CPUs: 100, DiskSafetyBytes: 10, MaxSwapUsedBytes: 10, MaxSwapoutBytesPerSecond: 10, RecoverySamples: 2}}
 }
@@ -34,7 +44,7 @@ func capacityFixtureBudget(t *testing.T, machine, quota, owner string, claim Res
 	if err := b.BindMachineCapacity(machine, owner); err != nil { t.Fatal(err) }
 	b.machine.probe = func(string) (diskCapacity, error) { return diskCapacity{Volume: "fixture-volume", Available: 10000}, nil }
 	b.Register(owner)
-	b.BindResourceSource(owner, func(string) (ResourceClaim, error) { return claim, nil })
+	b.BindResourceSource(owner, "openshell", func(string) (ResourceClaim, error) { return claim, nil })
 	now := time.Unix(4000, 0)
 	b.now = func() time.Time { return now }
 	for range 4 {
@@ -190,16 +200,101 @@ func TestMachineCapacityReplacementAndJoinedWorkerRetainResources(t *testing.T) 
 	p, err := b.TryAcquireTask("owner", "task", "openshell")
 	if err != nil { t.Fatal(err) }
 	if err = p.StartResourceEffects(); err != nil { t.Fatal(err) }
-	replacement, err := p.ReserveReplacement("owner")
+	b.machine.probe = func(string) (diskCapacity, error) { return diskCapacity{Volume: "fixture-volume", Available: 31}, nil }
+	path := filepath.Join(b.machine.dir, "capacity.json")
+	before, err := os.ReadFile(path)
 	if err != nil { t.Fatal(err) }
-	if err = replacement.StartResourceEffects(); err != nil { t.Fatal(err) }
-	if s := b.Snapshot(); s.Active != 1 || s.MachineCapacity.Leases != 1 { t.Fatal("replacement reserved twice") }
+	for range 3 {
+		replacement, err := p.ReserveReplacement("owner")
+		if replacement != nil || !errors.Is(err, ErrDeferred) || !strings.Contains(err.Error(), "replacement_resource_retirement_required") { t.Fatal("replacement reused finite peak without retirement", err) }
+		if s := b.Snapshot(); s.Active != 1 || s.SharedQuota.Allocations != 1 || s.MachineCapacity.Leases != 1 { t.Fatal("deferred replacement changed original quota or resource custody") }
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) { t.Fatal("replacement changed original held resource lease", err) }
 	p.Release()
-	if b.Snapshot().Active != 1 { t.Fatal("old worker freed replacement quota") }
-	replacement.Release()
 	s := b.Snapshot()
-	if s.Active != 0 || s.MachineCapacity.Leases != 1 { t.Fatal("worker Done claimed VM or disk retirement") }
+	if s.Active != 0 || s.SharedQuota.Allocations != 0 || s.MachineCapacity.Leases != 1 { t.Fatal("worker Done claimed VM or disk retirement") }
 	if err = b.machine.cancelUnstarted(p.allocation.machineID); err == nil { t.Fatal("effects-possible lease returned without GC/VM owner proof") }
+}
+
+func TestMachineCapacitySwapRecoveryWithoutAcquireDuringPressure(t *testing.T) {
+	for _, pressure := range []string{"used", "rate"} {
+		t.Run(pressure, func(t *testing.T) {
+			root := capacityFixtureRoot(t)
+			claim := capacityFixtureClaim(root)
+			b, now := capacityFixtureBudget(t, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner", claim)
+			var swapouts uint64
+			for range 4 {
+				*now = now.Add(PollInterval)
+				sample := Sample{At: *now, Pressure: Normal, TotalMemoryBytes: 10000, CPUs: 128}
+				if pressure == "used" { sample.SwapUsedBytes = claim.Policy.MaxSwapUsedBytes + 1
+				} else { swapouts += (claim.Policy.MaxSwapoutBytesPerSecond + 1) * uint64(PollInterval/time.Second) }
+				sample.Swapouts = swapouts
+				b.Observe(sample, nil)
+			}
+			for i := 1; i <= claim.Policy.RecoverySamples; i++ {
+				*now = now.Add(PollInterval)
+				b.Observe(Sample{At: *now, Pressure: Normal, TotalMemoryBytes: 10000, CPUs: 128, Swapouts: swapouts}, nil)
+				p, err := b.TryAcquireTask("owner", "after-pressure", "openshell")
+				if i < claim.Policy.RecoverySamples {
+					if p != nil || !errors.Is(err, ErrDeferred) || !strings.Contains(err.Error(), "machine_pressure_recovering") { t.Fatal("idle Swap pressure failed to reset recovery", err) }
+					if s := b.Snapshot(); s.Active != 0 || s.MachineCapacity.Leases != 0 { t.Fatal("recovering pressure acquired resources") }
+				} else {
+					if err != nil { t.Fatal("healthy sequence did not resume admission", err) }
+					p.Release()
+				}
+			}
+		})
+	}
+}
+
+func TestMachineCapacityRecoveryInvalidatesUnverifiableSequence(t *testing.T) {
+	for _, condition := range []string{"missing", "stale", "future", "unsupported", "error", "counter-reset", "gap", "ram", "cpu", "policy-change", "source-change", "source-error"} {
+		t.Run(condition, func(t *testing.T) {
+			root := capacityFixtureRoot(t)
+			claim := capacityFixtureClaim(root)
+			b, now := capacityFixtureBudget(t, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner", claim)
+			var sourceError error
+			b.resourceSources["owner"].read = func(string) (ResourceClaim, error) { return claim, sourceError }
+			swapouts := uint64(100)
+			for range 4 {
+				*now = now.Add(PollInterval)
+				b.Observe(Sample{At: *now, Pressure: Normal, TotalMemoryBytes: 10000, CPUs: 128, Swapouts: swapouts}, nil)
+			}
+			*now = now.Add(PollInterval)
+			sample := Sample{At: *now, Pressure: Normal, TotalMemoryBytes: 10000, CPUs: 128, Swapouts: swapouts}
+			var sampleError error
+			switch condition {
+			case "missing": sample.At = time.Time{}
+			case "stale": sample.At = now.Add(-MaxSampleAge-time.Second)
+			case "future": sample.At = now.Add(time.Second)
+			case "unsupported": sample.Unsupported = true
+			case "error": sampleError = errors.New("fixture sampler unavailable")
+			case "counter-reset": swapouts = 0; sample.Swapouts = swapouts
+			case "gap": *now = now.Add(MaxSampleAge); sample.At = *now
+			case "ram": sample.TotalMemoryBytes = 0
+			case "cpu": sample.CPUs = 0
+			case "policy-change": claim.Policy.MaxSwapUsedBytes++
+			case "source-change": claim.Source = "new-operator-source"
+			case "source-error": sourceError = errors.New("original operator source unavailable")
+			}
+			b.Observe(sample, sampleError)
+			changed := condition == "policy-change" || condition == "source-change"
+			if changed {
+				p, err := b.TryAcquireTask("owner", "new-policy-sequence", "openshell")
+				if p != nil || !errors.Is(err, ErrDeferred) { t.Fatal("old policy health admitted a new source or policy", err) }
+			}
+			sourceError = nil
+			for i := range 3 {
+				*now = now.Add(PollInterval)
+				b.Observe(Sample{At: *now, Pressure: Normal, TotalMemoryBytes: 10000, CPUs: 128, Swapouts: swapouts}, nil)
+				p, err := b.TryAcquireTask("owner", "after-unverifiable-sequence", "openshell")
+				if i == 0 && !changed && (p != nil || !errors.Is(err, ErrDeferred)) { t.Fatal("unverifiable health sequence was reused", err) }
+				if i == 2 && err != nil { t.Fatal("fresh healthy observations never recovered", err) }
+				if p != nil { p.Release() }
+			}
+		})
+	}
 }
 
 func TestMachineCapacityLostEffectFenceAndReturnACKStayHeld(t *testing.T) {

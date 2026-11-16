@@ -38,7 +38,7 @@ func (h *noodleHost) bindWorkerResourceSource(id, project, storage string, profi
 		if resolved, err := filepath.EvalSymlinks(root); err == nil { roots[i] = resolved }
 	}
 	generationGuard := h.machineGenerationGuard()
-	h.budget.BindResourceSource(id, func(runtime string) (admission.ResourceClaim, error) {
+	h.budget.BindResourceSource(id, "openshell", func(runtime string) (admission.ResourceClaim, error) {
 		if runtime != "openshell" || profile == nil { return admission.ResourceClaim{}, errors.New("worker_resource_runtime_unsupported: " + runtime) }
 		if err := generationGuard(); err != nil { return admission.ResourceClaim{}, err }
 		return loopruntime.OpenShellWorkerResourceClaim(selected, roots...)

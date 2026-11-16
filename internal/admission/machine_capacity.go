@@ -57,6 +57,14 @@ type ResourceClaim struct {
 
 type ResourceSource func(runtime string) (ResourceClaim, error)
 
+type resourceSource struct {
+	runtime string
+	read ResourceSource
+	source string
+	policy CapacityPolicy
+	normals int
+}
+
 type MachineSnapshot struct {
 	Policy string `json:"policy"`
 	Reason string `json:"reason"`
@@ -139,12 +147,34 @@ func (b *Budget) BindMachineCapacity(dir, owner string) error {
 	return nil
 }
 
-func (b *Budget) BindResourceSource(id string, source ResourceSource) {
+func (b *Budget) BindResourceSource(id, runtime string, source ResourceSource) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.resourceSources == nil { b.resourceSources = make(map[string]ResourceSource) }
+	if b.resourceSources == nil { b.resourceSources = make(map[string]*resourceSource) }
 	// A context's source is immutable even before its first worker.
-	if _, exists := b.resourceSources[id]; !exists { b.resourceSources[id] = source }
+	if _, exists := b.resourceSources[id]; !exists { b.resourceSources[id] = &resourceSource{runtime: runtime, read: source} }
+}
+
+// Health belongs to a verified operator policy. It changes on every original
+// Sample, including idle pressure periods with no attempted worker admission.
+func (b *Budget) observeMachineHealth(previous *Sample) {
+	for _, source := range b.resourceSources {
+		normals := source.normals
+		source.normals = 0
+		if source.read == nil || source.runtime == "" || b.stale() || b.unsupported || !b.rateValid || previous == nil { continue }
+		claim, err := source.read(source.runtime)
+		if err != nil || validateResourceClaim(claim) != nil {
+			source.source = ""
+			continue
+		}
+		if source.source != claim.Source || source.policy != claim.Policy { normals = 0 }
+		source.source, source.policy = claim.Source, claim.Policy
+		sample := b.previous
+		if sample.Pressure != Normal || previous.Pressure != Normal || sample.TotalMemoryBytes == 0 || sample.CPUs <= 0 ||
+			math.IsNaN(b.rate) || math.IsInf(b.rate, 0) || b.rate < 0 ||
+			sample.SwapUsedBytes > claim.Policy.MaxSwapUsedBytes || b.rate > float64(claim.Policy.MaxSwapoutBytesPerSecond) { continue }
+		source.normals = min(normals+1, 12)
+	}
 }
 
 func (m *machineCapacity) access(initialize bool, apply func(*machineState) (bool, error)) error {
@@ -338,10 +368,14 @@ func (b *Budget) acquireMachineTask(contextID, order, runtime string) (*Permit, 
 	if len(b.pendingMachineReturns) != 0 { return deferReason("machine_unstarted_return_readback_required") }
 	if b.machine == nil { return deferReason("machine_owner_unavailable: " + b.machineReason) }
 	source := b.resourceSources[contextID]
-	if source == nil { return deferReason("trusted_worker_peak_missing") }
-	claim, err := source(runtime)
-	if err != nil { return deferReason(err.Error()) }
-	if err = validateResourceClaim(claim); err != nil { return deferReason(err.Error()) }
+	if source == nil || source.read == nil { return deferReason("trusted_worker_peak_missing") }
+	claim, err := source.read(runtime)
+	if err == nil { err = validateResourceClaim(claim) }
+	if err != nil {
+		if runtime == source.runtime { source.source, source.normals = "", 0 }
+		return deferReason(err.Error())
+	}
+	if source.source != claim.Source || source.policy != claim.Policy { source.normals = 0 }
 	key := contextID + "\x00" + order
 	if b.machineAllocations[key] != nil { return deferReason("original_machine_allocation_active") }
 	pending, exists := b.pendingMachineAcquires[key]
@@ -364,14 +398,15 @@ func (b *Budget) acquireMachineTask(contextID, order, runtime string) (*Permit, 
 	}
 	sample := Sample{}
 	if b.previous != nil { sample = *b.previous }
-	err = b.machine.acquire(pending.id, claim, sample, b.rate, b.rateValid, b.machineNormals, b.now())
+	normals := 0
+	if source.source == claim.Source && source.policy == claim.Policy { normals = source.normals }
+	err = b.machine.acquire(pending.id, claim, sample, b.rate, b.rateValid, normals, b.now())
 	if err != nil {
 		var uncertain *machineWriteUncertain
 		if exists || errors.As(err, &uncertain) {
 			if b.pendingMachineAcquires == nil { b.pendingMachineAcquires = make(map[string]machinePending) }
 			b.pendingMachineAcquires[key] = pending
 		} else if b.shared != nil { b.returnSharedAllocation(pending.sharedID) }
-		if sample.SwapUsedBytes > claim.Policy.MaxSwapUsedBytes || b.rate > float64(claim.Policy.MaxSwapoutBytesPerSecond) { b.machineNormals = 0 }
 		return deferReason(err.Error())
 	}
 	delete(b.pendingMachineAcquires, key)
@@ -411,7 +446,8 @@ func (p *Permit) StartResourceEffects() error {
 	if p.released { return fmt.Errorf("%w: original permit released", ErrDeferred) }
 	if b.machineFault != "" { return fmt.Errorf("%w: %s", ErrDeferred, b.machineFault) }
 	if p.allocation.machineID == "" { return nil }
-	// Replacements share the original full peak and never reserve it twice.
+	// Reentry of this launch fence is idempotent. ReserveReplacement refuses a
+	// new sandbox while the original physical resources still lack retirement.
 	if p.allocation.effectsPossible { return nil }
 	p.allocation.effectsPossible = true
 	if err := b.machine.start(p.allocation.machineID); err != nil {

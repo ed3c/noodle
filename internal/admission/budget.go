@@ -3,6 +3,7 @@ package admission
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -62,8 +63,7 @@ type Budget struct {
 	machine *machineCapacity
 	machineReason string
 	machineFault string
-	machineNormals int
-	resourceSources map[string]ResourceSource
+	resourceSources map[string]*resourceSource
 	pendingMachineAcquires map[string]machinePending
 	pendingMachineReturns map[string]bool
 	machineAllocations map[string]*allocation
@@ -170,11 +170,11 @@ func (b *Budget) Run(ctx context.Context, sampler Sampler) {
 func (b *Budget) Observe(s Sample, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	previous := b.previous
+	defer b.observeMachineHealth(previous)
 	for id := range b.pendingMachineReturns {
 		b.returnUnstartedMachine(id)
 	}
-	normals := b.machineNormals
-	b.machineNormals = 0
 	for id := range b.pendingSharedReturns {
 		b.returnSharedAllocation(id)
 	}
@@ -189,7 +189,6 @@ func (b *Budget) Observe(s Sample, err error) {
 		b.previous = nil
 		return
 	}
-	previous := b.previous
 	b.previous = &s
 	b.unsupported = s.Unsupported
 	b.pressure = s.Pressure
@@ -202,9 +201,6 @@ func (b *Budget) Observe(s Sample, err error) {
 	}
 	b.rate = float64(s.Swapouts-previous.Swapouts) / s.At.Sub(previous.At).Seconds()
 	b.rateValid = true
-	if s.Pressure == Normal && previous.Pressure == Normal {
-		b.machineNormals = min(normals+1, 12)
-	}
 }
 
 func (b *Budget) stale() bool {
@@ -295,6 +291,12 @@ func (p *Permit) ReserveReplacement(id string) (*Permit, error) {
 	defer b.mu.Unlock()
 	if len(b.pendingSharedReturns) != 0 || b.machineFault != "" || p.released || p.replacementReserved || !b.contexts[id] || b.unresolvedResidents != 0 || b.switching {
 		return nil, ErrDeferred
+	}
+	// A replacement creates a new sandbox. Worker exit and Stop do not retire
+	// the old overlay or returned archives covered by this finite peak.
+	if p.allocation.machineID != "" && p.allocation.effectsPossible {
+		b.machineReason = "replacement_resource_retirement_required"
+		return nil, fmt.Errorf("%w: %s", ErrDeferred, b.machineReason)
 	}
 	if b.shared != nil {
 		if err := b.shared.replacement(p.allocation.sharedID); err != nil {

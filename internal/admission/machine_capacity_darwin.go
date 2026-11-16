@@ -1,21 +1,36 @@
-//go:build darwin
+//go:build darwin && cgo
 
 package admission
+
+/*
+#include <unistd.h>
+#include <sys/time.h>
+#include <uuid/uuid.h>
+*/
+import "C"
 
 import (
 	"errors"
 	"fmt"
 	"math"
 	"os"
-	"strings"
 
 	"golang.org/x/sys/unix"
 )
 
 func nativeMachineIdentity() (string, error) {
-	id, err := unix.Sysctl("kern.hostuuid")
-	if err != nil { return "", fmt.Errorf("machine identity unavailable: %w", err) }
-	return capacityIdentity(strings.TrimSpace(id), os.Getuid())
+	// gethostuuid(2) identifies the machine hardware across processes, users
+	// and boots. Hardware identity changes are not adopted into an old pool.
+	// https://github.com/apple-oss-distributions/Libc/blob/main/man/gethostuuid.2
+	var id C.uuid_t
+	wait := C.struct_timespec{tv_sec: 1}
+	if result, err := C.gethostuuid(&id[0], &wait); result != 0 {
+		return "", fmt.Errorf("machine hardware identity unavailable from gethostuuid: %w", err)
+	}
+	if C.uuid_is_null(&id[0]) != 0 { return "", errors.New("machine hardware identity unavailable: gethostuuid returned zero UUID") }
+	var text C.uuid_string_t
+	C.uuid_unparse_lower(&id[0], &text[0])
+	return capacityIdentity(C.GoString(&text[0]), os.Getuid())
 }
 
 func capacityFileIdentity(path string, directory bool) error {
