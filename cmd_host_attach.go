@@ -37,7 +37,8 @@ func (h *noodleHost) attachContinuation(ctx context.Context, req hostRequest, co
 	if req.Operation == "once" {
 		req.Mode = "manual"
 	}
-	if _, err = prepareHostStorage(ctx, req, data); err != nil {
+	storage, err := prepareHostStorage(ctx, req, data)
+	if err != nil {
 		return hostError("refused", err)
 	}
 	runtimeDir := filepath.Join(req.ProjectDir, ".noodle")
@@ -156,6 +157,7 @@ func (h *noodleHost) attachContinuation(ctx context.Context, req hostRequest, co
 	}
 	h.contexts[id] = c
 	if h.budget != nil {
+		h.bindWorkerResourceSource(id, req.ProjectDir, storage, selectedOpenShell)
 		h.budget.Register(id)
 	}
 	keepLock = true

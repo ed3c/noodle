@@ -90,6 +90,9 @@ func newHostRollingCmd() *cobra.Command {
 		if err = verifyRollingTarget(cmd.Context(), binary, digest); err != nil {
 			return err
 		}
+		if !inspect && !maintenancePlan {
+			if err = verifyMachineRollingTarget(cmd.Context(), binary, digest); err != nil { return err }
+		}
 		if maintenancePlan {
 			if handoverRoot != "" {
 				plan, planErr := planGatewayHandoverWithRecovery(cmd.Context(), root, handoverRoot, binary, digest, requestFiles, failureRecovery, sourcePlan)
@@ -483,6 +486,10 @@ func (h *noodleHost) advanceRolling(ctx context.Context) bool {
 				return false
 			}
 			if err = verifyRollingTarget(ctx, q.Binary, q.SHA); err != nil {
+				h.failVersion(q.ID, err)
+				return false
+			}
+			if err = verifyMachineRollingTarget(ctx, q.Binary, q.SHA); err != nil {
 				h.failVersion(q.ID, err)
 				return false
 			}

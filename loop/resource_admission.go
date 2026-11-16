@@ -35,7 +35,7 @@ func (l *Loop) withAdmission(ctx context.Context, runtimeName, orderID string, l
 	if rt, ok := l.deps.Runtimes[runtimeName].(interface{ CapacityAvailable() bool }); ok && !rt.CapacityAvailable() {
 		return admission.ErrDeferred
 	}
-	permit, err := l.deps.Admission.TryAcquireTask(l.deps.AdmissionContext, orderID)
+	permit, err := l.deps.Admission.TryAcquireTask(l.deps.AdmissionContext, orderID, runtimeName)
 	if err != nil {
 		return err
 	}
@@ -45,6 +45,9 @@ func (l *Loop) withAdmission(ctx context.Context, runtimeName, orderID string, l
 			permit.Release()
 		}
 	}()
+	if err := permit.StartResourceEffects(); err != nil {
+		return err
+	}
 	return launch(context.WithValue(ctx, admissionKey{}, accepted))
 }
 
@@ -89,6 +92,9 @@ func (l *Loop) withReplacement(cook *cookHandle, launch func(context.Context) er
 			permit.Release()
 		}
 	}()
+	if err := permit.StartResourceEffects(); err != nil {
+		return err
+	}
 	return launch(context.WithValue(ctx, admissionKey{}, accepted))
 }
 

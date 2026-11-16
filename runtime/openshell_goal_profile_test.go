@@ -299,3 +299,32 @@ func TestGoalOpenShellProfileReadbackRejectsChangedReceiptEndpoint(t *testing.T)
 		t.Fatal("receipt endpoint differs from the original profile but read back successfully")
 	}
 }
+
+func TestGoalOpenShellMaterializationPreservesExplicitResourceLineage(t *testing.T) {
+	template := goalProfileFixture(t)
+	configPath := filepath.Join(filepath.Dir(template), "gateway.toml")
+	raw, err := os.ReadFile(configPath)
+	if err != nil { t.Fatal(err) }
+	var original, resources map[string]any
+	if _, err = toml.Decode(string(raw), &original); err != nil { t.Fatal(err) }
+	if _, err = toml.Decode(resourceConfigFixture("/original/vm"), &resources); err != nil { t.Fatal(err) }
+	vm := original["openshell"].(map[string]any)["drivers"].(map[string]any)["vm"].(map[string]any)
+	vm["mem_mib"], vm["vcpus"], vm["overlay_disk_mib"] = int64(4), int64(2), int64(4)
+	original["noodle_worker_resources"] = resources["noodle_worker_resources"]
+	var encoded bytes.Buffer
+	if err = toml.NewEncoder(&encoded).Encode(original); err != nil { t.Fatal(err) }
+	if err = os.WriteFile(configPath, encoded.Bytes(), 0600); err != nil { t.Fatal(err) }
+	before := append([]byte(nil), encoded.Bytes()...)
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil { t.Fatal(err) }
+	receipt, err := MaterializeGoalOpenShellProfile(template, root, "127.0.0.1:12345")
+	if err != nil { t.Fatal(err) }
+	p, err := LoadOpenShellProfile(receipt.Profile.Path)
+	if err != nil { t.Fatal(err) }
+	claim, err := OpenShellWorkerResourceClaim(p, root)
+	if err != nil || claim.MemoryBytes != 6<<20 || claim.DiskBytes != 7<<20 || claim.CPUs != 2 { t.Fatalf("new profile lost operator resource lineage: %+v %v", claim, err) }
+	after, err := os.ReadFile(configPath)
+	if err != nil || !bytes.Equal(before, after) { t.Fatal("new materialization rewrote original config", err) }
+	again, err := MaterializeGoalOpenShellProfile(template, root, "127.0.0.1:12345")
+	if err != nil || again.Profile != receipt.Profile { t.Fatal("profile resource lineage changed on reentry", err) }
+}
