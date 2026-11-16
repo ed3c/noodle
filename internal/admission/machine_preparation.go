@@ -57,6 +57,9 @@ func preparationBinding(source PreparationSource, claim ResourceClaim) (*machine
 
 func validateMachinePreparation(lease machineLease) error {
 	if lease.Preparation == nil {
+		if lease.PreparationPromoted {
+			return errors.New("promoted preparation source missing")
+		}
 		return nil
 	}
 	bound, err := preparationBinding(lease.Preparation.Source, lease.Preparation.Claim)
@@ -66,7 +69,95 @@ func validateMachinePreparation(lease machineLease) error {
 	if lease.Preparation.Source.Purpose == "host-resident" && (lease.ContextID != "" || lease.OrderID != "" || lease.Binding != nil || lease.Settlement != nil) {
 		return errors.New("resident lifetime cannot become a worker session")
 	}
+	if lease.PreparationPromoted && (lease.ContextID == "" || lease.OrderID == "" || lease.Runtime == "" || !lease.EffectsPossible) {
+		return errors.New("promoted preparation original worker identity missing")
+	}
 	return nil
+}
+
+// BindPreparation is called by the native Host after verifying its original
+// control journal. The same row moves to the real context/order; no capacity is
+// returned and no session identity is invented before dispatch.
+func (b *Budget) BindPreparation(ref PreparationRef, contextID, orderID, runtime string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.machine == nil || contextID == "" || orderID == "" || runtime == "" || strings.ContainsRune(contextID+orderID+runtime, 0) {
+		return errors.New("original preparation worker destination missing")
+	}
+	key := contextID + "\x00" + orderID
+	if prior, exists := b.preparedMachine[key]; exists && prior != ref {
+		return errors.New("original worker preparation reference changed")
+	}
+	err := b.machine.access(false, func(state *machineState) (bool, error) {
+		for id, existing := range state.Leases {
+			if id != ref.ID && existing.Owner == b.machine.owner && existing.ContextID == contextID && existing.OrderID == orderID && existing.Settlement == nil {
+				return false, errors.New("original worker already has a different machine lifetime")
+			}
+		}
+		lease, exists := state.Leases[ref.ID]
+		if !exists || lease.Preparation == nil || lease.Preparation.SHA256 != ref.SHA256 || lease.Preparation.Source.Purpose != "task-preparation" || !lease.EffectsPossible || lease.Settlement != nil {
+			return false, errors.New("original task preparation missing or unresolved")
+		}
+		if lease.ContextID != "" {
+			if lease.Owner != b.machine.owner || lease.ContextID != contextID || lease.OrderID != orderID || lease.Runtime != runtime {
+				return false, errors.New("original preparation already belongs to another worker")
+			}
+			return false, nil
+		}
+		lease.Owner, lease.ContextID, lease.OrderID, lease.Runtime = b.machine.owner, contextID, orderID, runtime
+		state.Leases[ref.ID] = lease
+		return true, nil
+	})
+	if err != nil {
+		return err
+	}
+	if b.preparedMachine == nil {
+		b.preparedMachine = make(map[string]PreparationRef)
+	}
+	b.preparedMachine[key] = ref
+	return nil
+}
+
+func (m *machineCapacity) promotePreparation(ref PreparationRef, contextID, orderID, runtime string, claim ResourceClaim, sample Sample, rate float64, rateValid bool, normals int, now time.Time) error {
+	if err := validateResourceClaim(claim); err != nil {
+		return err
+	}
+	return m.access(false, func(state *machineState) (bool, error) {
+		original, exists := state.Leases[ref.ID]
+		if !exists || original.Owner != m.owner || original.ContextID != contextID || original.OrderID != orderID || original.Runtime != runtime || original.Preparation == nil || original.Preparation.SHA256 != ref.SHA256 || !original.EffectsPossible || original.Settlement != nil {
+			return false, errors.New("original preparation handoff differs")
+		}
+		if claim.Policy != original.Preparation.Claim.Policy {
+			return false, errors.New("original preparation operator policy changed")
+		}
+		if original.PreparationPromoted {
+			if original.Source != claim.Source || original.MemoryBytes != claim.MemoryBytes || original.CPUs != claim.CPUs || state.Capacity == nil || *state.Capacity != claim.Policy {
+				return false, errors.New("original promoted worker resource source changed")
+			}
+			volumes := map[string]uint64{}
+			for _, path := range claim.DiskPaths {
+				disk, err := m.probe(path)
+				if err != nil {
+					return false, err
+				}
+				volumes[disk.Volume] = claim.DiskBytes
+			}
+			if !reflect.DeepEqual(original.Disks, volumes) {
+				return false, errors.New("original promoted worker disk source changed")
+			}
+			return false, nil
+		}
+		// Replacement is only in this locked in-memory state. A failed check
+		// writes nothing; no other process can observe a release/reacquire gap.
+		delete(state.Leases, ref.ID)
+		if _, err := m.reserve(state, ref.ID, contextID, orderID, runtime, claim, sample, rate, rateValid, normals, now); err != nil {
+			return false, err
+		}
+		promoted := state.Leases[ref.ID]
+		promoted.Preparation, promoted.PreparationPromoted, promoted.EffectsPossible = original.Preparation, true, true
+		state.Leases[ref.ID] = promoted
+		return true, nil
+	})
 }
 
 // PreparationWindow is the original sampler's bounded recovery window. The

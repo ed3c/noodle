@@ -193,3 +193,65 @@ func TestMachinePreparationCrossFilesystemPeakAndBootstrapWindow(t *testing.T) {
 		t.Fatal("bootstrap bound cannot cover the original sampler recovery", window, err)
 	}
 }
+
+func TestMachinePreparationPromotesSameLeaseToRealWorkerAndRetainsUnknown(t *testing.T) {
+	root := capacityFixtureRoot(t)
+	prepClaim := capacityFixtureClaim(root)
+	producer := preparationFixture(t, filepath.Join(root, "machine"), prepClaim)
+	ref, err := producer.reservePreparation(preparationFixtureSource(root), prepClaim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = producer.StartPreparationEffects(ref); err != nil {
+		t.Fatal(err)
+	}
+	workerClaim := prepClaim
+	workerClaim.Source = "original-frozen-worker-profile"
+	workerClaim.DiskBytes *= 2
+	worker := preparationFixture(t, filepath.Join(root, "machine"), workerClaim)
+	worker.machine.owner = "actual-native-host-generation"
+	if err = worker.BindPreparation(ref, "original-native-owner", "order", "openshell"); err != nil {
+		t.Fatal(err)
+	}
+	if err = worker.BindPreparation(ref, "foreign-context", "order", "openshell"); err == nil {
+		t.Fatal("original preparation was rebound to another context")
+	}
+	write := worker.machine.write
+	worker.machine.write = func(path string, raw []byte) error {
+		if err := write(path, raw); err != nil {
+			return err
+		}
+		return errors.New("worker promotion write ACK lost")
+	}
+	if _, err = worker.TryAcquireTask("original-native-owner", "order", "openshell"); !errors.Is(err, ErrDeferred) {
+		t.Fatal("promotion with unknown write ACK was admitted", err)
+	}
+	worker.machine.write = write
+	permit, err := worker.TryAcquireTask("original-native-owner", "order", "openshell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if permit.allocation.machineID != ref.ID || !permit.allocation.effectsPossible {
+		t.Fatal("worker acquired a new lease or reset original effects")
+	}
+	binding := MachineSessionBinding{ContextID: "original-native-owner", ProjectDir: root, OrderID: "order", StageIndex: 0, RetryCount: 0, AttemptID: "real-attempt", SessionID: "real-session", Runtime: "openshell", WorktreePath: filepath.Join(root, "worker")}
+	if err = permit.BindSession(binding); err != nil {
+		t.Fatal("same preparation could not bind the real session", err)
+	}
+	permit.Release()
+	if err = worker.machine.access(false, func(state *machineState) (bool, error) {
+		lease := state.Leases[ref.ID]
+		if len(state.Leases) != 1 || lease.Owner != worker.machine.owner || lease.Source != workerClaim.Source || lease.Binding == nil || *lease.Binding != binding || lease.Settlement != nil || lease.Preparation.Claim.Source != prepClaim.Source {
+			t.Fatal("handoff lost original provenance or prematurely returned resources")
+		}
+		return false, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = producer.StartPreparationEffects(ref); err == nil {
+		t.Fatal("old preparation producer reused an assigned lifetime")
+	}
+	if worker.shared.snapshot().Allocations != 0 {
+		t.Fatal("worker Done failed to return only Host quota")
+	}
+}

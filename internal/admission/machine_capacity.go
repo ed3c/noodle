@@ -87,6 +87,7 @@ type MachineSnapshot struct {
 
 type machineLease struct {
 	Preparation *machinePreparation `json:"preparation,omitempty"`
+	PreparationPromoted bool `json:"preparation_promoted,omitempty"`
 	ContextID string `json:"context_id,omitempty"`
 	OrderID string `json:"order_id,omitempty"`
 	Runtime string `json:"runtime,omitempty"`
@@ -118,6 +119,7 @@ type machineWriteUncertain struct { error }
 type machinePending struct {
 	id, sharedID string
 	claim ResourceClaim
+	preparation *PreparationRef
 }
 
 func canonicalCapacityPath(path string) error {
@@ -423,8 +425,12 @@ func (b *Budget) acquireMachineTask(contextID, order, runtime string) (*Permit, 
 	if exists && !reflect.DeepEqual(pending.claim, claim) { return deferReason("original_machine_acquire_source_changed") }
 	if !exists {
 		pending.claim = claim
-		pending.id, err = machineNonce()
-		if err != nil { return deferReason(err.Error()) }
+		if prepared, ok := b.preparedMachine[key]; ok {
+			pending.id, pending.preparation = prepared.ID, &prepared
+		} else {
+			pending.id, err = machineNonce()
+			if err != nil { return deferReason(err.Error()) }
+		}
 		if b.shared != nil {
 			pending.sharedID, err = b.shared.acquire(contextID, b.maximum, false, "", b.switching)
 			if err != nil {
@@ -440,7 +446,11 @@ func (b *Budget) acquireMachineTask(contextID, order, runtime string) (*Permit, 
 	if b.previous != nil { sample = *b.previous }
 	normals := 0
 	if source.source == claim.Source && source.policy == claim.Policy { normals = source.normals }
-	err = b.machine.acquire(pending.id, contextID, order, runtime, claim, sample, b.rate, b.rateValid, normals, b.now())
+	if pending.preparation != nil {
+		err = b.machine.promotePreparation(*pending.preparation, contextID, order, runtime, claim, sample, b.rate, b.rateValid, normals, b.now())
+	} else {
+		err = b.machine.acquire(pending.id, contextID, order, runtime, claim, sample, b.rate, b.rateValid, normals, b.now())
+	}
 	if err != nil {
 		var uncertain *machineWriteUncertain
 		if exists || errors.As(err, &uncertain) {
@@ -451,7 +461,7 @@ func (b *Budget) acquireMachineTask(contextID, order, runtime string) (*Permit, 
 	}
 	delete(b.pendingMachineAcquires, key)
 	if b.machineAllocations == nil { b.machineAllocations = make(map[string]*allocation) }
-	a := &allocation{budget: b, refs: 1, sharedID: pending.sharedID, machineID: pending.id, machineKey: key}
+	a := &allocation{budget: b, refs: 1, sharedID: pending.sharedID, machineID: pending.id, machineKey: key, effectsPossible: pending.preparation != nil}
 	b.machineAllocations[key] = a
 	b.active++
 	b.machineReason = "admitted"

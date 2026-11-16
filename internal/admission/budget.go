@@ -67,6 +67,7 @@ type Budget struct {
 	pendingMachineAcquires map[string]machinePending
 	pendingMachineReturns map[string]bool
 	machineAllocations map[string]*allocation
+	preparedMachine map[string]PreparationRef
 	shared               *sharedQuota
 	sharedError          string
 	pendingSharedReturns map[string]bool
