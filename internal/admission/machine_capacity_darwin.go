@@ -1,36 +1,45 @@
-//go:build darwin && cgo
+//go:build darwin
 
 package admission
 
-/*
-#include <unistd.h>
-#include <sys/time.h>
-#include <uuid/uuid.h>
-*/
-import "C"
-
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
+	"os/exec"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
 
 func nativeMachineIdentity() (string, error) {
-	// gethostuuid(2) identifies the machine hardware across processes, users
-	// and boots. Hardware identity changes are not adopted into an old pool.
-	// https://github.com/apple-oss-distributions/Libc/blob/main/man/gethostuuid.2
-	var id C.uuid_t
-	wait := C.struct_timespec{tv_sec: 1}
-	if result, err := C.gethostuuid(&id[0], &wait); result != 0 {
-		return "", fmt.Errorf("machine hardware identity unavailable from gethostuuid: %w", err)
-	}
-	if C.uuid_is_null(&id[0]) != 0 { return "", errors.New("machine hardware identity unavailable: gethostuuid returned zero UUID") }
-	var text C.uuid_string_t
-	C.uuid_unparse_lower(&id[0], &text[0])
-	return capacityIdentity(C.GoString(&text[0]), os.Getuid())
+	// XNU's IOPlatformExpertDevice::generatePlatformUUID derives this property
+	// from hardware chip IDs (ARM) or EFI system-id (Intel), not a boot ID.
+	// Hardware changes refuse an existing pool. ioreg works in CGO_ENABLED=0 releases.
+	// https://github.com/apple-oss-distributions/xnu/blob/main/iokit/Kernel/IOPlatformExpert.cpp
+	// https://github.com/apple-oss-distributions/IOKitTools/blob/main/ioreg.tproj/ioreg.8
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "/usr/sbin/ioreg", "-r", "-d", "1", "-c", "IOPlatformExpertDevice", "-w", "0")
+	cmd.Dir = "/"
+	cmd.Env = []string{"LC_ALL=C", "LANG=C"}
+	cmd.WaitDelay = 100 * time.Millisecond
+	output, err := cmd.StdoutPipe()
+	if err != nil { return "", fmt.Errorf("machine hardware identity unavailable from ioreg: %w", err) }
+	if err = cmd.Start(); err != nil { return "", fmt.Errorf("machine hardware identity unavailable from ioreg: %w", err) }
+	data, readErr := io.ReadAll(io.LimitReader(output, platformUUIDOutputLimit+1))
+	if readErr != nil || len(data) > platformUUIDOutputLimit { _ = cmd.Process.Kill() }
+	waitErr := cmd.Wait()
+	if ctx.Err() != nil { return "", fmt.Errorf("machine hardware identity unavailable from ioreg: %w", ctx.Err()) }
+	if readErr != nil { return "", fmt.Errorf("machine hardware identity unavailable from ioreg: %w", readErr) }
+	if len(data) > platformUUIDOutputLimit { return "", errors.New("IOPlatformUUID observation exceeds output limit") }
+	if waitErr != nil { return "", fmt.Errorf("machine hardware identity unavailable from ioreg: %w", waitErr) }
+	id, err := parseDarwinPlatformUUID(data)
+	if err != nil { return "", err }
+	return capacityIdentity(id, os.Getuid())
 }
 
 func capacityFileIdentity(path string, directory bool) error {

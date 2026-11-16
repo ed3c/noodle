@@ -29,8 +29,89 @@ func TestMachineCapacityNativeIdentitySurvivesHostEnvironmentChanges(t *testing.
 	if err != nil { t.Fatal(err) }
 	t.Setenv("HOME", capacityFixtureRoot(t))
 	t.Setenv("XDG_CACHE_HOME", capacityFixtureRoot(t))
+	t.Setenv("PATH", capacityFixtureRoot(t))
 	after, err := nativeMachineIdentity()
 	if err != nil || before == "" || before != after { t.Fatal("native physical machine/user identity changed with Host environment", err) }
+}
+
+func TestMachineCapacityNativeDiskAndFileIdentity(t *testing.T) {
+	root := capacityFixtureRoot(t)
+	if err := capacityFileIdentity(root, true); err != nil { t.Fatal(err) }
+	disk, err := nativeDiskCapacity(root)
+	if err != nil || disk.Volume == "" || disk.Available == 0 { t.Fatal("native disk capacity unavailable", disk, err) }
+	path := filepath.Join(root, "owned")
+	if err = os.WriteFile(path, []byte("fixture"), 0600); err != nil { t.Fatal(err) }
+	if err = capacityFileIdentity(path, false); err != nil { t.Fatal(err) }
+	if err = os.Link(path, filepath.Join(root, "alias")); err != nil { t.Fatal(err) }
+	if err = capacityFileIdentity(path, false); err == nil { t.Fatal("native file identity accepted hardlink") }
+}
+
+func TestMachineCapacityDarwinPlatformUUIDObservation(t *testing.T) {
+	const id = "12345678-9ABC-5DEF-8123-123456789ABC"
+	property := `"IOPlatformUUID" = "` + id + `"`
+	valid := "+-o fixture <class IOPlatformExpertDevice>\n  {\n    " + property + "\n  }\n"
+	got, err := parseDarwinPlatformUUID([]byte(valid))
+	if err != nil || got != strings.ToLower(id) { t.Fatal("hardware UUID unavailable from ioreg property", got, err) }
+	for _, data := range []string{
+		"", `"kern.bootsessionuuid" = "` + id + `"`,
+		strings.Replace(valid, "IOPlatformUUID", "IOPlatformUUIDOther", 1),
+		valid + property + "\n", strings.Replace(valid, id, "00000000-0000-0000-0000-000000000000", 1),
+		strings.Replace(valid, id, "123456789ABC5DEF8123123456789ABC", 1),
+		strings.Replace(valid, id, "12345678-9ABC-5DEF-8123-123456789ABZ", 1),
+		strings.Replace(valid, id, "12345678-9ABC-5DEF-8123-123456789AB", 1),
+		strings.Replace(valid, `"`+id+`"`, id, 1),
+		strings.Repeat(" ", platformUUIDOutputLimit) + valid,
+	} {
+		if value, err := parseDarwinPlatformUUID([]byte(data)); err == nil || value != "" { t.Fatalf("invalid hardware observation admitted: %q %v", value, err) }
+	}
+}
+
+func TestMachineCapacityConcurrentFirstUse(t *testing.T) {
+	root := capacityFixtureRoot(t)
+	machine := filepath.Join(root, "machine")
+	start := make(chan struct{})
+	results := make(chan error, 16)
+	for i := range cap(results) {
+		go func() {
+			<-start
+			results <- NewBudget(9).BindMachineCapacity(machine, fmt.Sprintf("host-%d", i))
+		}()
+	}
+	close(start)
+	for range cap(results) {
+		if err := <-results; err != nil { t.Error("concurrent cold pool bind failed", err) }
+	}
+	before, err := os.ReadFile(filepath.Join(machine, "capacity.json"))
+	if err != nil { t.Fatal(err) }
+	if err = NewBudget(9).BindMachineCapacity(machine, "later-generation"); err != nil { t.Fatal(err) }
+	after, err := os.ReadFile(filepath.Join(machine, "capacity.json"))
+	if err != nil || !bytes.Equal(before, after) { t.Fatal("readback rewrote original pool", err) }
+}
+
+func TestMachineCapacityMissingInitializationStateIsNotRecreated(t *testing.T) {
+	for _, condition := range []string{"initialized-state-deleted", "creator-write-failed", "orphan-lock"} {
+		t.Run(condition, func(t *testing.T) {
+			root := capacityFixtureRoot(t)
+			machine := filepath.Join(root, "machine")
+			path := filepath.Join(machine, "capacity.json")
+			if err := os.Mkdir(machine, 0700); err != nil { t.Fatal(err) }
+			switch condition {
+			case "initialized-state-deleted":
+				b, _ := capacityFixtureBudget(t, machine, filepath.Join(root, "quota"), "original", capacityFixtureClaim(root))
+				if _, err := b.TryAcquireTask("original", "held", "openshell"); err != nil { t.Fatal(err) }
+				if err := os.Remove(path); err != nil { t.Fatal(err) }
+			case "creator-write-failed":
+				identity, err := nativeMachineIdentity()
+				if err != nil { t.Fatal(err) }
+				m := &machineCapacity{dir: machine, identity: identity, owner: "original", write: func(string, []byte) error { return errors.New("fixture initial write failed") }}
+				if err = m.access(true, nil); err == nil { t.Fatal("failed initialization reported success") }
+			case "orphan-lock":
+				if err := os.WriteFile(filepath.Join(machine, "capacity.lock"), []byte("original creator"), 0600); err != nil { t.Fatal(err) }
+			}
+			if err := NewBudget(9).BindMachineCapacity(machine, "later-generation"); err == nil || !strings.Contains(err.Error(), "machine capacity state missing") { t.Fatal("unknown original pool was recreated", err) }
+			if _, err := os.Lstat(path); !os.IsNotExist(err) { t.Fatal("missing state was written", err) }
+		})
+	}
 }
 
 func capacityFixtureClaim(root string) ResourceClaim {
