@@ -39,9 +39,11 @@ func (l *Loop) cleanupOwnedCheckouts(apply bool) error {
 			return fmt.Errorf("completed checkout Main disposition is unavailable: %s", id)
 		}
 		stage := order.Stages[0]
-		// The original VM retirement owner is a separate required effect. This
-		// process-only slice must not report an OpenShell lifecycle reclaimed.
-		if stage.Runtime != "" && stage.Runtime != "process" {
+		if stage.Runtime == "openshell" {
+			if _, ok := l.deps.Runtimes[stage.Runtime].(cleanupSessionRetirer); !ok {
+				return fmt.Errorf("completed checkout requires original VM retirement owner: %s", id)
+			}
+		} else if stage.Runtime != "" && stage.Runtime != "process" {
 			return fmt.Errorf("completed checkout requires original %s retirement owner: %s", stage.Runtime, id)
 		}
 		if len(stage.Attempts) == 0 {
@@ -79,6 +81,7 @@ func (l *Loop) completedCheckoutOperation(orderID, attemptID string, candidate l
 // Capacity settlement consumes this proof in the same original actor. Readiness
 // and legacy release are insufficient: every checkout must have a known effect.
 type completedCheckoutReclamation struct {
+	Operation     string
 	OrderID       string
 	StageIndex    int
 	AttemptID     string
@@ -178,7 +181,7 @@ func (l *Loop) verifyCompletedCheckoutReclamation() ([]completedCheckoutReclamat
 			if original.WorktreeName != attempt.WorktreeName {
 				return nil, fmt.Errorf("historical checkout reclamation evidence unavailable: %s", original.WorktreeName)
 			}
-			reclaimed = append(reclaimed, completedCheckoutReclamation{OrderID: id, StageIndex: stage.StageIndex, AttemptID: original.AttemptID, SessionID: original.SessionID, RetryCount: retry, WorktreeName: original.WorktreeName, Runtime: stage.Runtime, AttemptStatus: original.Status, Candidate: candidate, Head: expected.Head, Tree: expected.Tree, Branch: expected.Branch, ControlID: controlID, ControlAction: controlAction, MainACK: ack, Archive: archived})
+			reclaimed = append(reclaimed, completedCheckoutReclamation{Operation: operation, OrderID: id, StageIndex: stage.StageIndex, AttemptID: original.AttemptID, SessionID: original.SessionID, RetryCount: retry, WorktreeName: original.WorktreeName, Runtime: stage.Runtime, AttemptStatus: original.Status, Candidate: candidate, Head: expected.Head, Tree: expected.Tree, Branch: expected.Branch, ControlID: controlID, ControlAction: controlAction, MainACK: ack, Archive: archived})
 		}
 	}
 	return reclaimed, nil

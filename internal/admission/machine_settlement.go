@@ -43,6 +43,7 @@ type MachineReclamation struct {
 }
 
 type MachineSessionLease struct {
+	ContextID  string                 `json:"context_id"`
 	ID         string                 `json:"id"`
 	Owner      string                 `json:"owner"`
 	Source     string                 `json:"source"`
@@ -174,8 +175,11 @@ func (b *Budget) MachineSessionLeases(contextID, project string) ([]MachineSessi
 			if lease.Owner != b.machine.owner || lease.Settlement != nil {
 				continue
 			}
-			row := MachineSessionLease{ID: id, Owner: lease.Owner, Source: lease.Source, State: "held"}
+			row := MachineSessionLease{ContextID: lease.ContextID, ID: id, Owner: lease.Owner, Source: lease.Source, State: "held"}
 			if lease.Binding == nil {
+				if lease.ContextID != "" && lease.ContextID != contextID {
+					continue
+				}
 				row.HoldReason = "original_machine_session_binding_missing"
 			} else {
 				if lease.Binding.ContextID != contextID || lease.Binding.ProjectDir != project {
