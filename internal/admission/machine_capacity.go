@@ -312,7 +312,11 @@ func (m *machineCapacity) acquire(id, contextID, orderID, runtime string, c Reso
 			lease.Disks[disk.Volume] = c.DiskBytes
 			if old, ok := available[disk.Volume]; !ok || disk.Available < old { available[disk.Volume] = disk.Available }
 		}
-		if s.Capacity != nil && *s.Capacity != c.Policy && len(s.Leases) != 0 { return false, errors.New("machine_operator_policy_differs_with_held_leases") }
+		if s.Capacity != nil && *s.Capacity != c.Policy {
+			for _, held := range s.Leases {
+				if held.Settlement == nil { return false, errors.New("machine_operator_policy_differs_with_held_leases") }
+			}
+		}
 		switch {
 		case sample.At.IsZero(): return false, errors.New("machine_sample_missing")
 		case now.Before(sample.At) || now.Sub(sample.At) > MaxSampleAge: return false, errors.New("machine_sample_stale")
