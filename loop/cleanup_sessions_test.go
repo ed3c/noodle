@@ -133,3 +133,56 @@ func TestCleanupObservesEveryOriginalOpenShellAttempt(t *testing.T) {
 		})
 	}
 }
+
+func TestCleanupRetirementObservationKeepsExactIdentityAndSource(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "original-custody.json")
+	recoveryJSON(t, path, map[string]any{"original": "stopped native VM and disk evidence"})
+	ref, err := loopruntime.ReadSessionReadbackFile(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := loopruntime.CompletedSessionBinding{OrderID: "original-order", SessionID: "original-session"}
+	valid := loopruntime.CleanupSessionReadback{OutcomeStatus: loopruntime.StatusCompleted, PublishedHead: "original-head",
+		Execution: loopruntime.CompletedSessionReadback{NativeAttemptID: "original-native-attempt", NativeExecExitCode: 0,
+			NativePhase: "Retired", StopAcknowledged: true, Sources: map[string]loopruntime.SessionReadbackFileRef{"native_custody": ref},
+			Retirement: &loopruntime.CleanupSessionRetirement{OutcomeStatus: loopruntime.StatusCompleted, SessionID: binding.SessionID,
+				NativeAttemptID: "original-native-attempt", SandboxID: "original-uuid", State: loopruntime.CleanupSessionRetired, NativeDeletionOutcome: "unknown"}}}
+	for _, kind := range []string{"retired", "retiring-readiness", "bare-retired-string", "foreign-session", "foreign-attempt", "missing-sandbox", "wrong-outcome", "running", "missing-stop", "missing-source", "changed-source"} {
+		t.Run(kind, func(t *testing.T) {
+			observed := valid
+			retired := *valid.Execution.Retirement
+			observed.Execution.Retirement = &retired
+			observed.Execution.Sources = map[string]loopruntime.SessionReadbackFileRef{"native_custody": ref}
+			switch kind {
+			case "retiring-readiness":
+				observed.Execution.NativePhase, retired.State = "Retiring", "pending"
+			case "bare-retired-string":
+				observed.Execution.Retirement = nil
+			case "foreign-session":
+				retired.SessionID = "foreign"
+			case "foreign-attempt":
+				retired.NativeAttemptID = "foreign"
+			case "missing-sandbox":
+				retired.SandboxID = ""
+			case "wrong-outcome":
+				retired.OutcomeStatus = loopruntime.StatusFailed
+			case "running":
+				observed.Execution.NativePhase = "Ready"
+			case "missing-stop":
+				observed.Execution.StopAcknowledged = false
+			case "missing-source":
+				delete(observed.Execution.Sources, "native_custody")
+			case "changed-source":
+				observed.Execution.Sources["native_custody"] = loopruntime.SessionReadbackFileRef{Path: ref.Path, SHA256: "bad"}
+			}
+			err := verifyCleanupRuntimeOutcome(observed, binding, loopruntime.StatusCompleted)
+			if kind == "retired" || kind == "retiring-readiness" {
+				if err != nil {
+					t.Fatal("original qualified observation refused", err)
+				}
+			} else if err == nil {
+				t.Fatal("unbound retirement was accepted")
+			}
+		})
+	}
+}

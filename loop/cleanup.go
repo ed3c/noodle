@@ -51,6 +51,9 @@ func (l *Loop) cleanupCompleted(apply bool) (err error) {
 		l.cleanupUnknown = nil
 		return nil
 	}
+	if err := l.settleCompletedMachineSessions(true); err != nil {
+		return err
+	}
 	return l.finishRelease()
 }
 

@@ -59,12 +59,17 @@ type resourceSession struct {
 
 func (s *resourceSession) Done() <-chan struct{} { return s.done }
 
-func (l *Loop) retainDispatched(ctx context.Context, session loopruntime.SessionHandle) loopruntime.SessionHandle {
+func (l *Loop) retainDispatched(ctx context.Context, session loopruntime.SessionHandle, requests ...loopruntime.DispatchRequest) loopruntime.SessionHandle {
 	accepted, _ := ctx.Value(admissionKey{}).(*launchAdmission)
 	if accepted == nil {
 		return session
 	}
 	accepted.retained = true
+	if len(requests) == 1 {
+		if err := l.bindResourceSession(accepted.permit, requests[0], session.ID()); err != nil {
+			l.logger.Warn("original machine session binding remains held", "session", session.ID(), "error", err)
+		}
+	}
 	wrapped := &resourceSession{SessionHandle: session, permit: accepted.permit, done: make(chan struct{})}
 	go func() { <-session.Done(); accepted.permit.Release(); close(wrapped.done) }()
 	return wrapped

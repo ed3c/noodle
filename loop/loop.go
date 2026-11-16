@@ -381,6 +381,9 @@ func (l *Loop) Run(ctx context.Context) error {
 		l.deps.ModeOverride = state.RunMode(saved.Mode)
 		l.setState(saved.DispatchState)
 	}
+	if err := l.settleCompletedMachineSessions(false); err != nil {
+		l.logger.Warn("original machine settlement recovery remains held", "error", err)
+	}
 	if err := l.Cycle(ctx); err != nil {
 		return err
 	}

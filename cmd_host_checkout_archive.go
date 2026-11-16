@@ -21,6 +21,9 @@ import (
 // The original Host binds policy without changing its accepted environment.
 // Main supplies semantic work, never per-task archive paths or signing bytes.
 func prepareHostCheckoutArchive(ctx context.Context, e *execution.Context) (*archive.FileRef, error) {
+	if _, err := archive.FileIdentity(e.Root()); err != nil {
+		return nil, fmt.Errorf("original archive support is unavailable: %w", err)
+	}
 	if _, err := worktree.PrepareStorageExcludes(ctx, e); err != nil {
 		return nil, err
 	}

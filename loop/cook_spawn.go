@@ -263,7 +263,7 @@ func (l *Loop) dispatchSession(ctx context.Context, req loopruntime.DispatchRequ
 	req.Runtime = runtimeName
 	session, err := runtime.Dispatch(ctx, req)
 	if err == nil {
-		session = l.retainDispatched(ctx, session)
+		session = l.retainDispatched(ctx, session, req)
 		return session, RuntimeFallbackOutcome{}, nil
 	}
 	if runtimeName == "openshell" || runtimeName == "codex-app-server" {
@@ -295,7 +295,7 @@ func (l *Loop) dispatchSession(ctx context.Context, req loopruntime.DispatchRequ
 			if fallbackErr != nil {
 				return nil, outcome, classifyAgentStartFailure("process", fallbackErr)
 			}
-			fallbackSession = l.retainDispatched(ctx, fallbackSession)
+			fallbackSession = l.retainDispatched(ctx, fallbackSession, req)
 			return fallbackSession, outcome, nil
 		}
 	}
