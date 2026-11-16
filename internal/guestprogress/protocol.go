@@ -31,6 +31,7 @@ type Config struct {
 	Token                                   string
 	Argv                                    []string
 	Grace                                   time.Duration
+	ArchivePolicy                           string
 }
 
 type Request struct {
@@ -47,14 +48,16 @@ type Archive struct {
 }
 
 type Receipt struct {
-	Schema         int       `json:"schema"`
-	Identity       Identity  `json:"identity"`
-	RequestID      string    `json:"request_id"`
-	Status         string    `json:"status"`
-	ExitCode       int       `json:"exit_code"`
-	ChildrenReaped bool      `json:"children_reaped"`
-	Archives       []Archive `json:"archives"`
-	Error          string    `json:"error"`
+	Schema               int       `json:"schema"`
+	Identity             Identity  `json:"identity"`
+	RequestID            string    `json:"request_id"`
+	Status               string    `json:"status"`
+	ExitCode             int       `json:"exit_code"`
+	ChildrenReaped       bool      `json:"children_reaped"`
+	Archives             []Archive `json:"archives"`
+	Error                string    `json:"error"`
+	ArchivePolicySHA256  string    `json:"archive_policy_sha256,omitempty"`
+	ExcludedDependencies []string  `json:"excluded_dependencies,omitempty"`
 }
 
 type processBinding struct {
@@ -142,7 +145,12 @@ func privateDirectory(directory string) error {
 // ValidateReceipt checks data binding only. Callers must independently require
 // successful original supervisor completion; guest JSON is not attestation.
 func ValidateReceipt(result Receipt, identity Identity, requestID string) error {
-	if result.Schema != 1 || result.Identity != identity || (result.RequestID != "" && result.RequestID != requestID) || !result.ChildrenReaped || result.Status != "archived" || result.Error != "" || len(result.Archives) != 2 {
+	validSchema := result.Schema == 1 && result.ArchivePolicySHA256 == "" && len(result.ExcludedDependencies) == 0
+	if result.Schema == 2 {
+		_, err := hex.DecodeString(result.ArchivePolicySHA256)
+		validSchema = len(result.ArchivePolicySHA256) == 64 && err == nil
+	}
+	if !validSchema || result.Identity != identity || (result.RequestID != "" && result.RequestID != requestID) || !result.ChildrenReaped || result.Status != "archived" || result.Error != "" || len(result.Archives) != 2 {
 		return fmt.Errorf("progress result does not match this completed stop")
 	}
 	names := map[string]bool{"noodle-result.tar": false, "noodle-session.tar": false}

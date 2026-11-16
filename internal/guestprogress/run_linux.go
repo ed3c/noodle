@@ -37,6 +37,10 @@ type supervisorOperations struct {
 }
 
 func runWithOperations(cfg Config, ops supervisorOperations) (int, error) {
+	policy, err := ParseArchivePolicy(cfg.ArchivePolicy)
+	if err != nil {
+		return -1, err
+	}
 	if !cfg.Identity.valid() || len(cfg.Token) != 64 || digest([]byte(cfg.Token)) != cfg.Identity.TokenSHA256 || len(cfg.Argv) == 0 || !filepath.IsAbs(cfg.Argv[0]) || cfg.Grace <= 0 || cfg.Grace > time.Minute {
 		return -1, fmt.Errorf("progress launch binding invalid")
 	}
@@ -99,6 +103,10 @@ func runWithOperations(cfg Config, ops supervisorOperations) (int, error) {
 	defer cmd.Process.Release()
 	leader := cmd.Process.Pid
 	result := Receipt{Schema: 1, Identity: cfg.Identity, Status: "draining", ExitCode: -1, Archives: []Archive{}}
+	if policy != nil {
+		result.Schema = 2
+		result.ArchivePolicySHA256 = digest([]byte(cfg.ArchivePolicy))
+	}
 	waiters := []chan Receipt{}
 	var stopping time.Time
 	var failure error
@@ -210,10 +218,20 @@ func runWithOperations(cfg Config, ops supervisorOperations) (int, error) {
 		}
 		return -1, failure
 	}
+	excluded, paths, err := repositoryExclusions(cfg.Repository, policy)
+	if err != nil {
+		result.Status, result.Error = "unknown", err.Error()
+		failure := errors.Join(err, ops.writeJSON(cfg.Directory, "failure.json", result))
+		for _, reply := range waiters {
+			reply <- result
+		}
+		return -1, failure
+	}
+	result.ExcludedDependencies = paths
 	for _, spec := range []struct {
 		root, name string
 		excluded   map[string]bool
-	}{{cfg.Repository, "noodle-result.tar", nil}, {cfg.SessionDirectory, "noodle-session.tar", map[string]bool{"codex/auth.json": true}}} {
+	}{{cfg.Repository, "noodle-result.tar", excluded}, {cfg.SessionDirectory, "noodle-session.tar", map[string]bool{"codex/auth.json": true}}} {
 		archive, e := archiveTree(spec.root, cfg.Directory, spec.name, spec.excluded)
 		if e != nil {
 			result.Status = "unknown"

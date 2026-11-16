@@ -108,6 +108,21 @@ func (r *OpenShellRuntime) Dispatch(ctx context.Context, req DispatchRequest) (S
 	if err != nil {
 		return nil, err
 	}
+	proofs, err := workspaceartifacts.RebuildableDependencies(ctx, req.WorktreePath, baseline)
+	if err != nil {
+		return nil, err
+	}
+	archivePolicy := ""
+	if len(proofs) != 0 {
+		raw, err := json.Marshal(guestprogress.ArchivePolicy{Schema: 1, Dependencies: proofs})
+		if err != nil {
+			return nil, err
+		}
+		archivePolicy = string(raw)
+		if _, err := guestprogress.ParseArchivePolicy(archivePolicy); err != nil {
+			return nil, err
+		}
+	}
 	order := req.EnvVars["NOODLE_ORDER_ID"]
 	if order == "" {
 		order = req.Name
@@ -121,6 +136,7 @@ func (r *OpenShellRuntime) Dispatch(ctx context.Context, req DispatchRequest) (S
 		return nil, err
 	}
 	s := newOpenShellSession(r, plan.ID, plan.Directory)
+	s.archivePolicy = archivePolicy
 	s.receipt = openShellDispatchReceipt{Version: 1, ProfileSHA256: profileSHA, ContextID: r.config.ContextID, OrderID: order, AttemptID: attempt, SessionID: plan.ID, Target: req.WorktreePath, Baseline: baseline, Phase: "prepared", Outcome: SessionOutcome{Status: StatusFailed, Reason: "OpenShell attempt has not completed", ExitCode: -1}}
 	if err := s.persist(); err != nil {
 		return nil, err
@@ -132,6 +148,7 @@ func (r *OpenShellRuntime) Dispatch(ctx context.Context, req DispatchRequest) (S
 
 type openShellDispatchReceipt struct {
 	CredentialWaitError                                            string `json:",omitempty"`
+	PublicationScratchError                                        string `json:",omitempty"`
 	ProfileSHA256                                                  string
 	CandidateHead                                                  string
 	ProgressHead                                                   string
@@ -147,6 +164,7 @@ type openShellDispatchReceipt struct {
 }
 
 type openShellSession struct {
+	archivePolicy         string
 	owner                 *OpenShellRuntime
 	id, dir               string
 	mu                    sync.Mutex
@@ -356,7 +374,7 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 		s.finishStopped()
 		return
 	}
-	command, err := wrapOpenShellProgress(OpenShellCommand{RequestID: requestID, Argv: plan.Command(), Workdir: "/sandbox/repo", Env: env}, s.owner.config.Profile.ProgressSupervisor, s.id, token)
+	command, err := wrapOpenShellProgressWithPolicy(OpenShellCommand{RequestID: requestID, Argv: plan.Command(), Workdir: "/sandbox/repo", Env: env}, s.owner.config.Profile.ProgressSupervisor, s.id, token, progressDirectory(s.id), s.archivePolicy)
 	if err != nil {
 		s.fail(err)
 		s.finishStopped()
@@ -476,6 +494,19 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 		}
 	}
 	worker.RecordModelOutcome(s.Outcome())
+	if s.Outcome().Status == StatusCompleted && !s.interrupted() && s.receipt.Delivery != nil {
+		if err = workspaceartifacts.ReleasePublicationScratch(context.Background(), req.WorktreePath, s.receipt.Baseline, s.receipt.Delivery, s.receipt.CandidateHead); err != nil {
+			if !errors.Is(err, workspaceartifacts.ErrPublicationScratchHeld) {
+				s.fail(err)
+				return
+			}
+			// Publication is already durable. Preserve a refused scratch cleanup
+			// separately; it cannot invalidate the task or strand a settled handle.
+			s.mu.Lock()
+			s.receipt.PublicationScratchError = err.Error()
+			s.mu.Unlock()
+		}
+	}
 	if err = s.phase("settled"); err != nil {
 		s.fail(err)
 		return

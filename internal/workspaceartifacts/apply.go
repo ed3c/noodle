@@ -16,6 +16,7 @@ type Result struct {
 	PatchPath         string `json:"patch_path"`
 	ReturnedDirectory string `json:"returned_directory"`
 	Error             string `json:"error"`
+	scratch           *publicationScratch
 }
 
 // Apply validates a complete returned directory and applies its binary diff.
@@ -35,6 +36,9 @@ func Apply(ctx context.Context, target string, baseline *Baseline, returned, evi
 	}
 	result = &Result{State: "rejected", PatchPath: filepath.Join(evidence, "changes.patch"), ReturnedDirectory: returned}
 	defer func() {
+		if resultErr == nil {
+			resultErr = result.sealScratch()
+		}
 		if resultErr != nil {
 			result.Error = resultErr.Error()
 		}
@@ -77,6 +81,9 @@ func Apply(ctx context.Context, target string, baseline *Baseline, returned, evi
 	}
 	build := filepath.Join(evidence, "patch-repository")
 	if err := os.Mkdir(build, 0700); err != nil {
+		return result, err
+	}
+	if result.scratch, err = newPublicationScratch(build); err != nil {
 		return result, err
 	}
 	if _, err := git(ctx, build, nil, "init", "--quiet", "--template="); err != nil {

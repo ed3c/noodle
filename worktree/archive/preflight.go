@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/poteto/noodle/internal/rebuildable"
 )
 
 type Source struct {
@@ -141,6 +143,14 @@ func InspectSource(c Config, root string) (Source, error) {
 	if status != "" {
 		return s, &DirtySourceError{}
 	}
+	proofs, err := rebuildable.Dependencies(s.Tracked)
+	if err != nil {
+		return s, err
+	}
+	qualified := map[string]bool{}
+	for _, proof := range proofs {
+		qualified[proof.Directory] = true
+	}
 	// Only dependency directories with a tracked package declaration and lockfile
 	// are excluded. Their contents are never walked or hashed.
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
@@ -169,24 +179,8 @@ func InspectSource(c Config, root string) (Source, error) {
 		if !d.IsDir() || d.Type()&os.ModeSymlink != 0 {
 			return fmt.Errorf("dependency path is not a plain directory: %s", rel)
 		}
-		parent := filepath.Dir(rel)
-		manifest := filepath.Join(parent, "package.json")
-		if !s.Tracked[manifest] {
-			return fmt.Errorf("dependency declaration is not tracked: %s", rel)
-		}
-		locked := false
-		for p := parent; ; p = filepath.Dir(p) {
-			for _, name := range []string{"pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lock", "bun.lockb"} {
-				if s.Tracked[filepath.Join(p, name)] {
-					locked = true
-				}
-			}
-			if p == "." {
-				break
-			}
-		}
-		if !locked {
-			return fmt.Errorf("dependency lockfile is unavailable: %s", rel)
+		if !qualified[filepath.ToSlash(rel)] {
+			return fmt.Errorf("dependency tracked declaration or lockfile is unavailable: %s", rel)
 		}
 		s.Excluded = append(s.Excluded, rel)
 		return fs.SkipDir

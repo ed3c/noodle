@@ -110,7 +110,7 @@ func (s *openShellSession) receiveProgress(command OpenShellCommand) error {
 	}
 	tokenHash := sha256.Sum256([]byte(binding.Token))
 	identity := guestprogress.Identity{SessionID: s.id, CommandSHA256: binding.CommandSHA256, TokenSHA256: hex.EncodeToString(tokenHash[:])}
-	if err = guestprogress.ValidateReceipt(receipt, identity, s.progressStopRequestID); err != nil {
+	if err = guestprogress.ValidateReceiptForPolicy(receipt, identity, s.progressStopRequestID, binding.ArchivePolicy); err != nil {
 		return err
 	}
 	for _, archive := range receipt.Archives {
@@ -188,7 +188,7 @@ func readSavedProgress(dir string, receipt openShellDispatchReceipt, command Ope
 	}
 	tokenHash := sha256.Sum256([]byte(binding.Token))
 	identity := guestprogress.Identity{SessionID: receipt.SessionID, CommandSHA256: binding.CommandSHA256, TokenSHA256: hex.EncodeToString(tokenHash[:])}
-	if err := guestprogress.ValidateReceipt(saved, identity, stopRequestID); err != nil {
+	if err := guestprogress.ValidateReceiptForPolicy(saved, identity, stopRequestID, binding.ArchivePolicy); err != nil {
 		return SessionReadbackFileRef{}, err
 	}
 	return ref, nil

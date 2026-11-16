@@ -46,3 +46,29 @@ func TestOpenShellProgressCommandBindsOriginalLaunch(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenShellProgressCommandBindsArchivePolicyAndKeepsFrozenLaunch(t *testing.T) {
+	const policy = `{"schema":1,"dependencies":[{"directory":"node_modules","manifest":"package.json","lockfile":"pnpm-lock.yaml"}]}`
+	legacy := progressTestCommand(t)
+	base, old, err := unwrapOpenShellProgress(legacy)
+	if err != nil || old.ArchivePolicy != "" {
+		t.Fatal("Frozen launch changed", old, err)
+	}
+	wrapped, err := wrapOpenShellProgressWithPolicy(base, old.Binary, old.SessionID, old.Token, old.Directory, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, bound, err := unwrapOpenShellProgress(wrapped)
+	if err != nil || bound.ArchivePolicy != policy || bound.CommandSHA256 == old.CommandSHA256 {
+		t.Fatal("rebuild policy did not bind original command", bound, err)
+	}
+	changed := wrapped
+	changed.Argv = append([]string{}, wrapped.Argv...)
+	changed.Argv[13] = strings.ReplaceAll(policy, "pnpm-lock.yaml", "package-lock.json")
+	if _, _, err := unwrapOpenShellProgress(changed); err == nil {
+		t.Fatal("changed rebuild policy retained original command identity")
+	}
+	if _, err := progressStopCommand(wrapped, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"); err != nil {
+		t.Fatal("new producer broke original Stop owner", err)
+	}
+}
