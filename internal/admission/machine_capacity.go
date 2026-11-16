@@ -85,6 +85,11 @@ type MachineSnapshot struct {
 }
 
 type machineLease struct {
+	ContextID string `json:"context_id,omitempty"`
+	OrderID string `json:"order_id,omitempty"`
+	Runtime string `json:"runtime,omitempty"`
+	Binding *MachineSessionBinding `json:"session_binding,omitempty"`
+	Settlement *MachineReclamation `json:"settlement,omitempty"`
 	Owner string `json:"owner"`
 	Source string `json:"source"`
 	MemoryBytes uint64 `json:"memory_bytes"`
@@ -216,6 +221,7 @@ func (m *machineCapacity) access(initialize bool, apply func(*machineState) (boo
 		if err := validateCapacityPolicy(*s.Capacity); err != nil { return err }
 	}
 	for id, lease := range s.Leases {
+		if err := validateMachineLeaseSettlement(lease); err != nil { return err }
 		if id == "" || lease.Owner == "" || lease.Source == "" || lease.MemoryBytes == 0 || lease.CPUs == 0 || len(lease.Disks) == 0 {
 			return errors.New("machine capacity lease corrupt")
 		}
@@ -269,10 +275,10 @@ func validateCapacityPolicy(p CapacityPolicy) error {
 	return nil
 }
 
-func (m *machineCapacity) acquire(id string, c ResourceClaim, sample Sample, rate float64, rateValid bool, normals int, now time.Time) error {
+func (m *machineCapacity) acquire(id, contextID, orderID, runtime string, c ResourceClaim, sample Sample, rate float64, rateValid bool, normals int, now time.Time) error {
 	if err := validateResourceClaim(c); err != nil { return err }
 	return m.access(false, func(s *machineState) (bool, error) {
-		lease := machineLease{Owner: m.owner, Source: c.Source, MemoryBytes: c.MemoryBytes, CPUs: c.CPUs, Disks: map[string]uint64{}}
+		lease := machineLease{ContextID: contextID, OrderID: orderID, Runtime: runtime, Owner: m.owner, Source: c.Source, MemoryBytes: c.MemoryBytes, CPUs: c.CPUs, Disks: map[string]uint64{}}
 		available := map[string]uint64{}
 		for _, path := range c.DiskPaths {
 			disk, err := m.probe(path)
@@ -320,6 +326,7 @@ func (m *machineCapacity) acquire(id string, c ResourceClaim, sample Sample, rat
 			return nil
 		}
 		for _, held := range s.Leases {
+			if held.Settlement != nil { continue }
 			if err := consume(held); err != nil { return false, err }
 		}
 		if err := consume(lease); err != nil { return false, err }
@@ -400,7 +407,7 @@ func (b *Budget) acquireMachineTask(contextID, order, runtime string) (*Permit, 
 	if b.previous != nil { sample = *b.previous }
 	normals := 0
 	if source.source == claim.Source && source.policy == claim.Policy { normals = source.normals }
-	err = b.machine.acquire(pending.id, claim, sample, b.rate, b.rateValid, normals, b.now())
+	err = b.machine.acquire(pending.id, contextID, order, runtime, claim, sample, b.rate, b.rateValid, normals, b.now())
 	if err != nil {
 		var uncertain *machineWriteUncertain
 		if exists || errors.As(err, &uncertain) {
@@ -480,9 +487,11 @@ func (b *Budget) machineSnapshot() *MachineSnapshot {
 	if len(b.pendingMachineAcquires) != 0 || len(b.pendingMachineReturns) != 0 || b.machineFault != "" { s.Next = "original_machine_nonce_readback" }
 	if b.machine == nil { s.Disk = "unknown"; return s }
 	err := b.machine.access(false, func(state *machineState) (bool, error) {
-		s.Leases = len(state.Leases)
+		s.Leases = 0
 		if state.Capacity != nil { capacity := *state.Capacity; s.Capacity = &capacity }
 		for _, lease := range state.Leases {
+			if lease.Settlement != nil { continue }
+			s.Leases++
 			if lease.MemoryBytes > math.MaxUint64-s.MemoryBytes || lease.CPUs > math.MaxUint64-s.CPUs { return false, errors.New("machine capacity totals overflow") }
 			s.MemoryBytes += lease.MemoryBytes; s.CPUs += lease.CPUs
 			peak := uint64(0)
