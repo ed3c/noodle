@@ -101,11 +101,8 @@ func TestHostQualificationMissingGoalFailsBeforeCustodyAndDifferentGoalsReuseCla
 
 func TestHostTemplatePrepareOnlyLeavesDefaultRegistrationAndReusesBaseline(t *testing.T) {
 	root, _, template, _ := goalHostFixture(t)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "default"))
-	path, err := goalHostTemplatePath()
-	if err != nil {
-		t.Fatal(err)
-	}
+	path := isolatedGoalTemplatePath(t, root)
+	var err error
 	if _, err = registerGoalHostTemplate(context.Background(), path, template); err != nil {
 		t.Fatal(err)
 	}
