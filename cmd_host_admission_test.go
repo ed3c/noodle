@@ -397,6 +397,145 @@ func TestAdmissionCLIKeepsLegacyMissingCapabilityInputRequired(t *testing.T) {
 	}
 }
 
+func TestAdmissionWireCarriesOriginalRequestThroughAttachAndReadback(t *testing.T) {
+	for _, fault := range []string{"none", "missing-ref", "source-drift", "missing-digest", "executed-context"} {
+		t.Run(fault, func(t *testing.T) {
+			root, err := os.MkdirTemp("/tmp", "naw-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.RemoveAll(root) })
+			root, err = filepath.EvalSymlinks(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			isolatedGoalTemplatePath(t, root)
+			t.Setenv("NOODLE_HOST_DIR", root)
+			req := hostTestRequest(t, t.TempDir())
+			req.RequestFile = filepath.Join(root, "original.json")
+			req.RequiredHostInstanceID = strings.Repeat("a", 32)
+			binary, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			binary, err = filepath.EvalSymlinks(binary)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(binary)
+			if err != nil {
+				t.Fatal(err)
+			}
+			generationDir := filepath.Join(root, "g", req.RequiredHostInstanceID)
+			if err = os.MkdirAll(generationDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			h := &noodleHost{dir: generationDir, instanceID: req.RequiredHostInstanceID, binaryPath: binary, binarySHA: hostDigest(raw), blocked: true, rolling: &hostRolling{root: root}}
+			if err = updateHostPool(root, func(pool *hostPool) error {
+				pool.Active = h.instanceID
+				pool.Generations[h.instanceID] = hostGeneration{ID: h.instanceID, Directory: generationDir, Binary: binary, SHA: h.binarySHA, State: "running"}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			listener, err := net.Listen("unix", filepath.Join(generationDir, "host.sock"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			if err = os.Symlink(filepath.Join(generationDir, "host.sock"), filepath.Join(root, "host.sock")); err != nil {
+				t.Fatal(err)
+			}
+			serverErrors := make(chan error, 1)
+			go func() {
+				for range 2 {
+					connection, err := listener.Accept()
+					if err != nil {
+						serverErrors <- err
+						return
+					}
+					var wire hostRequest
+					if err = json.NewDecoder(connection).Decode(&wire); err != nil {
+						connection.Close()
+						serverErrors <- err
+						return
+					}
+					var response any
+					if wire.RequestFile != "" {
+						err = errors.New("CLI-only path leaked onto the wire")
+					} else if wire.Operation == "attach" {
+						if wire.ConfigPath != "" {
+							err = errors.New("legacy default config changed its binding")
+						}
+						switch fault {
+						case "missing-ref":
+							wire.ReadbackRequest = hostAdmissionFileRef{}
+						case "missing-digest":
+							wire.ReadbackRequest.SHA256 = ""
+						case "source-drift":
+							source, readErr := os.ReadFile(wire.ReadbackRequest.Path)
+							if readErr != nil {
+								err = readErr
+							} else {
+								err = os.WriteFile(wire.ReadbackRequest.Path, append(source, '\n'), 0600)
+							}
+						case "executed-context":
+							h.receipts = []hostReceipt{{RequestID: wire.RequestID, ProjectDir: wire.ProjectDir, ConfigSHA256: wire.ConfigSHA256, Mode: wire.Mode, ContextID: "original-failed", ContextState: "failed"}}
+						}
+						response = h.handle(context.Background(), wire)
+					} else if wire.Operation == "admission_readback" {
+						response = h.admissionReadback(wire)
+					} else {
+						err = fmt.Errorf("unexpected wire operation %s", wire.Operation)
+					}
+					if err == nil {
+						err = json.NewEncoder(connection).Encode(response)
+					}
+					connection.Close()
+					if err != nil {
+						serverErrors <- err
+						return
+					}
+				}
+				serverErrors <- nil
+			}()
+			response := callHost(context.Background(), req)
+			if response.Status != "unknown_effect" {
+				t.Fatalf("attach changed original refusal or unknown: %+v", response)
+			}
+			before, err := os.ReadFile(req.RequestFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			command := newHostAdmissionReadbackCmd(&App{})
+			command.SetArgs([]string{"--request-file", req.RequestFile})
+			var output bytes.Buffer
+			command.SetOut(&output)
+			if err = command.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			if err = <-serverErrors; err != nil {
+				t.Fatal(err)
+			}
+			var result map[string]any
+			if err = json.Unmarshal(output.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			want := "input_required"
+			if fault == "none" {
+				want = "not_admitted"
+			}
+			if result["status"] != want {
+				t.Fatalf("wire lost original evidence qualification: %s", output.String())
+			}
+			after, err := os.ReadFile(req.RequestFile)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("readback rewrote original request", err)
+			}
+		})
+	}
+}
+
 func TestRollingTargetAcceptsCurrentNativeCapabilitiesWithoutWarningGrant(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("rolling Host is not supported on Windows")

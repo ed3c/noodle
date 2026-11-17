@@ -42,9 +42,20 @@ type hostAdmissionTransfer struct {
 
 func admissionBinding(req hostRequest) (hostRequestBinding, hostAdmissionFileRef, error) {
 	var binding hostRequestBinding
-	reference, err := loopruntime.ReadSessionReadbackFile(req.RequestFile, &binding)
+	path := req.RequestFile
+	boundSource := req.ReadbackRequest != (hostAdmissionFileRef{})
+	if boundSource {
+		if path != "" && path != req.ReadbackRequest.Path {
+			return binding, hostAdmissionFileRef{}, errors.New("original admission request path differs")
+		}
+		path = req.ReadbackRequest.Path
+	}
+	reference, err := loopruntime.ReadSessionReadbackFile(path, &binding)
 	if err != nil {
 		return binding, reference, err
+	}
+	if boundSource && reference != req.ReadbackRequest {
+		return binding, reference, errors.New("original admission request source changed")
 	}
 	if binding.Schema != 1 || !validPoolID(binding.RequestID) || binding.HostDir == "" ||
 		binding.ProjectDir != req.ProjectDir || binding.RequestID != req.RequestID ||
@@ -58,7 +69,7 @@ func admissionBinding(req hostRequest) (hostRequestBinding, hostAdmissionFileRef
 
 // Only the original actor's pre-admission refusal can establish this evidence.
 func (h *noodleHost) recordAdmissionRefusal(req hostRequest, response hostResponse) hostResponse {
-	if !h.blocked || h.rolling == nil || req.RequestFile == "" {
+	if !h.blocked || h.rolling == nil || (req.RequestFile == "" && req.ReadbackRequest.Path == "") {
 		return response
 	}
 	binding, reference, err := admissionBinding(req)
@@ -468,7 +479,7 @@ func (h *noodleHost) admissionTransfer(ctx context.Context, req hostRequest) any
 		if err != nil {
 			return admissionInputRequired(err)
 		}
-		directory := filepath.Join(filepath.Dir(req.RequestFile), "host-transfers", binding.RequestID, targetHost.Instance)
+		directory := filepath.Join(filepath.Dir(owner.NotAdmitted.Request.Path), "host-transfers", binding.RequestID, targetHost.Instance)
 		prior := owner.NotAdmitted.Request
 		transfer = &hostAdmissionTransfer{Profile: targetConfig.Profile, ProfileSourceSHA256: targetConfig.ProfileSourceSHA256,
 			Noodle: binaryRef, TargetRoot: target, TargetInstance: targetHost.Instance, Config: targetConfig.Config,
@@ -601,10 +612,11 @@ func newHostAdmissionCmd(app *App, transfer bool) *cobra.Command {
 	cmd := &cobra.Command{Use: name, Short: "Read or transfer an original proven unaccepted admission", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var binding hostRequestBinding
-			if _, err := loopruntime.ReadSessionReadbackFile(requestFile, &binding); err != nil {
+			reference, err := loopruntime.ReadSessionReadbackFile(requestFile, &binding)
+			if err != nil {
 				return err
 			}
-			req := hostRequest{Operation: operation, RequestFile: requestFile, RequestID: binding.RequestID,
+			req := hostRequest{Operation: operation, RequestFile: requestFile, ReadbackRequest: reference, RequestID: binding.RequestID,
 				ProjectDir: binding.ProjectDir, ConfigPath: binding.ConfigPath, ConfigSHA256: binding.ConfigSHA256,
 				Mode: binding.Mode, BinarySHA256: binding.BinarySHA256, CleanupCompleted: binding.CleanupCompleted,
 				AdmissionTargetRoot: targetRoot, AdmissionConfigPath: configPath}
