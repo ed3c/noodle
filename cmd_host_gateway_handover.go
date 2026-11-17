@@ -277,18 +277,18 @@ func bindGatewayHandoverProfile(p *hostMaintenancePlan, path, digest string) err
 	if err != nil || !filepath.IsAbs(cfg.Runtime.OpenShell.Profile) {
 		return errors.New("original OpenShell profile source unavailable")
 	}
-	profile, err := loopruntime.LoadOpenShellProfile(cfg.Runtime.OpenShell.Profile)
+	gateway, err := loopruntime.LoadOpenShellGatewaySpec(cfg.Runtime.OpenShell.Profile)
 	if err != nil {
 		return err
 	}
-	ref, err := loopruntime.ReadSessionReadbackFile(profile.SourcePath, nil)
+	ref, err := loopruntime.ReadSessionReadbackFile(cfg.Runtime.OpenShell.Profile, nil)
 	if err != nil {
 		return err
 	}
-	if p.Handover.Profile.Path != "" && p.Handover.Binding != profile.Gateway.Binding {
+	if p.Handover.Profile.Path != "" && p.Handover.Binding != gateway.Binding {
 		return errors.New("original contexts use different gateway bindings")
 	}
-	p.Handover.Profile, p.Handover.Binding = ref, profile.Gateway.Binding
+	p.Handover.Profile, p.Handover.Binding = ref, gateway.Binding
 	return nil
 }
 

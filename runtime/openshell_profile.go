@@ -79,6 +79,20 @@ type openShellProfileFile struct {
 }
 
 func LoadOpenShellProfile(filename string) (OpenShellProfile, error) {
+	return loadOpenShellProfile(filename, false)
+}
+
+// LoadOpenShellGatewaySpec validates the gateway deployment without reading worker
+// payloads or route specifications. It cannot admit or execute a worker.
+func LoadOpenShellGatewaySpec(filename string) (OpenShellGatewaySpec, error) {
+	p, err := loadOpenShellProfile(filename, true)
+	if err != nil {
+		return OpenShellGatewaySpec{}, err
+	}
+	return p.Gateway, nil
+}
+
+func loadOpenShellProfile(filename string, gatewayOnly bool) (OpenShellProfile, error) {
 	var p OpenShellProfile
 	if !filepath.IsAbs(filename) {
 		return p, fmt.Errorf("OpenShell profile path is not absolute")
@@ -156,67 +170,69 @@ func LoadOpenShellProfile(filename string) (OpenShellProfile, error) {
 	}
 	p.GatewayName = f.GatewayName
 	p.Environment = append([]string(nil), f.Environment...)
-	if p.PayloadDirectory, err = resolve(f.PayloadDirectory); err != nil {
-		return p, err
-	}
-	if filepath.Base(p.PayloadDirectory) != "payload" {
-		return p, fmt.Errorf("OpenShell payload directory basename is not payload")
-	}
-	if p.PayloadSHA256, err = openShellPayloadHash(p.PayloadDirectory); err != nil {
-		return p, err
-	}
-	hash.Write([]byte(p.PayloadSHA256))
-	if f.InstructionVerifier != "" {
-		if !path.IsAbs(f.InstructionVerifier) || path.Clean(f.InstructionVerifier) != f.InstructionVerifier || strings.ContainsRune(f.InstructionVerifier, 0) || !strings.HasPrefix(f.InstructionVerifier, "/sandbox/payload/") {
-			return p, fmt.Errorf("OpenShell instruction verifier is outside the guest payload")
+	if !gatewayOnly {
+		if p.PayloadDirectory, err = resolve(f.PayloadDirectory); err != nil {
+			return p, err
 		}
-		localVerifier := filepath.Join(p.PayloadDirectory, filepath.FromSlash(strings.TrimPrefix(f.InstructionVerifier, "/sandbox/payload/")))
-		info, e := os.Lstat(localVerifier)
-		if e != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
-			return p, fmt.Errorf("OpenShell instruction verifier executable unavailable in payload")
+		if filepath.Base(p.PayloadDirectory) != "payload" {
+			return p, fmt.Errorf("OpenShell payload directory basename is not payload")
 		}
-		p.InstructionVerifier = f.InstructionVerifier
-	}
-	if !path.IsAbs(f.ProgressSupervisor) || path.Clean(f.ProgressSupervisor) != f.ProgressSupervisor || strings.ContainsRune(f.ProgressSupervisor, 0) || !strings.HasPrefix(f.ProgressSupervisor, "/sandbox/payload/") {
-		return p, fmt.Errorf("OpenShell progress supervisor is missing or outside the guest payload")
-	}
-	localSupervisor := filepath.Join(p.PayloadDirectory, filepath.FromSlash(strings.TrimPrefix(f.ProgressSupervisor, "/sandbox/payload/")))
-	info, statErr := os.Lstat(localSupervisor)
-	if statErr != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
-		return p, fmt.Errorf("OpenShell progress supervisor executable unavailable in payload")
-	}
-	p.ProgressSupervisor = f.ProgressSupervisor
-	p.Routes = make(map[string]OpenShellRoute, len(f.Routes))
-	// JSON map order is intentionally irrelevant; include routes in a fixed order.
-	for key := range f.Routes {
-		if key != "codex" && key != "pi" {
-			return p, fmt.Errorf("OpenShell harness route %q unsupported", key)
+		if p.PayloadSHA256, err = openShellPayloadHash(p.PayloadDirectory); err != nil {
+			return p, err
 		}
-	}
-	for _, key := range []string{"codex", "pi"} {
-		r, ok := f.Routes[key]
-		if !ok {
-			continue
+		hash.Write([]byte(p.PayloadSHA256))
+		if f.InstructionVerifier != "" {
+			if !path.IsAbs(f.InstructionVerifier) || path.Clean(f.InstructionVerifier) != f.InstructionVerifier || strings.ContainsRune(f.InstructionVerifier, 0) || !strings.HasPrefix(f.InstructionVerifier, "/sandbox/payload/") {
+				return p, fmt.Errorf("OpenShell instruction verifier is outside the guest payload")
+			}
+			localVerifier := filepath.Join(p.PayloadDirectory, filepath.FromSlash(strings.TrimPrefix(f.InstructionVerifier, "/sandbox/payload/")))
+			info, e := os.Lstat(localVerifier)
+			if e != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+				return p, fmt.Errorf("OpenShell instruction verifier executable unavailable in payload")
+			}
+			p.InstructionVerifier = f.InstructionVerifier
 		}
-		if !path.IsAbs(r.Binary) || path.Clean(r.Binary) != r.Binary || strings.ContainsRune(r.Binary, 0) || !strings.HasPrefix(r.Binary, "/sandbox/payload/") {
-			return p, fmt.Errorf("OpenShell %s binary is outside the guest payload", key)
+		if !path.IsAbs(f.ProgressSupervisor) || path.Clean(f.ProgressSupervisor) != f.ProgressSupervisor || strings.ContainsRune(f.ProgressSupervisor, 0) || !strings.HasPrefix(f.ProgressSupervisor, "/sandbox/payload/") {
+			return p, fmt.Errorf("OpenShell progress supervisor is missing or outside the guest payload")
 		}
-		guestBinary := filepath.Join(p.PayloadDirectory, filepath.FromSlash(strings.TrimPrefix(r.Binary, "/sandbox/payload/")))
-		if info, e := os.Stat(guestBinary); e != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
-			return p, fmt.Errorf("OpenShell %s guest executable unavailable in payload", key)
+		localSupervisor := filepath.Join(p.PayloadDirectory, filepath.FromSlash(strings.TrimPrefix(f.ProgressSupervisor, "/sandbox/payload/")))
+		info, statErr := os.Lstat(localSupervisor)
+		if statErr != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+			return p, fmt.Errorf("OpenShell progress supervisor executable unavailable in payload")
 		}
-		b, e := read(r.SpecFile)
-		if e != nil {
-			return p, e
+		p.ProgressSupervisor = f.ProgressSupervisor
+		p.Routes = make(map[string]OpenShellRoute, len(f.Routes))
+		// JSON map order is intentionally irrelevant; include routes in a fixed order.
+		for key := range f.Routes {
+			if key != "codex" && key != "pi" {
+				return p, fmt.Errorf("OpenShell harness route %q unsupported", key)
+			}
 		}
-		spec := new(pb.SandboxSpec)
-		if e = protojson.Unmarshal(b, spec); e != nil {
-			return p, fmt.Errorf("decode OpenShell %s sandbox specification: %w", key, e)
+		for _, key := range []string{"codex", "pi"} {
+			r, ok := f.Routes[key]
+			if !ok {
+				continue
+			}
+			if !path.IsAbs(r.Binary) || path.Clean(r.Binary) != r.Binary || strings.ContainsRune(r.Binary, 0) || !strings.HasPrefix(r.Binary, "/sandbox/payload/") {
+				return p, fmt.Errorf("OpenShell %s binary is outside the guest payload", key)
+			}
+			guestBinary := filepath.Join(p.PayloadDirectory, filepath.FromSlash(strings.TrimPrefix(r.Binary, "/sandbox/payload/")))
+			if info, e := os.Stat(guestBinary); e != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+				return p, fmt.Errorf("OpenShell %s guest executable unavailable in payload", key)
+			}
+			b, e := read(r.SpecFile)
+			if e != nil {
+				return p, e
+			}
+			spec := new(pb.SandboxSpec)
+			if e = protojson.Unmarshal(b, spec); e != nil {
+				return p, fmt.Errorf("decode OpenShell %s sandbox specification: %w", key, e)
+			}
+			if len(spec.GetProviders()) != 1 || spec.GetTemplate().GetImage() == "" {
+				return p, fmt.Errorf("OpenShell %s provider or image missing", key)
+			}
+			p.Routes[key] = OpenShellRoute{Binary: r.Binary, Spec: spec}
 		}
-		if len(spec.GetProviders()) != 1 || spec.GetTemplate().GetImage() == "" {
-			return p, fmt.Errorf("OpenShell %s provider or image missing", key)
-		}
-		p.Routes[key] = OpenShellRoute{Binary: r.Binary, Spec: spec}
 	}
 	ca, err := readGateway(f.Gateway.TLS.CAFile)
 	if err != nil {
