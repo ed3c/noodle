@@ -339,7 +339,7 @@ func (l *Loop) dispatchControlCommand(cmd ControlCommand) error {
 		return l.controlRecoverRequestChanges(cmd)
 	case "request-changes":
 		if order, ok := l.canonical.Orders[cmd.OrderID]; ok && len(order.Stages) == 1 && len(order.Stages[0].Extra[localTaskRetentionKey]) != 0 {
-			return fmt.Errorf("local task retained disposition is already fixed; original control readback required")
+			return fmt.Errorf("local task retained disposition is already fixed; inspect original control readback")
 		}
 		return l.controlRequestChanges(cmd.OrderID, cmd.Prompt)
 	case "mode":
