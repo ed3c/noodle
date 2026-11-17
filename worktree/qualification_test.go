@@ -13,7 +13,7 @@ import (
 )
 
 func TestSmallQualificationRepositoryRejectsEffectsBeforeControlCreation(t *testing.T) {
-	for _, kind := range []string{"small", "untracked-large", "selected-base-large", "dependencies", "hook", "filter"} {
+	for _, kind := range []string{"small", "untracked-large", "selected-base-large", "dependencies", "hook", "filter", "selected-base-relative-hook"} {
 		t.Run(kind, func(t *testing.T) {
 			repository := t.TempDir()
 			git := func(args ...string) string {
@@ -60,6 +60,23 @@ func TestSmallQualificationRepositoryRejectsEffectsBeforeControlCreation(t *test
 					t.Fatal(err)
 				}
 			}
+			if kind == "selected-base-relative-hook" {
+				if err := os.Mkdir(filepath.Join(repository, ".githooks"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(repository, ".githooks", "post-checkout"), []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				git("add", ".githooks/post-checkout")
+				git("commit", "-m", "Preserve original executable hook in selected base")
+				head = git("rev-parse", "HEAD")
+				git("rm", ".githooks/post-checkout")
+				git("commit", "-m", "Remove hook only from current checkout")
+				git("config", "core.hooksPath", ".githooks")
+				if _, err := os.Stat(filepath.Join(repository, ".githooks")); !os.IsNotExist(err) {
+					t.Fatal("counterexample must have no current checkout hook", err)
+				}
+			}
 			if kind == "filter" {
 				git("config", "filter.fixture.smudge", "unqualified-command")
 				if err := os.WriteFile(filepath.Join(repository, ".gitattributes"), []byte("source filter=fixture\n"), 0600); err != nil {
@@ -78,6 +95,9 @@ func TestSmallQualificationRepositoryRejectsEffectsBeforeControlCreation(t *test
 				}
 			} else if !errors.Is(err, admission.ErrDeferred) {
 				t.Fatal("unqualified repository was not a named HOLD", err)
+			}
+			if kind == "selected-base-relative-hook" && (err == nil || !strings.Contains(err.Error(), "relative core.hooksPath")) {
+				t.Fatal("selected base hook was not rejected by its original relative-path guard", err)
 			}
 			if _, err := os.Stat(filepath.Join(host, "controls")); !os.IsNotExist(err) {
 				t.Fatal("qualification inspection created checkout/custody", err)
