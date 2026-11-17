@@ -27,6 +27,17 @@ func TestOpenShellTransferChild(t *testing.T) {
 		return
 	}
 	args := os.Args
+	for flag, expected := range map[string]string{"--gateway": os.Getenv("NOODLE_TRANSFER_GATEWAY"), "--gateway-endpoint": os.Getenv("NOODLE_TRANSFER_ENDPOINT")} {
+		found := false
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == flag && args[i+1] == expected && expected != "" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("transfer did not retain bound %s=%q", flag, expected)
+		}
+	}
 	direction := ""
 	for _, v := range args {
 		if v == "upload" || v == "download" {
@@ -168,6 +179,7 @@ func openShellRuntimeFixture(t *testing.T, prepare ...func(*managedFixture)) (*O
 		t.Fatal(err)
 	}
 	runtime.config.Profile.Gateway = f.spec
+	runtime.config.Profile.Environment = append(runtime.config.Profile.Environment, "NOODLE_TRANSFER_GATEWAY=fixture", "NOODLE_TRANSFER_ENDPOINT="+f.spec.Binding.Gateway)
 	client := filepath.Join(root, "client", "openshell", "gateways", "fixture")
 	if err := os.MkdirAll(filepath.Join(client, "mtls"), 0700); err != nil {
 		t.Fatal(err)
