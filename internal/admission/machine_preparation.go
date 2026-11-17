@@ -107,6 +107,9 @@ func preparationBinding(source PreparationSource, claim ResourceClaim) (*machine
 }
 
 func validateMachinePreparation(lease machineLease) error {
+	if err := validateEmptyResidentRetirement(lease); err != nil {
+		return err
+	}
 	if lease.Preparation == nil {
 		if lease.PreparationPromoted || lease.PreparationClosed != nil {
 			return errors.New("promoted preparation source missing")
@@ -311,6 +314,9 @@ func (b *Budget) preparationRead(source PreparationSource, claim ResourceClaim) 
 		return ref, false, fmt.Errorf("%w: native machine owner unavailable", ErrDeferred)
 	}
 	err = b.machine.access(false, func(state *machineState) (bool, error) {
+		if err := refuseRetiredPreparationHost(state, source); err != nil {
+			return false, err
+		}
 		for id, lease := range state.Leases {
 			if lease.Preparation == nil || lease.Preparation.SHA256 != bound.SHA256 {
 				continue
@@ -338,6 +344,9 @@ func (b *Budget) reservePreparation(source PreparationSource, claim ResourceClai
 		return ref, fmt.Errorf("%w: native machine owner unavailable", ErrDeferred)
 	}
 	err = b.machine.access(false, func(state *machineState) (bool, error) {
+		if err := refuseRetiredPreparationHost(state, source); err != nil {
+			return false, err
+		}
 		for id, lease := range state.Leases {
 			if lease.Preparation != nil && lease.Preparation.SHA256 == bound.SHA256 {
 				if !reflect.DeepEqual(lease.Preparation, bound) || ref.ID != "" {

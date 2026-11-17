@@ -11,6 +11,7 @@ import (
 
 	"github.com/poteto/noodle/internal/admission"
 	"github.com/poteto/noodle/internal/filex"
+	"github.com/poteto/noodle/internal/procx"
 	loopruntime "github.com/poteto/noodle/runtime"
 )
 
@@ -183,6 +184,13 @@ func reclaimGoalResident(root string) error {
 }
 
 func returnHostResidentResourcesWithBudget(root string, g hostGeneration, budget *admission.Budget) error {
+	return returnHostResidentResourcesWithGroupReadback(root, g, budget, func(process procx.ProcessRecord) (bool, error) { return process.GroupAbsent() })
+}
+
+func returnHostResidentResourcesWithGroupReadback(root string, g hostGeneration, budget *admission.Budget, groupAbsent func(procx.ProcessRecord) (bool, error)) error {
+	if groupAbsent == nil {
+		return errors.New("original resident native group reader missing")
+	}
 	if g.Preparation == nil || g.SourceService != nil {
 		return errors.New("original resident lifetime unavailable or protected")
 	}
@@ -206,7 +214,7 @@ func returnHostResidentResourcesWithBudget(root string, g hostGeneration, budget
 				return nil, errors.New("original resident effects unresolved")
 			}
 		}
-		absent, err := g.Process.GroupAbsent()
+		absent, err := groupAbsent(g.Process)
 		if err != nil || !absent {
 			return nil, errors.New("original resident process group is running or unknown")
 		}
