@@ -247,6 +247,20 @@ func (l *Loop) reviewPayloadForCook(cook *cookHandle, reason string) map[string]
 	if cook.attempt > 0 || cook.session != nil {
 		attemptID = dispatchAttemptID(cook.orderID, cook.stageIndex, cook.attempt)
 	}
+	// A merge cook is reconstructed from review custody, without a retry count.
+	// Preserve the recorded identity instead of turning a later attempt into 0.
+	if _, stage, ok := l.canonical.LookupStage(cook.orderID, cook.stageIndex); ok && sessionID != "" {
+		matched, count := "", 0
+		for _, attempt := range stage.Attempts {
+			if attempt.SessionID == sessionID {
+				matched = attempt.AttemptID
+				count++
+			}
+		}
+		if count == 1 {
+			attemptID = matched
+		}
+	}
 	return map[string]any{
 		"order_id":      cook.orderID,
 		"stage_index":   cook.stageIndex,

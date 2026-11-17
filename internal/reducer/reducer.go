@@ -165,14 +165,18 @@ func reduceDispatchCompleted(current state.State, event ingest.StateEvent) (stat
 	order.UpdatedAt = event.Timestamp
 
 	attempt := state.AttemptNode{
-		AttemptID:    attemptID,
-		SessionID:    payload.SessionID,
-		Status:       state.AttemptRunning,
-		StartedAt:    event.Timestamp,
-		WorktreeName: payload.WorktreeName,
+		ReturnHandoffUnattempted: true,
+		AttemptID:                attemptID,
+		SessionID:                payload.SessionID,
+		Status:                   state.AttemptRunning,
+		StartedAt:                event.Timestamp,
+		WorktreeName:             payload.WorktreeName,
 	}
 	if idx, found := attemptIndexByID(stage.Attempts, attemptID); found {
 		existing := stage.Attempts[idx]
+		if err := retainAttemptReturnHandoff(current, payload.OrderID, payload.StageIndex, &existing, attempt.SessionID); err != nil {
+			return current, nil, err
+		}
 		existing.SessionID = attempt.SessionID
 		existing.Status = attempt.Status
 		existing.StartedAt = attempt.StartedAt
@@ -486,6 +490,9 @@ func reduceSessionAdopted(current state.State, event ingest.StateEvent) (state.S
 	stage = order.Stages[payload.StageIndex]
 
 	if idx, found := attemptIndexByID(stage.Attempts, attemptID); found {
+		if err := retainAttemptReturnHandoff(current, payload.OrderID, payload.StageIndex, &stage.Attempts[idx], sessionID); err != nil {
+			return current, nil, err
+		}
 		stage.Attempts[idx].SessionID = sessionID
 		stage.Attempts[idx].Status = state.AttemptRunning
 	} else {
@@ -620,8 +627,29 @@ func reduceStageReviewParked(current state.State, event ingest.StateEvent) (stat
 		return current, nil, nil
 	}
 
-	if review, ok := current.PendingReviews[payload.OrderID]; ok && review.ReturnHandoff != nil {
-		return current, nil, fmt.Errorf("return handoff already unknown; original Owner readback required")
+	intent, unattempted, err := current.ReturnHandoffForAttempt(payload.OrderID, payload.StageIndex, payload.AttemptID, payload.SessionID)
+	if err != nil {
+		return current, nil, err
+	}
+	if incoming := payload.ReturnHandoff; incoming != nil {
+		if incoming.BindingPath == "" || len(incoming.BindingSHA256) != 64 || incoming.Status != "unknown" {
+			return current, nil, fmt.Errorf("invalid return handoff intent")
+		}
+		if intent != nil {
+			if incoming.BindingPath != intent.BindingPath || incoming.BindingSHA256 != intent.BindingSHA256 || (incoming.EventID != "" && incoming.EventID != intent.EventID) {
+				return current, nil, fmt.Errorf("return handoff binding differs; original Owner readback required")
+			}
+		} else {
+			if !unattempted {
+				return current, nil, fmt.Errorf("return handoff first-attempt history unavailable; original Owner readback required")
+			}
+			if incoming.EventID != "" {
+				return current, nil, fmt.Errorf("new return handoff already names an event; original Owner readback required")
+			}
+			value := *incoming
+			value.EventID = strconv.FormatUint(uint64(event.ID), 10)
+			intent = &value
+		}
 	}
 
 	next := current.Clone()
@@ -635,18 +663,17 @@ func reduceStageReviewParked(current state.State, event ingest.StateEvent) (stat
 	order.Status = state.OrderActive
 	order.UpdatedAt = event.Timestamp
 	recordReviewAttempt(&stage, payload, event)
+	if idx, found := attemptIndexByID(stage.Attempts, payload.AttemptID); found {
+		stage.Attempts[idx].ReturnHandoffUnattempted = false
+		if intent != nil {
+			value := *intent
+			stage.Attempts[idx].ReturnHandoff = &value
+		}
+	}
 	order.Stages[payload.StageIndex] = stage
 	next.Orders[payload.OrderID] = order
-	if payload.ReturnHandoff != nil {
-		if payload.ReturnHandoff.BindingPath == "" || len(payload.ReturnHandoff.BindingSHA256) != 64 || payload.ReturnHandoff.Status != "unknown" {
-			return current, nil, fmt.Errorf("invalid return handoff intent")
-		}
-		intent := *payload.ReturnHandoff
-		intent.EventID = strconv.FormatUint(uint64(event.ID), 10)
-		payload.ReturnHandoff = &intent
-	}
 	next.PendingReviews[payload.OrderID] = state.PendingReviewNode{
-		ReturnHandoff: payload.ReturnHandoff,
+		ReturnHandoff: intent,
 		OrderID:       payload.OrderID,
 		StageIndex:    payload.StageIndex,
 		TaskKey:       strings.TrimSpace(payload.TaskKey),
@@ -670,10 +697,37 @@ func reduceStageReviewApproved(current state.State, event ingest.StateEvent) (st
 	if err := decodeEventPayload(event, &payload); err != nil {
 		return current, nil, fmt.Errorf("reduce stage_review_approved: %w", err)
 	}
-	if _, ok := current.PendingReviews[payload.OrderID]; !ok {
+	review, ok := current.PendingReviews[payload.OrderID]
+	if !ok {
 		return current, nil, nil
 	}
 	next := current.Clone()
+	if review.ReturnHandoff != nil {
+		_, stage, found := current.LookupStage(payload.OrderID, payload.StageIndex)
+		if !found {
+			return current, nil, fmt.Errorf("return handoff original stage missing")
+		}
+		index := -1
+		for i, attempt := range stage.Attempts {
+			if attempt.SessionID == review.SessionID {
+				if index >= 0 {
+					return current, nil, fmt.Errorf("return handoff original attempt ambiguous")
+				}
+				index = i
+			}
+		}
+		if index < 0 {
+			return current, nil, fmt.Errorf("return handoff original attempt missing")
+		}
+		intent, _, err := current.ReturnHandoffForAttempt(payload.OrderID, payload.StageIndex, stage.Attempts[index].AttemptID, review.SessionID)
+		if err != nil {
+			return current, nil, err
+		}
+		order := next.Orders[payload.OrderID]
+		order.Stages[payload.StageIndex].Attempts[index].ReturnHandoff = intent
+		order.Stages[payload.StageIndex].Attempts[index].ReturnHandoffUnattempted = false
+		next.Orders[payload.OrderID] = order
+	}
 	delete(next.PendingReviews, payload.OrderID)
 	next.LastEventID = strconv.FormatUint(uint64(event.ID), 10)
 	return next, nil, nil
@@ -763,6 +817,22 @@ func normalizedAttemptID(raw string, event ingest.StateEvent) string {
 		return id
 	}
 	return fmt.Sprintf("attempt-%d", event.ID)
+}
+
+func retainAttemptReturnHandoff(current state.State, orderID string, stageIndex int, attempt *state.AttemptNode, sessionID string) error {
+	intent, _, err := current.ReturnHandoffForAttempt(orderID, stageIndex, attempt.AttemptID, attempt.SessionID)
+	if err != nil {
+		return err
+	}
+	if intent == nil {
+		return nil
+	}
+	if attempt.SessionID != sessionID {
+		return fmt.Errorf("return handoff original session differs; original Owner readback required")
+	}
+	attempt.ReturnHandoff = intent
+	attempt.ReturnHandoffUnattempted = false
+	return nil
 }
 
 func recordReviewAttempt(stage *state.StageNode, payload reviewPayload, event ingest.StateEvent) {

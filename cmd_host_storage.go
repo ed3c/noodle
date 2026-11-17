@@ -147,6 +147,9 @@ func prepareHostStorageAt(ctx context.Context, req hostRequest, data []byte, sel
 	if err = repairHostStorageWorktrees(ctx, e, storage, commonDir); err != nil {
 		return "", err
 	}
+	if _, err = worktree.PrepareStorageExcludes(ctx, e); err != nil {
+		return "", err
+	}
 	return storage, nil
 }
 

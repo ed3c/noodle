@@ -124,14 +124,18 @@ type StageNode struct {
 
 // AttemptNode represents a dispatch attempt for a stage.
 type AttemptNode struct {
-	AttemptID    string        `json:"attempt_id"`
-	SessionID    string        `json:"session_id"`
-	Status       AttemptStatus `json:"status"`
-	StartedAt    time.Time     `json:"started_at"`
-	CompletedAt  time.Time     `json:"completed_at"`
-	ExitCode     *int          `json:"exit_code"`
-	WorktreeName string        `json:"worktree_name"`
-	Error        string        `json:"error"`
+	// Only a newly recorded dispatch can establish an unattempted first return.
+	// False also covers legacy unknown history; it never proves delivery.
+	ReturnHandoffUnattempted bool                 `json:"return_handoff_unattempted,omitempty"`
+	ReturnHandoff            *ReturnHandoffIntent `json:"return_handoff,omitempty"`
+	AttemptID                string               `json:"attempt_id"`
+	SessionID                string               `json:"session_id"`
+	Status                   AttemptStatus        `json:"status"`
+	StartedAt                time.Time            `json:"started_at"`
+	CompletedAt              time.Time            `json:"completed_at"`
+	ExitCode                 *int                 `json:"exit_code"`
+	WorktreeName             string               `json:"worktree_name"`
+	Error                    string               `json:"error"`
 }
 
 // MergeRecoveryNode records the durable recovery data for a stage that has
@@ -269,6 +273,10 @@ func (s State) Clone() State {
 					attemptsCopy := make([]AttemptNode, len(order.Stages[i].Attempts))
 					for j := range order.Stages[i].Attempts {
 						attemptCopy := order.Stages[i].Attempts[j]
+						if attemptCopy.ReturnHandoff != nil {
+							intent := *attemptCopy.ReturnHandoff
+							attemptCopy.ReturnHandoff = &intent
+						}
 						if attemptCopy.ExitCode != nil {
 							exitCode := *attemptCopy.ExitCode
 							attemptCopy.ExitCode = &exitCode
