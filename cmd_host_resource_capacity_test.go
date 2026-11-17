@@ -55,7 +55,7 @@ recovery_samples=2
 	if err != nil { t.Fatal(err) }
 	h := &noodleHost{dir: hostCapacityRoot(t), instanceID: "fixture-generation", budget: admission.NewBudget(9)}
 	if err = h.budget.BindMachineCapacity(filepath.Join(hostCapacityRoot(t), "machine"), h.dir+"/"+h.instanceID); err != nil { t.Fatal(err) }
-	h.bindWorkerResourceSource("context", directory, directory, &p)
+	h.bindWorkerResourceSource("context", directory, directory, &p, nil)
 	h.budget.Register("context")
 	for i := 3; i >= 0; i-- { h.budget.Observe(admission.Sample{At: time.Now().Add(-time.Duration(i)*time.Second), Pressure: admission.Normal, TotalMemoryBytes: 4<<20, CPUs: 4}, nil) }
 	permit, err := h.budget.TryAcquireTask("context", "task", "openshell")
@@ -71,7 +71,7 @@ recovery_samples=2
 	if _, err = h.budget.TryAcquireTask("context", "drift", "openshell"); !errors.Is(err, admission.ErrDeferred) || !strings.Contains(err.Error(), "source_changed") { t.Fatal("changed original config was admitted", err) }
 	updated, err := loopruntime.LoadOpenShellProfile(profilePath)
 	if err != nil { t.Fatal(err) }
-	h.bindWorkerResourceSource("new-context", directory, directory, &updated)
+	h.bindWorkerResourceSource("new-context", directory, directory, &updated, nil)
 	h.budget.Register("new-context")
 	if _, err = h.budget.TryAcquireTask("new-context", "missing-peak", "openshell"); !errors.Is(err, admission.ErrDeferred) || !strings.Contains(err.Error(), "return_tar_peak_mib") { t.Fatal("new profile guessed missing archive peak", err) }
 	if s := h.budget.Snapshot(); s.AdmissionPolicy != admission.WorkerAdmissionPolicy || s.Limit != 9 || s.MachineCapacity.IO != "unknown_no_reliable_observer" { t.Fatalf("old worker policy changed meaning or I/O became PASS: %+v", s) }

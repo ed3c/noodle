@@ -16,6 +16,14 @@ import (
 // The existing template command is the only policy registration entry. Its
 // native sampler supplies physical capacity once, not per-task estimates.
 func registerBudgetedGoalHostTemplate(ctx context.Context, path, profile, class string, sampler admission.Sampler) (loopruntime.SessionReadbackFileRef, error) {
+	ref, err := prepareBudgetedGoalHostTemplate(ctx, path, profile, class, sampler)
+	if err != nil {
+		return ref, err
+	}
+	return registerGoalHostTemplate(ctx, path, ref.Path)
+}
+
+func prepareBudgetedGoalHostTemplate(ctx context.Context, path, profile, class string, sampler admission.Sampler) (loopruntime.SessionReadbackFileRef, error) {
 	var empty loopruntime.SessionReadbackFileRef
 	if (class != loopruntime.ConservativeGoalResourceBudget && class != loopruntime.QualificationGoalResourceBudget) || sampler == nil || !filepath.IsAbs(path) || !filepath.IsAbs(profile) {
 		return empty, errors.New("unsupported Goal resource budget or original source")
@@ -78,11 +86,14 @@ func registerBudgetedGoalHostTemplate(ctx context.Context, path, profile, class 
 		return empty, readErr
 	}
 	// Capacity, never instantaneous free space/RSS/pressure, fixes the class.
-	identity, _ := json.Marshal(struct {
+	identity, err := json.Marshal(struct {
 		Class, Source string
 		Memory        uint64
 		CPUs          int
 	}{class, original.SourceSHA256, hardware.TotalMemoryBytes, hardware.CPUs})
+	if err != nil {
+		return empty, err
+	}
 	root := filepath.Join(filepath.Dir(path), "resource-templates", hostDigest(identity))
 	if err = os.MkdirAll(root, 0700); err != nil {
 		return empty, err
@@ -102,5 +113,5 @@ func registerBudgetedGoalHostTemplate(ctx context.Context, path, profile, class 
 	if err = loopruntime.VerifyOpenShellProfile(original); err != nil {
 		return empty, err
 	}
-	return registerGoalHostTemplate(ctx, path, receipt.Profile.Path)
+	return receipt.Profile, nil
 }

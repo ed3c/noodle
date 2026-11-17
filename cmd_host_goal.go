@@ -96,25 +96,44 @@ func goalHostTemplatePath() (string, error) {
 }
 
 func newHostGoalTemplateCmd() *cobra.Command {
-	var profile, resourceBudget string
+	var profile, resourceBudget, gatewayArtifact, progressArtifact string
+	var prepareOnly bool
 	cmd := &cobra.Command{Use: "template", Short: "Register the installed OpenShell template once for normal Goal dispatch", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		path, err := goalHostTemplatePath()
 		if err != nil {
 			return err
 		}
+		selected, err := prepareGoalTemplatePairing(cmd.Context(), path, profile, gatewayArtifact, progressArtifact)
+		if err != nil {
+			return err
+		}
+		if !filepath.IsAbs(selected) {
+			return errors.New("Host profile template is not absolute")
+		}
 		var ref loopruntime.SessionReadbackFileRef
-		if resourceBudget == "" {
-			ref, err = registerGoalHostTemplate(cmd.Context(), path, profile)
+		if resourceBudget != "" {
+			ref, err = prepareBudgetedGoalHostTemplate(cmd.Context(), path, selected, resourceBudget, admission.NewSampler())
 		} else {
-			ref, err = registerBudgetedGoalHostTemplate(cmd.Context(), path, profile, resourceBudget, admission.NewSampler())
+			ref, _, err = readGoalHostTemplate(selected)
 		}
 		if err != nil {
 			return err
 		}
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "status": "registered", "profile": ref})
+		status := "prepared"
+		if !prepareOnly {
+			ref, err = registerGoalHostTemplate(cmd.Context(), path, ref.Path)
+			if err != nil {
+				return err
+			}
+			status = "registered"
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "status": status, "profile": ref})
 	}}
 	cmd.Flags().StringVar(&profile, "profile", "", "Installed original OpenShell template source")
 	cmd.Flags().StringVar(&resourceBudget, "resource-budget", "", "Explicit once-only conservative-v1 or qualification-small-no-deps-v1 reservation policy")
+	cmd.Flags().StringVar(&gatewayArtifact, "gateway-artifact", "", "Qualified gateway artifact manifest path for this new template")
+	cmd.Flags().StringVar(&progressArtifact, "progress-artifact", "", "Qualified Linux progress artifact manifest path for this new template")
+	cmd.Flags().BoolVar(&prepareOnly, "prepare-only", false, "Return the verified template without changing the default registration")
 	return cmd
 }
 
@@ -175,6 +194,21 @@ func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOp
 	if !filepath.IsAbs(root) || filepath.Clean(root) != root {
 		return fail(errors.New("native Host owner root is not absolute"))
 	}
+	selectionFile := filepath.Join(root, "goals", key+".json")
+	var templateRef loopruntime.SessionReadbackFileRef
+	var loadedTemplate loopruntime.OpenShellProfile
+	// A missing Goal contract must fail before even creating its custody root.
+	if _, e := os.Lstat(selectionFile); os.IsNotExist(e) {
+		templateRef, loadedTemplate, err = readGoalHostTemplate(template)
+		if err != nil {
+			return fail(err)
+		}
+		if _, err = loopruntime.ReadOpenShellGoalExecutionConstraints(loadedTemplate, goal); err != nil {
+			return fail(err)
+		}
+	} else if e != nil {
+		return fail(e)
+	}
 	selections := filepath.Join(root, "goals")
 	if err = os.MkdirAll(selections, 0700); err != nil {
 		return fail(err)
@@ -182,7 +216,6 @@ func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOp
 	if canonical, e := filepath.EvalSymlinks(selections); e != nil || canonical != selections {
 		return fail(errors.New("native Goal Host custody path contains a symlink"))
 	}
-	selectionFile := filepath.Join(selections, key+".json")
 	lock, err := lockfile.Acquire(ctx, selectionFile+".lock")
 	if err != nil {
 		return fail(err)
@@ -288,43 +321,15 @@ func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOp
 		return fail(err)
 	}
 	if !exists {
-		var loadedTemplate loopruntime.OpenShellProfile
-		if template == "" {
-			path, e := goalHostTemplatePath()
-			if e != nil {
-				return fail(e)
-			}
-			var installed goalHostTemplateRegistration
-			raw, e := os.ReadFile(path)
-			if e != nil {
-				return fail(fmt.Errorf("installed Host profile template is unavailable: %w", e))
-			}
-			if e = json.Unmarshal(raw, &installed); e != nil {
-				return fail(e)
-			}
-			actual, e := loopruntime.ReadSessionReadbackFile(installed.Profile.Path, nil)
-			if e != nil || actual != installed.Profile {
-				return fail(errors.New("installed Host profile template changed"))
-			}
-			loaded, e := loopruntime.LoadOpenShellProfile(installed.Profile.Path)
-			if e != nil {
-				return fail(e)
-			}
-			if installed.Schema != 1 || loaded.SourceSHA256 != installed.PolicySHA256 {
-				return fail(errors.New("installed Host profile template dependencies changed"))
-			}
-			loadedTemplate = loaded
-			template = installed.Profile.Path
-		}
-		templateRef, e := loopruntime.ReadSessionReadbackFile(template, nil)
-		if e != nil {
-			return fail(e)
-		}
 		if loadedTemplate.SourcePath == "" {
-			loadedTemplate, e = loopruntime.LoadOpenShellProfile(template)
+			var e error
+			templateRef, loadedTemplate, e = readGoalHostTemplate(template)
 			if e != nil {
 				return fail(e)
 			}
+		}
+		if _, e := loopruntime.ReadOpenShellGoalExecutionConstraints(loadedTemplate, goal); e != nil {
+			return fail(e)
 		}
 		binaryRef, e := hostReadbackBinaryRef(binary)
 		if e != nil {
