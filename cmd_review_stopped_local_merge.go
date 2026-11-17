@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/poteto/noodle/cmdmeta"
+	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/filex"
 	"github.com/poteto/noodle/internal/orderx"
@@ -356,8 +357,31 @@ func stoppedMergeValidateCustody(p *stoppedMergePlan, c stoppedMergeCandidate) e
 	if !orderx.ValidOrderRevision(s.OrderRevision) || s.State.SchemaVersion != statever.Current || s.GeneratedAt.IsZero() || s.EffectLedger == nil {
 		return fmt.Errorf("original canonical snapshot incomplete")
 	}
-	if len(s.State.Orders) != 1 || len(s.State.PendingReviews) != 1 {
+	if len(s.State.PendingReviews) != 1 || (len(s.State.Orders) != 1 && len(s.State.Orders) != 2) {
 		return fmt.Errorf("stopped merge has foreign order/review custody")
+	}
+	if len(s.State.Orders) == 2 {
+		ref := p.Stable["config"]
+		if ref.Path == "" || ref.Path != p.Host.Current.ConfigPath || len(ref.SHA256) != 64 || ref.SHA256 != p.Host.Current.ConfigSHA256 {
+			return fmt.Errorf("original stopped merge config binding differs")
+		}
+		raw, err := config.ReadExplicitSource(ref.Path)
+		if err != nil {
+			return fmt.Errorf("read original stopped merge config: %w", err)
+		}
+		if hostDigest(raw) != ref.SHA256 {
+			return fmt.Errorf("original stopped merge config changed")
+		}
+		cfg, err := config.Parse(raw)
+		if err != nil {
+			return err
+		}
+		if cfg.Mode != p.Host.Current.Mode {
+			return fmt.Errorf("original stopped merge config mode differs")
+		}
+		if err := loop.ValidateStoppedLocalMergeCompanion(p.Snapshot, c.OrderID, cfg); err != nil {
+			return err
+		}
 	}
 	o, ok := s.State.Orders[c.OrderID]
 	if !ok || o.Status != state.OrderActive || len(o.Stages) != 1 {
