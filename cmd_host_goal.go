@@ -96,19 +96,25 @@ func goalHostTemplatePath() (string, error) {
 }
 
 func newHostGoalTemplateCmd() *cobra.Command {
-	var profile string
+	var profile, resourceBudget string
 	cmd := &cobra.Command{Use: "template", Short: "Register the installed OpenShell template once for normal Goal dispatch", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		path, err := goalHostTemplatePath()
 		if err != nil {
 			return err
 		}
-		ref, err := registerGoalHostTemplate(cmd.Context(), path, profile)
+		var ref loopruntime.SessionReadbackFileRef
+		if resourceBudget == "" {
+			ref, err = registerGoalHostTemplate(cmd.Context(), path, profile)
+		} else {
+			ref, err = registerBudgetedGoalHostTemplate(cmd.Context(), path, profile, resourceBudget, admission.NewSampler())
+		}
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "status": "registered", "profile": ref})
 	}}
 	cmd.Flags().StringVar(&profile, "profile", "", "Installed original OpenShell template source")
+	cmd.Flags().StringVar(&resourceBudget, "resource-budget", "", "Explicit once-only conservative-v1 or qualification-small-no-deps-v1 reservation policy")
 	return cmd
 }
 

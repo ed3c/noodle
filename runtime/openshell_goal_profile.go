@@ -104,6 +104,10 @@ func ReadGoalOpenShellProfile(hostRoot string) (GoalProfileReceipt, error) {
 
 // MaterializeGoalOpenShellProfile creates configuration, never a gateway or VM.
 func MaterializeGoalOpenShellProfile(template, hostRoot, address string) (GoalProfileReceipt, error) {
+	return materializeGoalOpenShellProfile(template, hostRoot, address, nil)
+}
+
+func materializeGoalOpenShellProfile(template, hostRoot, address string, budget map[string]any) (GoalProfileReceipt, error) {
 	var result GoalProfileReceipt
 	if !filepath.IsAbs(hostRoot) || filepath.Clean(hostRoot) != hostRoot {
 		return result, errors.New("Goal Host root is not an absolute canonical path")
@@ -235,6 +239,19 @@ func MaterializeGoalOpenShellProfile(template, hostRoot, address string) (GoalPr
 	}
 	jwt["signing_key_path"], jwt["public_key_path"], jwt["kid_path"], jwt["gateway_id"] = path("keys/signing.pem"), path("keys/public.pem"), path("keys/kid"), name
 	vm["state_dir"] = path("vm")
+	if budget != nil {
+		// Only an explicitly selected new template receives these new bytes.
+		for key, value := range budget {
+			document[key] = value
+		}
+		// The native driver accepts explicit component configuration. Keep the
+		// worker component Oracle independent from the declared extra budget.
+		guest := budget["noodle_resource_budget"].(map[string]any)
+		vm["mem_mib"], vm["vcpus"], vm["overlay_disk_mib"] = guest["guest_memory_mib"], guest["guest_vcpus"], guest["guest_overlay_mib"]
+		if guest["class"] == QualificationGoalResourceBudget {
+			vm["default_image"], vm["bootstrap_image"] = guest["image"], guest["image"]
+		}
+	}
 	var encoded bytes.Buffer
 	if err = toml.NewEncoder(&encoded).Encode(document); err != nil {
 		return result, err
