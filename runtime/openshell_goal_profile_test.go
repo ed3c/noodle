@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/BurntSushi/toml"
@@ -399,5 +400,69 @@ func TestNativeGatewayConfigurationPreservesUnknownNativeFields(t *testing.T) {
 	}
 	if len(document) != 6 {
 		t.Fatal("projection changed original Owner document")
+	}
+}
+
+func TestGoalOpenShellMaterializationRejectsUnpreservedConfigurationSources(t *testing.T) {
+	for _, fault := range []string{"extra", "duplicate", "wrong-native", "wrong-argv"} {
+		t.Run(fault, func(t *testing.T) {
+			template := goalProfileFixture(t)
+			issuedRoot, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			issued, err := MaterializeGoalOpenShellProfile(template, issuedRoot, "127.0.0.1:12345")
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(issued.Profile.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var profile openShellProfileFile
+			if err = json.Unmarshal(raw, &profile); err != nil {
+				t.Fatal(err)
+			}
+			switch fault {
+			case "extra":
+				extra := filepath.Join(issuedRoot, "extra.conf")
+				if err = os.WriteFile(extra, []byte("extra=true\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				profile.Gateway.ConfigFiles = append(profile.Gateway.ConfigFiles, extra)
+			case "duplicate":
+				profile.Gateway.ConfigFiles = []string{profile.Gateway.IdentitySource, profile.Gateway.IdentitySource}
+			case "wrong-native":
+				native := filepath.Join(issuedRoot, "openshell", "gateway-native.toml")
+				raw, err := os.ReadFile(native)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = os.WriteFile(native, append(raw, []byte("\n[foreign_native_setting]\nvalue=true\n")...), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "wrong-argv":
+				for i, arg := range profile.Gateway.Resident.Argv {
+					if arg == "--config" {
+						profile.Gateway.Resident.Argv[i+1] = profile.Gateway.IdentitySource
+					}
+				}
+			}
+			writeProfileFixture(t, issued.Profile.Path, profile)
+			if _, err = LoadOpenShellProfile(issued.Profile.Path); err != nil {
+				t.Fatalf("counterexample was not accepted by the original profile loader: %v", err)
+			}
+			host, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = MaterializeGoalOpenShellProfile(issued.Profile.Path, host, "127.0.0.1:12346"); err == nil || !strings.Contains(err.Error(), "Goal gateway template") {
+				t.Fatalf("unpreserved source was not a named pre-materialization refusal: %v", err)
+			}
+			entries, err := os.ReadDir(host)
+			if err != nil || len(entries) != 0 {
+				t.Fatal("refusal created new profile state", entries, err)
+			}
+		})
 	}
 }

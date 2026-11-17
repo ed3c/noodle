@@ -155,20 +155,62 @@ func materializeGoalOpenShellProfile(template, hostRoot, address string, budget 
 	for _, value := range []*string{&f.CredentialSource.TLS.CAFile, &f.CredentialSource.TLS.CertificateFile, &f.CredentialSource.TLS.KeyFile} {
 		*value = resolve(*value)
 	}
-	identityBound := false
-	for _, file := range f.Gateway.ConfigFiles {
-		identityBound = identityBound || resolve(file) == resolve(f.Gateway.IdentitySource)
+	identity := resolve(f.Gateway.IdentitySource)
+	if len(f.Gateway.ConfigFiles) < 1 || len(f.Gateway.ConfigFiles) > 2 {
+		return result, errors.New("Goal gateway template configuration sources are unsupported")
 	}
-	if !identityBound {
+	configurations := map[string]bool{}
+	for _, file := range f.Gateway.ConfigFiles {
+		path := resolve(file)
+		if configurations[path] {
+			return result, errors.New("Goal gateway template configuration source is duplicated")
+		}
+		configurations[path] = true
+	}
+	if !configurations[identity] {
 		return result, errors.New("Goal profile template identity source is not bound by its configuration files")
 	}
-	configuration, err := os.ReadFile(resolve(f.Gateway.IdentitySource))
+	configuration, err := os.ReadFile(identity)
 	if err != nil {
 		return result, err
+	}
+	identityDigest := sha256.Sum256(configuration)
+	if hex.EncodeToString(identityDigest[:]) != original.sourceFiles[identity] {
+		return result, errors.New("Goal gateway template identity source changed")
 	}
 	var document map[string]any
 	if _, err = toml.Decode(string(configuration), &document); err != nil {
 		return result, fmt.Errorf("decode Goal gateway template: %w", err)
+	}
+	if len(configurations) == 2 {
+		nativePath := filepath.Join(filepath.Dir(identity), "gateway-native.toml")
+		if !configurations[nativePath] {
+			return result, errors.New("Goal gateway template has an unsupported additional configuration source")
+		}
+		selected := false
+		selections := 0
+		for i, arg := range f.Gateway.Resident.Argv {
+			if arg == "--config" && i+1 < len(f.Gateway.Resident.Argv) {
+				selections++
+				selected = resolve(f.Gateway.Resident.Argv[i+1]) == nativePath
+			}
+		}
+		ref, readErr := ReadSessionReadbackFile(nativePath, nil)
+		if !selected || selections != 1 || readErr != nil || ref.Path != nativePath || ref.SHA256 != original.sourceFiles[nativePath] {
+			return result, errors.New("Goal gateway template native source selection or binding differs")
+		}
+		native, readErr := os.ReadFile(nativePath)
+		if readErr != nil {
+			return result, readErr
+		}
+		digest := sha256.Sum256(native)
+		expected, encodeErr := encodeNativeGatewayConfiguration(document)
+		if encodeErr != nil {
+			return result, encodeErr
+		}
+		if hex.EncodeToString(digest[:]) != ref.SHA256 || !bytes.Equal(native, expected) {
+			return result, errors.New("Goal gateway template native source differs from its complete Owner policy")
+		}
 	}
 	openshell, ok := document["openshell"].(map[string]any)
 	if !ok || openshell["version"] != int64(2) {
