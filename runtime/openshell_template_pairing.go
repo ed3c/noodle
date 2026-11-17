@@ -59,6 +59,9 @@ func pairingDigestFile(path string) (string, error) {
 }
 
 func readTemplatePairingArtifact(ctx context.Context, path string, gateway bool) (SessionReadbackFileRef, templatePairingBinary, error) {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return SessionReadbackFileRef{}, templatePairingBinary{}, errors.New("template artifact receipt path is not absolute and stable")
+	}
 	var manifest templatePairingArtifact
 	ref, err := ReadSessionReadbackFile(path, &manifest)
 	if err != nil {
