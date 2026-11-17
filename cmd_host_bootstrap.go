@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/poteto/noodle/internal/admission"
 	"github.com/poteto/noodle/internal/filex"
 	"github.com/poteto/noodle/internal/lockfile"
 	"github.com/poteto/noodle/internal/procx"
@@ -426,6 +427,12 @@ func bootstrapCheckpoint(ctx context.Context, root string, b *hostBootstrap) (bo
 }
 
 func bootstrapLegacyHost(ctx context.Context, root, target, digest string, requests []string, out *json.Encoder) error {
+	// Read-only inspection and planning have separate entry points. Never take
+	// the maintenance lock, create custody or pause/detach a legacy task before
+	// this old migration has a native preparation/resident lifetime handoff.
+	if err := legacyBootstrapPreparationAdmission(root); err != nil {
+		return err
+	}
 	lock, err := lockfile.TryLock(filepath.Join(root, "maintenance.lock"))
 	if err != nil {
 		return err
@@ -670,4 +677,10 @@ func bootstrapImportedPool(b hostBootstrap) (hostPool, error) {
 		p.Owners[t.Original.RequestID] = hostTaskOwner{Original: t.Original, Current: *t.Detached, State: taskState, RoundState: t.Round, ContextInputs: t.Inputs, RebuildError: t.Blocked, EnvironmentSHA: t.Request.EnvironmentSHA256}
 	}
 	return p, nil
+}
+
+func legacyBootstrapPreparationAdmission(root string) error {
+	// Existing migration journals are evidence, not a new resource claim. This
+	// revision cannot safely adopt them or guess a replacement resident nonce.
+	return fmt.Errorf("%w: legacy bootstrap has no original preparation handoff; inspect/plan retained, no pause or detach sent", admission.ErrDeferred)
 }

@@ -53,6 +53,21 @@ func taskPreparationPlan(ctx context.Context, hostRoot string, control worktree.
 			return result, err
 		}
 	}
+	if _, err = loopruntime.ReadOpenShellGoalExecutionConstraints(profile, goal); err != nil {
+		return result, err
+	}
+	class, err := loopruntime.OpenShellResourceBudgetClass(profile)
+	if err != nil {
+		return result, err
+	}
+	if class == loopruntime.QualificationGoalResourceBudget {
+		if err = verifyQualificationHostGoal(hostRoot, goal); err != nil {
+			return result, err
+		}
+		if err = worktree.VerifySmallQualificationRepository(ctx, control); err != nil {
+			return result, err
+		}
+	}
 	result.Profile = profile
 	result.Sources = map[string]loopruntime.SessionReadbackFileRef{"task": ref, "goal": goal, "execution_binary": binary}
 	result.Storage, err = planHostStorage(ctx, hostRequest{ProjectDir: control.ControlRoot, Environment: environment}, "", control.Repository)
@@ -170,6 +185,15 @@ func verifyTaskPreparationPlan(plan hostTaskPreparationPlan) error {
 	}
 	if err := loopruntime.VerifySessionReadbackFiles(plan.Sources); err != nil {
 		return err
+	}
+	class, err := loopruntime.OpenShellResourceBudgetClass(plan.Profile)
+	if err != nil {
+		return err
+	}
+	if class == loopruntime.QualificationGoalResourceBudget {
+		if err = verifyQualificationPreparation(context.Background(), plan.Profile, &plan); err != nil {
+			return err
+		}
 	}
 	return loopruntime.VerifyOpenShellProfile(plan.Profile)
 }

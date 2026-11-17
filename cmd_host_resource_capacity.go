@@ -33,7 +33,7 @@ func (h *noodleHost) bindMachineCapacity() {
 	_ = h.budget.BindMachineCapacity(directory, root+"/generation/"+h.instanceID)
 }
 
-func (h *noodleHost) bindWorkerResourceSource(id, project, storage string, profile *loopruntime.OpenShellProfile, preparedRoots ...string) {
+func (h *noodleHost) bindWorkerResourceSource(id, project, storage string, profile *loopruntime.OpenShellProfile, preparation *hostTaskPreparationPlan, preparedRoots ...string) {
 	if h.budget == nil {
 		return
 	}
@@ -55,6 +55,15 @@ func (h *noodleHost) bindWorkerResourceSource(id, project, storage string, profi
 	h.budget.BindResourceSource(id, "openshell", func(runtime string) (admission.ResourceClaim, error) {
 		if runtime != "openshell" || profile == nil {
 			return admission.ResourceClaim{}, errors.New("worker_resource_runtime_unsupported: " + runtime)
+		}
+		class, err := loopruntime.OpenShellResourceBudgetClass(selected)
+		if err != nil {
+			return admission.ResourceClaim{}, err
+		}
+		if class == loopruntime.QualificationGoalResourceBudget {
+			if err = verifyQualificationPreparation(context.Background(), selected, preparation); err != nil {
+				return admission.ResourceClaim{}, err
+			}
 		}
 		if err := generationGuard(); err != nil {
 			return admission.ResourceClaim{}, err

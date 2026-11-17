@@ -172,7 +172,7 @@ func (h *noodleHost) attachContinuation(ctx context.Context, req hostRequest, co
 		if preparationPlan.Storage.Source.StorageRoot != "" {
 			roots = append([]string{preparationPlan.Storage.Source.CommonDir}, preparationPlan.Archive.diskRoots()...)
 		}
-		h.bindWorkerResourceSource(id, req.ProjectDir, storage, selectedOpenShell, roots...)
+		h.bindWorkerResourceSource(id, req.ProjectDir, storage, selectedOpenShell, &preparationPlan, roots...)
 		h.budget.Register(id)
 	}
 	keepLock = true

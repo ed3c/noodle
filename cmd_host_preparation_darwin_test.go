@@ -132,7 +132,7 @@ func TestHostPreparationOriginalSourceFlowsThroughControlAndWorkerNonce(t *testi
 		t.Fatal("Host lost original control or preparation")
 	}
 	preparedRoots := append([]string{plan.Storage.Source.CommonDir}, plan.Archive.diskRoots()...)
-	h.bindWorkerResourceSource(control.Preparation.ID, control.ControlRoot, plan.Storage.Source.StorageRoot, &plan.Profile, preparedRoots...)
+	h.bindWorkerResourceSource(control.Preparation.ID, control.ControlRoot, plan.Storage.Source.StorageRoot, &plan.Profile, &plan, preparedRoots...)
 	worker.Register(control.Preparation.ID)
 	for index := 3; index >= 0; index-- {
 		worker.Observe(admission.Sample{At: time.Now().Add(-time.Duration(index) * time.Second), Pressure: admission.Normal, TotalMemoryBytes: 16 << 30, CPUs: 8}, nil)
