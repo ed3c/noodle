@@ -46,11 +46,7 @@ func TestHostGoalResourceBudgetRegistersOnceAndNormalGoalNeedsNoManualClass(t *t
 	}
 	// The normal consumer already selects the registered profile; no task field
 	// carries estimates or policy decisions. Keep its existing native server seam.
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "native-config"))
-	nativeRegistration, err := goalHostTemplatePath()
-	if err != nil {
-		t.Fatal(err)
-	}
+	nativeRegistration := isolatedGoalTemplatePath(t, root)
 	if _, err = registerGoalHostTemplate(context.Background(), nativeRegistration, issued.Path); err != nil {
 		t.Fatal(err)
 	}

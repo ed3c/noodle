@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -63,6 +64,45 @@ func TestHostGoalResumesOriginalResidentIntentBeforeRootCreation(t *testing.T) {
 	if _, err = loopruntime.ReadSessionReadbackFile(path, &after); err != nil || after.Preparation != selected.Preparation {
 		t.Fatal("resume minted a new resident nonce", err)
 	}
+}
+
+// A native config path is platform-specific: Darwin ignores XDG_CONFIG_HOME.
+// Keep both the real default and its absence unchanged; never restore it here.
+func isolatedGoalTemplatePath(t *testing.T, root string) string {
+	t.Helper()
+	outside, err := goalHostTemplatePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, beforeErr := os.ReadFile(outside)
+	if beforeErr != nil && !os.IsNotExist(beforeErr) {
+		t.Fatal(beforeErr)
+	}
+	t.Cleanup(func() {
+		after, afterErr := os.ReadFile(outside)
+		if os.IsNotExist(beforeErr) {
+			if !os.IsNotExist(afterErr) {
+				t.Errorf("fixture changed original default presence: %s", outside)
+			}
+		} else if afterErr != nil || !bytes.Equal(before, after) {
+			t.Errorf("fixture changed original default bytes: %s (%v)", outside, afterErr)
+		}
+		t.Logf("original default after fixture sha256=%s", hostDigest(after))
+	})
+	// These changes belong only to the test process and testing restores them.
+	t.Setenv("HOME", filepath.Join(root, "fixture-home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "fixture-xdg"))
+	t.Setenv("AppData", filepath.Join(root, "fixture-appdata"))
+	path, err := goalHostTemplatePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relative, err := filepath.Rel(root, path)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) || path == outside {
+		t.Fatalf("native template path escaped fixture before effects: %s (%v)", path, err)
+	}
+	t.Logf("native registration=%s fixture root=%s original default=%s original sha256=%s", path, root, outside, hostDigest(before))
+	return path
 }
 
 func goalHostFixture(t *testing.T) (root, goal, template, binary string) {
@@ -341,12 +381,8 @@ func TestHostGoalSocketFailureRequiresOriginalProcessAbsence(t *testing.T) {
 
 func TestHostGoalInstalledTemplatePinsDependencies(t *testing.T) {
 	root, goal, template, binary := goalHostFixture(t)
-	t.Setenv("HOME", root)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
-	registration, err := goalHostTemplatePath()
-	if err != nil {
-		t.Fatal(err)
-	}
+	registration := isolatedGoalTemplatePath(t, root)
+	var err error
 	if _, err = registerGoalHostTemplate(context.Background(), registration, template); err != nil {
 		t.Fatal(err)
 	}
