@@ -21,7 +21,7 @@ func TestHostReadonlyWebLifecycle(t *testing.T) {
 	t.Setenv("NOODLE_HOST_DIR", dir)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- serveHost(ctx) }()
+	go func() { done <- serveHostWithSampler(ctx, hostShutdownTestSampler{}, fixtureTaskPreparation) }()
 	defer func() {
 		cancel()
 		select {
