@@ -26,6 +26,8 @@ type CompletedSessionBinding struct {
 	StageIndex, RetryCount                            int
 }
 type CompletedSessionReadback struct {
+	custodyQualification  *completionCustodyQualification
+	CustodyProjection     *SessionCustodyProjection          `json:"custody_projection,omitempty"`
 	ProfileSHA256         string                            `json:"profile_sha256"`
 	CommandSHA256         string                            `json:"command_sha256"`
 	Instructions          *CompletedInstructionEvidence     `json:"instructions"`
@@ -119,7 +121,7 @@ func (r *OpenShellRuntime) readSettledSession(ctx context.Context, b CompletedSe
 	if r.config.Gateway == nil {
 		return result, fmt.Errorf("original OpenShell gateway unavailable")
 	}
-	reader := openShellSessionEvidenceReader{r.config.Profile, r.config.RuntimeDir, r.config.ContextID, r.config.Gateway.spec}
+	reader := openShellSessionEvidenceReader{r.config.Profile, r.config.RuntimeDir, r.config.ContextID, r.config.Gateway.spec, false}
 	return reader.read(ctx, b, observe, progress, retained)
 }
 
@@ -129,6 +131,7 @@ type openShellSessionEvidenceReader struct {
 	profile               OpenShellProfile
 	runtimeDir, contextID string
 	spec                  OpenShellGatewaySpec
+	selectedCustody       bool
 }
 
 func (r openShellSessionEvidenceReader) read(ctx context.Context, b CompletedSessionBinding, observe func(context.Context, OpenShellIdentity) (OpenShellCompletedObservation, error), progress bool, retained func(context.Context, openShellDispatchReceipt, string) error) (result settledSessionEvidence, err error) {
@@ -303,6 +306,21 @@ func (r openShellSessionEvidenceReader) read(ctx context.Context, b CompletedSes
 	if err = validate(original, identity); err != nil {
 		return result, err
 	}
+	var before completionCustodySnapshot
+	if r.selectedCustody {
+		if progress || retained != nil {
+			return result, fmt.Errorf("selected custody qualification is not a completed standalone read")
+		}
+		before, err = readCompletionCustody(r.spec, SessionCustodySubject{r.contextID, b.OrderID, b.SessionID, receipt.AttemptID}, &identity)
+		if err != nil {
+			return result, err
+		}
+		// Both consumers must use the same selected input to the native window.
+		if !reflect.DeepEqual(before.record, original) {
+			return result, fmt.Errorf("original selected custody changed before observation")
+		}
+		custodyRef = before.ref
+	}
 	sources["native_custody"] = custodyRef
 	observed, err := observe(ctx, identity)
 	if err != nil {
@@ -353,7 +371,26 @@ func (r openShellSessionEvidenceReader) read(ctx context.Context, b CompletedSes
 			return result, fmt.Errorf("OpenShell cleanup terminal metadata identity changed")
 		}
 	}
-	if err = VerifySessionReadbackFiles(sources); err != nil {
+	var projection *SessionCustodyProjection
+	var qualification *completionCustodyQualification
+	if r.selectedCustody {
+		after, e := readCompletionCustody(r.spec, SessionCustodySubject{r.contextID, b.OrderID, b.SessionID, receipt.AttemptID}, &identity)
+		if e != nil {
+			return result, e
+		}
+		if before.rootSHA != after.rootSHA || before.selectedSHA != after.selectedSHA || before.retainedSHA != after.retainedSHA || before.ref.Path != after.ref.Path {
+			return result, fmt.Errorf("original completion custody changed during observation")
+		}
+		sources["native_custody"] = after.ref
+		projection = &SessionCustodyProjection{Schema: 1, Scope: SelectedSessionStopped, Subject: SessionCustodySubject{r.contextID, b.OrderID, b.SessionID, receipt.AttemptID}, ProfileSHA256: profileSHA, RootSHA256: after.rootSHA, SelectedRecordSHA256: after.selectedSHA, Before: before.ref, After: after.ref}
+		qualification = &completionCustodyQualification{projection: *projection, identity: identity, retainedSHA: after.retainedSHA}
+		refs := maps.Clone(sources)
+		delete(refs, "native_custody")
+		err = VerifySessionReadbackFiles(refs)
+	} else {
+		err = VerifySessionReadbackFiles(sources)
+	}
+	if err != nil {
 		return result, err
 	}
 	if err = verifyLocal(); err != nil {
@@ -371,6 +408,7 @@ func (r openShellSessionEvidenceReader) read(ctx context.Context, b CompletedSes
 	if err = VerifyOpenShellProfile(r.profile); err != nil {
 		return result, err
 	}
-	completed := CompletedSessionReadback{ProfileSHA256: profileSHA, CommandSHA256: commandSHA256, Instructions: instructions, NativeAttemptID: receipt.AttemptID, CandidateHead: receipt.CandidateHead, NativeExecExitCode: observed.ExecExitCode, NativePhase: observed.Phase, StopAcknowledged: observed.StopAcknowledged, MainProcessInstanceID: observed.MainProcessInstanceID, Sources: sources}
+	completed := CompletedSessionReadback{CustodyProjection: projection, ProfileSHA256: profileSHA, CommandSHA256: commandSHA256, Instructions: instructions, NativeAttemptID: receipt.AttemptID, CandidateHead: receipt.CandidateHead, NativeExecExitCode: observed.ExecExitCode, NativePhase: observed.Phase, StopAcknowledged: observed.StopAcknowledged, MainProcessInstanceID: observed.MainProcessInstanceID, Sources: sources}
+	completed.custodyQualification = qualification
 	return settledSessionEvidence{completed: completed, progressHead: receipt.ProgressHead, harnessExitCode: receipt.Progress.ExitCode, status: receipt.Outcome.Status}, nil
 }

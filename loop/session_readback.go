@@ -42,7 +42,13 @@ func (l *Loop) SessionReadback(ctx context.Context, orderID, sessionID string) (
 	if !ok {
 		return result, fmt.Errorf("original runtime has no session readback capability")
 	}
-	return readCanonicalSessionEvidence(ctx, l.projectDir, l.canonicalSnapshotPath(), orderID, sessionID, l.taskWorktreePhysical, reader.ReadCompletedSession)
+	verify := func(e loopruntime.CompletedSessionReadback) error {
+		if e.CustodyProjection != nil {
+			return fmt.Errorf("managed session readback returned standalone custody proof")
+		}
+		return loopruntime.VerifySessionReadbackFiles(e.Sources)
+	}
+	return readCanonicalSessionEvidence(ctx, l.projectDir, l.canonicalSnapshotPath(), orderID, sessionID, l.taskWorktreePhysical, reader.ReadCompletedSession, verify)
 }
 
 // ReadOpenShellSessionEvidence verifies the original canonical session and
@@ -56,10 +62,16 @@ func ReadOpenShellSessionEvidence(ctx context.Context, project, runtimeDir, cont
 	read := func(ctx context.Context, b loopruntime.CompletedSessionBinding) (loopruntime.CompletedSessionReadback, error) {
 		return loopruntime.ReadOpenShellCompletedEvidence(ctx, profile, runtimeDir, contextID, b)
 	}
-	return readCanonicalSessionEvidence(ctx, project, filepath.Join(runtimeDir, "state.snapshot.json"), orderID, sessionID, physical, read)
+	verify := func(e loopruntime.CompletedSessionReadback) error {
+		if e.CustodyProjection == nil {
+			return fmt.Errorf("standalone session custody proof missing")
+		}
+		return loopruntime.VerifyCompletedSessionReadback(e, profile, contextID, orderID, sessionID)
+	}
+	return readCanonicalSessionEvidence(ctx, project, filepath.Join(runtimeDir, "state.snapshot.json"), orderID, sessionID, physical, read, verify)
 }
 
-func readCanonicalSessionEvidence(ctx context.Context, project, snapshotPath, orderID, sessionID string, physical func(string) (string, error), read func(context.Context, loopruntime.CompletedSessionBinding) (loopruntime.CompletedSessionReadback, error)) (result SessionReadback, err error) {
+func readCanonicalSessionEvidence(ctx context.Context, project, snapshotPath, orderID, sessionID string, physical func(string) (string, error), read func(context.Context, loopruntime.CompletedSessionBinding) (loopruntime.CompletedSessionReadback, error), verify func(loopruntime.CompletedSessionReadback) error) (result SessionReadback, err error) {
 	if orderID == "" || sessionID == "" {
 		return result, fmt.Errorf("exact order and session identity missing")
 	}
@@ -111,7 +123,7 @@ func readCanonicalSessionEvidence(ctx context.Context, project, snapshotPath, or
 		return result, fmt.Errorf("original runtime returned no source evidence")
 	}
 	execution.Sources["canonical_snapshot"] = ref
-	if err = loopruntime.VerifySessionReadbackFiles(execution.Sources); err != nil {
+	if err = verify(execution); err != nil {
 		return result, err
 	}
 	return SessionReadback{SchemaVersion: 1, Status: "observed", OrderID: orderID, StageIndex: stage.StageIndex, AttemptID: attempt.AttemptID, SessionID: sessionID, OrderStatus: string(order.Status), StageStatus: string(stage.Status), AttemptStatus: string(attempt.Status), Runtime: stage.Runtime, Provider: stage.Provider, Model: stage.Model, WorktreePath: target, Execution: execution, Effects: []string{}}, nil

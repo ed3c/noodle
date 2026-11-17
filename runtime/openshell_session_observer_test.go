@@ -1,13 +1,19 @@
 package runtime
 
 import (
+	"context"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	pb "github.com/NVIDIA/OpenShell/sdk/go/proto/openshellv1"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestOpenShellCompletedEvidenceObserverUsesOnlyGetWithoutOwner(t *testing.T) {
@@ -77,6 +83,225 @@ func TestOpenShellCompletedEvidenceObserverUsesOnlyGetWithoutOwner(t *testing.T)
 			current, _ := os.ReadFile(custodyPath)
 			if string(current) != string(before) {
 				t.Fatal("failed observer wrote custody")
+			}
+		})
+	}
+}
+
+// Enable the original child only; do not pre-bind its gateway endpoint.
+func prepareCompletionGetMutation(t *testing.T, f *managedFixture) {
+	t.Helper()
+	path := filepath.Join(f.root, "child.json")
+	var child managedChildConfig
+	if _, err := ReadSessionReadbackFile(path, &child); err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.EvalSymlinks(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child.CompletionMutationRoot = filepath.Dir(root)
+	writeReadbackJSON(t, path, child)
+}
+
+func stageCompletionGetMutation(t *testing.T, f *managedFixture, sandbox, path string, after []byte) {
+	t.Helper()
+	canonical, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeReadbackJSON(t, filepath.Join(f.root, "completion-get-write.json"),
+		completionGetMutation{SandboxName: sandbox, Path: canonical, BeforeSHA256: sha256.Sum256(before), After: after})
+}
+
+func otherCompletedCustodyRecord(t *testing.T, record OpenShellCustodyRecord) OpenShellCustodyRecord {
+	t.Helper()
+	raw, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var other OpenShellCustodyRecord
+	if err = json.Unmarshal(raw, &other); err != nil {
+		t.Fatal(err)
+	}
+	other.Name += "-other"
+	other.Worker.Identity.OrderID += "-other"
+	other.Worker.Identity.SessionID += "-other"
+	other.Worker.Identity.AttemptID += "-other"
+	other.Worker.Identity.SandboxName = other.Name
+	other.Worker.Identity.Sandbox.SandboxID += "-other"
+	other.Task = OpenShellTask{other.Worker.Identity.OrderID, other.Worker.Identity.AttemptID, other.Worker.Identity.SessionID}
+	other.CreateRequestID, err = openShellUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var intent pb.CreateSandboxRequest
+	if err = proto.Unmarshal(other.CreateIntent, &intent); err != nil {
+		t.Fatal(err)
+	}
+	intent.Name, intent.RequestId = other.Name, other.CreateRequestID
+	other.CreateIntent, err = openShellBytes(&intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return other
+}
+
+func TestStandaloneObserverAllowsOtherRecordProgressDuringOriginalGet(t *testing.T) {
+	r, b, f := completedReadbackFixtureWithPrepare(t, func(f *managedFixture) { prepareCompletionGetMutation(t, f) })
+	profile := r.config.Profile
+	path := filepath.Join(profile.Gateway.Binding.StateRoot, "owner.json")
+	var custody OpenShellCustodyState
+	before, err := ReadSessionReadbackFile(path, &custody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.WriteFile(path, original, 0600); err != nil {
+			t.Error(err)
+		}
+	})
+	custody.Records = append(custody.Records, otherCompletedCustodyRecord(t, custody.Records[0]))
+	if err = validateOpenShellCustodyLedger(custody); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := json.Marshal(custody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stageCompletionGetMutation(t, f, custody.Records[0].Name, path, changed)
+	eventsBefore, err := os.ReadFile(filepath.Join(f.root, "events"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadOpenShellCompletedEvidence(t.Context(), profile, r.config.RuntimeDir, r.config.ContextID, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := got.CustodyProjection
+	if proof == nil || proof.Before != before || proof.Before.SHA256 == proof.After.SHA256 || proof.After != got.Sources["native_custody"] || proof.Before.Path != proof.After.Path {
+		t.Fatal("other-row control did not cross the original native Get read window")
+	}
+	eventsAfter, err := os.ReadFile(filepath.Join(f.root, "events"))
+	if err != nil || string(eventsAfter[len(eventsBefore):]) != "get\n" {
+		t.Fatal("standalone projection performed more than one exact native Get", err)
+	}
+	if err = VerifySessionReadbackFiles(map[string]SessionReadbackFileRef{"native_custody": before}); err == nil {
+		t.Fatal("generic whole-file fence was weakened")
+	}
+	otherProgress := completionCustodyBytes(t, path, func(root map[string]any) {
+		root["Records"].([]any)[1].(map[string]any)["Opaque"] = json.Number("9007199254740993")
+	})
+	if err = os.WriteFile(path, otherProgress, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = VerifyCompletedSessionReadback(got, profile, r.config.ContextID, b.OrderID, b.SessionID); err != nil {
+		t.Fatal("outer qualified consumer reinstated whole-file fence", err)
+	}
+	var transported CompletedSessionReadback
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(raw, &transported); err != nil {
+		t.Fatal(err)
+	}
+	if err = VerifyCompletedSessionReadback(transported, profile, r.config.ContextID, b.OrderID, b.SessionID); err == nil {
+		t.Fatal("unqualified wire proof acquired original producer qualification")
+	}
+}
+
+func TestManagedReaderRetainsWholeFileFenceDuringOriginalObservation(t *testing.T) {
+	r, b, _ := completedReadbackFixture(t)
+	path := filepath.Join(r.config.Profile.Gateway.Binding.StateRoot, "owner.json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.WriteFile(path, before, 0600); err != nil {
+			t.Error(err)
+		}
+	})
+	observe := func(ctx context.Context, id OpenShellIdentity) (OpenShellCompletedObservation, error) {
+		got, err := r.config.Gateway.ObserveCompleted(ctx, r.config.ContextID, id)
+		if err != nil {
+			return got, err
+		}
+		return got, os.WriteFile(path, append(before, ' '), 0600)
+	}
+	if _, err = r.readCompletedSession(t.Context(), b, observe); err == nil || !strings.Contains(err.Error(), "native_custody") {
+		t.Fatal("managed reader lost whole-file custody fence", err)
+	}
+}
+
+func TestStandaloneObserverRejectsDriftDuringOriginalGet(t *testing.T) {
+	r, b, f := completedReadbackFixtureWithPrepare(t, func(f *managedFixture) { prepareCompletionGetMutation(t, f) })
+	path := filepath.Join(r.config.Profile.Gateway.Binding.StateRoot, "owner.json")
+	metaPath := filepath.Join(r.config.RuntimeDir, "sessions", b.SessionID, "meta.json")
+	for _, fault := range []string{"selected-opaque", "root-opaque", "selected-command", "duplicate", "malformed-other", "blocked", "metadata"} {
+		t.Run(fault, func(t *testing.T) {
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			meta, err := os.ReadFile(metaPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := os.WriteFile(path, before, 0600); err != nil {
+					t.Error(err)
+				}
+				if err := os.WriteFile(metaPath, meta, 0600); err != nil {
+					t.Error(err)
+				}
+			})
+			changed := completionCustodyBytes(t, path, func(root map[string]any) {
+				rows := root["Records"].([]any)
+				row := rows[0].(map[string]any)
+				switch fault {
+				case "selected-opaque":
+					row["Opaque"] = json.Number("9007199254740993")
+				case "root-opaque":
+					root["Opaque"] = json.Number("9007199254740993")
+				case "selected-command":
+					row["Exec"].(map[string]any)["Command"].(map[string]any)["Argv"] = []string{"foreign"}
+				case "duplicate":
+					root["Records"] = append(rows, row)
+				case "malformed-other":
+					root["Records"] = append(rows, map[string]any{"Name": "incomplete"})
+				case "blocked":
+					root["Blocked"] = "unresolved"
+				}
+			})
+			var custody OpenShellCustodyState
+			if err = json.Unmarshal(before, &custody); err != nil {
+				t.Fatal(err)
+			}
+			target, mutation := path, changed
+			if fault == "metadata" {
+				target, mutation = metaPath, append(meta, ' ')
+			}
+			stageCompletionGetMutation(t, f, custody.Records[0].Name, target, mutation)
+			events, err := os.ReadFile(filepath.Join(f.root, "events"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = ReadOpenShellCompletedEvidence(t.Context(), r.config.Profile, r.config.RuntimeDir, r.config.ContextID, b); err == nil {
+				t.Fatal("changed original source was reported observed")
+			}
+			after, err := os.ReadFile(filepath.Join(f.root, "events"))
+			if err != nil || string(after[len(events):]) != "get\n" {
+				t.Fatal("refused standalone read performed unexpected native effects", err)
 			}
 		})
 	}
@@ -245,5 +470,44 @@ func TestOpenShellCompletedEvidenceObserverUsesManagedRuntimeLink(t *testing.T) 
 	}
 	if _, err := ReadOpenShellCompletedEvidence(t.Context(), r.config.Profile, link, r.config.ContextID, b); err == nil {
 		t.Fatal("accepted a managed runtime alias pointing outside the original session")
+	}
+}
+
+func TestStandaloneProjectionPreservesOriginalProfileAndKeySources(t *testing.T) {
+	r, b, f := fileProfileObserverFixture(t)
+	profile := r.config.Profile
+	observed, err := ReadOpenShellCompletedEvidence(t.Context(), profile, r.config.RuntimeDir, r.config.ContextID, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path := range profile.sourceFiles {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := os.WriteFile(path, before, 0600); err != nil {
+					t.Error(err)
+				}
+			})
+			if err = os.WriteFile(path, append(before, ' '), 0600); err != nil {
+				t.Fatal(err)
+			}
+			events, err := os.ReadFile(filepath.Join(f.root, "events"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = VerifyCompletedSessionReadback(observed, profile, r.config.ContextID, b.OrderID, b.SessionID); err == nil {
+				t.Fatal("scoped verifier accepted changed original profile dependency")
+			}
+			if _, err = ReadOpenShellCompletedEvidence(t.Context(), profile, r.config.RuntimeDir, r.config.ContextID, b); err == nil {
+				t.Fatal("standalone producer accepted changed original profile dependency")
+			}
+			after, err := os.ReadFile(filepath.Join(f.root, "events"))
+			if err != nil || string(events) != string(after) {
+				t.Fatal("changed key/profile dependency reached native Get", err)
+			}
+		})
 	}
 }

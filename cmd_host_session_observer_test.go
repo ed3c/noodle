@@ -3,17 +3,19 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"github.com/poteto/noodle/internal/procx"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/poteto/noodle/internal/admission"
+	"github.com/poteto/noodle/internal/procx"
+	"github.com/poteto/noodle/loop"
 	loopruntime "github.com/poteto/noodle/runtime"
 )
 
-func TestSessionObserverRequiresOriginalZeroWorkerFrame(t *testing.T) {
+func TestSessionObserverRequiresOriginalResourceFrameWithOtherWorkers(t *testing.T) {
 	profile := hostDeferralProfile(t)
 	spec, err := loopruntime.LoadOpenShellGatewaySpec(profile)
 	if err != nil {
@@ -25,14 +27,21 @@ func TestSessionObserverRequiresOriginalZeroWorkerFrame(t *testing.T) {
 	}
 	owner := &hostOwnerBinding{HostRoot: "/original", GenerationDir: "/original/g/generation", ExecutionBinary: loopruntime.SessionReadbackFileRef{Path: "/original/noodle", SHA256: "original-sha"}, Current: hostReceipt{Schema: 1, Protocol: hostProtocol, HostPID: 123, HostInstanceID: "generation", ContextID: "context", RequestID: "request", ProjectDir: "/original/project", ConfigSHA256: "config", ContextState: "active", HostDir: "/original", BinaryPath: "/original/noodle", BinarySHA256: "original-sha"}}
 	resident := admission.Resident{ID: spec.Resident.Name, Name: spec.Resident.Name, Sharing: "shared", State: "running", PID: 456, ProcessGroup: 456, Started: "original start", Fingerprint: "original fingerprint", GuardID: guard, Contexts: []string{"context"}}
-	for _, fault := range []string{"", "pressure-only", "resident-history", "host", "root", "binary", "context", "status", "active", "missing-active", "unknown-quota", "missing-quota", "unresolved", "resident-error", "missing-persist-result", "guard", "lease", "fingerprint", "resident-unknown", "shutting-down"} {
+	for _, fault := range []string{"", "other-worker", "other-generation-worker", "pressure-only", "resident-history", "host", "root", "binary", "context", "status", "active", "negative-active", "missing-active", "unknown-quota", "missing-quota", "quota-maximum", "quota-overflow", "unresolved", "resident-error", "missing-persist-result", "guard", "lease", "selected-released-only", "fingerprint", "resident-unknown", "shutting-down"} {
 		t.Run(fault, func(t *testing.T) {
 			status := hostResponse{hostReceipt: owner.Current, Status: "ok"}
-			budget := map[string]any{"active_workers": 0, "unresolved_residents": 0, "shared_quota": map[string]any{"allocations": 1, "residents": 1, "error": ""}}
+			quota := map[string]any{"maximum": 9, "allocations": 1, "residents": 1, "owned_allocations": 1, "error": ""}
+			budget := map[string]any{"active_workers": 0, "unresolved_residents": 0, "shared_quota": quota}
 			row := resident
 			residents := map[string]any{"records": []admission.Resident{row}, "error": nil}
 			resource := map[string]any{"protocol": hostProtocol, "host_root": owner.HostRoot, "host_dir": owner.GenerationDir, "host_pid": 123, "host_instance_id": "generation", "binary_path": owner.ExecutionBinary.Path, "binary_sha256": owner.ExecutionBinary.SHA256, "shutdown": map[string]any{"requested": false}, "resources": budget, "residents": residents}
 			switch fault {
+			case "other-worker":
+				budget["active_workers"] = 1
+				quota["allocations"] = 2
+				quota["owned_allocations"] = 2
+			case "other-generation-worker":
+				quota["allocations"] = 2
 			case "pressure-only":
 				budget["maximum_workers"] = 4
 				budget["pressure"] = "critical"
@@ -53,12 +62,18 @@ func TestSessionObserverRequiresOriginalZeroWorkerFrame(t *testing.T) {
 				status.Status = "unknown_effect"
 			case "active":
 				budget["active_workers"] = 1
+			case "negative-active":
+				budget["active_workers"] = -1
 			case "missing-active":
 				delete(budget, "active_workers")
 			case "unknown-quota":
 				budget["shared_quota"] = map[string]any{"allocations": 1, "residents": 1, "error": "original launch unknown"}
 			case "missing-quota":
 				delete(budget, "shared_quota")
+			case "quota-maximum":
+				quota["maximum"] = 4
+			case "quota-overflow":
+				quota["allocations"] = 11
 			case "unresolved":
 				budget["unresolved_residents"] = 1
 			case "resident-error":
@@ -69,6 +84,9 @@ func TestSessionObserverRequiresOriginalZeroWorkerFrame(t *testing.T) {
 				row.GuardID = "foreign"
 			case "lease":
 				row.Contexts = nil
+			case "selected-released-only":
+				row.Contexts = nil
+				row.Released = []string{owner.Current.ContextID}
 			case "fingerprint":
 				row.Fingerprint = ""
 			case "resident-unknown":
@@ -83,7 +101,7 @@ func TestSessionObserverRequiresOriginalZeroWorkerFrame(t *testing.T) {
 			}
 			var observed admission.Resident
 			err = validateSessionObserverResources(owner, status, raw, spec, &observed)
-			if fault == "" || fault == "pressure-only" || fault == "resident-history" {
+			if fault == "" || fault == "other-worker" || fault == "other-generation-worker" || fault == "pressure-only" || fault == "resident-history" {
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -207,5 +225,281 @@ func TestSessionObserverLoadsOriginalFileProfileWithoutConfusingDigests(t *testi
 	}
 	if _, err := loadSessionObserverProfile(path, ref); err == nil {
 		t.Fatal("profile raw source drift accepted")
+	}
+}
+
+func TestSessionObserverQuotaUsesOriginalSharedResidentCreator(t *testing.T) {
+	spec, err := loopruntime.LoadOpenShellGatewaySpec(hostDeferralProfile(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, creatorReleased := range []bool{false, true} {
+		t.Run(fmt.Sprintf("creator-released-%t", creatorReleased), func(t *testing.T) {
+			owner := &hostOwnerBinding{Current: hostReceipt{HostInstanceID: "generation", ContextID: "selected"}}
+			budget := admission.NewBudget(admission.DefaultWorkerLimit)
+			directory := t.TempDir()
+			if err := budget.BindSharedQuota(directory, owner.Current.HostInstanceID); err != nil {
+				t.Fatal(err)
+			}
+			budget.Register("creator")
+			budget.Register(owner.Current.ContextID)
+			permit, err := budget.TryAcquireScopedResident("creator", spec.Resident.Name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(permit.Release)
+			var quota sessionObserverQuota
+			if _, err := loopruntime.ReadSessionReadbackFile(filepath.Join(directory, "quota.json"), &quota); err != nil {
+				t.Fatal(err)
+			}
+			if len(quota.Leases) != 1 {
+				t.Fatal("shared resident acquired more than its original allocation")
+			}
+			for _, lease := range quota.Leases {
+				if lease.Context != "creator" || lease.Owner != owner.Current.HostInstanceID || !lease.Resident || lease.Key != spec.Resident.Name {
+					t.Fatal("original producer changed resident creator identity")
+				}
+			}
+			// Residents.acquire reuses the original allocation when adding selected;
+			// release moves only the creator context, not that allocation.
+			resident := admission.Resident{Contexts: []string{"creator", owner.Current.ContextID}}
+			if creatorReleased {
+				resident.Contexts = []string{owner.Current.ContextID}
+				resident.Released = []string{"creator"}
+			}
+			raw, err := json.Marshal(map[string]any{"resources": budget.Snapshot()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			frame := hostSessionObserverFrame{Resident: resident, Resources: raw}
+			if err := validateSessionObserverQuota(owner, quota, frame, spec); err != nil {
+				t.Fatal("shared resident lost original creator allocation", err)
+			}
+		})
+	}
+}
+
+func TestSessionObserverQuotaPreservesNineAcrossGenerationsAndOwnLease(t *testing.T) {
+	spec, err := loopruntime.LoadOpenShellGatewaySpec(hostDeferralProfile(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &hostOwnerBinding{Current: hostReceipt{HostInstanceID: "generation", ContextID: "context"}}
+	for _, fault := range []string{"", "nine-workers", "schema", "policy", "maximum", "ten-workers", "unknown-count", "foreign-context", "foreign-owner", "creator-released", "missing-key", "worker-key", "duplicate-resident", "duplicate-shared-creator"} {
+		t.Run(fault, func(t *testing.T) {
+			quota := sessionObserverQuota{Schema: 3, Maximum: 9, Policy: admission.WorkerAdmissionPolicy, Leases: map[string]sessionObserverQuotaLease{
+				"resident":     {Owner: "generation", Context: "context", Resident: true, Key: spec.Resident.Name},
+				"other-worker": {Owner: "older-generation", Context: "another-context"},
+			}}
+			resident := quota.Leases["resident"]
+			frame := hostSessionObserverFrame{Resident: admission.Resident{Contexts: []string{"context"}, Released: []string{"released"}}}
+			switch fault {
+			case "nine-workers", "ten-workers":
+				for i := 1; i < 9; i++ {
+					quota.Leases[fmt.Sprint("worker-", i)] = sessionObserverQuotaLease{Owner: "older-generation", Context: "another-context"}
+				}
+				if fault == "ten-workers" {
+					quota.Leases["tenth"] = sessionObserverQuotaLease{Owner: "other-generation", Context: "other"}
+				}
+			case "schema":
+				quota.Schema = 2
+			case "policy":
+				quota.Policy = "old-policy"
+			case "maximum":
+				quota.Maximum = 4
+			case "foreign-context":
+				resident.Context = "foreign"
+			case "foreign-owner":
+				resident.Owner = "foreign"
+			case "creator-released":
+				resident.Context = "released"
+			case "missing-key":
+				resident.Key = ""
+			case "worker-key":
+				worker := quota.Leases["other-worker"]
+				worker.Key = spec.Resident.Name
+				quota.Leases["other-worker"] = worker
+			case "duplicate-resident":
+				quota.Leases["duplicate"] = resident
+			case "duplicate-shared-creator":
+				duplicate := resident
+				duplicate.Context = "released"
+				quota.Leases["duplicate"] = duplicate
+			}
+			quota.Leases["resident"] = resident
+			count := len(quota.Leases)
+			if fault == "unknown-count" {
+				count++
+			}
+			residents, owned := 1, 1
+			if fault == "duplicate-shared-creator" {
+				residents, owned = 2, 2
+			}
+			frame.Resources, err = json.Marshal(map[string]any{"resources": map[string]any{"shared_quota": admission.SharedQuotaSnapshot{Maximum: 9, Allocations: count, Residents: residents, Owned: owned}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = validateSessionObserverQuota(owner, quota, frame, spec)
+			if fault == "" || fault == "nine-workers" || fault == "creator-released" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil {
+				t.Fatal("invalid quota or own context lease accepted")
+			}
+		})
+	}
+}
+
+// Native qualification and kernel reads are isolated here. Runtime tests drive
+// the real Get-only producer; this control exercises the complete Host consumer.
+func TestSessionObserverResponseConsumesSelectedProofWithOtherWorker(t *testing.T) {
+	for _, fault := range []string{"", "missing-proof", "completion-refused", "actor-generation", "quota-source", "profile-source"} {
+		t.Run(fault, func(t *testing.T) {
+			project, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			profilePath := hostDeferralProfile(t)
+			profile, err := loopruntime.LoadOpenShellProfile(profilePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = os.MkdirAll(profile.Gateway.Binding.StateRoot, 0700); err != nil {
+				t.Fatal(err)
+			}
+			write := func(path string, raw []byte) loopruntime.SessionReadbackFileRef {
+				t.Helper()
+				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, raw, 0600); err != nil {
+					t.Fatal(err)
+				}
+				ref, err := loopruntime.ReadSessionReadbackFile(path, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return ref
+			}
+			binary := write(filepath.Join(root, "observer"), []byte("immutable observer"))
+			executor := write(filepath.Join(root, "executor"), []byte("original executor"))
+			configPath := filepath.Join(project, ".noodle.toml")
+			configRef := write(configPath, []byte(fmt.Sprintf("mode='supervised'\n[runtime.openshell]\nprofile=%q\n", profilePath)))
+			owner := &hostOwnerBinding{HostRoot: root, GenerationDir: filepath.Join(root, "g", "generation"), ExecutionBinary: executor, Sources: map[string]loopruntime.SessionReadbackFileRef{}, Current: hostReceipt{Schema: 1, Protocol: hostProtocol, HostPID: 123, HostInstanceID: "generation", ContextID: "context", RequestID: "request", ProjectDir: project, ConfigPath: configPath, ConfigSHA256: configRef.SHA256, ContextState: "active", Mode: "supervised", HostDir: root, BinaryPath: executor.Path, BinarySHA256: executor.SHA256}}
+			profile.Gateway.ControlRoot = root
+			spec := profile.Gateway
+			spec.Binding.StateRoot, err = filepath.EvalSymlinks(spec.Binding.StateRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			guard, err := loopruntime.OpenShellGatewayGuardID(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resident := admission.Resident{ID: profile.Gateway.Resident.Name, Name: profile.Gateway.Resident.Name, Sharing: "shared", State: "running", PID: 456, ProcessGroup: 456, Started: "original start", Fingerprint: "original fingerprint", GuardID: guard, Contexts: []string{"context", "other-context"}, Released: []string{"creator"}}
+			quota := sessionObserverQuota{Schema: 3, Maximum: 9, Policy: admission.WorkerAdmissionPolicy, Leases: map[string]sessionObserverQuotaLease{
+				"resident": {Owner: "generation", Context: "creator", Resident: true, Key: resident.Name},
+				"worker":   {Owner: "generation", Context: "other-context"},
+			}}
+			quotaRaw, err := json.Marshal(quota)
+			if err != nil {
+				t.Fatal(err)
+			}
+			quotaRef := write(filepath.Join(root, "quota", "quota.json"), quotaRaw)
+			resources, err := json.Marshal(map[string]any{"protocol": hostProtocol, "host_root": root, "host_dir": owner.GenerationDir, "host_pid": 123, "host_instance_id": "generation", "binary_path": executor.Path, "binary_sha256": executor.SHA256, "shutdown": map[string]any{"requested": false}, "residents": map[string]any{"records": []admission.Resident{resident}, "error": nil}, "resources": map[string]any{"active_workers": 1, "unresolved_residents": 0, "shared_quota": admission.SharedQuotaSnapshot{Maximum: 9, Allocations: 2, Residents: 1, Owned: 2}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity := procx.NativeIdentity{PID: 123, UID: 501, ParentPID: 1, Group: 123, StartSec: 10, Version: 1, Token: []byte("host")}
+			gateway := identity
+			gateway.PID, gateway.ParentPID, gateway.Group, gateway.Token = 456, 123, 456, []byte("gateway")
+			frames, completions := 0, 0
+			reads := sessionObserverReads{}
+			reads.frame = func(_ context.Context, got *hostOwnerBinding, request string, spec loopruntime.OpenShellGatewaySpec) (hostSessionObserverFrame, error) {
+				if got != owner || request != "original-request" {
+					t.Fatal("Host frame input changed")
+				}
+				frame := hostSessionObserverFrame{Status: hostResponse{hostReceipt: owner.Current, Status: "ok"}, Resources: resources, Host: hostOperatorActor{Process: identity, Binary: executor}, Gateway: hostOperatorActor{Process: gateway, Binary: binary}}
+				if err := validateSessionObserverResources(owner, frame.Status, frame.Resources, spec, &frame.Resident); err != nil {
+					return frame, err
+				}
+				frames++
+				if frames == 2 && fault == "actor-generation" {
+					frame.Host.Process.Version++
+				}
+				return frame, nil
+			}
+			var produced loopruntime.CompletedSessionReadback
+			reads.session = func(_ context.Context, gotProject, runtimeDir, contextID string, p loopruntime.OpenShellProfile, orderID, sessionID string) (loop.SessionReadback, error) {
+				if gotProject != project || runtimeDir != filepath.Join(project, ".noodle") || contextID != "context" || p.SourcePath != profilePath || orderID != "order" || sessionID != "session" {
+					t.Fatal("original session inputs changed")
+				}
+				profileSHA, err := loopruntime.OpenShellDispatchSHA256(p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(p.Gateway.Binding.StateRoot, "owner.json")
+				before := write(path, []byte("{}"))
+				after := write(path, []byte("{} "))
+				proof := &loopruntime.SessionCustodyProjection{Schema: 1, Scope: loopruntime.SelectedSessionStopped, Subject: loopruntime.SessionCustodySubject{ContextID: contextID, OrderID: orderID, SessionID: sessionID, NativeAttemptID: "native-attempt"}, ProfileSHA256: profileSHA, RootSHA256: strings.Repeat("a", 64), SelectedRecordSHA256: strings.Repeat("b", 64), Before: before, After: after}
+				produced = loopruntime.CompletedSessionReadback{CustodyProjection: proof, ProfileSHA256: profileSHA, NativeAttemptID: "native-attempt", CandidateHead: "candidate", NativePhase: "Stopped", StopAcknowledged: true, MainProcessInstanceID: "original-main", Sources: map[string]loopruntime.SessionReadbackFileRef{"native_custody": after}}
+				write(path, []byte("{}  "))
+				switch fault {
+				case "missing-proof":
+					produced.CustodyProjection = nil
+				case "quota-source":
+					write(quotaRef.Path, append(quotaRaw, ' '))
+				case "profile-source":
+					raw, err := os.ReadFile(profilePath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					write(profilePath, append(raw, ' '))
+				}
+				return loop.SessionReadback{SchemaVersion: 1, Status: "observed", OrderID: orderID, SessionID: sessionID, AttemptID: "canonical-attempt", AttemptStatus: "failed", Runtime: "openshell", Execution: produced, Effects: []string{}}, nil
+			}
+			reads.completion = func(e loopruntime.CompletedSessionReadback, p loopruntime.OpenShellProfile, contextID, orderID, sessionID string) error {
+				completions++
+				if p.SourcePath != profilePath || contextID != "context" || orderID != "order" || sessionID != "session" || e.CustodyProjection != produced.CustodyProjection {
+					t.Fatal("Host lost qualified producer proof or original subject")
+				}
+				if fault == "completion-refused" {
+					return fmt.Errorf("original selected completion changed")
+				}
+				return nil
+			}
+			result, err := observeHostSessionWithReads(t.Context(), project, "original-request", "order", "session", owner, binary, reads)
+			if fault != "" {
+				if err == nil || result.Status != "refused" || result.Observation != nil {
+					t.Fatal("Host accepted invalid source/frame/completion")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Status != "observed" || result.SchemaVersion != 2 || result.Observer == nil || result.Observer.InactiveScope != loopruntime.SelectedSessionStopped || result.Observer.Binary != binary || result.Observer.ExecutionBinary != executor || result.Observation.Execution.CustodyProjection != produced.CustodyProjection || result.Observation.AttemptID == produced.NativeAttemptID || result.Observation.AttemptStatus != "failed" || len(result.Effects) != 0 || frames != 2 || completions != 1 {
+				t.Fatal("Host response lost original execution, proof, scope or provenance")
+			}
+			raw, err := json.Marshal(result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var packet struct {
+				Observation struct {
+					Execution struct {
+						Proof map[string]any `json:"custody_projection"`
+					} `json:"execution"`
+				} `json:"observation"`
+			}
+			if err = json.Unmarshal(raw, &packet); err != nil || len(packet.Observation.Execution.Proof) != 8 {
+				t.Fatal("schema2 response lost exact optional proof", err)
+			}
+		})
 	}
 }

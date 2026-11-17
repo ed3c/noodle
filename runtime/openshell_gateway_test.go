@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -61,10 +62,131 @@ func (s *managedGatewayServer) GetGatewayInfo(context.Context, *pb.GetGatewayInf
 }
 
 type managedChildConfig struct {
-	Address    string
-	ServerCert [][]byte
-	ServerKey  []byte
-	ClientCA   []byte
+	Address                string
+	ServerCert             [][]byte
+	ServerKey              []byte
+	ClientCA               []byte
+	CompletionMutationRoot string
+}
+
+type completionGetMutation struct {
+	SandboxName, Path string
+	BeforeSHA256      [sha256.Size]byte
+	After             []byte
+}
+
+// Only an explicitly enabled test child may consume this one-shot fixture.
+// The original native Get and its mTLS response still run unchanged.
+func applyCompletionGetMutation(root, allowedRoot, sandbox string) error {
+	if allowedRoot == "" {
+		return nil
+	}
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil || allowedRoot != filepath.Dir(root) {
+		return fmt.Errorf("completion fixture root differs")
+	}
+	marker := filepath.Join(root, "completion-get-write.json")
+	info, err := os.Lstat(marker)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 64<<20 {
+		return fmt.Errorf("completion fixture marker is not bounded and regular")
+	}
+	raw, err := os.ReadFile(marker)
+	if err != nil {
+		return err
+	}
+	var mutation completionGetMutation
+	if err = json.Unmarshal(raw, &mutation); err != nil {
+		return err
+	}
+	canonical, err := filepath.EvalSymlinks(mutation.Path)
+	relative, relErr := filepath.Rel(allowedRoot, mutation.Path)
+	if err != nil || relErr != nil || canonical != mutation.Path || !filepath.IsLocal(relative) || relative == "." || mutation.SandboxName != sandbox || sandbox == "" || len(mutation.After) > 64<<20 {
+		return fmt.Errorf("completion fixture target differs")
+	}
+	info, err = os.Lstat(mutation.Path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 64<<20 {
+		return fmt.Errorf("completion fixture target is not bounded and regular")
+	}
+	before, err := os.ReadFile(mutation.Path)
+	if err != nil || sha256.Sum256(before) != mutation.BeforeSHA256 {
+		return fmt.Errorf("completion fixture original bytes differ")
+	}
+	if err = os.Remove(marker); err != nil {
+		return err
+	}
+	return os.WriteFile(mutation.Path, mutation.After, info.Mode().Perm())
+}
+
+func TestCompletionGetFixtureBindsOneShotToOriginalTempSource(t *testing.T) {
+	allowed, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(allowed, "child")
+	if err = os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(allowed, "owner.json")
+	before, after := []byte("original fixture"), []byte("changed fixture")
+	if err = os.WriteFile(target, before, 0600); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(root, "completion-get-write.json")
+	mutation := completionGetMutation{SandboxName: "original", Path: target, BeforeSHA256: sha256.Sum256(before), After: after}
+	writeReadbackJSON(t, marker, mutation)
+	if err = applyCompletionGetMutation(root, "", "original"); err != nil {
+		t.Fatal(err)
+	}
+	for _, fault := range []string{"sandbox", "foreign", "alias", "digest", "root"} {
+		t.Run(fault, func(t *testing.T) {
+			changed := mutation
+			bound := allowed
+			sandbox := "original"
+			switch fault {
+			case "sandbox":
+				sandbox = "foreign"
+			case "foreign":
+				changed.Path = filepath.Join(t.TempDir(), "outside.json")
+				if err := os.WriteFile(changed.Path, before, 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "alias":
+				changed.Path = filepath.Join(allowed, "alias.json")
+				if err := os.Symlink(target, changed.Path); err != nil {
+					t.Fatal(err)
+				}
+			case "digest":
+				changed.BeforeSHA256 = sha256.Sum256(after)
+			case "root":
+				bound = t.TempDir()
+			}
+			writeReadbackJSON(t, marker, changed)
+			if err := applyCompletionGetMutation(root, bound, sandbox); err == nil {
+				t.Fatal("unbound fixture mutation accepted")
+			}
+			current, err := os.ReadFile(target)
+			if err != nil || string(current) != string(before) {
+				t.Fatal("refused fixture changed original bytes", err)
+			}
+		})
+	}
+	writeReadbackJSON(t, marker, mutation)
+	if err = applyCompletionGetMutation(root, allowed, "original"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("fixture was not consumed once", err)
+	}
+	if err = applyCompletionGetMutation(root, allowed, "original"); err != nil {
+		t.Fatal(err)
+	}
+	current, err := os.ReadFile(target)
+	if err != nil || string(current) != string(after) {
+		t.Fatal("one-shot fixture lost selected bytes", err)
+	}
 }
 
 // The sole managed child itself binds TCP and serves verified mTLS gRPC. No
@@ -148,8 +270,15 @@ func TestManagedOpenShellGatewayChild(t *testing.T) {
 		}
 		return nativeList(ctx, req)
 	}
+	var completionMutation sync.Mutex
 	native.get = func(ctx context.Context, req *pb.GetSandboxRequest) (*pb.SandboxResponse, error) {
 		server.event("get")
+		completionMutation.Lock()
+		err := applyCompletionGetMutation(root, cfg.CompletionMutationRoot, req.GetName())
+		completionMutation.Unlock()
+		if err != nil {
+			return nil, status.Error(codes.FailedPrecondition, err.Error())
+		}
 		return nativeGet(ctx, req)
 	}
 	nativeStop := native.stop

@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,12 +25,93 @@ type readbackRuntime struct {
 	read  func(loopruntime.CompletedSessionBinding) (loopruntime.CompletedSessionReadback, error)
 }
 
+// The producer and its qualification are isolated. The original canonical
+// wrapper must retain that proof and use its verifier after physical readback.
+func TestCanonicalSessionReadbackConsumesScopedVerifier(t *testing.T) {
+	for _, fault := range []string{"", "canonical-drift", "physical-drift", "selected-refused"} {
+		t.Run(fault, func(t *testing.T) {
+			project, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot := reducer.DurableSnapshot{State: state.State{SchemaVersion: statever.Current, Orders: map[string]state.OrderNode{"order": {OrderID: "order", Status: state.OrderFailed, Stages: []state.StageNode{{StageIndex: 0, Runtime: "openshell", Provider: "codex", Model: "model", Status: state.StageFailed, Attempts: []state.AttemptNode{{AttemptID: "canonical-attempt", SessionID: "session", WorktreeName: "worker", Status: state.AttemptFailed}}}}}}}}
+			raw, err := json.Marshal(snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(project, "state.snapshot.json")
+			if err = os.WriteFile(path, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			custody := filepath.Join(project, "owner.json")
+			if err = os.WriteFile(custody, []byte("{}"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			ref, err := loopruntime.ReadSessionReadbackFile(custody, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			proof := &loopruntime.SessionCustodyProjection{Schema: 1, Scope: loopruntime.SelectedSessionStopped, Subject: loopruntime.SessionCustodySubject{ContextID: "context", OrderID: "order", SessionID: "session", NativeAttemptID: "native-attempt"}, Before: ref, After: ref}
+			physicalReads, verifies := 0, 0
+			physical := func(target string) (string, error) {
+				if target != filepath.Join(project, ".worktrees", "worker") {
+					t.Fatal("canonical logical worktree changed")
+				}
+				physicalReads++
+				if physicalReads == 2 && fault == "physical-drift" {
+					return "foreign", nil
+				}
+				return "original-physical", nil
+			}
+			read := func(_ context.Context, binding loopruntime.CompletedSessionBinding) (loopruntime.CompletedSessionReadback, error) {
+				if binding.OrderID != "order" || binding.SessionID != "session" || binding.StageIndex != 0 || binding.RetryCount != 0 || binding.Provider != "codex" || binding.Model != "model" {
+					t.Fatal("original canonical binding changed")
+				}
+				if err := os.WriteFile(custody, []byte("{} "), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if fault == "canonical-drift" {
+					if err := os.WriteFile(path, append(raw, ' '), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return loopruntime.CompletedSessionReadback{CustodyProjection: proof, NativeAttemptID: "native-attempt", CandidateHead: "candidate", NativePhase: "Stopped", StopAcknowledged: true, Sources: map[string]loopruntime.SessionReadbackFileRef{"native_custody": ref}}, nil
+			}
+			verify := func(e loopruntime.CompletedSessionReadback) error {
+				verifies++
+				if physicalReads != 2 || e.CustodyProjection != proof || e.Sources["canonical_snapshot"].Path != path {
+					t.Fatal("canonical wrapper lost proof or verifier ordering")
+				}
+				if fault == "selected-refused" {
+					return fmt.Errorf("original selected completion changed")
+				}
+				refs := maps.Clone(e.Sources)
+				delete(refs, "native_custody")
+				return loopruntime.VerifySessionReadbackFiles(refs)
+			}
+			result, err := readCanonicalSessionEvidence(t.Context(), project, path, "order", "session", physical, read, verify)
+			if fault != "" {
+				if err == nil {
+					t.Fatal("canonical wrapper swallowed source or qualified completion refusal")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if verifies != 1 || result.Status != "observed" || result.Execution.CustodyProjection != proof || result.AttemptID == result.Execution.NativeAttemptID || result.OrderStatus != "failed" || result.StageStatus != "failed" || result.AttemptStatus != "failed" || len(result.Effects) != 0 {
+				t.Fatal("canonical wrapper lost original result, failure history or scoped proof")
+			}
+		})
+	}
+}
+
 func (r *readbackRuntime) ReadCompletedSession(_ context.Context, b loopruntime.CompletedSessionBinding) (loopruntime.CompletedSessionReadback, error) {
 	r.calls++
 	return r.read(b)
 }
 func TestSessionReadbackKeepsCanonicalAndNativeAttemptsDistinct(t *testing.T) {
-	for _, variant := range []string{"observed", "durable", "durable-unbound", "wrong-order", "wrong-session", "duplicate", "process", "stage-location", "source-drift"} {
+	for _, variant := range []string{"observed", "durable", "durable-unbound", "wrong-order", "wrong-session", "duplicate", "process", "stage-location", "source-drift", "unqualified-projection", "custody-drift"} {
 		t.Run(variant, func(t *testing.T) {
 			project, err := filepath.EvalSymlinks(t.TempDir())
 			if err != nil {
@@ -85,7 +168,25 @@ func TestSessionReadbackKeepsCanonicalAndNativeAttemptsDistinct(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				return loopruntime.CompletedSessionReadback{NativeAttemptID: "native-attempt", CandidateHead: "candidate", Sources: map[string]loopruntime.SessionReadbackFileRef{}}, nil
+				result := loopruntime.CompletedSessionReadback{NativeAttemptID: "native-attempt", CandidateHead: "candidate", Sources: map[string]loopruntime.SessionReadbackFileRef{}}
+				if variant == "unqualified-projection" {
+					result.CustodyProjection = &loopruntime.SessionCustodyProjection{Schema: 1, Scope: loopruntime.SelectedSessionStopped}
+				}
+				if variant == "custody-drift" {
+					path := filepath.Join(runtimeDir, "owner.json")
+					if err := os.WriteFile(path, []byte("{}"), 0600); err != nil {
+						t.Fatal(err)
+					}
+					ref, err := loopruntime.ReadSessionReadbackFile(path, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					result.Sources["native_custody"] = ref
+					if err := os.WriteFile(path, []byte("{} "), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return result, nil
 			}
 			l := &Loop{projectDir: project, runtimeDir: runtimeDir, deps: Dependencies{Execution: owner, Runtimes: map[string]loopruntime.Runtime{"openshell": rt}}}
 			order, session := "order", "session"

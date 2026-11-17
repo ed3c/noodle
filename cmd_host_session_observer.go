@@ -165,8 +165,13 @@ func validateSessionObserverResources(owner *hostOwnerBinding, status hostRespon
 		return fmt.Errorf("original session Host resource identity unavailable")
 	}
 	budget := resource.Resources
-	if budget == nil || budget.Active == nil || *budget.Active != 0 || budget.Unresolved == nil || *budget.Unresolved != 0 || budget.Quota == nil || budget.Quota.Error != "" || budget.Reason == "shared_quota_unknown" || budget.Quota.Allocations <= 0 || budget.Quota.Residents <= 0 || budget.Quota.Allocations != budget.Quota.Residents {
-		return fmt.Errorf("original Host does not prove zero active workers; exact session inactivity is unknown")
+	if budget == nil || budget.Active == nil || *budget.Active < 0 || budget.Unresolved == nil || *budget.Unresolved != 0 || budget.Quota == nil || budget.Quota.Error != "" || budget.Reason == "shared_quota_unknown" {
+		return fmt.Errorf("original Host resource custody is unknown")
+	}
+	quota := budget.Quota
+	workers := quota.Allocations - quota.Residents
+	if quota.Maximum != admission.DefaultWorkerLimit || quota.Allocations <= 0 || quota.Residents <= 0 || workers < 0 || workers > quota.Maximum || *budget.Active > workers || quota.Owned <= 0 || quota.Owned > quota.Allocations {
+		return fmt.Errorf("original Host quota counts differ")
 	}
 	if resource.Residents == nil || string(resource.Residents.Error) != "null" {
 		return fmt.Errorf("original Host resident custody is unknown")
@@ -192,7 +197,17 @@ func validateSessionObserverResources(owner *hostOwnerBinding, status hostRespon
 	return nil
 }
 
-func observeHostSession(ctx context.Context, project, requestFile, orderID, sessionID string, owner *hostOwnerBinding, binary loopruntime.SessionReadbackFileRef) (result hostSessionReadback, err error) {
+type sessionObserverReads struct {
+	frame      func(context.Context, *hostOwnerBinding, string, loopruntime.OpenShellGatewaySpec) (hostSessionObserverFrame, error)
+	session    func(context.Context, string, string, string, loopruntime.OpenShellProfile, string, string) (loop.SessionReadback, error)
+	completion func(loopruntime.CompletedSessionReadback, loopruntime.OpenShellProfile, string, string, string) error
+}
+
+func observeHostSession(ctx context.Context, project, requestFile, orderID, sessionID string, owner *hostOwnerBinding, binary loopruntime.SessionReadbackFileRef) (hostSessionReadback, error) {
+	return observeHostSessionWithReads(ctx, project, requestFile, orderID, sessionID, owner, binary, sessionObserverReads{readSessionObserverFrame, loop.ReadOpenShellSessionEvidence, loopruntime.VerifyCompletedSessionReadback})
+}
+
+func observeHostSessionWithReads(ctx context.Context, project, requestFile, orderID, sessionID string, owner *hostOwnerBinding, binary loopruntime.SessionReadbackFileRef, reads sessionObserverReads) (result hostSessionReadback, err error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	result = hostSessionReadback{SchemaVersion: 2, Status: "refused", HostInstanceID: owner.Current.HostInstanceID, ContextID: owner.Current.ContextID, RequestID: owner.Current.RequestID, Sources: owner.Sources, Effects: []string{}}
@@ -248,66 +263,42 @@ func observeHostSession(ctx context.Context, project, requestFile, orderID, sess
 	if err != nil {
 		return result, err
 	}
-	var quota struct {
-		Schema int `json:"schema"`
-		Leases map[string]struct {
-			Owner    string `json:"owner"`
-			Context  string `json:"context"`
-			Resident bool   `json:"resident"`
-			Key      string `json:"resident_key"`
-		} `json:"leases"`
-	}
+	var quota sessionObserverQuota
 	result.Sources["quota"], err = loopruntime.ReadSessionReadbackFile(filepath.Join(owner.HostRoot, "quota", "quota.json"), &quota)
 	if err != nil {
 		return result, err
 	}
-	if quota.Schema != 3 || len(quota.Leases) == 0 {
-		return result, fmt.Errorf("original observer quota custody unavailable")
-	}
-	residentLease := false
-	for _, lease := range quota.Leases {
-		if !lease.Resident {
-			return result, fmt.Errorf("original Host worker lease remains; inactivity unknown")
-		}
-		residentLease = residentLease || (lease.Owner == owner.Current.HostInstanceID && lease.Key == profile.Gateway.Resident.Name)
-	}
-	if !residentLease {
-		return result, fmt.Errorf("original gateway quota lease unavailable")
-	}
-	before, err := readSessionObserverFrame(ctx, owner, requestFile, spec)
+	before, err := reads.frame(ctx, owner, requestFile, spec)
 	if err != nil {
 		return result, err
 	}
-	var resource sessionObserverResources
-	if err = json.Unmarshal(before.Resources, &resource); err != nil {
+	if err = validateSessionObserverQuota(owner, quota, before, spec); err != nil {
 		return result, err
 	}
-	if resource.Resources.Quota.Allocations != len(quota.Leases) {
-		return result, fmt.Errorf("original quota source differs from authoritative Host snapshot")
-	}
-	for _, lease := range quota.Leases {
-		if lease.Owner == owner.Current.HostInstanceID && lease.Key == profile.Gateway.Resident.Name && !(slices.Contains(before.Resident.Contexts, lease.Context) || slices.Contains(before.Resident.Released, lease.Context)) {
-			return result, fmt.Errorf("original gateway allocation context is not leased by resident")
-		}
-	}
-	observer := &hostSessionObserver{Binary: binary, ExecutionBinary: owner.ExecutionBinary, InactiveScope: "host_zero_workers", Before: before}
+	observer := &hostSessionObserver{Binary: binary, ExecutionBinary: owner.ExecutionBinary, InactiveScope: loopruntime.SelectedSessionStopped, Before: before}
 	result.Observer = observer
-	observation, err := loop.ReadOpenShellSessionEvidence(ctx, project, filepath.Join(project, ".noodle"), owner.Current.ContextID, profile, orderID, sessionID)
+	observation, err := reads.session(ctx, project, filepath.Join(project, ".noodle"), owner.Current.ContextID, profile, orderID, sessionID)
 	if err != nil {
 		return result, err
 	}
-	after, err := readSessionObserverFrame(ctx, owner, requestFile, spec)
+	after, err := reads.frame(ctx, owner, requestFile, spec)
 	if err != nil {
 		return result, err
 	}
 	observer.After = after
+	if err = validateSessionObserverQuota(owner, quota, after, spec); err != nil {
+		return result, err
+	}
 	if err = verifySessionObserverFrames(before, after); err != nil {
 		return result, err
 	}
 	if err = loopruntime.VerifySessionReadbackFiles(result.Sources); err != nil {
 		return result, err
 	}
-	if err = loopruntime.VerifySessionReadbackFiles(observation.Execution.Sources); err != nil {
+	if observation.Execution.CustodyProjection == nil {
+		return result, fmt.Errorf("original standalone completion custody proof missing")
+	}
+	if err = reads.completion(observation.Execution, profile, owner.Current.ContextID, orderID, sessionID); err != nil {
 		return result, err
 	}
 	afterRoot, rootErr := filepath.EvalSymlinks(profile.Gateway.Binding.StateRoot)
@@ -320,6 +311,63 @@ func observeHostSession(ctx context.Context, project, requestFile, orderID, sess
 	result.Status = "observed"
 	result.Observation = &observation
 	return result, nil
+}
+
+type sessionObserverQuota struct {
+	Schema  int                                  `json:"schema"`
+	Maximum int                                  `json:"maximum"`
+	Policy  string                               `json:"worker_admission_policy"`
+	Leases  map[string]sessionObserverQuotaLease `json:"leases"`
+}
+
+type sessionObserverQuotaLease struct {
+	Owner    string `json:"owner"`
+	Context  string `json:"context"`
+	Resident bool   `json:"resident"`
+	Key      string `json:"resident_key"`
+}
+
+func validateSessionObserverQuota(owner *hostOwnerBinding, quota sessionObserverQuota, frame hostSessionObserverFrame, spec loopruntime.OpenShellGatewaySpec) error {
+	if quota.Schema != 3 || quota.Policy != admission.WorkerAdmissionPolicy || quota.Maximum != admission.DefaultWorkerLimit || len(quota.Leases) == 0 {
+		return fmt.Errorf("original observer quota policy or custody unavailable")
+	}
+	residentLeases := 0
+	seenResidents := map[sessionObserverQuotaLease]bool{}
+	residents, owned := 0, 0
+	for id, lease := range quota.Leases {
+		if id == "" || lease.Owner == "" || lease.Context == "" || (lease.Resident && lease.Key == "") || (!lease.Resident && lease.Key != "") {
+			return fmt.Errorf("original observer quota lease shape differs")
+		}
+		if lease.Resident {
+			if seenResidents[lease] {
+				return fmt.Errorf("original observer resident quota lease is ambiguous")
+			}
+			seenResidents[lease] = true
+			residents++
+		}
+		if lease.Owner == owner.Current.HostInstanceID {
+			owned++
+		}
+		if lease.Resident && lease.Owner == owner.Current.HostInstanceID && lease.Key == spec.Resident.Name {
+			if !(slices.Contains(frame.Resident.Contexts, lease.Context) || slices.Contains(frame.Resident.Released, lease.Context)) {
+				return fmt.Errorf("original gateway allocation context is not leased by resident")
+			}
+			// A shared resident retains its creator's allocation when contexts join.
+			residentLeases++
+		}
+	}
+	var resource sessionObserverResources
+	if err := json.Unmarshal(frame.Resources, &resource); err != nil {
+		return err
+	}
+	if resource.Resources == nil || resource.Resources.Quota == nil {
+		return fmt.Errorf("original quota authoritative Host snapshot missing")
+	}
+	snapshot := resource.Resources.Quota
+	if residentLeases != 1 || len(quota.Leases)-residents > quota.Maximum || snapshot.Maximum != quota.Maximum || snapshot.Allocations != len(quota.Leases) || snapshot.Residents != residents || snapshot.Owned != owned || snapshot.Error != "" {
+		return fmt.Errorf("original quota source differs from authoritative Host snapshot or own context lease")
+	}
+	return nil
 }
 
 func verifySessionObserverFrames(before, after hostSessionObserverFrame) error {
