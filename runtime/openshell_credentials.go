@@ -211,7 +211,11 @@ func (o *OpenShellGateway) startCredentials() error {
 		return nil
 	}
 	if o.credentialClient == nil {
-		conn, err := newOpenShellConnection(o.spec.CredentialSource.Gateway, o.spec.CredentialSource.TLS)
+		security := o.spec.CredentialSource.TLS
+		if o.credentialTLS != nil {
+			security = *o.credentialTLS
+		}
+		conn, err := newOpenShellConnection(o.spec.CredentialSource.Gateway, security)
 		if err != nil {
 			return fmt.Errorf("openshell credential source transport unavailable")
 		}
