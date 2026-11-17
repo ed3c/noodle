@@ -18,6 +18,18 @@ type MergeOpts struct {
 
 // Merge rebases the worktree branch onto a target branch, merges, and cleans up.
 func (a *App) Merge(name string, opts ...MergeOpts) error {
+	return a.merge(name, true, opts...)
+}
+
+// ContinueBoundGitOnly retains the reviewed worktree and never installs dependencies.
+func (a *App) ContinueBoundGitOnly(name, head, tree string) error {
+	if head == "" || tree == "" {
+		return fmt.Errorf("original reviewed HEAD and tree are required")
+	}
+	return a.merge(name, false, MergeOpts{ExpectedHead: head, ExpectedTree: tree, RetainWorktree: true})
+}
+
+func (a *App) merge(name string, install bool, opts ...MergeOpts) error {
 	var o MergeOpts
 	if len(opts) > 0 {
 		o = opts[0]
@@ -152,7 +164,9 @@ func (a *App) Merge(name string, opts ...MergeOpts) error {
 		}
 	}
 
-	a.installDeps(a.Root)
+	if install {
+		a.installDeps(a.Root)
+	}
 	for _, warning := range warnings {
 		a.warnf("WARNING: %s\n", warning)
 	}

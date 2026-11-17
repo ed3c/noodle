@@ -91,6 +91,10 @@ func Commands() []Command {
 			}},
 		}},
 		{Name: "review", Short: "Inspect or reject one exact stopped completed review", Subcommands: []Command{
+			{Name: "prepare-stopped-local-merge", Short: "Capture the original completed execution and one refused local merge effect"},
+			{Name: "inspect-stopped-local-merge", Short: "Read the original same-effect continuation without replay"},
+			{Name: "detach-stopped-local-merge", Short: "Release only the original Context through its original Host"},
+			{Name: "continue-stopped-local-merge", Short: "Continue one positively detached original Git merge effect"},
 			{Name: "inspect", Short: "Read stopped review custody and exact continuation"},
 			{Name: "reject", Short: "Archive and reject unchanged stopped review custody"},
 			{Name: "prepare-local-completion-recovery", Short: "Bind retained terminal local-task work for review recovery"},
