@@ -69,6 +69,14 @@ func (m *Monitor) RunOnce(ctx context.Context) ([]SessionMeta, error) {
 		}
 
 		meta := DeriveSessionMeta(sessionID, observation, claims, previous, now)
+		if !meta.Alive && !meta.ExitPending && (meta.Status == SessionStatusExited || meta.Status == SessionStatusFailed) {
+			stable := meta
+			stable.UpdatedAt, stable.IdleSeconds = previous.UpdatedAt, previous.IdleSeconds
+			if stable == previous {
+				metas = append(metas, previous)
+				continue
+			}
+		}
 		if err := writeSessionMeta(sessionMetaPath(m.runtimeDir, sessionID), meta); err != nil {
 			return nil, fmt.Errorf("write meta for %s: %w", sessionID, err)
 		}
