@@ -5,11 +5,95 @@ import (
 	"encoding/json"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"github.com/BurntSushi/toml"
 )
+
+func TestGoalOpenShellProfileNativeGatewayMetadata(t *testing.T) {
+	template := goalProfileFixture(t)
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := MaterializeGoalOpenShellProfile(template, root, "127.0.0.1:12345")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := LoadOpenShellProfile(receipt.Profile.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(root, "openshell", "client")
+	filename := filepath.Join(config, "openshell", "gateways", profile.GatewayName, "metadata.json")
+	raw, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if string(metadata["is_remote"]) != "false" || string(metadata["gateway_port"]) != "12345" {
+		t.Fatalf("native gateway metadata omits its local type or selected port: %s", raw)
+	}
+	t.Run("native-cli", func(t *testing.T) {
+		cli := os.Getenv("NOODLE_TEST_OPENSHELL_CLI")
+		if cli == "" {
+			t.Skip("set NOODLE_TEST_OPENSHELL_CLI to the selected native executable")
+		}
+		list := func() bool {
+			t.Helper()
+			cmd := exec.Command(cli, "gateway", "list", "-o", "json")
+			cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+config)
+			out, err := cmd.Output()
+			if err != nil {
+				t.Fatalf("native gateway list: %v", err)
+			}
+			var gateways []struct {
+				Name     string `json:"name"`
+				Endpoint string `json:"endpoint"`
+				Remote   bool   `json:"is_remote"`
+			}
+			if err := json.Unmarshal(out, &gateways); err != nil {
+				t.Fatalf("native gateway list output: %v: %s", err, out)
+			}
+			for _, gateway := range gateways {
+				if gateway.Name == profile.GatewayName {
+					if gateway.Endpoint != receipt.Gateway || gateway.Remote {
+						t.Fatalf("native gateway selection differs: %+v", gateway)
+					}
+					return true
+				}
+			}
+			return false
+		}
+		if !list() {
+			t.Fatal("native CLI did not recognize the generated gateway")
+		}
+		for _, test := range []struct{ key, value string }{{"is_remote", ""}, {"gateway_port", ""}, {"is_remote", `"false"`}, {"gateway_port", `"12345"`}} {
+			value := metadata[test.key]
+			if test.value == "" {
+				delete(metadata, test.key)
+			} else {
+				metadata[test.key] = json.RawMessage(test.value)
+			}
+			invalid, err := json.Marshal(metadata)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filename, invalid, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if list() {
+				t.Fatalf("native CLI accepted invalid %s=%q", test.key, test.value)
+			}
+			metadata[test.key] = value
+		}
+	})
+}
 
 func goalProfileFixture(t *testing.T) string {
 	t.Helper()
