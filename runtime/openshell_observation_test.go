@@ -435,3 +435,65 @@ func TestOpenShellCommandDigestBindsEveryField(t *testing.T) {
 		t.Fatal("equivalent environment map changed digest")
 	}
 }
+
+func TestOpenShellObserveNotStartedRejectsIntentsAndNativeDrift(t *testing.T) {
+	for _, kind := range []string{"valid", "exec-intent", "progress-intent", "stop-ack", "stop-pending", "stopped-history", "worker-result", "duplicate", "missing", "id", "spec", "workspace", "main", "phase"} {
+		t.Run(kind, func(t *testing.T) {
+			g, c, b, id := completedObservationFixture(t)
+			c.mu.Lock()
+			row := &c.state.Records[0]
+			row.Exec = nil
+			row.Worker.ExecResult = OpenShellExecResult{}
+			gets := 0
+			switch kind {
+			case "exec-intent":
+				row.Exec = &OpenShellCustodyExec{AttemptID: "unacknowledged"}
+			case "progress-intent":
+				row.ProgressStop = &OpenShellCustodyExec{AttemptID: "unacknowledged"}
+			case "stop-ack":
+				row.StopAcknowledged = false
+			case "stop-pending":
+				row.Worker.StopPending = true
+			case "stopped-history":
+				row.Stopped = nil
+			case "worker-result":
+				row.Worker.ExecResult.StartAttempted = true
+			case "duplicate":
+				c.state.Records = append(c.state.Records, *row)
+			default:
+				gets = 1
+			}
+			if err := c.save(); err != nil {
+				t.Fatal(err)
+			}
+			c.mu.Unlock()
+			g.mutate(func() {
+				s := g.sandboxes[id.SandboxName]
+				switch kind {
+				case "missing":
+					delete(g.sandboxes, id.SandboxName)
+				case "id":
+					s.Metadata.Id = "foreign"
+				case "spec":
+					s.Spec.Command = []string{"foreign"}
+				case "workspace":
+					s.Metadata.Workspace = "foreign"
+				case "main":
+					s.Status.MainProcessInstanceId = "foreign"
+				case "phase":
+					s.Status.Phase = pb.SandboxPhase_SANDBOX_PHASE_READY
+				}
+			})
+			before := beforeObservation(t, g, c, b)
+			got, err := c.observeSettled(t.Context(), id, notStartedObservation)
+			if kind == "valid" {
+				if err != nil || got.CommandSHA256 != "" || got.ExecRequestID != "" || !got.StopAcknowledged {
+					t.Fatalf("pre-exec observation: %+v %v", got, err)
+				}
+			} else if err == nil {
+				t.Fatal("unresolved execution or native drift accepted")
+			}
+			assertObservationReadOnly(t, g, c, b, before, gets)
+		})
+	}
+}

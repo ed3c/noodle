@@ -275,3 +275,112 @@ func TestSavedProgressQueueRevalidatesBeforeDispatchAndOfferIsOneShot(t *testing
 		})
 	}
 }
+
+func notStartedProgressFixture(t *testing.T) (*Loop, string, string, *savedRuntime) {
+	t.Helper()
+	l, order, session, rt := savedProgressFixture(t)
+	manifest := filepath.Join(l.projectDir, "frozen-manifest.json")
+	requestChangesWrite(t, manifest, []byte("prepared manifest"))
+	ref, err := loopruntime.ReadSessionReadbackFile(manifest, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := l.canonical.Orders[order]
+	node.Stages[0].Attempts[0].Status = state.AttemptFailed
+	node.Stages[0].Prompt = strings.ReplaceAll(node.Stages[0].Prompt, strings.Repeat("a", 64), ref.SHA256)
+	l.canonical.Orders[order] = node
+	dir := filepath.Join(l.runtimeDir, "sessions", session)
+	recoveryWriteJSON(t, filepath.Join(dir, "spawn.json"), map[string]any{"instruction_bundle": &dispatcher.InstructionBundleRef{Path: manifest, SHA256: ref.SHA256}, "reasoning_level": "high", "skill": "local-task"})
+	stage := node.Stages[0]
+	requestChangesWrite(t, filepath.Join(dir, "prompt.txt"), []byte(buildCookPrompt(order, Stage{TaskKey: stage.TaskKey, Prompt: stage.Prompt, Skill: stage.Skill, Provider: stage.Provider, Model: stage.Model, Runtime: stage.Runtime, ExtraPrompt: stage.ExtraPrompt}, node.Plan, node.Title, node.Rationale, "")))
+	if err := l.persistCanonicalCheckpoint(); err != nil {
+		t.Fatal(err)
+	}
+	original := rt.saved
+	rt.saved = func(b loopruntime.CompletedSessionBinding) (loopruntime.SavedProgressReadback, error) {
+		e, err := original(b)
+		e.Status = "not_started"
+		e.OutcomeStatus = loopruntime.StatusFailed
+		e.BaselineHead = "original-baseline"
+		e.OriginalError = "original upload failure"
+		e.ProgressHead = ""
+		e.CommandSHA256 = ""
+		e.PreparedManifest = &ref
+		e.Sources["instruction_manifest"] = ref
+		e.Instructions = nil
+		return e, err
+	}
+	return l, order, session, rt
+}
+
+func TestNotStartedInspectionCannotQueueOrDispatch(t *testing.T) {
+	l, order, session, rt := notStartedProgressFixture(t)
+	before := recoveryRead(t, l.canonicalSnapshotPath())
+	got, err := l.InspectSavedProgress(t.Context(), order, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "not_started" || got.NativeResumeSupported || got.Execution.ProgressHead != "" || got.Execution.CommandSHA256 != "" || got.Execution.Instructions != nil || len(got.Effects) != 0 {
+		t.Fatalf("observation escalated authority: %+v", got)
+	}
+	if _, err = l.QueueSavedProgressAttempt(t.Context(), order, session, got.Version); err == nil {
+		t.Fatal("pre-exec observation queued a new attempt")
+	}
+	if err = l.controlRetrySavedProgress(ControlCommand{ID: "saved-progress-" + got.Version, Action: "retry-saved-progress", OrderID: order, Name: session, Value: got.Version}); err == nil {
+		t.Fatal("pre-exec observation dispatched a new attempt")
+	}
+	path, _, _ := l.controlPaths()
+	if _, err = os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("pre-exec observation wrote control queue")
+	}
+	if len(rt.mockRuntime.calls) != 0 || string(before) != string(recoveryRead(t, l.canonicalSnapshotPath())) {
+		t.Fatal("pre-exec observation changed canonical history or dispatched")
+	}
+}
+
+func TestNotStartedInspectionRejectsChangedCanonicalInputs(t *testing.T) {
+	for _, kind := range []string{"prompt", "effort", "bundle", "duplicate-session", "manifest-source", "missing-error", "invented-progress", "invented-command", "completed-instructions"} {
+		t.Run(kind, func(t *testing.T) {
+			l, order, session, rt := notStartedProgressFixture(t)
+			node := l.canonical.Orders[order]
+			switch kind {
+			case "prompt":
+				node.Stages[0].Prompt = strings.ReplaceAll(node.Stages[0].Prompt, "fix candidate", "different task")
+			case "effort":
+				node.Stages[0].Prompt = strings.ReplaceAll(node.Stages[0].Prompt, "high", "low")
+			case "bundle":
+				node.Stages[0].Prompt = strings.ReplaceAll(node.Stages[0].Prompt, "\"sha256\":\"", "\"sha256\":\"0")
+			case "duplicate-session":
+				node.Stages[0].Attempts = append(node.Stages[0].Attempts, node.Stages[0].Attempts[0])
+			default:
+				original := rt.saved
+				rt.saved = func(b loopruntime.CompletedSessionBinding) (loopruntime.SavedProgressReadback, error) {
+					e, err := original(b)
+					switch kind {
+					case "manifest-source":
+						requestChangesWrite(t, e.PreparedManifest.Path, []byte("drifted"))
+					case "missing-error":
+						e.OriginalError = ""
+					case "invented-progress":
+						e.ProgressHead = "invented"
+					case "invented-command":
+						e.CommandSHA256 = strings.Repeat("f", 64)
+					case "completed-instructions":
+						e.Instructions = &loopruntime.CompletedInstructionEvidence{Manifest: *e.PreparedManifest}
+					}
+					return e, err
+				}
+			}
+			l.canonical.Orders[order] = node
+			if err := l.persistCanonicalCheckpoint(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := l.InspectSavedProgress(t.Context(), order, session); err == nil {
+				t.Fatal("changed pre-exec input accepted")
+			}
+			if len(rt.mockRuntime.calls) != 0 {
+				t.Fatal("inspection dispatched")
+			}
+		})
+	}
+}
