@@ -153,8 +153,25 @@ func GoalResourceBudgetBaseline(p OpenShellProfile, original OpenShellProfile, h
 	if receipt.Template.Path != original.SourcePath || receipt.TemplatePolicySHA256 != original.SourceSHA256 || cfg.Budget.Memory != int64(hardware.TotalMemoryBytes>>20) || cfg.Budget.CPUs != int64(hardware.CPUs) {
 		return 0, false, nil
 	}
+	if receipt.Profile != (SessionReadbackFileRef{Path: p.SourcePath, SHA256: p.sourceFiles[p.SourcePath]}) || receipt.Template != (SessionReadbackFileRef{Path: original.SourcePath, SHA256: original.sourceFiles[original.SourcePath]}) {
+		return 0, false, errors.New("original resource publication FileRef differs")
+	}
 	if cfg.Budget.Swap < 0 {
 		return 0, false, errors.New("original native swap baseline invalid")
+	}
+	hardware.SwapUsedBytes = uint64(cfg.Budget.Swap)
+	expected, err := conservativeGoalResourceBudget(original, hardware, cfg.Budget.Class)
+	if err != nil {
+		return 0, false, err
+	}
+	var actual map[string]any
+	if err = readOpenShellResourcePolicy(p, &actual); err != nil {
+		return 0, false, err
+	}
+	for key, policy := range expected {
+		if !reflect.DeepEqual(actual[key], policy) {
+			return 0, false, errors.New("original resource publication policy semantics differ")
+		}
 	}
 	return uint64(cfg.Budget.Swap), true, nil
 }

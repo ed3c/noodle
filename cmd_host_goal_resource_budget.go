@@ -57,6 +57,7 @@ func prepareBudgetedGoalHostTemplate(ctx context.Context, path, profile, class s
 		return empty, err
 	}
 	defer publication.Close()
+	registeredBaseline := false
 	// The original registered template fixes the first observed stock. A
 	// second class uses that same policy; retries cannot ratchet it upward.
 	if raw, readErr := os.ReadFile(path); readErr == nil {
@@ -81,6 +82,7 @@ func prepareBudgetedGoalHostTemplate(ctx context.Context, path, profile, class s
 		}
 		if ok {
 			hardware.SwapUsedBytes = baseline
+			registeredBaseline = true
 		}
 	} else if !os.IsNotExist(readErr) {
 		return empty, readErr
@@ -91,6 +93,46 @@ func prepareBudgetedGoalHostTemplate(ctx context.Context, path, profile, class s
 		Memory        uint64
 		CPUs          int
 	}{class, original.SourceSHA256, hardware.TotalMemoryBytes, hardware.CPUs})
+	if err != nil {
+		return empty, err
+	}
+	legacyRoot := filepath.Join(filepath.Dir(path), "resource-templates", hostDigest(identity))
+	if _, readErr := os.Lstat(legacyRoot); readErr == nil {
+		if resolved, e := filepath.EvalSymlinks(legacyRoot); e != nil || resolved != legacyRoot {
+			return empty, errors.New("original resource template publication is aliased")
+		}
+		prior, e := loopruntime.LoadOpenShellProfile(filepath.Join(legacyRoot, "openshell", "profile.json"))
+		if e != nil {
+			return empty, fmt.Errorf("original resource template publication unavailable: %w", e)
+		}
+		priorClass, e := loopruntime.OpenShellResourceBudgetClass(prior)
+		if e != nil {
+			return empty, fmt.Errorf("original resource template publication class unavailable: %w", e)
+		}
+		if priorClass != class {
+			return empty, errors.New("original resource template publication class differs")
+		}
+		baseline, ok, e := loopruntime.GoalResourceBudgetBaseline(prior, original, hardware)
+		if e != nil {
+			return empty, fmt.Errorf("original resource template publication binding differs: %w", e)
+		}
+		if !ok {
+			return empty, errors.New("original resource template publication class, source or hardware differs")
+		}
+		if registeredBaseline && hardware.SwapUsedBytes != baseline {
+			return empty, errors.New("original registered and prepared resource publication baselines conflict")
+		}
+		hardware.SwapUsedBytes = baseline
+	} else if !os.IsNotExist(readErr) {
+		return empty, readErr
+	}
+	// The native input format changed, not the policy or any existing claim.
+	// Keep the legacy publication and its first stock intact; future builds use
+	// this same format key instead of creating one cache per binary revision.
+	identity, err = json.Marshal(struct {
+		Format   string
+		Identity json.RawMessage
+	}{"native-dual-config-v1", identity})
 	if err != nil {
 		return empty, err
 	}
