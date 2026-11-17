@@ -156,6 +156,7 @@ func newHostCmd(app *App) *cobra.Command {
 	cmd.AddCommand(newHostRestrictedCmd())
 	cmd.AddCommand(newHostRebuildCmd())
 	cmd.AddCommand(newHostCleanupCmd(app))
+	cmd.AddCommand(newHostEmptyRetirementCmd())
 	cmd.AddCommand(newHostRecoverCmd(app))
 	cmd.AddCommand(newHostViewsCmd())
 	cmd.AddCommand(newHostContextsCmd())

@@ -280,6 +280,53 @@ func TestHostGoalFaultReplacementAndExplicitSelectionAreIdempotent(t *testing.T)
 	}
 }
 
+func TestHostGoalRetiredSelectionRequiresDifferentOriginalOperation(t *testing.T) {
+	root, goal, template, binary := goalHostFixture(t)
+	f := &goalHostFixtureServer{blocked: map[string]bool{}}
+	launch := f.launch(t)
+	first, err := ensureFixtureGoalHost(t.Context(), root, goal, template, binary, "", launch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goalRef, err := loopruntime.ReadSessionReadbackFile(goal, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectionPath := filepath.Join(root, "goals", hostDigest([]byte(goalRef.Path+"\x00"+goalRef.SHA256))+".json")
+	var selected goalHostSelection
+	if _, err = loopruntime.ReadSessionReadbackFile(selectionPath, &selected); err != nil {
+		t.Fatal(err)
+	}
+	selected.Phase = "retired"
+	if err = saveGoalHostSelection(selectionPath, selected); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(selectionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = ensureFixtureGoalHost(t.Context(), root, goal, "", binary, "", launch); err == nil || f.launches != 1 {
+		t.Fatalf("retired original selection recreated: launches=%d err=%v", f.launches, err)
+	}
+	if after, err := os.ReadFile(selectionPath); err != nil || !bytes.Equal(before, after) {
+		t.Fatal("refused retired selection changed", err)
+	}
+	operation := filepath.Join(root, "next-operation.json")
+	if err = os.WriteFile(operation, []byte(`{"new_host":"fresh original operation"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	next, err := ensureFixtureGoalHost(t.Context(), root, goal, template, binary, operation, launch)
+	if err != nil || next.Status != "ready" || next.HostRoot == first.HostRoot || f.launches != 2 {
+		t.Fatalf("fresh operation did not select a new Host: %+v launches=%d err=%v", next, f.launches, err)
+	}
+	if _, err = loopruntime.ReadSessionReadbackFile(selectionPath, &selected); err != nil || len(selected.Previous) != 1 || selected.Previous[0].Root != first.HostRoot || selected.Previous[0].Phase != "retired" {
+		t.Fatal("original retired selection history was lost", err)
+	}
+	if again, err := ensureFixtureGoalHost(t.Context(), root, goal, "", binary, operation, launch); err != nil || again.HostRoot != next.HostRoot || f.launches != 2 {
+		t.Fatalf("same new operation replayed: %+v launches=%d err=%v", again, f.launches, err)
+	}
+}
+
 func TestHostGoalUnknownCreationAndLegacyReadbackDoNotReplay(t *testing.T) {
 	root, goal, template, binary := goalHostFixture(t)
 	launches := 0

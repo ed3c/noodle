@@ -240,7 +240,7 @@ func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOp
 				}
 			}
 			if !historical {
-				if selected.Phase != "ready" {
+				if selected.Phase != "ready" && selected.Phase != "retired" {
 					return fail(errors.New("original Host creation is unresolved; new selection refused"))
 				}
 				previous := selected

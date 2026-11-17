@@ -89,6 +89,7 @@ type MachineSnapshot struct {
 }
 
 type machineLease struct {
+	EmptyRetirement *EmptyResidentRetirementFence `json:"empty_host_retirement,omitempty"`
 	Preparation *machinePreparation `json:"preparation,omitempty"`
 	PreparationPromoted bool `json:"preparation_promoted,omitempty"`
 	PreparationClosed map[string]MachineSettlementFile `json:"preparation_closed,omitempty"`
