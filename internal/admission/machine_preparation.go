@@ -73,6 +73,9 @@ func (b *Budget) CancelUnstartedPreparation(ref PreparationRef) error {
 	}
 	return b.machine.access(false, func(state *machineState) (bool, error) {
 		lease, exists := state.Leases[ref.ID]
+		if err := refuseManagedSwitchCancellation(state, ref); err != nil {
+			return false, err
+		}
 		if !exists || lease.Owner != b.machine.owner || lease.Preparation == nil || lease.Preparation.SHA256 != ref.SHA256 || lease.EffectsPossible {
 			return false, errors.New("original preparation cannot be proved unstarted")
 		}
@@ -107,6 +110,9 @@ func preparationBinding(source PreparationSource, claim ResourceClaim) (*machine
 }
 
 func validateMachinePreparation(lease machineLease) error {
+	if err := validateManagedResidentSwitch(lease); err != nil {
+		return err
+	}
 	if err := validateEmptyResidentRetirement(lease); err != nil {
 		return err
 	}
@@ -194,6 +200,9 @@ func (b *Budget) BindPreparation(ref PreparationRef, contextID, orderID, runtime
 		lease, exists := state.Leases[ref.ID]
 		if !exists || lease.Preparation == nil || lease.Preparation.SHA256 != ref.SHA256 || lease.Preparation.Source.Purpose != "task-preparation" || !lease.EffectsPossible || lease.Settlement != nil {
 			return false, errors.New("original task preparation missing or unresolved")
+		}
+		if err := refuseManagedSwitchSource(state, lease.Preparation.Source); err != nil {
+			return false, err
 		}
 		if lease.ContextID != "" {
 			if lease.Owner != b.machine.owner || lease.ContextID != contextID || lease.OrderID != orderID || lease.Runtime != runtime {
@@ -394,6 +403,14 @@ func (b *Budget) StartPreparationEffects(ref PreparationRef) error {
 		lease, exists := state.Leases[ref.ID]
 		if !exists || lease.Owner != b.machine.owner || lease.Preparation == nil || lease.Preparation.SHA256 != ref.SHA256 || lease.ContextID != "" || lease.Settlement != nil || lease.PreparationClosed != nil {
 			return false, errors.New("original machine preparation effect owner differs")
+		}
+		if err := refuseManagedSwitchSource(state, lease.Preparation.Source); err != nil {
+			return false, err
+		}
+		for _, old := range state.Leases {
+			if old.ManagedSwitch != nil && old.ManagedSwitch.Preparation == ref && old.PreparationClosed == nil {
+				return false, errors.New("original managed predecessor exit is not closed")
+			}
 		}
 		if lease.EffectsPossible {
 			return false, nil

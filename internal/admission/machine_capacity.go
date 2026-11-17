@@ -89,6 +89,7 @@ type MachineSnapshot struct {
 }
 
 type machineLease struct {
+	ManagedSwitch *ManagedResidentSwitchFence `json:"managed_host_switch,omitempty"`
 	EmptyRetirement *EmptyResidentRetirementFence `json:"empty_host_retirement,omitempty"`
 	Preparation *machinePreparation `json:"preparation,omitempty"`
 	PreparationPromoted bool `json:"preparation_promoted,omitempty"`

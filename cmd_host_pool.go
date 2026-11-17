@@ -34,6 +34,7 @@ type hostGeneration struct {
 	Error         string                              `json:"error,omitempty"`
 }
 type hostVersionRequest struct {
+	Managed          *managedHostSwitch `json:"managed_switch,omitempty"`
 	unknown          map[string]json.RawMessage
 	MaintenanceState string `json:"maintenance_previous_state,omitempty"`
 	ID               string `json:"id"`
@@ -252,6 +253,23 @@ func launchHostGenerationWithSource(ctx context.Context, root, binary, digest st
 			return errors.New("two Host generations already exist")
 		}
 		p.Generations[id] = g
+		if request, ok := ctx.Value(managedSwitchLaunchKey{}).(string); ok {
+			found := false
+			for i := range p.Queue {
+				q := &p.Queue[i]
+				if q.ID != request {
+					continue
+				}
+				if q.State != "starting" || q.Generation != "" || q.Managed == nil || q.Managed.Preparation != preparation || q.Binary != binary || q.SHA != digest || p.Active != "" {
+					return errors.New("original managed launch intent changed; no replay")
+				}
+				q.Generation = id
+				found = true
+			}
+			if !found {
+				return errors.New("original managed launch queue missing")
+			}
+		}
 		return nil
 	}); err != nil {
 		return g, err

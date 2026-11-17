@@ -158,6 +158,10 @@ func emptyRetirementPool(root string, selected goalHostSelection) (hostPool, hos
 }
 
 func emptyRetirementResources(ctx context.Context, root string, generation hostGeneration, native emptyHostRetirementNative) (json.RawMessage, procx.NativeIdentity, error) {
+	return residentRetirementResources(ctx, root, generation, native, false)
+}
+
+func residentRetirementResources(ctx context.Context, root string, generation hostGeneration, native emptyHostRetirementNative, completed bool) (json.RawMessage, procx.NativeIdentity, error) {
 	raw, err := native.rpc(ctx, generation.Directory, hostRequest{Operation: "resources"})
 	if err != nil {
 		return raw, procx.NativeIdentity{}, err
@@ -186,8 +190,18 @@ func emptyRetirementResources(ctx context.Context, root string, generation hostG
 	if err = json.Unmarshal(raw, &observed); err != nil {
 		return raw, procx.NativeIdentity{}, err
 	}
-	if observed.Protocol != hostProtocol || observed.Root != root || observed.Dir != generation.Directory || observed.PID != generation.Process.PID || observed.Instance != generation.ID || observed.Binary != generation.Binary || observed.SHA != generation.SHA || observed.Contexts == nil || *observed.Contexts != 0 || observed.Rolling != 1 || observed.RollingError != "" || len(observed.Source) != 0 || observed.Shutdown == nil || observed.Shutdown.Requested == nil || *observed.Shutdown.Requested || observed.Residents == nil || observed.Residents.Error != nil || observed.Residents.Records == nil || len(observed.Residents.Records) != 0 || observed.Resources == nil {
+	if observed.Protocol != hostProtocol || observed.Root != root || observed.Dir != generation.Directory || observed.PID != generation.Process.PID || observed.Instance != generation.ID || observed.Binary != generation.Binary || observed.SHA != generation.SHA || observed.Contexts == nil || *observed.Contexts != 0 || observed.Rolling != 1 || observed.RollingError != "" || len(observed.Source) != 0 || observed.Shutdown == nil || observed.Shutdown.Requested == nil || *observed.Shutdown.Requested || observed.Residents == nil || observed.Residents.Error != nil || observed.Residents.Records == nil || !completed && len(observed.Residents.Records) != 0 || observed.Resources == nil {
 		return raw, procx.NativeIdentity{}, errors.New("original empty Host resources are foreign, busy or unknown")
+	}
+	for _, resident := range observed.Residents.Records {
+		if resident.State != "exited" || len(resident.Contexts) != 0 {
+			return raw, procx.NativeIdentity{}, errors.New("original resident effects or consumers unresolved")
+		}
+		for _, consumer := range resident.ConsumerLeases {
+			if consumer.State != "released" {
+				return raw, procx.NativeIdentity{}, errors.New("original resident consumer lease unresolved")
+			}
+		}
 	}
 	resources := observed.Resources
 	if resources.Allocations != 0 || resources.Active != 0 || resources.Residents != 0 || resources.UnresolvedResidents != 0 || resources.OwnedAllocations != 0 || resources.SharedQuota == nil || resources.SharedQuota.Error != "" || resources.SharedQuota.Allocations != 0 || resources.SharedQuota.Maximum != admission.DefaultWorkerLimit {

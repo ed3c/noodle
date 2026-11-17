@@ -34,6 +34,9 @@ func validateEmptyResidentRetirement(lease machineLease) error {
 }
 
 func refuseRetiredPreparationHost(state *machineState, source PreparationSource) error {
+	if err := refuseManagedSwitchSource(state, source); err != nil {
+		return err
+	}
 	root := source.Bindings["host_root"]
 	if root == "" {
 		return nil

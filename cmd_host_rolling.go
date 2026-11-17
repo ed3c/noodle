@@ -112,6 +112,12 @@ func newHostRollingCmd() *cobra.Command {
 		if bootstrap {
 			return bootstrapLegacyHost(cmd.Context(), root, binary, digest, requestFiles, json.NewEncoder(cmd.OutOrStdout()))
 		}
+		if result, managed, switchErr := switchManagedHost(cmd.Context(), root, binary, digest, nativeManagedHostSwitch()); managed {
+			if encodeErr := json.NewEncoder(cmd.OutOrStdout()).Encode(result); encodeErr != nil {
+				return encodeErr
+			}
+			return switchErr
+		}
 		if waiting := maintenanceWaitResponse(root); waiting != nil {
 			return errors.New(waiting.Error)
 		}
