@@ -4,6 +4,7 @@ package loop
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,9 +40,9 @@ func checkWorkerGroupAdmission(t *testing.T, stop string, warning bool) {
 	})
 	rt := loopruntime.NewProcessRuntime(d, runtimeDir, 1)
 	capacity := rt.(interface{ CapacityAvailable() bool })
-	l := &Loop{projectDir: root, runtimeDir: runtimeDir, deps: Dependencies{Runtimes: map[string]loopruntime.Runtime{"process": rt}}}
+	l := &Loop{projectDir: root, runtimeDir: runtimeDir, logger: slog.Default(), deps: Dependencies{Runtimes: map[string]loopruntime.Runtime{"process": rt}}}
 	b := resourceBudget(l, 1)
-	orderID := ""
+	orderID := "group-fixture"
 	if warning {
 		orderID = "selected-task"
 		now := time.Now()
@@ -52,13 +53,27 @@ func checkWorkerGroupAdmission(t *testing.T, stop string, warning bool) {
 		healthyResourceBudget(b)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	var session loopruntime.SessionHandle
+	t.Cleanup(func() {
+		cancel()
+		if session == nil {
+			return
+		}
+		if err := session.ForceKill(); err != nil {
+			t.Error(err)
+		}
+		select {
+		case <-session.Done():
+		case <-time.After(3 * time.Second):
+			t.Error("isolated worker session did not finish before fixture cleanup")
+		}
+	})
 	err := l.withAdmission(ctx, "process", orderID, func(ctx context.Context) error {
 		var err error
 		session, _, err = l.dispatchSession(ctx, loopruntime.DispatchRequest{
 			Name: "group-fixture", Prompt: "fixture", Provider: "codex", Model: "fixture",
 			Runtime: "process", WorktreePath: root, AllowPrimaryCheckout: true,
+			EnvVars: map[string]string{"NOODLE_ORDER_ID": orderID, "NOODLE_STAGE_INDEX": "0"},
 		})
 		return err
 	})
@@ -66,11 +81,6 @@ func checkWorkerGroupAdmission(t *testing.T, stop string, warning bool) {
 		t.Fatal(err)
 	}
 	child := 0
-	t.Cleanup(func() {
-		if child > 0 {
-			_ = syscall.Kill(child, syscall.SIGKILL)
-		}
-	})
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		data, _ := os.ReadFile(filepath.Join(root, "child.pid"))
