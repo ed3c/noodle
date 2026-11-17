@@ -176,7 +176,7 @@ func TestTemplatePairingRefusesPartialForeignTamperedOrWritableSources(t *testin
 	if got, err := PairGoalOpenShellTemplate(t.Context(), "", template, "", ""); err != nil || got != template {
 		t.Fatal("legacy NOOP changed", got, err)
 	}
-	for _, variant := range []string{"missing", "foreign-role", "binary-drift", "writable-payload", "unknown-source", "old-policy", "wrong-platform", "duplicate-manifest"} {
+	for _, variant := range []string{"missing", "foreign-role", "binary-drift", "writable-payload", "unknown-source", "old-policy", "wrong-platform", "duplicate-manifest", "relative-manifest"} {
 		t.Run(variant, func(t *testing.T) {
 			gateway, guest := native, progress
 			raw, err := os.ReadFile(progress)
@@ -190,6 +190,15 @@ func TestTemplatePairingRefusesPartialForeignTamperedOrWritableSources(t *testin
 			switch variant {
 			case "missing":
 				guest = ""
+			case "relative-manifest":
+				cwd, err := os.Getwd()
+				if err != nil {
+					t.Fatal(err)
+				}
+				guest, err = filepath.Rel(cwd, progress)
+				if err != nil {
+					t.Fatal(err)
+				}
 			case "foreign-role":
 				gateway = progress
 			case "binary-drift":
