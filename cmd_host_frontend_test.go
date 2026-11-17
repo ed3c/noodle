@@ -71,6 +71,7 @@ func TestNativeFrontendPinsCapabilitiesAndRunningWorker(t *testing.T) {
 		{[]string{"host", "task", "capabilities"}, false, "ORIGINAL_BINARY"},
 		{[]string{"host", "task", "review-capabilities"}, false, "ORIGINAL_BINARY"},
 		{[]string{"host", "task", "session-readback"}, false, "ORIGINAL_BINARY"},
+		{[]string{"host", "task", "source-auth-plan"}, false, "ORIGINAL_BINARY"},
 		{[]string{"version"}, false, "SELECTED_BINARY"},
 		{[]string{"version"}, true, "ORIGINAL_BINARY"},
 	} {

@@ -246,6 +246,19 @@ noodle --project-dir /path/to/control host task new-attempt \
 
 `new-attempt` 將該版本送入原 Loop control queue。`status=queued` 僅表示排隊，並不表示 worker 已開始、候選已接受或資源條件已允許派工；後續仍由原 Loop 重新驗證版本並經既有 admission。ACK 遺失、可能寫入後失敗或來源漂移會回報 `unknown` 並保留已有 command／effects，不可自行重送。缺失、變更或已關閉的 owner 不會被啟動或接替；舊 retained VM 也不能藉此遷移到新 Host。`host task review-capabilities` 的 `openshell_saved_progress_attempt=1` 表示此入口存在。
 
+### Source client-auth proposal
+
+```sh
+noodle host task source-auth-plan --request-file /original/host-request.json
+```
+
+此入口只讀原 attach request、pool／receipt、config、canonical attempt、spawn、dispatch、custody 與已註冊 Host template。它自行取得原身分和檔案引用。若原 task 有多個 session，可加 `--session-file /original/session/spawn.json` 指向原始檔案；不要手填或重建 attempt ID。
+
+候選只選取 template 的 Source client authentication。它保留原 task 的 Target gateway、payload、business scope、Frozen profile、SourceBinding、pending、密文與 receipts。Source endpoint、workspace、server trust、原 Host／custody epoch 或來源 bytes 不符時，入口拒絕提案。輸出只有原檔案引用與 pending 摘要，不包含私鑰或 credential 值。
+
+JSON 的 `executable` 固定為 `false`，`effects` 固定為 `[]`。`status=unknown` 與 `requires` 保留原 Owner 的 pending-effect 讀回、auth-handoff 能力及當前效果授權缺口。即使 exit code 為 0，也只表示唯讀觀察完成。它不證明原請求沒有執行效果，不執行登入、refresh、Create、重啟或新 attempt，也不修改 Frozen 或 custody。此入口使用呼叫者明確選定的 planner binary；它不自動轉回舊 executor，且不採用該 planner 到運行中的 Host。
+
+
 ### 精確的 retained 初始化誤判恢復
 
 ```sh
