@@ -80,7 +80,10 @@ recovery_samples=2
 func TestHostMachineCapabilitiesSeparateSourceFromLaterOwners(t *testing.T) {
 	c := hostCapabilities("darwin")
 	if c["machine_worker_admission"] != 1 || c["machine_admission_policy"] != admission.MachineAdmissionPolicy || c["worker_admission_policy"] != admission.WorkerAdmissionPolicy { t.Fatal("worker/machine capability versions merged") }
-	for _, missing := range []string{"machine_pre_control_admission", "machine_gc_release", "machine_safe_pause"} {
+	for _, implemented := range []string{"machine_pre_control_admission", "machine_gc_release"} {
+		if c[implemented] != 1 { t.Fatalf("connected owner %s missing from implemented capability", implemented) }
+	}
+	for _, missing := range []string{"machine_safe_pause", "safe_host_switch"} {
 		if c[missing] != 0 { t.Fatalf("unconnected owner %s reported ready", missing) }
 	}
 }
