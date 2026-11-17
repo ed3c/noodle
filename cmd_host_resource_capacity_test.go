@@ -68,7 +68,7 @@ recovery_samples=2
 	if err != nil { t.Fatal("old context was hot rebound", err) }
 	permit.Release()
 	if err = os.WriteFile(filepath.Join(directory, "address"), []byte(strings.Replace(configuration, "return_tar_peak_mib=1\n", "", 1)), 0600); err != nil { t.Fatal(err) }
-	if _, err = h.budget.TryAcquireTask("context", "drift", "openshell"); !errors.Is(err, admission.ErrDeferred) || !strings.Contains(err.Error(), "source_changed") { t.Fatal("changed original config was admitted", err) }
+	if _, err = h.budget.TryAcquireTask("context", "drift", "openshell"); !errors.Is(err, admission.ErrDeferred) || !strings.Contains(err.Error(), "original lifecycle resource source changed") { t.Fatal("changed original config was admitted", err) }
 	updated, err := loopruntime.LoadOpenShellProfile(profilePath)
 	if err != nil { t.Fatal(err) }
 	h.bindWorkerResourceSource("new-context", directory, directory, &updated, nil)
