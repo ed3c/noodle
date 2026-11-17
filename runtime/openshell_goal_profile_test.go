@@ -304,27 +304,100 @@ func TestGoalOpenShellMaterializationPreservesExplicitResourceLineage(t *testing
 	template := goalProfileFixture(t)
 	configPath := filepath.Join(filepath.Dir(template), "gateway.toml")
 	raw, err := os.ReadFile(configPath)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	var original, resources map[string]any
-	if _, err = toml.Decode(string(raw), &original); err != nil { t.Fatal(err) }
-	if _, err = toml.Decode(resourceConfigFixture("/original/vm"), &resources); err != nil { t.Fatal(err) }
+	if _, err = toml.Decode(string(raw), &original); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = toml.Decode(resourceConfigFixture("/original/vm"), &resources); err != nil {
+		t.Fatal(err)
+	}
 	vm := original["openshell"].(map[string]any)["drivers"].(map[string]any)["vm"].(map[string]any)
 	vm["mem_mib"], vm["vcpus"], vm["overlay_disk_mib"] = int64(4), int64(2), int64(4)
 	original["noodle_worker_resources"] = resources["noodle_worker_resources"]
 	var encoded bytes.Buffer
-	if err = toml.NewEncoder(&encoded).Encode(original); err != nil { t.Fatal(err) }
-	if err = os.WriteFile(configPath, encoded.Bytes(), 0600); err != nil { t.Fatal(err) }
+	if err = toml.NewEncoder(&encoded).Encode(original); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(configPath, encoded.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
 	before := append([]byte(nil), encoded.Bytes()...)
 	root, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	receipt, err := MaterializeGoalOpenShellProfile(template, root, "127.0.0.1:12345")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	p, err := LoadOpenShellProfile(receipt.Profile.Path)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	claim, err := OpenShellWorkerResourceClaim(p, root)
-	if err != nil || claim.MemoryBytes != 6<<20 || claim.DiskBytes != 7<<20 || claim.CPUs != 2 { t.Fatalf("new profile lost operator resource lineage: %+v %v", claim, err) }
+	if err != nil || claim.MemoryBytes != 6<<20 || claim.DiskBytes != 7<<20 || claim.CPUs != 2 {
+		t.Fatalf("new profile lost operator resource lineage: %+v %v", claim, err)
+	}
+	nativePath := filepath.Join(root, "openshell", "gateway-native.toml")
+	native, err := os.ReadFile(nativePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nativeDocument map[string]any
+	if _, err = toml.Decode(string(native), &nativeDocument); err != nil {
+		t.Fatal(err)
+	}
+	if len(nativeDocument) != 1 || nativeDocument["openshell"] == nil {
+		t.Fatal("native input contains Owner policy", nativeDocument)
+	}
+	if receipt.Files["gateway.toml"] == "" || receipt.Files["gateway-native.toml"] == "" || p.sourceFiles[nativePath] == "" {
+		t.Fatal("native and Owner inputs are not both bound")
+	}
+	configSelected := false
+	for i, arg := range p.Gateway.Resident.Argv {
+		if arg == "--config" && i+1 < len(p.Gateway.Resident.Argv) {
+			configSelected = p.Gateway.Resident.Argv[i+1] == nativePath
+		}
+	}
+	if !configSelected {
+		t.Fatal("gateway still receives Owner policy")
+	}
 	after, err := os.ReadFile(configPath)
-	if err != nil || !bytes.Equal(before, after) { t.Fatal("new materialization rewrote original config", err) }
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("new materialization rewrote original config", err)
+	}
 	again, err := MaterializeGoalOpenShellProfile(template, root, "127.0.0.1:12345")
-	if err != nil || again.Profile != receipt.Profile { t.Fatal("profile resource lineage changed on reentry", err) }
+	if err != nil || again.Profile != receipt.Profile {
+		t.Fatal("profile resource lineage changed on reentry", err)
+	}
+	if err = os.WriteFile(nativePath, append(native, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = VerifyOpenShellProfile(p); err == nil {
+		t.Fatal("changed Native input escaped the complete profile binding")
+	}
+}
+
+func TestNativeGatewayConfigurationPreservesUnknownNativeFields(t *testing.T) {
+	document := map[string]any{"openshell": map[string]any{"version": int64(2)}, "foreign_native_setting": map[string]any{"value": true}}
+	for _, key := range []string{"noodle_worker_resources", "noodle_preparation_resources", "noodle_resident_resources", "noodle_resource_budget"} {
+		document[key] = map[string]any{"schema": int64(1)}
+	}
+	raw, err := encodeNativeGatewayConfiguration(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var native map[string]any
+	if _, err = toml.Decode(string(raw), &native); err != nil {
+		t.Fatal(err)
+	}
+	if len(native) != 2 || native["openshell"] == nil || native["foreign_native_setting"] == nil {
+		t.Fatal("projection dropped unknown Native fields", native)
+	}
+	if len(document) != 6 {
+		t.Fatal("projection changed original Owner document")
+	}
 }

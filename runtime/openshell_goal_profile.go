@@ -155,8 +155,12 @@ func materializeGoalOpenShellProfile(template, hostRoot, address string, budget 
 	for _, value := range []*string{&f.CredentialSource.TLS.CAFile, &f.CredentialSource.TLS.CertificateFile, &f.CredentialSource.TLS.KeyFile} {
 		*value = resolve(*value)
 	}
-	if len(f.Gateway.ConfigFiles) != 1 || resolve(f.Gateway.ConfigFiles[0]) != resolve(f.Gateway.IdentitySource) {
-		return result, errors.New("Goal profile template does not select one gateway configuration source")
+	identityBound := false
+	for _, file := range f.Gateway.ConfigFiles {
+		identityBound = identityBound || resolve(file) == resolve(f.Gateway.IdentitySource)
+	}
+	if !identityBound {
+		return result, errors.New("Goal profile template identity source is not bound by its configuration files")
 	}
 	configuration, err := os.ReadFile(resolve(f.Gateway.IdentitySource))
 	if err != nil {
@@ -259,6 +263,13 @@ func materializeGoalOpenShellProfile(template, hostRoot, address string, budget 
 	if err = write("gateway.toml", encoded.Bytes()); err != nil {
 		return result, err
 	}
+	native, err := encodeNativeGatewayConfiguration(document)
+	if err != nil {
+		return result, err
+	}
+	if err = write("gateway-native.toml", native); err != nil {
+		return result, err
+	}
 	clientRoot := path("client")
 	stateRoot := path("gateway-state")
 	database := "sqlite://" + path("gateway.db") + "?mode=rwc"
@@ -287,7 +298,7 @@ func materializeGoalOpenShellProfile(template, hostRoot, address string, budget 
 		return result, errors.New("Goal gateway foreground executable is absent")
 	}
 	arguments[0] = resolve(arguments[0])
-	required := map[string]string{"--config": path("gateway.toml"), "--tls-cert": path("tls/server.crt"), "--tls-key": path("tls/server.key"), "--tls-client-ca": path("tls/ca.crt")}
+	required := map[string]string{"--config": path("gateway-native.toml"), "--tls-cert": path("tls/server.crt"), "--tls-key": path("tls/server.key"), "--tls-client-ca": path("tls/ca.crt")}
 	for i := 1; i < len(arguments); i++ {
 		if arguments[i] == "--db-url" {
 			if i+1 >= len(arguments) {
@@ -327,7 +338,7 @@ func materializeGoalOpenShellProfile(template, hostRoot, address string, budget 
 	f.Gateway.Binding.Workspace = "default"
 	f.Gateway.Binding.Owner = name
 	f.Gateway.IdentitySource = path("gateway.toml")
-	f.Gateway.ConfigFiles = []string{path("gateway.toml")}
+	f.Gateway.ConfigFiles = []string{path("gateway.toml"), path("gateway-native.toml")}
 	f.Gateway.Retained = nil
 	f.Gateway.TLS.CAFile = path("tls/ca.crt")
 	f.Gateway.TLS.CertificateFile = path("tls/client.crt")
@@ -376,6 +387,25 @@ func materializeGoalOpenShellProfile(template, hostRoot, address string, budget 
 		return result, err
 	}
 	return result, nil
+}
+
+// Native OpenShell rejects unknown root tables. Keep the complete Owner policy
+// as the identity source, and bind this separate native input in the same profile.
+// Unknown native fields remain present so native validation still rejects them.
+func encodeNativeGatewayConfiguration(document map[string]any) ([]byte, error) {
+	native := make(map[string]any, len(document))
+	for key, value := range document {
+		switch key {
+		case "noodle_worker_resources", "noodle_preparation_resources", "noodle_resident_resources", "noodle_resource_budget":
+			continue
+		}
+		native[key] = value
+	}
+	var encoded bytes.Buffer
+	if err := toml.NewEncoder(&encoded).Encode(native); err != nil {
+		return nil, err
+	}
+	return encoded.Bytes(), nil
 }
 
 func goalProfileKeys(name string, write func(string, []byte) error) error {
