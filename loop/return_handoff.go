@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/poteto/noodle/config"
+	"github.com/poteto/noodle/internal/state"
 )
 
 type returnDescriptor struct {
@@ -79,19 +81,7 @@ func (l *Loop) prepareReturnHandoff(cook *cookHandle) (*returnDescriptor, error)
 	if err := readReturnSource(ref, &target); err != nil {
 		return nil, err
 	}
-	var binding struct {
-		Schema  int                  `json:"schema"`
-		Request config.RuntimeSource `json:"request"`
-		Goal    string               `json:"goal"`
-		Main    struct {
-			ThreadID string `json:"threadId"`
-			HostID   string `json:"hostId"`
-		} `json:"main"`
-		Connection     string               `json:"connection_instance"`
-		Revision       string               `json:"consumer_revision"`
-		Producer       config.RuntimeSource `json:"producer"`
-		HostInstanceID string               `json:"host_instance_id"`
-	}
+	var binding returnBinding
 	if err := readReturnSource(target.Binding, &binding); err != nil {
 		return nil, err
 	}
@@ -118,26 +108,52 @@ func (l *Loop) prepareReturnHandoff(cook *cookHandle) (*returnDescriptor, error)
 	return &target, nil
 }
 func sendReturnHandoff(endpoint string, packet returnPacket) error {
+	raw, err := json.Marshal(packet)
+	if err != nil || len(raw)+1 > 65536 {
+		return &returnTransportError{Phase: "before_encode_unknown", Cause: fmt.Errorf("return packet oversized or invalid")}
+	}
 	connection, err := net.DialTimeout("unix", endpoint, time.Second)
 	if err != nil {
-		return err
+		return &returnTransportError{Phase: "dial_before_encode", Cause: err}
 	}
 	defer connection.Close()
+	return encodeReturnHandoff(connection, packet)
+}
+func encodeReturnHandoff(connection net.Conn, packet returnPacket) error {
 	if err := connection.SetDeadline(time.Now().Add(8 * time.Second)); err != nil {
-		return err
+		return &returnTransportError{Phase: "before_encode_unknown", Cause: err}
 	}
 	if err := json.NewEncoder(connection).Encode(packet); err != nil {
-		return err
+		return &returnTransportError{Phase: "write_unknown", Cause: err}
 	}
 	// This is carrier custody/readback only, never Main consumption or product acceptance.
 	var result struct {
 		Status string `json:"status"`
 	}
 	if err := json.NewDecoder(io.LimitReader(connection, 65537)).Decode(&result); err != nil {
-		return err
+		return &returnTransportError{Phase: "ack_unknown", Cause: err}
 	}
 	if result.Status != "acknowledged" {
-		return fmt.Errorf("return handoff unresolved: %s", result.Status)
+		return &returnTransportError{Phase: "ack_unknown", Cause: fmt.Errorf("return handoff unresolved: %s", result.Status)}
 	}
 	return nil
+}
+
+type returnTransportError struct {
+	Phase string
+	Cause error
+}
+func (e *returnTransportError) Error() string { return e.Cause.Error() }
+func (e *returnTransportError) Unwrap() error { return e.Cause }
+func returnTransportPhase(err error) string {
+	var transport *returnTransportError
+	if errors.As(err, &transport) {
+		return transport.Phase
+	}
+	return "unknown"
+}
+func originalReturnPacket(target *returnDescriptor, intent *state.ReturnHandoffIntent, orderID string, stageIndex int, attemptID, sessionID string) returnPacket {
+	return returnPacket{Operation: "worker_return", Schema: 1, Binding: target.Binding,
+		EventID: intent.EventID, Type: "stage_review_parked", OrderID: orderID, StageIndex: stageIndex,
+		AttemptID: attemptID, SessionID: sessionID, HostInstanceID: target.HostInstanceID, Producer: target.Producer}
 }
