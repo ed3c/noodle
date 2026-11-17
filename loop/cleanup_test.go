@@ -21,7 +21,7 @@ func completedCleanupFixture(t *testing.T) *Loop {
 	if err := os.Mkdir(filepath.Join(dir, "sessions"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	return &Loop{runtimeDir: dir, canonicalLoaded: true, effectLedger: reducer.NewEffectLedger(),
+	return &Loop{projectDir: t.TempDir(), runtimeDir: dir, canonicalLoaded: true, effectLedger: reducer.NewEffectLedger(),
 		canonical: state.State{SchemaVersion: 1, Mode: state.RunModeManual, LastEventID: "1", Orders: map[string]state.OrderNode{
 			"done":     {OrderID: "done", Status: state.OrderCompleted, Stages: []state.StageNode{{StageIndex: 0, TaskKey: "execute", Skill: "execute", Status: state.StageCompleted}}},
 			"schedule": {OrderID: "schedule", Status: state.OrderActive, Stages: []state.StageNode{{StageIndex: 0, TaskKey: "schedule", Skill: "schedule", Status: state.StagePending}}},
