@@ -169,6 +169,10 @@ func (b *Budget) BindResourceSource(id, runtime string, source ResourceSource) {
 	if _, exists := b.resourceSources[id]; !exists { b.resourceSources[id] = &resourceSource{runtime: runtime, read: source} }
 }
 
+func machinePressureAllowsAdmission(pressure Pressure) bool {
+	return pressure == Normal || pressure == Warning
+}
+
 // Health belongs to a verified operator policy. It changes on every original
 // Sample, including idle pressure periods with no attempted worker admission.
 func (b *Budget) observeMachineHealth(previous *Sample) {
@@ -184,7 +188,7 @@ func (b *Budget) observeMachineHealth(previous *Sample) {
 		if source.source != claim.Source || source.policy != claim.Policy { normals = 0 }
 		source.source, source.policy = claim.Source, claim.Policy
 		sample := b.previous
-		if sample.Pressure != Normal || previous.Pressure != Normal || sample.TotalMemoryBytes == 0 || sample.CPUs <= 0 ||
+		if !machinePressureAllowsAdmission(sample.Pressure) || !machinePressureAllowsAdmission(previous.Pressure) || sample.TotalMemoryBytes == 0 || sample.CPUs <= 0 ||
 			math.IsNaN(b.rate) || math.IsInf(b.rate, 0) || b.rate < 0 ||
 			sample.SwapUsedBytes > claim.Policy.MaxSwapUsedBytes || b.rate > float64(claim.Policy.MaxSwapoutBytesPerSecond) { continue }
 		source.normals = min(normals+1, MaxRecoverySamples)
@@ -339,7 +343,7 @@ func (m *machineCapacity) reserve(s *machineState, id, contextID, orderID, runti
 		case sample.Unsupported: return false, errors.New("machine_sample_unsupported")
 		case sample.TotalMemoryBytes == 0: return false, errors.New("ram_observation_unknown")
 		case sample.CPUs <= 0: return false, errors.New("cpu_capacity_unknown")
-		case sample.Pressure != Normal: return false, fmt.Errorf("ram_pressure_%s", sample.Pressure)
+		case !machinePressureAllowsAdmission(sample.Pressure): return false, fmt.Errorf("ram_pressure_%s", sample.Pressure)
 		case !rateValid || math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0: return false, errors.New("swap_rate_unavailable")
 		case sample.SwapUsedBytes > c.Policy.MaxSwapUsedBytes: return false, errors.New("swap_used_pressure")
 		case rate > float64(c.Policy.MaxSwapoutBytesPerSecond): return false, errors.New("swapout_pressure")
