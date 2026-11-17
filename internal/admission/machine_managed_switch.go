@@ -110,6 +110,12 @@ func (b *Budget) FenceManagedResidentSwitch(ref PreparationRef, fence ManagedRes
 			if other.Preparation != nil && other.Preparation.Source.Bindings["host_root"] == fence.HostRoot || strings.HasPrefix(other.Owner, fence.HostRoot+"/") {
 				return false, errors.New("original managed Host has unresolved machine consumers")
 			}
+			if other.Preparation == nil || other.Preparation.Source.Purpose != "host-resident" {
+				original := row.Preparation.Source.Bindings
+				if other.Preparation == nil || original["goal_path"] == "" || original["goal_sha256"] == "" || other.Preparation.Source.Bindings["goal_path"] != original["goal_path"] || other.Preparation.Source.Bindings["goal_sha256"] != original["goal_sha256"] {
+					return false, errors.New("original managed switch has a foreign or unknown active machine participant")
+				}
+			}
 		}
 		row.ManagedSwitch = &fence
 		if err := validateManagedResidentSwitch(row); err != nil {

@@ -16,7 +16,7 @@ func managedSwitchFixture(t *testing.T) (*Budget, PreparationRef, PreparationRef
 	root := capacityFixtureRoot(t)
 	claim := capacityFixtureClaim(root)
 	b := preparationFixture(t, filepath.Join(root, "machine"), claim)
-	source := PreparationSource{Purpose: "host-resident", Bindings: map[string]string{"host_root": root, "binary_path": filepath.Join(root, "old"), "binary_sha256": strings.Repeat("a", 64)}}
+	source := PreparationSource{Purpose: "host-resident", Bindings: map[string]string{"host_root": root, "goal_path": filepath.Join(root, "goal"), "goal_sha256": strings.Repeat("e", 64), "binary_path": filepath.Join(root, "old"), "binary_sha256": strings.Repeat("a", 64)}}
 	old, err := b.reservePreparation(source, claim)
 	if err != nil {
 		t.Fatal(err)
@@ -85,5 +85,50 @@ func TestManagedSwitchLatePreparationWinsMachineLockAndPreventsFence(t *testing.
 	}
 	if err := b.CancelUnstartedPreparation(fence.Preparation); err != nil {
 		t.Fatal("unfenced reservation incorrectly frozen", err)
+	}
+}
+
+func TestManagedSwitchChecksForeignActiveGoalInsideMachineLock(t *testing.T) {
+	for _, kind := range []string{"foreign-task", "unknown-task", "same-goal-unknown", "foreign-resident"} {
+		t.Run(kind, func(t *testing.T) {
+			b, old, _, source, claim, fence := managedSwitchFixture(t)
+			foreign := PreparationSource{Purpose: "task-preparation", Bindings: map[string]string{
+				"host_root": filepath.Join(fence.HostRoot, "other-host"),
+				"goal_path": source.Bindings["goal_path"], "goal_sha256": source.Bindings["goal_sha256"],
+			}}
+			// A separate Host does not share this root's owner namespace.
+			if kind == "foreign-task" {
+				foreign.Bindings["goal_sha256"] = strings.Repeat("f", 64)
+			}
+			if kind == "unknown-task" {
+				delete(foreign.Bindings, "goal_path")
+			}
+			if kind == "foreign-resident" {
+				foreign.Purpose = "host-resident"
+			}
+			ref, err := b.reservePreparation(foreign, claim)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind == "same-goal-unknown" {
+				if err = b.StartPreparationEffects(ref); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err = b.FenceManagedResidentSwitch(old, fence, func(PreparationSource) error { return nil })
+			allowed := kind == "same-goal-unknown" || kind == "foreign-resident"
+			if (err == nil) != allowed {
+				t.Fatal("machine-locked participant boundary differs", kind, err)
+			}
+			if err = b.machine.access(false, func(state *machineState) (bool, error) {
+				retained, exists := state.Leases[ref.ID]
+				if !exists || retained.PreparationClosed != nil || retained.Settlement != nil || retained.Preparation.Source.Bindings["goal_sha256"] != foreign.Bindings["goal_sha256"] {
+					t.Fatal("original participant history changed")
+				}
+				return false, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
