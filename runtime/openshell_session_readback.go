@@ -66,7 +66,14 @@ func ReadSessionReadbackFile(path string, value any) (SessionReadbackFileRef, er
 	return ref, nil
 }
 func VerifySessionReadbackFiles(refs map[string]SessionReadbackFileRef) error {
+	archives, err := verifyProgressArchiveSources(refs)
+	if err != nil {
+		return err
+	}
 	for name, ref := range refs {
+		if archives[name] {
+			continue
+		}
 		current, err := ReadSessionReadbackFile(ref.Path, nil)
 		if err != nil {
 			return err
@@ -101,25 +108,41 @@ type settledSessionEvidence struct {
 }
 
 func (r *OpenShellRuntime) readSettledSession(ctx context.Context, b CompletedSessionBinding, observe func(context.Context, OpenShellIdentity) (OpenShellCompletedObservation, error), progress bool, retained func(context.Context, openShellDispatchReceipt, string) error) (result settledSessionEvidence, err error) {
-	if b.SessionID == "" || filepath.Base(b.SessionID) != b.SessionID || b.SessionID == "." || b.SessionID == ".." || b.OrderID == "" || b.Provider == "" || b.Model == "" || b.StageIndex < 0 || b.RetryCount < 0 || !filepath.IsAbs(b.WorktreePath) {
-		return result, fmt.Errorf("session readback binding incomplete")
-	}
 	if !r.mu.TryLock() {
-		return result, fmt.Errorf("OpenShell runtime operation in progress")
+		return settledSessionEvidence{}, fmt.Errorf("OpenShell runtime operation in progress")
 	}
 	active := r.active[b.SessionID] != nil
 	r.mu.Unlock()
 	if active {
-		return result, fmt.Errorf("original session has not settled")
+		return settledSessionEvidence{}, fmt.Errorf("original session has not settled")
 	}
-	if err = VerifyOpenShellProfile(r.config.Profile); err != nil {
+	if r.config.Gateway == nil {
+		return result, fmt.Errorf("original OpenShell gateway unavailable")
+	}
+	reader := openShellSessionEvidenceReader{r.config.Profile, r.config.RuntimeDir, r.config.ContextID, r.config.Gateway.spec}
+	return reader.read(ctx, b, observe, progress, retained)
+}
+
+// This reader verifies facts only. Its caller owns the separate inactivity proof;
+// it has no runtime active map, resident handle, or custody write capability.
+type openShellSessionEvidenceReader struct {
+	profile               OpenShellProfile
+	runtimeDir, contextID string
+	spec                  OpenShellGatewaySpec
+}
+
+func (r openShellSessionEvidenceReader) read(ctx context.Context, b CompletedSessionBinding, observe func(context.Context, OpenShellIdentity) (OpenShellCompletedObservation, error), progress bool, retained func(context.Context, openShellDispatchReceipt, string) error) (result settledSessionEvidence, err error) {
+	if b.SessionID == "" || filepath.Base(b.SessionID) != b.SessionID || b.SessionID == "." || b.SessionID == ".." || b.OrderID == "" || b.Provider == "" || b.Model == "" || b.StageIndex < 0 || b.RetryCount < 0 || !filepath.IsAbs(b.WorktreePath) {
+		return result, fmt.Errorf("session readback binding incomplete")
+	}
+	if err = VerifyOpenShellProfile(r.profile); err != nil {
 		return result, err
 	}
-	profileSHA, err := OpenShellDispatchSHA256(r.config.Profile)
+	profileSHA, err := OpenShellDispatchSHA256(r.profile)
 	if err != nil {
 		return result, err
 	}
-	dir := filepath.Join(r.config.RuntimeDir, "sessions", b.SessionID)
+	dir := filepath.Join(r.runtimeDir, "sessions", b.SessionID)
 	sources := map[string]SessionReadbackFileRef{}
 	read := func(name string, value any) error {
 		ref, e := ReadSessionReadbackFile(filepath.Join(dir, name), value)
@@ -132,7 +155,7 @@ func (r *OpenShellRuntime) readSettledSession(ctx context.Context, b CompletedSe
 	if err = read("openshell-dispatch.json", &receipt); err != nil {
 		return result, err
 	}
-	if receipt.ContextID != r.config.ContextID {
+	if receipt.ContextID != r.contextID {
 		if _, err := maintenanceCompletion(receipt); err != nil {
 			return result, err
 		}
@@ -247,15 +270,12 @@ func (r *OpenShellRuntime) readSettledSession(ctx context.Context, b CompletedSe
 	if identity.OrderID != b.OrderID || identity.SessionID != b.SessionID || identity.AttemptID != receipt.AttemptID || receipt.Worker.Boundary != OpenShellBoundaryStopped {
 		return result, fmt.Errorf("OpenShell native attempt differs from dispatch")
 	}
-	if r.config.Gateway == nil {
-		return result, fmt.Errorf("original OpenShell gateway unavailable")
-	}
 	var custody OpenShellCustodyState
-	custodyRef, err := ReadSessionReadbackFile(filepath.Join(r.config.Gateway.spec.Binding.StateRoot, "owner.json"), &custody)
+	custodyRef, err := ReadSessionReadbackFile(filepath.Join(r.spec.Binding.StateRoot, "owner.json"), &custody)
 	if err != nil {
 		return result, err
 	}
-	if !openShellCustodySupportsProfile(custody, r.config.Gateway.spec) || custody.Binding != r.config.Gateway.spec.Binding || custody.Blocked != "" {
+	if !openShellCustodySupportsProfile(custody, r.spec) || custody.Binding != r.spec.Binding || custody.Blocked != "" {
 		return result, fmt.Errorf("original OpenShell custody source differs")
 	}
 	count := 0
@@ -348,7 +368,7 @@ func (r *OpenShellRuntime) readSettledSession(ctx context.Context, b CompletedSe
 			return result, fmt.Errorf("OpenShell instruction evidence changed during readback")
 		}
 	}
-	if err = VerifyOpenShellProfile(r.config.Profile); err != nil {
+	if err = VerifyOpenShellProfile(r.profile); err != nil {
 		return result, err
 	}
 	completed := CompletedSessionReadback{ProfileSHA256: profileSHA, CommandSHA256: commandSHA256, Instructions: instructions, NativeAttemptID: receipt.AttemptID, CandidateHead: receipt.CandidateHead, NativeExecExitCode: observed.ExecExitCode, NativePhase: observed.Phase, StopAcknowledged: observed.StopAcknowledged, MainProcessInstanceID: observed.MainProcessInstanceID, Sources: sources}

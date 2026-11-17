@@ -510,3 +510,20 @@ func OpenShellDispatchSHA256(p OpenShellProfile) (string, error) {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), nil
 }
+
+// VerifyOpenShellProfileSource binds a loaded profile's original raw JSON to
+// its FileRef. SourceSHA256 instead binds the entire profile dependency closure;
+// these digests describe different inputs and must never be compared directly.
+func VerifyOpenShellProfileSource(p OpenShellProfile, ref SessionReadbackFileRef) error {
+	if p.SourcePath == "" || p.sourceFiles[p.SourcePath] == "" || p.sourceFiles[p.SourcePath] != ref.SHA256 {
+		return fmt.Errorf("original OpenShell profile raw source binding differs")
+	}
+	current, err := ReadSessionReadbackFile(p.SourcePath, nil)
+	if err != nil {
+		return err
+	}
+	if current != ref {
+		return fmt.Errorf("original OpenShell profile raw source changed")
+	}
+	return nil
+}

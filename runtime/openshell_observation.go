@@ -124,7 +124,10 @@ func (c *OpenShellCustody) observeSettled(ctx context.Context, expected OpenShel
 	if err := c.available(); err != nil {
 		return OpenShellCompletedObservation{}, err
 	}
-	native := response.GetSandbox()
+	return settledNativeObservation(record, expected, response.GetSandbox(), kind)
+}
+
+func settledNativeObservation(record OpenShellCustodyRecord, expected OpenShellIdentity, native *pb.Sandbox, kind openShellObservationKind) (OpenShellCompletedObservation, error) {
 	if !sameOpenShellSandbox(native, record.Name, expected.Sandbox.SandboxID, expected.Sandbox.Workspace) {
 		return OpenShellCompletedObservation{}, fmt.Errorf("openshell completion native identity changed or is missing")
 	}
