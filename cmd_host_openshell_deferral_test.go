@@ -173,7 +173,7 @@ func TestHostOpenShellCustodyRefusalIsRepeatableWithoutPoisoningContext(t *testi
 		t.Fatal(err)
 	}
 	req.ConfigSHA256 = hostDigest(data)
-	h := &noodleHost{dir: t.TempDir(), instanceID: "instance", binaryPath: "/native/noodle", binarySHA: "test-binary", budget: admission.NewBudget(2), completed: make(chan string, 4)}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), instanceID: "instance", binaryPath: "/native/noodle", binarySHA: "test-binary", budget: admission.NewBudget(2), completed: make(chan string, 4)}
 	var err error
 	h.residents, err = admission.OpenResidents(h.dir)
 	if err != nil {
@@ -338,7 +338,7 @@ type hostDeferralShutdownFailure struct {
 func (r *hostDeferralShutdownFailure) Shutdown() { r.onShutdown() }
 
 func TestHostOpenShellDeferralCleanupFailureRetainsContext(t *testing.T) {
-	h := &noodleHost{dir: t.TempDir(), contexts: make(map[string]*hostContext)}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), contexts: make(map[string]*hostContext)}
 	var err error
 	h.residents, err = admission.OpenResidents(h.dir)
 	if err != nil {

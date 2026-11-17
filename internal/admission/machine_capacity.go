@@ -67,6 +67,9 @@ type resourceSource struct {
 }
 
 type MachineSnapshot struct {
+	Scope string `json:"scope"`
+	Uncovered string `json:"uncovered"`
+	ReadbackSource string `json:"readback_source"`
 	Policy string `json:"policy"`
 	Reason string `json:"reason"`
 	RAM string `json:"ram_observation"`
@@ -86,6 +89,9 @@ type MachineSnapshot struct {
 }
 
 type machineLease struct {
+	Preparation *machinePreparation `json:"preparation,omitempty"`
+	PreparationPromoted bool `json:"preparation_promoted,omitempty"`
+	PreparationClosed map[string]MachineSettlementFile `json:"preparation_closed,omitempty"`
 	ContextID string `json:"context_id,omitempty"`
 	OrderID string `json:"order_id,omitempty"`
 	Runtime string `json:"runtime,omitempty"`
@@ -117,6 +123,7 @@ type machineWriteUncertain struct { error }
 type machinePending struct {
 	id, sharedID string
 	claim ResourceClaim
+	preparation *PreparationRef
 }
 
 func canonicalCapacityPath(path string) error {
@@ -179,7 +186,7 @@ func (b *Budget) observeMachineHealth(previous *Sample) {
 		if sample.Pressure != Normal || previous.Pressure != Normal || sample.TotalMemoryBytes == 0 || sample.CPUs <= 0 ||
 			math.IsNaN(b.rate) || math.IsInf(b.rate, 0) || b.rate < 0 ||
 			sample.SwapUsedBytes > claim.Policy.MaxSwapUsedBytes || b.rate > float64(claim.Policy.MaxSwapoutBytesPerSecond) { continue }
-		source.normals = min(normals+1, 12)
+		source.normals = min(normals+1, MaxRecoverySamples)
 	}
 }
 
@@ -246,6 +253,7 @@ func (m *machineCapacity) access(initialize bool, apply func(*machineState) (boo
 		if err := validateCapacityPolicy(*s.Capacity); err != nil { return err }
 	}
 	for id, lease := range s.Leases {
+		if err := validateMachinePreparation(lease); err != nil { return err }
 		if err := validateMachineLeaseSettlement(lease); err != nil { return err }
 		if id == "" || lease.Owner == "" || lease.Source == "" || lease.MemoryBytes == 0 || lease.CPUs == 0 || len(lease.Disks) == 0 {
 			return errors.New("machine capacity lease corrupt")
@@ -294,7 +302,7 @@ func validateResourceClaim(c ResourceClaim) error {
 }
 
 func validateCapacityPolicy(p CapacityPolicy) error {
-	if p.MemoryBytes == 0 || p.CPUs == 0 || p.DiskSafetyBytes == 0 || p.RecoverySamples < 2 || p.RecoverySamples > 12 {
+	if p.MemoryBytes == 0 || p.CPUs == 0 || p.DiskSafetyBytes == 0 || p.RecoverySamples < 2 || p.RecoverySamples > MaxRecoverySamples {
 		return errors.New("operator_machine_policy_missing_or_invalid")
 	}
 	return nil
@@ -303,6 +311,13 @@ func validateCapacityPolicy(p CapacityPolicy) error {
 func (m *machineCapacity) acquire(id, contextID, orderID, runtime string, c ResourceClaim, sample Sample, rate float64, rateValid bool, normals int, now time.Time) error {
 	if err := validateResourceClaim(c); err != nil { return err }
 	return m.access(false, func(s *machineState) (bool, error) {
+		return m.reserve(s, id, contextID, orderID, runtime, c, sample, rate, rateValid, normals, now)
+	})
+}
+
+// The caller owns the same machine journal lock for lookup, nonce creation,
+// volume observation and reservation. Preparation cannot race worker claims.
+func (m *machineCapacity) reserve(s *machineState, id, contextID, orderID, runtime string, c ResourceClaim, sample Sample, rate float64, rateValid bool, normals int, now time.Time) (bool, error) {
 		lease := machineLease{ContextID: contextID, OrderID: orderID, Runtime: runtime, Owner: m.owner, Source: c.Source, MemoryBytes: c.MemoryBytes, CPUs: c.CPUs, Disks: map[string]uint64{}}
 		available := map[string]uint64{}
 		for _, path := range c.DiskPaths {
@@ -314,7 +329,7 @@ func (m *machineCapacity) acquire(id, contextID, orderID, runtime string, c Reso
 		}
 		if s.Capacity != nil && *s.Capacity != c.Policy {
 			for _, held := range s.Leases {
-				if held.Settlement == nil { return false, errors.New("machine_operator_policy_differs_with_held_leases") }
+				if held.Settlement == nil && held.PreparationClosed == nil { return false, errors.New("machine_operator_policy_differs_with_held_leases") }
 			}
 		}
 		switch {
@@ -355,7 +370,7 @@ func (m *machineCapacity) acquire(id, contextID, orderID, runtime string, c Reso
 			return nil
 		}
 		for _, held := range s.Leases {
-			if held.Settlement != nil { continue }
+			if held.Settlement != nil || held.PreparationClosed != nil { continue }
 			if err := consume(held); err != nil { return false, err }
 		}
 		if err := consume(lease); err != nil { return false, err }
@@ -363,7 +378,6 @@ func (m *machineCapacity) acquire(id, contextID, orderID, runtime string, c Reso
 		s.Capacity = &policy
 		s.Leases[id] = lease
 		return true, nil
-	})
 }
 
 func (m *machineCapacity) start(id string) error {
@@ -419,8 +433,12 @@ func (b *Budget) acquireMachineTask(contextID, order, runtime string) (*Permit, 
 	if exists && !reflect.DeepEqual(pending.claim, claim) { return deferReason("original_machine_acquire_source_changed") }
 	if !exists {
 		pending.claim = claim
-		pending.id, err = machineNonce()
-		if err != nil { return deferReason(err.Error()) }
+		if prepared, ok := b.preparedMachine[key]; ok {
+			pending.id, pending.preparation = prepared.ID, &prepared
+		} else {
+			pending.id, err = machineNonce()
+			if err != nil { return deferReason(err.Error()) }
+		}
 		if b.shared != nil {
 			pending.sharedID, err = b.shared.acquire(contextID, b.maximum, false, "", b.switching)
 			if err != nil {
@@ -436,7 +454,11 @@ func (b *Budget) acquireMachineTask(contextID, order, runtime string) (*Permit, 
 	if b.previous != nil { sample = *b.previous }
 	normals := 0
 	if source.source == claim.Source && source.policy == claim.Policy { normals = source.normals }
-	err = b.machine.acquire(pending.id, contextID, order, runtime, claim, sample, b.rate, b.rateValid, normals, b.now())
+	if pending.preparation != nil {
+		err = b.machine.promotePreparation(*pending.preparation, contextID, order, runtime, claim, sample, b.rate, b.rateValid, normals, b.now())
+	} else {
+		err = b.machine.acquire(pending.id, contextID, order, runtime, claim, sample, b.rate, b.rateValid, normals, b.now())
+	}
 	if err != nil {
 		var uncertain *machineWriteUncertain
 		if exists || errors.As(err, &uncertain) {
@@ -447,7 +469,7 @@ func (b *Budget) acquireMachineTask(contextID, order, runtime string) (*Permit, 
 	}
 	delete(b.pendingMachineAcquires, key)
 	if b.machineAllocations == nil { b.machineAllocations = make(map[string]*allocation) }
-	a := &allocation{budget: b, refs: 1, sharedID: pending.sharedID, machineID: pending.id, machineKey: key}
+	a := &allocation{budget: b, refs: 1, sharedID: pending.sharedID, machineID: pending.id, machineKey: key, effectsPossible: pending.preparation != nil}
 	b.machineAllocations[key] = a
 	b.active++
 	b.machineReason = "admitted"
@@ -527,7 +549,7 @@ func (b *Budget) returnUnstartedMachine(id string) {
 
 func (b *Budget) machineSnapshot() *MachineSnapshot {
 	if !b.machineRequired { return nil }
-	s := &MachineSnapshot{Policy: MachineAdmissionPolicy, Reason: b.machineReason, RAM: "total_and_pressure_only", CPU: "capacity_only_no_load", Swap: "used_and_swapout_rate", Disk: "statfs_at_admission_only_all_machine_peaks_deducted", IO: "unknown_no_reliable_observer", Retention: "effects_possible_held_for_vm_retirement_and_gc", Next: "original_resource_owner_return_or_pressure_recovery"}
+	s := &MachineSnapshot{Scope: "native_uid_participating_reservations_and_machine_telemetry", Uncovered: "legacy_and_nonparticipating_processes_not_assumed_reserved", Policy: MachineAdmissionPolicy, Reason: b.machineReason, RAM: "total_and_pressure_only", CPU: "capacity_only_no_load", Swap: "used_and_swapout_rate", Disk: "statfs_at_admission_only_all_machine_peaks_deducted", IO: "unknown_no_reliable_observer", Retention: "effects_possible_held_for_vm_retirement_and_gc", Next: "original_resource_owner_return_or_pressure_recovery"}
 	if b.stale() || b.unsupported { s.RAM = "unknown"; s.CPU = "unknown"; s.Swap = "unknown" }
 	if !b.stale() && !b.unsupported && b.previous != nil {
 		memory, cpus := b.previous.TotalMemoryBytes, b.previous.CPUs
@@ -536,11 +558,12 @@ func (b *Budget) machineSnapshot() *MachineSnapshot {
 	}
 	if len(b.pendingMachineAcquires) != 0 || len(b.pendingMachineReturns) != 0 || b.machineFault != "" { s.Next = "original_machine_nonce_readback" }
 	if b.machine == nil { s.Disk = "unknown"; return s }
+	s.ReadbackSource = filepath.Join(b.machine.dir, "capacity.json")
 	err := b.machine.access(false, func(state *machineState) (bool, error) {
 		s.Leases = 0
 		if state.Capacity != nil { capacity := *state.Capacity; s.Capacity = &capacity }
 		for _, lease := range state.Leases {
-			if lease.Settlement != nil { continue }
+			if lease.Settlement != nil || lease.PreparationClosed != nil { continue }
 			s.Leases++
 			if lease.MemoryBytes > math.MaxUint64-s.MemoryBytes || lease.CPUs > math.MaxUint64-s.CPUs { return false, errors.New("machine capacity totals overflow") }
 			s.MemoryBytes += lease.MemoryBytes; s.CPUs += lease.CPUs

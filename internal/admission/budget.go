@@ -20,6 +20,7 @@ const (
 	PollInterval                   = 5 * time.Second
 	SampleTimeout                  = time.Second
 	MaxSampleAge                   = 15 * time.Second
+	MaxRecoverySamples             = 12
 )
 
 var ErrDeferred = errors.New("worker resource admission deferred")
@@ -67,6 +68,7 @@ type Budget struct {
 	pendingMachineAcquires map[string]machinePending
 	pendingMachineReturns map[string]bool
 	machineAllocations map[string]*allocation
+	preparedMachine map[string]PreparationRef
 	shared               *sharedQuota
 	sharedError          string
 	pendingSharedReturns map[string]bool

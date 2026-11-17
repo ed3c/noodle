@@ -37,6 +37,14 @@ func (h *noodleHost) attachContinuation(ctx context.Context, req hostRequest, co
 	if req.Operation == "once" {
 		req.Mode = "manual"
 	}
+	prepare := h.prepareContext
+	if prepare == nil {
+		prepare = h.taskPreparation
+	}
+	preparation, preparationPlan, err := prepare(ctx, req, data)
+	if err != nil {
+		return hostError("refused", err)
+	}
 	storage, err := prepareHostStorage(ctx, req, data)
 	if err != nil {
 		return hostError("refused", err)
@@ -116,10 +124,7 @@ func (h *noodleHost) attachContinuation(ctx context.Context, req hostRequest, co
 			return hostError("refused", err)
 		}
 	}
-	id, err := hostID()
-	if err != nil {
-		return hostError("refused", err)
-	}
+	id := preparation.Preparation.ID
 	r := hostReceipt{Schema: 1, Protocol: hostProtocol, HostPID: os.Getpid(), HostInstanceID: h.instanceID,
 		ContextID: id, ProjectDir: req.ProjectDir, ContextState: "active", Mode: cfg.Mode,
 		ConfigPath: req.ConfigPath, ConfigSHA256: req.ConfigSHA256, BinaryPath: h.binaryPath,
@@ -163,7 +168,11 @@ func (h *noodleHost) attachContinuation(ctx context.Context, req hostRequest, co
 	}
 	h.contexts[id] = c
 	if h.budget != nil {
-		h.bindWorkerResourceSource(id, req.ProjectDir, storage, selectedOpenShell)
+		var roots []string
+		if preparationPlan.Storage.Source.StorageRoot != "" {
+			roots = append([]string{preparationPlan.Storage.Source.CommonDir}, preparationPlan.Archive.diskRoots()...)
+		}
+		h.bindWorkerResourceSource(id, req.ProjectDir, storage, selectedOpenShell, roots...)
 		h.budget.Register(id)
 	}
 	keepLock = true

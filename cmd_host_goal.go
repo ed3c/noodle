@@ -17,16 +17,17 @@ import (
 )
 
 type goalHostSelection struct {
-	Schema    int                                 `json:"schema"`
-	Goal      loopruntime.SessionReadbackFileRef  `json:"goal"`
-	Operation *loopruntime.SessionReadbackFileRef `json:"operation,omitempty"`
-	Root      string                              `json:"host_root"`
-	Template  loopruntime.SessionReadbackFileRef  `json:"template"`
-	Profile   loopruntime.SessionReadbackFileRef  `json:"profile"`
-	Noodle    loopruntime.SessionReadbackFileRef  `json:"noodle"`
-	Phase     string                              `json:"phase"`
-	Previous  []goalHostSelection                 `json:"previous,omitempty"`
-	Fault     string                              `json:"replacement_reason,omitempty"`
+	Preparation admission.PreparationRef            `json:"machine_preparation"`
+	Schema      int                                 `json:"schema"`
+	Goal        loopruntime.SessionReadbackFileRef  `json:"goal"`
+	Operation   *loopruntime.SessionReadbackFileRef `json:"operation,omitempty"`
+	Root        string                              `json:"host_root"`
+	Template    loopruntime.SessionReadbackFileRef  `json:"template"`
+	Profile     loopruntime.SessionReadbackFileRef  `json:"profile"`
+	Noodle      loopruntime.SessionReadbackFileRef  `json:"noodle"`
+	Phase       string                              `json:"phase"`
+	Previous    []goalHostSelection                 `json:"previous,omitempty"`
+	Fault       string                              `json:"replacement_reason,omitempty"`
 }
 
 type goalHostResult struct {
@@ -139,7 +140,7 @@ func registerGoalHostTemplate(ctx context.Context, path, profile string) (loopru
 	return ref, filex.WriteFileAtomicDurable(path, raw)
 }
 
-func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOperation string, launch func(context.Context, string, string) error) (goalHostResult, error) {
+func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOperation string, launch func(context.Context, string, string) error, preparation ...goalHostPreparation) (goalHostResult, error) {
 	result := goalHostResult{Schema: 1, Status: "refused", Policy: admission.WorkerAdmissionPolicy, RuntimeReadiness: "not_observed"}
 	fail := func(err error) (goalHostResult, error) { result.Error = err.Error(); return result, err }
 	goal, err := loopruntime.ReadSessionReadbackFile(goalFile, nil)
@@ -189,7 +190,7 @@ func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOp
 		if err = json.Unmarshal(raw, &selected); err != nil {
 			return fail(err)
 		}
-		if selected.Schema != 1 || selected.Goal != goal {
+		if (selected.Schema != 1 && selected.Schema != 2) || selected.Goal != goal {
 			return fail(errors.New("original Goal Host selection binding changed"))
 		}
 		if operation != nil && !sameGoalOperation(selected.Operation, operation) {
@@ -243,6 +244,13 @@ func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOp
 				}
 				if readErr != nil {
 					previous.Fault = fmt.Sprintf("original Host process and group absent; readback: %v", readErr)
+					if resourceErr := reclaimGoalResident(selected.Root); resourceErr != nil {
+						previous.Fault += "; resident resources retained: " + resourceErr.Error()
+						selected.Fault = previous.Fault
+						if e := saveGoalHostSelection(selectionFile, selected); e != nil {
+							return fail(e)
+						}
+					}
 				}
 				selected = goalHostSelection{Previous: append(selected.Previous, previous)}
 				exists = false
@@ -274,6 +282,7 @@ func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOp
 		return fail(err)
 	}
 	if !exists {
+		var loadedTemplate loopruntime.OpenShellProfile
 		if template == "" {
 			path, e := goalHostTemplatePath()
 			if e != nil {
@@ -298,35 +307,54 @@ func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOp
 			if installed.Schema != 1 || loaded.SourceSHA256 != installed.PolicySHA256 {
 				return fail(errors.New("installed Host profile template dependencies changed"))
 			}
+			loadedTemplate = loaded
 			template = installed.Profile.Path
 		}
 		templateRef, e := loopruntime.ReadSessionReadbackFile(template, nil)
 		if e != nil {
 			return fail(e)
 		}
-		if _, e = loopruntime.LoadOpenShellProfile(template); e != nil {
-			return fail(e)
+		if loadedTemplate.SourcePath == "" {
+			loadedTemplate, e = loopruntime.LoadOpenShellProfile(template)
+			if e != nil {
+				return fail(e)
+			}
 		}
 		binaryRef, e := hostReadbackBinaryRef(binary)
 		if e != nil {
 			return fail(e)
 		}
-		id, e := hostID()
+		selected = goalHostSelection{Schema: 2, Goal: goal, Operation: operation, Template: templateRef, Noodle: binaryRef, Phase: "materializing", Previous: selected.Previous}
+		prepare := prepareGoalHostResources
+		if len(preparation) != 0 && preparation[0] != nil {
+			prepare = preparation[0]
+		}
+		selected, e = prepare(ctx, root, selected, loadedTemplate)
 		if e != nil {
 			return fail(e)
 		}
-		selected = goalHostSelection{Schema: 1, Goal: goal, Operation: operation, Root: filepath.Join(root, "h", id[:16]), Template: templateRef, Noodle: binaryRef, Phase: "materializing", Previous: selected.Previous}
-		if e = os.MkdirAll(filepath.Dir(selected.Root), 0700); e != nil {
-			return fail(e)
-		}
-		if e = os.Mkdir(selected.Root, 0700); e != nil {
-			return fail(e)
-		}
+		// Persist the original nonce and planned root before that root exists.
+		// A lost result resumes this same intent, never another Host identity.
 		if e = saveGoalHostSelection(selectionFile, selected); e != nil {
 			return fail(e)
 		}
 	}
+	if selected.Schema != 2 || selected.Preparation.ID == "" {
+		return fail(fmt.Errorf("%w: original Goal resident reservation missing; no legacy adoption", admission.ErrDeferred))
+	}
+	if exists && (len(preparation) == 0 || preparation[0] == nil) {
+		if err = verifyGoalResidentPreparation(selected); err != nil {
+			return fail(err)
+		}
+	}
 	if selected.Phase == "materializing" {
+		canonical, e := hostPlannedPath(selected.Root)
+		if e != nil || canonical != selected.Root {
+			return fail(errors.New("original Goal planned root changed"))
+		}
+		if e = os.MkdirAll(selected.Root, 0700); e != nil {
+			return fail(e)
+		}
 		actual, e := loopruntime.ReadSessionReadbackFile(selected.Template.Path, nil)
 		if e != nil || actual != selected.Template {
 			return fail(errors.New("original Goal template changed"))
@@ -352,6 +380,7 @@ func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOp
 	if err = saveGoalHostSelection(selectionFile, selected); err != nil {
 		return fail(err)
 	}
+	ctx = context.WithValue(ctx, goalPreparationContextKey{}, goalResidentAdmission{selected.Root, selected.Noodle, selected.Preparation})
 	if err = launch(ctx, selected.Noodle.Path, selected.Root); err != nil {
 		result.Status = "unknown"
 		result.Next = goalHostNext(selected.Noodle.Path, goalFile, newOperation)

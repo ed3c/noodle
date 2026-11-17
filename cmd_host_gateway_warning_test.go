@@ -23,7 +23,7 @@ func TestHostGatewayResidentLeavesNineWorkerSlotsUnderCriticalObservation(t *tes
 	}
 	request.ConfigSHA256 = hostDigest(data)
 	request.RequiredHostInstanceID = "instance"
-	host := &noodleHost{dir: t.TempDir(), instanceID: "instance", binaryPath: "/native/noodle", binarySHA: "test-binary", budget: admission.NewBudget(admission.DefaultWorkerLimit), completed: make(chan string, 4)}
+	host := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), instanceID: "instance", binaryPath: "/native/noodle", binarySHA: "test-binary", budget: admission.NewBudget(admission.DefaultWorkerLimit), completed: make(chan string, 4)}
 	var err error
 	host.residents, err = admission.OpenResidents(host.dir)
 	if err != nil {

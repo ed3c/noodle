@@ -84,7 +84,7 @@ func TestRollingExitedProducerRetainsUnresolvedTaskAndQuota(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &noodleHost{budget: budget, rolling: &hostRolling{root: root}}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, budget: budget, rolling: &hostRolling{root: root}}
 	p, err := readHostPool(root)
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +143,7 @@ func TestHostRebuildReleasedRoundPreservesBindingAndPause(t *testing.T) {
 		t.Fatal(err)
 	}
 	var runtimes []*fakeHostRuntime
-	h := &noodleHost{dir: filepath.Join(root, "g", newID), instanceID: newID, binaryPath: "/new/noodle", binarySHA: "new", rolling: &hostRolling{root: root, carry: map[string]rollingCarry{}}}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: filepath.Join(root, "g", newID), instanceID: newID, binaryPath: "/new/noodle", binarySHA: "new", rolling: &hostRolling{root: root, carry: map[string]rollingCarry{}}}
 	if err = os.MkdirAll(h.dir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +317,7 @@ func TestRollingRebuildAfterProducerExitBlocksOnlyMissingTask(t *testing.T) {
 	if err := child.Run(); err != nil {
 		t.Fatal(err)
 	}
-	h := &noodleHost{dir: filepath.Join(poolRoot, "g", newID), instanceID: newID, binaryPath: "/new/noodle", binarySHA: "new", rolling: &hostRolling{root: poolRoot, carry: map[string]rollingCarry{}}}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: filepath.Join(poolRoot, "g", newID), instanceID: newID, binaryPath: "/new/noodle", binarySHA: "new", rolling: &hostRolling{root: poolRoot, carry: map[string]rollingCarry{}}}
 	if err := os.MkdirAll(h.dir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -435,7 +435,7 @@ func TestHostReviewControllerCanReleaseOnSameGenerationWithoutDrainingHost(t *te
 		t.Fatal(err)
 	}
 	var rt *rollingBusyRuntime
-	h := &noodleHost{dir: filepath.Join(root, "g", id), instanceID: id, binaryPath: "/new/noodle", binarySHA: "new", rolling: &hostRolling{root: root, carry: map[string]rollingCarry{}}}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: filepath.Join(root, "g", id), instanceID: id, binaryPath: "/new/noodle", binarySHA: "new", rolling: &hostRolling{root: root, carry: map[string]rollingCarry{}}}
 	if err := os.MkdirAll(h.dir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +495,7 @@ func TestHostRebuildKnownRefusalNeverReplaysNewOrFailedReceipt(t *testing.T) {
 			receipt.BinarySHA256 = "new"
 			receipt.ContextState = contextState
 			receipt.TerminalCause = ""
-			h := &noodleHost{instanceID: id, binarySHA: "new", rolling: &hostRolling{root: root}, receipts: []hostReceipt{receipt}}
+			h := &noodleHost{prepareContext: fixtureTaskPreparation, instanceID: id, binarySHA: "new", rolling: &hostRolling{root: root}, receipts: []hostReceipt{receipt}}
 			h.newRuntime = func(string, string, config.Config, loop.Dependencies) hostRuntime {
 				t.Fatal("new receipt replayed")
 				return nil

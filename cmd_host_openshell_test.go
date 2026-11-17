@@ -24,7 +24,7 @@ func TestHostOpenShellProfileRefusalPrecedesRuntimeOrContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.ConfigSHA256 = hostDigest(data)
-	h := &noodleHost{dir: t.TempDir(), instanceID: "instance", binaryPath: "/native/noodle", binarySHA: "test-binary", budget: admission.NewBudget(2)}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), instanceID: "instance", binaryPath: "/native/noodle", binarySHA: "test-binary", budget: admission.NewBudget(2)}
 	var err error
 	h.residents, err = admission.OpenResidents(h.dir)
 	if err != nil {
@@ -45,7 +45,7 @@ func TestHostOpenShellProfileRefusalPrecedesRuntimeOrContext(t *testing.T) {
 func TestHostOpenShellKeepsEachContextPolicy(t *testing.T) {
 	first := loopruntime.OpenShellProfile{Gateway: loopruntime.OpenShellGatewaySpec{Binding: loopruntime.OpenShellCustodyBinding{ConfigSource: "/shared/gateway.toml", ConfigFingerprint: "same-deployment"}}, Routes: map[string]loopruntime.OpenShellRoute{"codex": {Binary: "first-task"}}}
 	owner := &loopruntime.OpenShellGateway{}
-	h := &noodleHost{openShell: owner, openShellProfile: &first, contexts: map[string]*hostContext{"first": {openShell: true, done: make(chan error)}}}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, openShell: owner, openShellProfile: &first, contexts: map[string]*hostContext{"first": {openShell: true, done: make(chan error)}}}
 	second := first
 	second.Routes = map[string]loopruntime.OpenShellRoute{"codex": {Binary: "second-task"}}
 	selected, err := h.bindOpenShellProfile(second)
@@ -93,7 +93,7 @@ func TestHostOpenShellTwoAttachedContextsSelectDistinctPolicies(t *testing.T) {
 	if err = os.WriteFile(secondPath, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	h := &noodleHost{dir: t.TempDir(), instanceID: "instance", binaryPath: "/native/noodle", binarySHA: "test-binary", budget: admission.NewBudget(2), completed: make(chan string, 4)}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), instanceID: "instance", binaryPath: "/native/noodle", binarySHA: "test-binary", budget: admission.NewBudget(2), completed: make(chan string, 4)}
 	h.residents, err = admission.OpenResidents(h.dir)
 	if err != nil {
 		t.Fatal(err)

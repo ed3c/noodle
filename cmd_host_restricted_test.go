@@ -184,7 +184,7 @@ func TestRestrictedHeldOwnerRefusesExplicitAndAutomaticRebuild(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	h := &noodleHost{instanceID: id, rolling: &hostRolling{root: root}}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, instanceID: id, rolling: &hostRolling{root: root}}
 	req.AdmissionSHA = "old"
 	req.RoundSource = r.HostInstanceID
 	req.RoundState = &loop.HostContinuation{Mode: "manual", DispatchState: loop.StatePaused}

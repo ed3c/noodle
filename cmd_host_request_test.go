@@ -70,7 +70,7 @@ func TestHostRequestBindingSeparatesOldReceiptAndNeverReplaysUnknown(t *testing.
 	if retry.Operation != "status" || retry.RequestID != binding.RequestID {
 		t.Fatalf("unknown request was replayed: %+v", retry)
 	}
-	h := &noodleHost{binarySHA: req.BinarySHA256, receipts: []hostReceipt{{ProjectDir: root, RequestID: "old-request", ConfigSHA256: req.ConfigSHA256, Mode: req.Mode, ContextState: "detached"}}}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, binarySHA: req.BinarySHA256, receipts: []hostReceipt{{ProjectDir: root, RequestID: "old-request", ConfigSHA256: req.ConfigSHA256, Mode: req.Mode, ContextState: "detached"}}}
 	if got := h.handle(context.Background(), retry); got.Status != "not_found" {
 		t.Fatalf("old receipt satisfied new request: %+v", got)
 	}

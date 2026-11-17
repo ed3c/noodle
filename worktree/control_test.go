@@ -3,12 +3,21 @@ package worktree
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/poteto/noodle/internal/admission"
 )
+
+func prepareControlFixture(ctx context.Context, host, task string) (TaskControl, error) {
+	return PrepareTaskControlWithAdmission(ctx, host, task, func(context.Context, TaskControl) (admission.PreparationRef, error) {
+		return admission.PreparationRef{ID: "original-native-fixture", SHA256: "original-reservation-source"}, nil
+	})
+}
 
 func TestPrepareTaskControlPreservesSourceAndReusesOriginal(t *testing.T) {
 	root := t.TempDir()
@@ -36,11 +45,24 @@ func TestPrepareTaskControlPreservesSourceAndReusesOriginal(t *testing.T) {
 		t.Fatal(err)
 	}
 	host := t.TempDir()
-	first, err := PrepareTaskControl(context.Background(), host, task)
+	plan, err := PlanTaskControl(context.Background(), host, task)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := PrepareTaskControl(context.Background(), host, task)
+	if _, err := os.Stat(filepath.Dir(plan.ControlRoot)); !os.IsNotExist(err) {
+		t.Fatal("planning created a control directory")
+	}
+	if _, err := PrepareTaskControl(context.Background(), host, task); !errors.Is(err, admission.ErrDeferred) {
+		t.Fatal("missing admission created a control", err)
+	}
+	if _, err := os.Stat(filepath.Dir(plan.ControlRoot)); !os.IsNotExist(err) {
+		t.Fatal("refused admission created a control directory")
+	}
+	first, err := prepareControlFixture(context.Background(), host, task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := prepareControlFixture(context.Background(), host, task)
 	if err != nil || first != second || second.Status != "prepared" {
 		t.Fatalf("original control differs: %+v %+v %v", first, second, err)
 	}
@@ -56,7 +78,7 @@ func TestPrepareTaskControlPreservesSourceAndReusesOriginal(t *testing.T) {
 	if err := os.Rename(first.ControlRoot, first.ControlRoot+"-lost"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := PrepareTaskControl(context.Background(), host, task); err == nil {
+	if _, err := prepareControlFixture(context.Background(), host, task); err == nil {
 		t.Fatal("lost original creation was replayed")
 	}
 }
@@ -86,7 +108,7 @@ func TestPrepareTaskControlTakesBaseOnlyFromBoundTaskSource(t *testing.T) {
 		if err := os.WriteFile(task, raw, 0600); err != nil {
 			t.Fatal(err)
 		}
-		control, err := PrepareTaskControl(context.Background(), host, task)
+		control, err := prepareControlFixture(context.Background(), host, task)
 		if err != nil || control.Head != head {
 			t.Fatalf("bound base ignored: %+v %v", control, err)
 		}

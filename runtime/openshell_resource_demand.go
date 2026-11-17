@@ -106,7 +106,7 @@ func OpenShellWorkerResourceClaim(p OpenShellProfile, diskRoots ...string) (admi
 	if err != nil { return claim, err }
 	claim.Policy.MaxSwapUsedBytes, err = resourceMiB(policy.MaxSwapUsedMiB, "max_swap_used_mib", true)
 	if err != nil { return claim, err }
-	if policy.CPUBudget == nil || *policy.CPUBudget <= 0 || policy.MaxSwapoutBytesPerSecond == nil || *policy.MaxSwapoutBytesPerSecond < 0 || policy.RecoverySamples < 2 || policy.RecoverySamples > 12 {
+	if policy.CPUBudget == nil || *policy.CPUBudget <= 0 || policy.MaxSwapoutBytesPerSecond == nil || *policy.MaxSwapoutBytesPerSecond < 0 || policy.RecoverySamples < 2 || policy.RecoverySamples > admission.MaxRecoverySamples {
 		return claim, errors.New("operator_machine_policy_missing_or_invalid")
 	}
 	claim.Policy.CPUs = uint64(*policy.CPUBudget)

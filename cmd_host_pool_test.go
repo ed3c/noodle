@@ -95,7 +95,7 @@ func TestRollingBusyRoundStaysWithOldRuntimeUntilNativeRelease(t *testing.T) {
 	}
 	observeKnownHostFixtureSamples(budget)
 	rt := &rollingBusyRuntime{fakeHostRuntime{ready: make(chan struct{}), released: make(chan struct{}), busy: true}}
-	h := &noodleHost{dir: root, instanceID: oldID, binaryPath: "/old/noodle", binarySHA: "old", budget: budget,
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: root, instanceID: oldID, binaryPath: "/old/noodle", binarySHA: "old", budget: budget,
 		rolling:    &hostRolling{root: root, carry: map[string]rollingCarry{}},
 		newRuntime: func(string, string, config.Config, loop.Dependencies) hostRuntime { return rt }}
 	req := hostTestRequest(t, t.TempDir())
@@ -207,7 +207,7 @@ func TestRollingLostAckReconcilesOriginalReceiptWithoutDispatch(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	h := &noodleHost{instanceID: nextID, binarySHA: "new", receipts: []hostReceipt{current}, rolling: &hostRolling{root: root}}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, instanceID: nextID, binarySHA: "new", receipts: []hostReceipt{current}, rolling: &hostRolling{root: root}}
 	req := hostRequest{RequestID: "request", ProjectDir: original.ProjectDir, Mode: original.Mode, ConfigSHA256: original.ConfigSHA256, RoundSource: oldID}
 	for i := 0; i < 2; i++ {
 		got := h.reconcileRollingRound(req)
@@ -334,7 +334,7 @@ func TestRollingPoolDoesNotHideCorruptOwnerState(t *testing.T) {
 func TestRollingRejectedAdmissionKeepsOriginalCauseWithoutReplay(t *testing.T) {
 	root := t.TempDir()
 	id := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	h := &noodleHost{dir: root, instanceID: id, binaryPath: "/exact/noodle", binarySHA: "original", rolling: &hostRolling{root: root}}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: root, instanceID: id, binaryPath: "/exact/noodle", binarySHA: "original", rolling: &hostRolling{root: root}}
 	if err := updateHostPool(root, func(p *hostPool) error {
 		p.Active = id
 		p.Generations[id] = hostGeneration{ID: id, Directory: filepath.Join(root, "g", id), Binary: h.binaryPath, SHA: h.binarySHA}

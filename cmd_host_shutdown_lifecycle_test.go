@@ -103,7 +103,7 @@ func TestHostShutdownKeepsSocketUntilOriginalResidentExits(t *testing.T) {
 	t.Setenv("NOODLE_HOST_DIR", dir)
 	ctx, shutdown := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- serveHostWithSampler(ctx, hostShutdownTestSampler{}) }()
+	go func() { done <- serveHostWithSampler(ctx, hostShutdownTestSampler{}, fixtureTaskPreparation) }()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		conn, err := net.DialTimeout("unix", filepath.Join(dir, "host.sock"), 50*time.Millisecond)

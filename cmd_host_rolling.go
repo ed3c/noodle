@@ -91,7 +91,9 @@ func newHostRollingCmd() *cobra.Command {
 			return err
 		}
 		if !inspect && !maintenancePlan {
-			if err = verifyMachineRollingTarget(cmd.Context(), binary, digest); err != nil { return err }
+			if err = verifyMachineRollingTarget(cmd.Context(), binary, digest); err != nil {
+				return err
+			}
 		}
 		if maintenancePlan {
 			if handoverRoot != "" {
@@ -663,7 +665,7 @@ func (h *noodleHost) failVersion(id string, failure error) {
 }
 func (h *noodleHost) observeRetiredGenerations(p *hostPool) {
 	for id, g := range p.Generations {
-		if (g.State != "exiting" && g.State != "retiring") || g.Process.PID <= 0 {
+		if (g.State != "exiting" && g.State != "retiring" && g.State != "exited") || g.Process.PID <= 0 {
 			continue
 		}
 		if g.State == "retiring" {
@@ -679,13 +681,20 @@ func (h *noodleHost) observeRetiredGenerations(p *hostPool) {
 		if err != nil || !absent {
 			continue
 		}
+		resourceErr := error(nil)
+		if g.Preparation != nil {
+			resourceErr = returnHostResidentResources(h.rolling.root, g)
+		}
 		if err := updateHostPool(h.rolling.root, func(p *hostPool) error {
 			current := p.Generations[id]
+			if resourceErr != nil && !strings.Contains(current.Error, resourceErr.Error()) {
+				current.Error = strings.TrimSpace(current.Error + "\nresident resources retained: " + resourceErr.Error())
+			}
 			if current.State == "exiting" || current.State == "retiring" {
 				// Physical exit does not discharge a task, continuation or quota lease.
 				current.State = "exited"
-				p.Generations[id] = current
 			}
+			p.Generations[id] = current
 			return nil
 		}); err != nil {
 			h.rolling.failure = err.Error()
