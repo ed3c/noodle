@@ -114,7 +114,9 @@ func VerifySmallQualificationRepository(ctx context.Context, control TaskControl
 		}
 		hooks = filepath.Join(common, "hooks")
 	} else if !filepath.IsAbs(hooks) {
-		hooks = filepath.Join(control.Repository, hooks)
+		// Git resolves this in the new checkout, not the current repository.
+		// Absence here cannot qualify the selected base before worktree add.
+		return fail("relative core.hooksPath cannot be qualified before selected checkout")
 	}
 	entries, err := os.ReadDir(hooks)
 	if err != nil && !os.IsNotExist(err) {
