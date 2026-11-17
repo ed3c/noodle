@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -771,4 +772,78 @@ func TestManagedOpenShellGatewayQuotaAndRetainedInitialization(t *testing.T) {
 		}
 		f.spawns(t, 1)
 	})
+}
+
+func TestManagedOpenShellGatewayAcquireWaitsForCustodyObservation(t *testing.T) {
+	f := newManagedFixture(t, true)
+	o := f.open(t)
+	c, err := o.Acquire(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	result := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		_, err := o.Acquire(ctx, "b")
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		c.mu.Unlock()
+		t.Fatalf("transient custody observation terminated acquire: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	c.mu.Unlock()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("acquire did not continue after observation released custody")
+	}
+	f.spawns(t, 1)
+}
+
+func TestManagedOpenShellGatewayAcquireCustodyWaitPreservesRefusals(t *testing.T) {
+	f := newManagedFixture(t, true)
+	o := f.open(t)
+	c, err := o.Acquire(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel()
+	_, err = o.Acquire(ctx, "b")
+	c.mu.Unlock()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("busy acquire lost deadline: %v", err)
+	}
+	if _, err := o.Acquire(ctx, "b"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expired acquire accepted: %v", err)
+	}
+	for _, kind := range []string{"quiesced", "blocked", "fault"} {
+		t.Run(kind, func(t *testing.T) {
+			c.mu.Lock()
+			c.quiesced = kind == "quiesced"
+			if kind == "blocked" {
+				c.state.Blocked = "unresolved original effect"
+			}
+			if kind == "fault" {
+				c.fault = errors.New("unresolved custody persistence")
+			}
+			c.mu.Unlock()
+			_, err := o.Acquire(t.Context(), "b")
+			c.mu.Lock()
+			c.quiesced, c.state.Blocked, c.fault = false, "", nil
+			c.mu.Unlock()
+			if err == nil {
+				t.Fatal("custody refusal bypassed")
+			}
+		})
+	}
+	f.spawns(t, 1)
 }
