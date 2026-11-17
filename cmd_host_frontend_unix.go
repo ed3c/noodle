@@ -9,14 +9,14 @@ import (
 	"syscall"
 )
 
-// Existing workers and explicit binary introspection retain their version.
+// Workers, explicit introspection and bound maintenance retain their version.
 // New external CLI invocations use the native selected version before parsing.
 func selectNativeFrontend() error {
 	if os.Getenv("NOODLE_SESSION_ID") != "" {
 		return nil
 	}
 	for i := 1; i+1 < len(os.Args); i++ {
-		if os.Args[i] == "host" && (os.Args[i+1] == "serve" || os.Args[i+1] == "capabilities" || os.Args[i+1] == "switch") {
+		if os.Args[i] == "host" && (os.Args[i+1] == "serve" || os.Args[i+1] == "capabilities" || os.Args[i+1] == "switch" || os.Args[i+1] == "maintenance") {
 			return nil
 		}
 		if i+2 < len(os.Args) && os.Args[i] == "host" && os.Args[i+1] == "task" && (os.Args[i+2] == "capabilities" || os.Args[i+2] == "review-capabilities" || os.Args[i+2] == "session-readback") {

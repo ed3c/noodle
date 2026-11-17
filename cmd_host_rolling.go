@@ -244,6 +244,7 @@ func (h *noodleHost) joinRolling() error {
 		return err
 	}
 	h.rolling = &hostRolling{root: root, generation: id, retiring: p.Active != "" && p.Active != id && g.State != "starting", carry: map[string]rollingCarry{}, fence: fence}
+	h.sourceService = g.SourceService
 	return nil
 }
 

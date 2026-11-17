@@ -16,18 +16,22 @@ import (
 	"github.com/poteto/noodle/internal/lockfile"
 	"github.com/poteto/noodle/internal/procx"
 	"github.com/poteto/noodle/loop"
+	loopruntime "github.com/poteto/noodle/runtime"
 )
 
 type hostGeneration struct {
-	ID        string              `json:"id"`
-	Directory string              `json:"directory"`
-	Binary    string              `json:"binary_path"`
-	SHA       string              `json:"binary_sha256"`
-	State     string              `json:"state"`
-	Process   procx.ProcessRecord `json:"process"`
-	Error     string              `json:"error,omitempty"`
+	unknown       map[string]json.RawMessage
+	SourceService *loopruntime.SessionReadbackFileRef `json:"source_service,omitempty"`
+	ID            string                              `json:"id"`
+	Directory     string                              `json:"directory"`
+	Binary        string                              `json:"binary_path"`
+	SHA           string                              `json:"binary_sha256"`
+	State         string                              `json:"state"`
+	Process       procx.ProcessRecord                 `json:"process"`
+	Error         string                              `json:"error,omitempty"`
 }
 type hostVersionRequest struct {
+	unknown          map[string]json.RawMessage
 	MaintenanceState string `json:"maintenance_previous_state,omitempty"`
 	ID               string `json:"id"`
 	Binary           string `json:"binary_path"`
@@ -37,6 +41,7 @@ type hostVersionRequest struct {
 	Error            string `json:"error,omitempty"`
 }
 type hostTaskOwner struct {
+	unknown               map[string]json.RawMessage
 	NotAdmitted           *hostUnacceptedAdmission `json:"not_admitted,omitempty"`
 	MaintenanceHold       string                   `json:"maintenance_hold,omitempty"`
 	ExecutionProfile      *hostExecutionProfile    `json:"execution_profile,omitempty"`
@@ -70,6 +75,7 @@ func historicalHostContext(owner hostTaskOwner, id string) bool {
 }
 
 type hostPool struct {
+	unknown     map[string]json.RawMessage
 	Schema      int                       `json:"schema"`
 	Active      string                    `json:"active"`
 	Generations map[string]hostGeneration `json:"generations"`
@@ -206,6 +212,10 @@ func generationLive(g hostGeneration) bool { return g.State != "exited" && g.Sta
 // The existing Host actor owns both the version queue and activation. No
 // additional resident coordinator or connection carrier is created.
 func launchHostGeneration(ctx context.Context, root, binary, digest string) (hostGeneration, error) {
+	return launchHostGenerationWithSource(ctx, root, binary, digest, nil)
+}
+
+func launchHostGenerationWithSource(ctx context.Context, root, binary, digest string, source *loopruntime.SessionReadbackFileRef) (hostGeneration, error) {
 	data, err := os.ReadFile(binary)
 	if err != nil || hostDigest(data) != digest {
 		return hostGeneration{}, errors.New("selected Host binary changed")
@@ -214,7 +224,7 @@ func launchHostGeneration(ctx context.Context, root, binary, digest string) (hos
 	if err != nil {
 		return hostGeneration{}, err
 	}
-	g := hostGeneration{ID: id, Directory: filepath.Join(root, "g", id), Binary: binary, SHA: digest, State: "starting"}
+	g := hostGeneration{ID: id, Directory: filepath.Join(root, "g", id), Binary: binary, SHA: digest, State: "starting", SourceService: source}
 	if err = os.MkdirAll(g.Directory, 0700); err != nil {
 		return g, err
 	}

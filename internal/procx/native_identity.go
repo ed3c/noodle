@@ -18,6 +18,7 @@ type NativeIdentity struct {
 	StartUsec uint64 `json:"start_usec"`
 	Version   int    `json:"version"`
 	Zombie    bool   `json:"zombie"`
+	Stopped   bool   `json:"stopped,omitempty"`
 	Token     []byte `json:"token,omitempty"`
 }
 

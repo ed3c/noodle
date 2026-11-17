@@ -21,6 +21,9 @@ func (h *noodleHost) openShellContextsActive() bool {
 // A new generation is possible only after all bound contexts finish and the
 // original resident child is conclusively reaped. Unknown effects retain owner.
 func (h *noodleHost) closeIdleOpenShell() error {
+	if h.sourceService != nil {
+		return nil
+	}
 	if h.openShell == nil || h.openShellContextsActive() {
 		return nil
 	}

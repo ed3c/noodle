@@ -18,6 +18,9 @@ type OpenShellColdRelease struct {
 type OpenShellRetiredActor struct {
 	Process            procx.NativeIdentity
 	IntentAt, ExitedAt time.Time
+	// Intent and kernel acknowledgement are not native shutdown/drain proof.
+	ControlMethod     string    `json:",omitempty"`
+	ControlAcceptedAt time.Time `json:",omitzero"`
 }
 
 type OpenShellColdRetirement struct {

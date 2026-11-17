@@ -18,6 +18,18 @@ import (
 // retirement of every old writer. It preserves exact old bytes separately.
 // A repeat reads the same result, never empties live leases.
 func MigrateEmptySharedQuota(ctx context.Context, dir, custody string, original []byte) error {
+	return migrateEmptySharedQuota(ctx, dir, custody, original, 1, "quota-schema1.json")
+}
+
+// MigrateEmptySourceQuotaV2 is the explicit Source maintenance continuation.
+// The original controller must prove every old writer retired and settle only
+// the selected retired resident allocation before this empty-ledger migration.
+// It does not expand the original schema-1 entry's accepted inputs.
+func MigrateEmptySourceQuotaV2(ctx context.Context, dir, custody string, original []byte) error {
+	return migrateEmptySharedQuota(ctx, dir, custody, original, 2, "quota-source-schema2.json")
+}
+
+func migrateEmptySharedQuota(ctx context.Context, dir, custody string, original []byte, schema int, backupName string) error {
 	var before struct {
 		Schema    int                   `json:"schema"`
 		Maximum   int                   `json:"maximum"`
@@ -27,8 +39,11 @@ func MigrateEmptySharedQuota(ctx context.Context, dir, custody string, original 
 	if err := json.Unmarshal(original, &before); err != nil {
 		return err
 	}
-	if before.Schema != 1 || before.Maximum <= 0 || before.SwapLimit != 15_000_000_000 || before.Leases == nil || len(before.Leases) != 0 {
-		return errors.New("migration requires an original empty schema-1 quota with the selected ceiling")
+	if before.Schema != schema || before.Maximum <= 0 || before.SwapLimit != 15_000_000_000 || before.Leases == nil || len(before.Leases) != 0 {
+		if schema == 1 {
+			return errors.New("migration requires an original empty schema-1 quota with the selected ceiling")
+		}
+		return errors.New("Source migration requires an original empty schema-2 quota with the selected ceiling")
 	}
 	next, err := json.Marshal(quotaState{Schema: sharedQuotaSchema, Policy: WorkerAdmissionPolicy,
 		Maximum: DefaultWorkerLimit, Leases: map[string]quotaLease{}})
@@ -45,7 +60,7 @@ func MigrateEmptySharedQuota(ctx context.Context, dir, custody string, original 
 	if err != nil {
 		return err
 	}
-	backup := filepath.Join(custody, "quota-schema1.json")
+	backup := filepath.Join(custody, backupName)
 	intent := filepath.Join(custody, "quota-migration.json")
 	if prior, readErr := os.ReadFile(intent); readErr == nil {
 		var saved struct{ Before, After string }

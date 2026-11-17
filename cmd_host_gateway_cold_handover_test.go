@@ -87,15 +87,18 @@ func TestColdRetirementPersistsIntentBeforeNativeControl(t *testing.T) {
 	writes := 0
 	save := func() error {
 		writes++
-		if writes == 1 && (actor.IntentAt.IsZero() || !actor.ExitedAt.IsZero()) {
+		if writes == 1 && (actor.IntentAt.IsZero() || !actor.ExitedAt.IsZero() || actor.ControlMethod != "kill" || !actor.ControlAcceptedAt.IsZero()) {
 			t.Fatal("control preceded intent")
+		}
+		if writes == 2 && (actor.ControlAcceptedAt.IsZero() || actor.ControlAcceptedAt.Before(actor.IntentAt) || !actor.ExitedAt.IsZero()) {
+			t.Fatal("kernel acknowledgement was not saved separately from exit")
 		}
 		return nil
 	}
 	initialErr := retireColdActor(context.Background(), &actor, save)
 	err = initialErr
 	if initialErr != nil {
-		if writes != 1 || actor.IntentAt.IsZero() || !actor.ExitedAt.IsZero() {
+		if (writes != 1 && writes != 2) || actor.IntentAt.IsZero() || !actor.ExitedAt.IsZero() {
 			t.Fatal("unknown retirement changed original intent or claimed exit", initialErr, writes)
 		}
 		t.Logf("initial native retirement remained unknown: %v", initialErr)
@@ -109,7 +112,7 @@ func TestColdRetirementPersistsIntentBeforeNativeControl(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
-	if err != nil || writes != 2 || actor.ExitedAt.IsZero() {
+	if err != nil || writes != 3 || actor.ExitedAt.IsZero() || actor.ControlMethod != "kill" || actor.ControlAcceptedAt.IsZero() {
 		t.Fatal("native retirement lacks actual exit", err, writes, "initial result:", initialErr)
 	}
 	writes = 0
@@ -220,7 +223,7 @@ func TestColdRetirementReadsNaturalActorExitWithoutSignal(t *testing.T) {
 	_ = cmd.Wait()
 	actor := loopruntime.OpenShellRetiredActor{Process: identity}
 	writes := 0
-	if err := retireColdActor(context.Background(), &actor, func() error { writes++; return nil }); err != nil || writes != 1 || actor.ExitedAt.IsZero() {
+	if err := retireColdActor(context.Background(), &actor, func() error { writes++; return nil }); err != nil || writes != 1 || actor.ExitedAt.IsZero() || actor.ControlMethod != "exit-observed" || !actor.ControlAcceptedAt.IsZero() {
 		t.Fatal("natural exit required an unnecessary control", err, writes)
 	}
 }

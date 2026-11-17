@@ -142,6 +142,12 @@ func reserveOpenShellCustody(binding OpenShellCustodyBinding, conn *grpc.ClientC
 }
 
 func reserveOpenShellCustodyWithCredentials(binding OpenShellCustodyBinding, conn *grpc.ClientConn, retained []OpenShellRetainedSandbox, controlRoot string, source *OpenShellCredentialSource) (*OpenShellCustody, error) {
+	return reserveOpenShellCustodyBound(binding, conn, retained, controlRoot, source, nil)
+}
+
+// Source restoration must consume the exact existing ledger without writing
+// worker conflicts. Ordinary reservations keep their original blocking rules.
+func reserveOpenShellCustodyBound(binding OpenShellCustodyBinding, conn *grpc.ClientConn, retained []OpenShellRetainedSandbox, controlRoot string, source *OpenShellCredentialSource, expected *SessionReadbackFileRef) (*OpenShellCustody, error) {
 	fail := func(err error) (*OpenShellCustody, error) { _ = conn.Close(); return nil, err }
 	if !filepath.IsAbs(controlRoot) {
 		return fail(fmt.Errorf("openshell Host control root is not absolute"))
@@ -175,10 +181,21 @@ func reserveOpenShellCustodyWithCredentials(binding OpenShellCustodyBinding, con
 	}
 	ownerCtx, cancel := context.WithCancel(context.Background())
 	c := &OpenShellCustody{lock: lock, conn: conn, client: pb.NewOpenShellClient(conn), ctx: ownerCtx, cancel: cancel}
+	reject := func(reason string) (*OpenShellCustody, error) {
+		if expected != nil {
+			return nil, errors.Join(fmt.Errorf("%s", reason), c.Close())
+		}
+		return c, c.block(reason)
+	}
 	if source != nil {
 		c.credentialSourceBinding = source.BindingSHA256
 	}
 	data, err := os.ReadFile(filepath.Join(root, "owner.json"))
+	if expected != nil {
+		if err != nil || expected.Path != filepath.Join(root, "owner.json") || retainedRecoveryHash(data) != expected.SHA256 {
+			return nil, errors.Join(fmt.Errorf("Source custody differs from the original restore before-image"), c.Close())
+		}
+	}
 	if err == nil {
 		if err := json.Unmarshal(data, &c.state); err != nil {
 			_ = c.Close()
@@ -187,6 +204,9 @@ func reserveOpenShellCustodyWithCredentials(binding OpenShellCustodyBinding, con
 		if !openShellCustodySupportsProfile(c.state, OpenShellGatewaySpec{CredentialSource: source}) {
 			_ = c.Close()
 			return nil, fmt.Errorf("unsupported openshell custody version")
+		}
+		if expected != nil && (c.state.Version != openShellCustodyVersion || len(c.state.Credentials) != 0) {
+			return nil, errors.Join(fmt.Errorf("Source service restore requires original credential-free v4 custody"), c.Close())
 		}
 		if c.state.ControlRoot != controlRoot {
 			_ = c.Close()
@@ -201,13 +221,13 @@ func reserveOpenShellCustodyWithCredentials(binding OpenShellCustodyBinding, con
 		if c.state.Binding != binding {
 			// Always persist through the admitted root, never a path supplied by disk.
 			c.state.Binding.StateRoot = root
-			return c, c.block("openshell custody configuration/owner binding changed")
+			return reject("openshell custody configuration/owner binding changed")
 		}
 		if err := verifyOpenShellRetainedRecovery(binding); err != nil {
 			return c, err
 		}
 		if len(retained) != 0 && !sameOpenShellRetained(c.state, retained) {
-			return c, c.block("retained sandbox receipt set changed")
+			return reject("retained sandbox receipt set changed")
 		}
 	} else if os.IsNotExist(err) {
 		for _, name := range []string{retainedRecoveryAuditFile, retainedRecoveryCompleteFile} {
@@ -226,7 +246,7 @@ func reserveOpenShellCustodyWithCredentials(binding OpenShellCustodyBinding, con
 		return nil, err
 	}
 	if err := c.validateLedger(); err != nil {
-		return c, c.block(err.Error())
+		return reject(err.Error())
 	}
 	return c, nil
 }

@@ -18,6 +18,7 @@ import (
 // Preparation is read-only, including on refusal. This plan is evidence for
 // review, never an authorization token or a replacement for an original request.
 type hostMaintenancePlan struct {
+	SourcePolicy *hostSourcePolicyPlan        `json:"source_policy,omitempty"`
 	Schema       int                          `json:"schema"`
 	Root         string                       `json:"host_dir"`
 	Target       string                       `json:"target"`

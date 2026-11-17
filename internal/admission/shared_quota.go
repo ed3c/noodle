@@ -53,7 +53,7 @@ func (b *Budget) BindSharedQuota(dir, owner string) error {
 		return err
 	}
 	q := &sharedQuota{dir: dir, owner: owner}
-	if err := q.update(b.maximum, func(*quotaState) error { return nil }); err != nil {
+	if err := q.access(b.maximum, true, nil); err != nil {
 		return err
 	}
 	b.mu.Lock()
@@ -101,10 +101,14 @@ func (q *sharedQuota) access(maximum int, write bool, apply func(*quotaState) er
 			return errors.New("Host generations disagree on the Host worker ceiling")
 		}
 	}
-	if err = apply(&state); err != nil {
-		return err
+	if apply != nil {
+		if err = apply(&state); err != nil {
+			return err
+		}
 	}
-	if !write {
+	// Binding only validates an existing ledger. Preserve its exact bytes and
+	// opaque metadata; only a genuinely new ledger needs initialization.
+	if !write || (apply == nil && raw != nil) {
 		return nil
 	}
 	data, err := json.Marshal(state)
