@@ -306,6 +306,12 @@ func callHost(ctx context.Context, req hostRequest) hostResponse {
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
+	if requestBinding != nil && (req.Operation == "attach" || req.Operation == "once") {
+		req.ReadbackRequest, err = loopruntime.ReadSessionReadbackFile(req.RequestFile, nil)
+		if err != nil {
+			return hostError("refused", err)
+		}
+	}
 	if err = json.NewEncoder(conn).Encode(req); err != nil {
 		return hostError("unknown_effect", err)
 	}

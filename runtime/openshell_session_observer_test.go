@@ -311,6 +311,11 @@ func TestStandaloneObserverRejectsDriftDuringOriginalGet(t *testing.T) {
 // then produces its own wrapped command, custody, progress receipt and archives.
 func fileProfileObserverFixture(t *testing.T) (*OpenShellRuntime, CompletedSessionBinding, *managedFixture) {
 	t.Helper()
+	return fileProfileObserverFixtureWithPrepare(t, nil)
+}
+
+func fileProfileObserverFixtureWithPrepare(t *testing.T, prepare func(*managedFixture)) (*OpenShellRuntime, CompletedSessionBinding, *managedFixture) {
+	t.Helper()
 	var loaded OpenShellProfile
 	r, f, target := openShellRuntimeFixture(t, func(f *managedFixture) {
 		filename, doc := profileFixture(t)
@@ -365,6 +370,9 @@ func fileProfileObserverFixture(t *testing.T) (*OpenShellRuntime, CompletedSessi
 		f.spec = loaded.Gateway
 		managedMarker(t, f.root, "completion-observation")
 		managedMarker(t, f.root, "provider-ready")
+		if prepare != nil {
+			prepare(f)
+		}
 	})
 	r.config.Profile = loaded
 	h, err := r.Dispatch(t.Context(), DispatchRequest{Name: "file-backed", Provider: "codex", Model: "fixture", Runtime: "openshell", Prompt: "produce result", WorktreePath: target, AllowPrimaryCheckout: true, EnvVars: map[string]string{"NOODLE_ORDER_ID": "file-backed", "NOODLE_STAGE_INDEX": "0"}})
@@ -386,6 +394,46 @@ func fileProfileObserverFixture(t *testing.T) (*OpenShellRuntime, CompletedSessi
 	})
 	writeReadbackJSON(t, filepath.Join(r.config.RuntimeDir, "sessions", h.ID(), "meta.json"), map[string]any{"session_id": h.ID(), "provider": "codex", "model": "fixture", "runtime": "openshell", "status": "exited", "alive": false})
 	return r, CompletedSessionBinding{OrderID: "file-backed", SessionID: h.ID(), WorktreePath: target, Provider: "codex", Model: "fixture"}, f
+}
+
+func TestStandaloneObserverRejectsProfileClosureDriftDuringOriginalGet(t *testing.T) {
+	r, b, f := fileProfileObserverFixtureWithPrepare(t, func(f *managedFixture) { prepareCompletionGetMutation(t, f) })
+	profile := r.config.Profile
+	var custody OpenShellCustodyState
+	if _, err := ReadSessionReadbackFile(filepath.Join(profile.Gateway.Binding.StateRoot, "owner.json"), &custody); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Dir(profile.SourcePath)
+	for label, path := range map[string]string{
+		"profile": profile.SourcePath,
+		"source":  filepath.Join(root, "spec.json"),
+		"payload": filepath.Join(profile.PayloadDirectory, "codex"),
+		"client":  filepath.Join(root, "client", "openshell", "gateways", profile.GatewayName, "metadata.json"),
+	} {
+		t.Run(label, func(t *testing.T) {
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := os.WriteFile(path, before, 0700); err != nil {
+					t.Error(err)
+				}
+			})
+			stageCompletionGetMutation(t, f, custody.Records[0].Name, path, append(before, ' '))
+			events, err := os.ReadFile(filepath.Join(f.root, "events"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = ReadOpenShellCompletedEvidence(t.Context(), profile, r.config.RuntimeDir, r.config.ContextID, b); err == nil {
+				t.Fatal("original producer accepted profile closure drift during Get")
+			}
+			after, err := os.ReadFile(filepath.Join(f.root, "events"))
+			if err != nil || string(after[len(events):]) != "get\n" {
+				t.Fatal("profile closure refusal performed unexpected native effects", err)
+			}
+		})
+	}
 }
 
 func TestOpenShellObserverPreservesDistinctProducerDigests(t *testing.T) {

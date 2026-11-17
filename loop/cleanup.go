@@ -44,9 +44,15 @@ func (l *Loop) cleanupCompleted(apply bool) (err error) {
 	if err := l.checkCompletedTasks(); err != nil {
 		return err
 	}
+	if err := l.cleanupOwnedCheckouts(apply); err != nil {
+		return err
+	}
 	if !apply {
 		l.cleanupUnknown = nil
 		return nil
+	}
+	if err := l.settleCompletedMachineSessions(true); err != nil {
+		return err
 	}
 	return l.finishRelease()
 }
@@ -104,6 +110,17 @@ func (l *Loop) checkCompletedTasks() error {
 func (l *Loop) checkCompletedLocalTask(order state.OrderNode, stage state.StageNode) error {
 	if !l.isAdmittedLocalTask(order, stage) {
 		return fmt.Errorf("local task completion admission is unresolved: %s", order.OrderID)
+	}
+	if len(stage.Extra[localTaskRetentionKey]) != 0 {
+		retained, _, err := retainedLocalTask(order)
+		if err != nil {
+			return fmt.Errorf("local task retained branch evidence is invalid: %w", err)
+		}
+		head, err := recoveryGitWithExecution(l.deps.Execution, l.projectDir, "rev-parse", retained.Branch)
+		if err != nil || head != retained.Head {
+			return fmt.Errorf("local task retained branch moved or is missing: %s", order.OrderID)
+		}
+		return l.checkRetainedControlACK(retained.ControlID)
 	}
 	raw := stage.Extra[localTaskMergeKey]
 	if len(raw) == 0 {

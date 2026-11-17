@@ -116,13 +116,13 @@ func validateOpenShellCredentialLedger(rows []OpenShellCredentialDelivery) error
 	return nil
 }
 
-// Readback may retain v5 only when its original profile includes the delivery
-// source. An ordinary standalone custody client cannot resume these effects.
+// Credential-capable v5/v7 readback requires the original delivery source.
+// An ordinary standalone custody client cannot resume these effects.
 func openShellCustodySupportsProfile(state OpenShellCustodyState, spec OpenShellGatewaySpec) bool {
-	if state.Version == openShellCustodyVersion {
+	if state.Version == openShellCustodyVersion || state.Version == openShellRetirementCustodyVersion {
 		return len(state.Credentials) == 0
 	}
-	if state.Version != openShellCredentialCustodyVersion || spec.CredentialSource == nil || spec.CredentialSource.BindingSHA256 == "" {
+	if (state.Version != openShellCredentialCustodyVersion && state.Version != openShellCredentialRetirementCustodyVersion) || spec.CredentialSource == nil || spec.CredentialSource.BindingSHA256 == "" {
 		return false
 	}
 	for _, row := range state.Credentials {
@@ -397,12 +397,16 @@ func (o *OpenShellGateway) advanceCredential(ctx context.Context, provider strin
 		c.mu.Unlock()
 		return fmt.Errorf("openshell credential source-capable custody owner unavailable")
 	}
-	if c.state.Version != openShellCredentialCustodyVersion {
-		if c.state.Version != openShellCustodyVersion || len(c.state.Credentials) != 0 {
+	if c.state.Version != openShellCredentialCustodyVersion && c.state.Version != openShellCredentialRetirementCustodyVersion {
+		if (c.state.Version != openShellCustodyVersion && c.state.Version != openShellRetirementCustodyVersion) || len(c.state.Credentials) != 0 {
 			c.mu.Unlock()
 			return fmt.Errorf("openshell credential custody upgrade source invalid")
 		}
-		c.state.Version = openShellCredentialCustodyVersion
+		if c.state.Version == openShellRetirementCustodyVersion {
+			c.state.Version = openShellCredentialRetirementCustodyVersion
+		} else {
+			c.state.Version = openShellCredentialCustodyVersion
+		}
 		if err := c.save(); err != nil {
 			c.mu.Unlock()
 			return err

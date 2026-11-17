@@ -35,7 +35,7 @@ func (l *Loop) withAdmission(ctx context.Context, runtimeName, orderID string, l
 	if rt, ok := l.deps.Runtimes[runtimeName].(interface{ CapacityAvailable() bool }); ok && !rt.CapacityAvailable() {
 		return admission.ErrDeferred
 	}
-	permit, err := l.deps.Admission.TryAcquireTask(l.deps.AdmissionContext, orderID)
+	permit, err := l.deps.Admission.TryAcquireTask(l.deps.AdmissionContext, orderID, runtimeName)
 	if err != nil {
 		return err
 	}
@@ -45,6 +45,9 @@ func (l *Loop) withAdmission(ctx context.Context, runtimeName, orderID string, l
 			permit.Release()
 		}
 	}()
+	if err := permit.StartResourceEffects(); err != nil {
+		return err
+	}
 	return launch(context.WithValue(ctx, admissionKey{}, accepted))
 }
 
@@ -56,12 +59,17 @@ type resourceSession struct {
 
 func (s *resourceSession) Done() <-chan struct{} { return s.done }
 
-func (l *Loop) retainDispatched(ctx context.Context, session loopruntime.SessionHandle) loopruntime.SessionHandle {
+func (l *Loop) retainDispatched(ctx context.Context, session loopruntime.SessionHandle, requests ...loopruntime.DispatchRequest) loopruntime.SessionHandle {
 	accepted, _ := ctx.Value(admissionKey{}).(*launchAdmission)
 	if accepted == nil {
 		return session
 	}
 	accepted.retained = true
+	if len(requests) == 1 {
+		if err := l.bindResourceSession(accepted.permit, requests[0], session.ID()); err != nil {
+			l.logger.Warn("original machine session binding remains held", "session", session.ID(), "error", err)
+		}
+	}
 	wrapped := &resourceSession{SessionHandle: session, permit: accepted.permit, done: make(chan struct{})}
 	go func() { <-session.Done(); accepted.permit.Release(); close(wrapped.done) }()
 	return wrapped
@@ -89,6 +97,9 @@ func (l *Loop) withReplacement(cook *cookHandle, launch func(context.Context) er
 			permit.Release()
 		}
 	}()
+	if err := permit.StartResourceEffects(); err != nil {
+		return err
+	}
 	return launch(context.WithValue(ctx, admissionKey{}, accepted))
 }
 

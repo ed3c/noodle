@@ -58,7 +58,7 @@ func TestHostCleanupInspectApplyAndDuplicate(t *testing.T) {
 	ctx := context.Background()
 	req := hostTestRequest(t, t.TempDir())
 	rt := &fakeHostRuntime{ready: make(chan struct{}), released: make(chan struct{})}
-	h := &noodleHost{dir: t.TempDir(), binarySHA: req.BinarySHA256, instanceID: "instance", newRuntime: func(string, string, config.Config, loop.Dependencies) hostRuntime { return rt }}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), binarySHA: req.BinarySHA256, instanceID: "instance", newRuntime: func(string, string, config.Config, loop.Dependencies) hostRuntime { return rt }}
 	attached := h.handle(ctx, req)
 	if attached.Status != "ok" {
 		t.Fatalf("attach: %+v", attached)
@@ -84,7 +84,7 @@ func TestHostCleanupInspectApplyAndDuplicate(t *testing.T) {
 
 func TestHostGlobalCleanupSelectsCurrentIdentityAndPreservesBusy(t *testing.T) {
 	ctx := context.Background()
-	h := &noodleHost{dir: t.TempDir(), instanceID: "current", binarySHA: "test-binary"}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), instanceID: "current", binarySHA: "test-binary"}
 	runtimes := []*fakeHostRuntime{}
 	h.newRuntime = func(string, string, config.Config, loop.Dependencies) hostRuntime {
 		rt := &fakeHostRuntime{ready: make(chan struct{}), released: make(chan struct{}), busy: len(runtimes) == 1}
@@ -115,7 +115,7 @@ func TestHostGlobalCleanupSelectsCurrentIdentityAndPreservesBusy(t *testing.T) {
 
 func TestHostAutomaticCleanupUsesBoundPolicy(t *testing.T) {
 	ctx := context.Background()
-	h := &noodleHost{dir: t.TempDir(), instanceID: "current", binarySHA: "test-binary"}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), instanceID: "current", binarySHA: "test-binary"}
 	h.newRuntime = func(string, string, config.Config, loop.Dependencies) hostRuntime {
 		return &fakeHostRuntime{ready: make(chan struct{}), released: make(chan struct{})}
 	}
@@ -167,7 +167,7 @@ func TestHostHistoricalReceiptWithoutCauseRemainsUnknown(t *testing.T) {
 	if err := json.Unmarshal(data, &receipts); err != nil {
 		t.Fatal(err)
 	}
-	h := &noodleHost{dir: dir, binarySHA: "original-binary", receipts: receipts}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: dir, binarySHA: "original-binary", receipts: receipts}
 	for _, op := range []string{"status", "detach", "cleanup"} {
 		req := hostRequest{Operation: op, ProjectDir: "/original", ContextID: "old", RequestID: "original", BinarySHA256: "original-binary", CleanupCompleted: true}
 		if got := h.handle(context.Background(), req); got.Status != "ok" || got.TerminalCause != "" {
@@ -185,7 +185,7 @@ func TestHostHistoricalReceiptWithoutCauseRemainsUnknown(t *testing.T) {
 
 func TestHostGlobalCleanupStopsAtUnknownEffect(t *testing.T) {
 	ctx := context.Background()
-	h := &noodleHost{dir: t.TempDir(), instanceID: "current", binarySHA: "test-binary"}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), instanceID: "current", binarySHA: "test-binary"}
 	h.newRuntime = func(string, string, config.Config, loop.Dependencies) hostRuntime {
 		return &fakeHostRuntime{ready: make(chan struct{}), released: make(chan struct{})}
 	}

@@ -461,6 +461,16 @@ func VerifyOpenShellProfile(p OpenShellProfile) error {
 	}
 	return VerifyOpenShellClient(p)
 }
+// OpenShellProfileReadbackFiles returns the admitted closure, without following
+// paths from a later profile revision. Callers must still verify these refs.
+func OpenShellProfileReadbackFiles(p OpenShellProfile) map[string]SessionReadbackFileRef {
+	files := make(map[string]SessionReadbackFileRef, len(p.sourceFiles))
+	for path, digest := range p.sourceFiles {
+		files[path] = SessionReadbackFileRef{Path: path, SHA256: digest}
+	}
+	return files
+}
+
 func freezeOpenShellProfile(p OpenShellProfile) OpenShellProfile {
 	p.Environment = append([]string(nil), p.Environment...)
 	files := make(map[string]string, len(p.sourceFiles))

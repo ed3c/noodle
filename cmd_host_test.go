@@ -94,7 +94,7 @@ func TestHostConcurrentContextsKeepPIDAndIsolateEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	first, second := t.TempDir(), t.TempDir()
-	h := &noodleHost{dir: t.TempDir(), instanceID: "instance", binaryPath: "/native/noodle", binarySHA: "test-binary"}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), instanceID: "instance", binaryPath: "/native/noodle", binarySHA: "test-binary"}
 	var runtimes []*fakeHostRuntime
 	var observedRoots, observedSecrets []string
 	h.newRuntime = func(root, bin string, cfg config.Config, deps loop.Dependencies) hostRuntime {
@@ -181,7 +181,7 @@ func TestHostConcurrentContextsKeepPIDAndIsolateEnvironment(t *testing.T) {
 }
 
 func TestHostOnceIsManualAndCompletedContextNeverReplays(t *testing.T) {
-	h := &noodleHost{dir: t.TempDir(), instanceID: "instance", binarySHA: "test-binary"}
+	h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), instanceID: "instance", binarySHA: "test-binary"}
 	created := 0
 	h.newRuntime = func(root, bin string, cfg config.Config, deps loop.Dependencies) hostRuntime {
 		created++
@@ -242,7 +242,7 @@ func TestHostRuntimeFailuresShutdownAndNeverReuseContext(t *testing.T) {
 			} else {
 				rt.cycleErr = errors.New("cycle failed")
 			}
-			h := &noodleHost{dir: t.TempDir(), binarySHA: req.BinarySHA256, instanceID: "instance", newRuntime: func(string, string, config.Config, loop.Dependencies) hostRuntime { return rt }}
+			h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), binarySHA: req.BinarySHA256, instanceID: "instance", newRuntime: func(string, string, config.Config, loop.Dependencies) hostRuntime { return rt }}
 			response := h.handle(context.Background(), req)
 			if h.testContext() != nil {
 				defer h.testContext().lock.Close()
@@ -275,7 +275,7 @@ func TestHostDetachClassifiesOnlyQuiescenceRefusalAsBusy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := hostTestRequest(t, t.TempDir())
 			rt := &fakeHostRuntime{ready: make(chan struct{}), released: make(chan struct{}), releaseErr: tc.err}
-			h := &noodleHost{dir: t.TempDir(), binarySHA: req.BinarySHA256, instanceID: "instance", newRuntime: func(string, string, config.Config, loop.Dependencies) hostRuntime { return rt }}
+			h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), binarySHA: req.BinarySHA256, instanceID: "instance", newRuntime: func(string, string, config.Config, loop.Dependencies) hostRuntime { return rt }}
 			attached := h.handle(context.Background(), req)
 			if attached.Status != "ok" {
 				t.Fatalf("attach: %+v", attached)
@@ -297,7 +297,7 @@ func TestHostDetachClassifiesOnlyQuiescenceRefusalAsBusy(t *testing.T) {
 func TestHostHistoricalDetachSurvivesFailedOrUnpersistedContext(t *testing.T) {
 	for _, failure := range []string{"cycle", "save"} {
 		t.Run(failure, func(t *testing.T) {
-			h := &noodleHost{dir: t.TempDir(), binarySHA: "test-binary", instanceID: "instance"}
+			h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), binarySHA: "test-binary", instanceID: "instance"}
 			rt := &fakeHostRuntime{}
 			h.newRuntime = func(string, string, config.Config, loop.Dependencies) hostRuntime { return rt }
 			first := hostTestRequest(t, t.TempDir())
@@ -361,7 +361,7 @@ func TestHostHistoricalDetachSurvivesFailedOrUnpersistedContext(t *testing.T) {
 func TestHostUpgradeReadsExactHistoricalReceiptWithOriginalBinary(t *testing.T) {
 	req := hostTestRequest(t, t.TempDir())
 	req.Operation = "once"
-	old := &noodleHost{dir: t.TempDir(), instanceID: "old-instance", binarySHA: req.BinarySHA256,
+	old := &noodleHost{prepareContext: fixtureTaskPreparation, dir: t.TempDir(), instanceID: "old-instance", binarySHA: req.BinarySHA256,
 		newRuntime: func(string, string, config.Config, loop.Dependencies) hostRuntime { return &fakeHostRuntime{} }}
 	detached := old.handle(context.Background(), req)
 	if detached.Status != "ok" {
@@ -371,7 +371,7 @@ func TestHostUpgradeReadsExactHistoricalReceiptWithOriginalBinary(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	upgraded := &noodleHost{dir: old.dir, instanceID: "new-instance", binarySHA: "new-binary"}
+	upgraded := &noodleHost{prepareContext: fixtureTaskPreparation, dir: old.dir, instanceID: "new-instance", binarySHA: "new-binary"}
 	if err := json.Unmarshal(data, &upgraded.receipts); err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +442,7 @@ func TestHostCapabilitiesPreservesProtocolContract(t *testing.T) {
 	}
 	versions, _ := value["openshell_custody_versions"].([]any)
 	if value["openshell_custody_version"] != float64(5) || value["openshell_credential_delivery"] != float64(1) ||
-		len(versions) != 2 || versions[0] != float64(4) || versions[1] != float64(5) {
+		len(versions) != 4 || versions[0] != float64(4) || versions[1] != float64(5) || versions[2] != float64(6) || versions[3] != float64(7) {
 		t.Fatalf("credential custody capability missing: %v", value)
 	}
 	if value["existing_instance_admission"] != float64(1) || value["openshell_warning_grant"] != nil || value["task_warning_grant"] != nil || value["worker_admission_policy"] != admission.WorkerAdmissionPolicy || value["safe_host_switch"] != float64(0) || value["rolling_host_version"] != wantRolling || value["shared_worker_quota"] != wantRolling || value["codex_native_runtime"] != wantForce || value["schema"] != float64(1) || value["protocol"] != "noodle-host-v1" || value["resident_request_binding"] != float64(1) || value["completed_context_cleanup"] != float64(1) || value["resident_force_after_grace"] != wantForce || value["local_task_interrupt_custody"] != float64(1) || value["external_task_config"] != float64(1) {

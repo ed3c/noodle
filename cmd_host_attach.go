@@ -37,7 +37,16 @@ func (h *noodleHost) attachContinuation(ctx context.Context, req hostRequest, co
 	if req.Operation == "once" {
 		req.Mode = "manual"
 	}
-	if _, err = prepareHostStorage(ctx, req, data); err != nil {
+	prepare := h.prepareContext
+	if prepare == nil {
+		prepare = h.taskPreparation
+	}
+	preparation, preparationPlan, err := prepare(ctx, req, data)
+	if err != nil {
+		return hostError("refused", err)
+	}
+	storage, err := prepareHostStorage(ctx, req, data)
+	if err != nil {
 		return hostError("refused", err)
 	}
 	runtimeDir := filepath.Join(req.ProjectDir, ".noodle")
@@ -115,10 +124,7 @@ func (h *noodleHost) attachContinuation(ctx context.Context, req hostRequest, co
 			return hostError("refused", err)
 		}
 	}
-	id, err := hostID()
-	if err != nil {
-		return hostError("refused", err)
-	}
+	id := preparation.Preparation.ID
 	r := hostReceipt{Schema: 1, Protocol: hostProtocol, HostPID: os.Getpid(), HostInstanceID: h.instanceID,
 		ContextID: id, ProjectDir: req.ProjectDir, ContextState: "active", Mode: cfg.Mode,
 		ConfigPath: req.ConfigPath, ConfigSHA256: req.ConfigSHA256, BinaryPath: h.binaryPath,
@@ -137,13 +143,22 @@ func (h *noodleHost) attachContinuation(ctx context.Context, req hostRequest, co
 	if err != nil {
 		return failBeforeRuntime(err)
 	}
+	deps := loop.Dependencies{ReturnHostInstance: h.instanceID, ModeOverride: state.RunMode(req.Mode), Execution: e, Admission: h.budget, AdmissionContext: id, CleanupCompleted: req.CleanupCompleted, HostContinuation: continuation, DispatchBlocked: req.DispatchBlocked}
+	if preparationPlan.Source.Purpose == "task-preparation" && h.budget != nil {
+		deps.PreparationReady = h.preparationReady(preparation, preparationPlan, cfg.Runtime.AdmittedOrders[0])
+	}
+	if req.CleanupCompleted && len(cfg.Runtime.AdmittedOrders) != 0 {
+		deps.CheckoutArchivePolicy, err = prepareHostCheckoutArchive(ctx, e)
+		if err != nil {
+			return failBeforeRuntime(fmt.Errorf("original checkout archive policy unavailable: %w", err))
+		}
+	}
 	h.receipts = append(h.receipts, r)
 	if err = h.save(); err != nil {
 		h.receipts = h.receipts[:len(h.receipts)-1]
 		return failBeforeRuntime(err)
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	deps := loop.Dependencies{ReturnHostInstance: h.instanceID, ModeOverride: state.RunMode(req.Mode), Execution: e, Admission: h.budget, AdmissionContext: id, CleanupCompleted: req.CleanupCompleted, HostContinuation: continuation, DispatchBlocked: req.DispatchBlocked}
 	if cfg.Runtime.OpenShell.Profile != "" {
 		deps.OpenShellGateway, deps.OpenShellProfile = h.openShell, selectedOpenShell
 	}
@@ -156,6 +171,11 @@ func (h *noodleHost) attachContinuation(ctx context.Context, req hostRequest, co
 	}
 	h.contexts[id] = c
 	if h.budget != nil {
+		var roots []string
+		if preparationPlan.Storage.Source.StorageRoot != "" {
+			roots = append([]string{preparationPlan.Storage.Source.CommonDir}, preparationPlan.Archive.diskRoots()...)
+		}
+		h.bindWorkerResourceSource(id, req.ProjectDir, storage, selectedOpenShell, &preparationPlan, roots...)
 		h.budget.Register(id)
 	}
 	keepLock = true

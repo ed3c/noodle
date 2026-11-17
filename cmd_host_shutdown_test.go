@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"github.com/poteto/noodle/internal/admission"
 	"net"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ func TestHostShutdownPersistsCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- serveHost(ctx)
+		done <- serveHostWithSampler(ctx, admission.NewSampler(), fixtureTaskPreparation)
 		close(done)
 	}()
 	t.Cleanup(func() {

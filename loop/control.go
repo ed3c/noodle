@@ -331,11 +331,16 @@ func (l *Loop) dispatchControlCommand(cmd ControlCommand) error {
 		return l.controlRecoverLocalTaskMerge(cmd)
 	case "merge-local-task":
 		return l.controlMergeLocalTask(cmd)
+	case "retain-local-task":
+		return l.controlRetainLocalTask(cmd)
 	case "recover-local-task-review":
 		return l.controlRecoverLocalTaskReview(cmd)
 	case "recover-request-changes":
 		return l.controlRecoverRequestChanges(cmd)
 	case "request-changes":
+		if order, ok := l.canonical.Orders[cmd.OrderID]; ok && len(order.Stages) == 1 && len(order.Stages[0].Extra[localTaskRetentionKey]) != 0 {
+			return fmt.Errorf("local task retained disposition is already fixed; inspect original control readback")
+		}
 		return l.controlRequestChanges(cmd.OrderID, cmd.Prompt)
 	case "mode":
 		return l.controlMode(cmd.Value)

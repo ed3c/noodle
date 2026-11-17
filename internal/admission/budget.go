@@ -3,6 +3,7 @@ package admission
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -19,6 +20,7 @@ const (
 	PollInterval                   = 5 * time.Second
 	SampleTimeout                  = time.Second
 	MaxSampleAge                   = 15 * time.Second
+	MaxRecoverySamples             = 12
 )
 
 var ErrDeferred = errors.New("worker resource admission deferred")
@@ -38,6 +40,7 @@ type Sampler interface {
 }
 
 type Snapshot struct {
+	MachineCapacity     *MachineSnapshot     `json:"machine_capacity,omitempty"`
 	AdmissionPolicy     string               `json:"worker_admission_policy"`
 	SharedQuota         *SharedQuotaSnapshot `json:"shared_quota,omitempty"`
 	OwnedAllocations    int                  `json:"owned_allocations"`
@@ -57,6 +60,15 @@ type Snapshot struct {
 }
 
 type Budget struct {
+	machineRequired bool
+	machine *machineCapacity
+	machineReason string
+	machineFault string
+	resourceSources map[string]*resourceSource
+	pendingMachineAcquires map[string]machinePending
+	pendingMachineReturns map[string]bool
+	machineAllocations map[string]*allocation
+	preparedMachine map[string]PreparationRef
 	shared               *sharedQuota
 	sharedError          string
 	pendingSharedReturns map[string]bool
@@ -109,6 +121,9 @@ func (b *Budget) HoldForSwitch() {
 }
 
 type allocation struct {
+	machineID string
+	machineKey string
+	effectsPossible bool
 	sharedID string
 	budget   *Budget
 	refs     int
@@ -135,6 +150,7 @@ func (b *Budget) Unregister(id string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.contexts, id)
+	delete(b.resourceSources, id)
 }
 
 func (b *Budget) Run(ctx context.Context, sampler Sampler) {
@@ -156,6 +172,11 @@ func (b *Budget) Run(ctx context.Context, sampler Sampler) {
 func (b *Budget) Observe(s Sample, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	previous := b.previous
+	defer b.observeMachineHealth(previous)
+	for id := range b.pendingMachineReturns {
+		b.returnUnstartedMachine(id)
+	}
 	for id := range b.pendingSharedReturns {
 		b.returnSharedAllocation(id)
 	}
@@ -170,7 +191,6 @@ func (b *Budget) Observe(s Sample, err error) {
 		b.previous = nil
 		return
 	}
-	previous := b.previous
 	b.previous = &s
 	b.unsupported = s.Unsupported
 	b.pressure = s.Pressure
@@ -190,10 +210,15 @@ func (b *Budget) stale() bool {
 }
 
 func (b *Budget) TryAcquire(id string) (*Permit, error) { return b.tryAcquire(id, false, "", "") }
-func (b *Budget) TryAcquireTask(id, order string) (*Permit, error) {
-	return b.tryAcquire(id, false, "", order)
+func (b *Budget) TryAcquireTask(id, order string, runtime ...string) (*Permit, error) {
+	name := ""
+	if len(runtime) == 1 { name = runtime[0] }
+	return b.tryAcquireRuntime(id, false, "", order, name)
 }
 func (b *Budget) tryAcquire(id string, resident bool, residentKey, order string) (*Permit, error) {
+	return b.tryAcquireRuntime(id, resident, residentKey, order, "")
+}
+func (b *Budget) tryAcquireRuntime(id string, resident bool, residentKey, order, runtime string) (*Permit, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if len(b.pendingSharedReturns) != 0 || !b.contexts[id] || b.unresolvedResidents != 0 || (b.switching && (!resident || b.shared == nil || !b.shared.workerContext(id))) {
@@ -201,6 +226,9 @@ func (b *Budget) tryAcquire(id string, resident bool, residentKey, order string)
 	}
 	if !resident && b.active-b.residents >= b.maximum {
 		return nil, ErrDeferred
+	}
+	if !resident && b.machineRequired {
+		return b.acquireMachineTask(id, order, runtime)
 	}
 	sharedID := ""
 	if b.shared != nil {
@@ -243,6 +271,10 @@ func (p *Permit) Release() {
 		}
 		p.allocation.refs--
 		if p.allocation.refs == 0 {
+			if p.allocation.machineID != "" {
+				if !p.allocation.effectsPossible { b.returnUnstartedMachine(p.allocation.machineID) }
+				delete(b.machineAllocations, p.allocation.machineKey)
+			}
 			if b.shared != nil {
 				b.returnSharedAllocation(p.allocation.sharedID)
 			}
@@ -259,8 +291,14 @@ func (p *Permit) ReserveReplacement(id string) (*Permit, error) {
 	b := p.allocation.budget
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if len(b.pendingSharedReturns) != 0 || p.released || p.replacementReserved || !b.contexts[id] || b.unresolvedResidents != 0 || b.switching {
+	if len(b.pendingSharedReturns) != 0 || b.machineFault != "" || p.released || p.replacementReserved || !b.contexts[id] || b.unresolvedResidents != 0 || b.switching {
 		return nil, ErrDeferred
+	}
+	// A replacement creates a new sandbox. Worker exit and Stop do not retire
+	// the old overlay or returned archives covered by this finite peak.
+	if p.allocation.machineID != "" && p.allocation.effectsPossible {
+		b.machineReason = "replacement_resource_retirement_required"
+		return nil, fmt.Errorf("%w: %s", ErrDeferred, b.machineReason)
 	}
 	if b.shared != nil {
 		if err := b.shared.replacement(p.allocation.sharedID); err != nil {
@@ -280,6 +318,7 @@ func (b *Budget) Snapshot() Snapshot {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	s := Snapshot{AdmissionPolicy: WorkerAdmissionPolicy, Pressure: b.pressure, Reason: "ready", Active: b.active - b.residents, Residents: b.residents, Allocations: b.active, Maximum: b.maximum, Limit: b.maximum, Unsupported: b.unsupported}
+	s.MachineCapacity = b.machineSnapshot()
 	s.SampleAgeSeconds = -1
 	if b.sampleError != nil {
 		message := *b.sampleError

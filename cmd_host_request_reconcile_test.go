@@ -56,7 +56,7 @@ func TestHostLostAttachReplyReconcilesOnlyProvenActivePendingRequest(t *testing.
 			}); err != nil {
 				t.Fatal(err)
 			}
-			h := &noodleHost{dir: directory, instanceID: identity, binaryPath: binary.Path, binarySHA: binary.SHA256,
+			h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: directory, instanceID: identity, binaryPath: binary.Path, binarySHA: binary.SHA256,
 				budget: admission.NewBudget(admission.DefaultWorkerLimit), rolling: &hostRolling{root: root},
 				newRuntime: func(string, string, config.Config, loop.Dependencies) hostRuntime {
 					return &fakeHostRuntime{ready: make(chan struct{}), released: make(chan struct{})}

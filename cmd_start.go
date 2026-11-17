@@ -53,6 +53,9 @@ func newStartCmd(app *App) *cobra.Command {
 		Short: cmdmeta.Short("start"),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := standalonePreparationAdmission(); err != nil {
+				return err
+			}
 			return runStart(cmd.Context(), app, opts)
 		},
 	}

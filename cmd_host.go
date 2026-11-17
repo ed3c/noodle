@@ -145,6 +145,7 @@ type noodleHost struct {
 	blocked                 bool
 	shutdown                *hostShutdown
 	newRuntime              func(string, string, config.Config, loop.Dependencies) hostRuntime
+	prepareContext          hostPreparationReader
 	rolling                 *hostRolling
 }
 
@@ -155,6 +156,7 @@ func newHostCmd(app *App) *cobra.Command {
 	cmd.AddCommand(newHostRestrictedCmd())
 	cmd.AddCommand(newHostRebuildCmd())
 	cmd.AddCommand(newHostCleanupCmd(app))
+	cmd.AddCommand(newHostEmptyRetirementCmd())
 	cmd.AddCommand(newHostRecoverCmd(app))
 	cmd.AddCommand(newHostViewsCmd())
 	cmd.AddCommand(newHostContextsCmd())
@@ -216,7 +218,13 @@ func newHostCmd(app *App) *cobra.Command {
 	return cmd
 }
 
+// Capabilities describe implemented, fail-closed protocol paths. They do not
+// certify a deployment, activate an operator policy, or replace native acceptance.
 func hostCapabilities(platform string) map[string]any {
+	machineMonitor := 0
+	if platform == "darwin" {
+		machineMonitor = 1
+	}
 	force := 1
 	if platform == "windows" {
 		force = 0
@@ -229,7 +237,7 @@ func hostCapabilities(platform string) map[string]any {
 	if platform == "darwin" && procx.NativeFixtureControlAvailable() {
 		sourceService = 1
 	}
-	return map[string]any{"schema": 1, "protocol": hostProtocol, "stateless_fixture_recovery": 1, "resident_request_binding": 1, "restricted_host_maintenance": 1, "existing_instance_admission": 1, "unaccepted_admission_transfer_readback": 1, "native_consumer_leases": 1, "native_consumer_worktrees": 1, "shared_service_adapter": "stateless_fixtures_only", "completed_context_cleanup": 1, "external_task_config": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1, "codex_native_runtime": force, "safe_host_switch": 0, "rolling_host_version": rolling, "shared_worker_quota": rolling, "openshell_pool_owner": rolling, "openshell_custody_version": 5, "openshell_session_readback_observer": sourceService, "openshell_session_archive_streams": 1, "source_service_restore": sourceService, "source_service_upgrade": sourceService, "openshell_custody_versions": []int{4, 5}, "openshell_credential_delivery": 1, "gateway_host_handover": 1, "gateway_custody_release": 3, "worker_admission_policy": admission.WorkerAdmissionPolicy}
+	return map[string]any{"schema": 1, "protocol": hostProtocol, "stateless_fixture_recovery": 1, "resident_request_binding": 1, "restricted_host_maintenance": 1, "existing_instance_admission": 1, "unaccepted_admission_transfer_readback": 1, "native_consumer_leases": 1, "native_consumer_worktrees": 1, "shared_service_adapter": "stateless_fixtures_only", "completed_context_cleanup": 1, "external_task_config": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1, "codex_native_runtime": force, "safe_host_switch": 0, "rolling_host_version": rolling, "shared_worker_quota": rolling, "openshell_pool_owner": rolling, "openshell_custody_version": 5, "openshell_session_readback_observer": sourceService, "openshell_session_archive_streams": 1, "source_service_restore": sourceService, "source_service_upgrade": sourceService, "openshell_custody_versions": []int{4, 5, 6, 7}, "openshell_credential_delivery": 1, "gateway_host_handover": 1, "gateway_custody_release": 3, "worker_admission_policy": admission.WorkerAdmissionPolicy, "machine_worker_admission": 1, "machine_admission_policy": admission.MachineAdmissionPolicy, "machine_native_sample": machineMonitor, "machine_filesystem_sample": rolling, "machine_pre_control_admission": 1, "machine_preparation_observation_window_seconds": int(admission.MaxPreparationObservationWindow / time.Second), "machine_gc_release": 1, "machine_safe_pause": 0, "local_task_branch_retention": 1}
 }
 
 func hostDirectory() (string, error) {
@@ -361,7 +369,12 @@ func serveHost(shutdownRequested context.Context) error {
 	return serveHostWithSampler(shutdownRequested, admission.NewSampler())
 }
 
-func serveHostWithSampler(shutdownRequested context.Context, sampler admission.Sampler) error {
+func serveHostWithSampler(shutdownRequested context.Context, sampler admission.Sampler, preparation ...hostPreparationReader) error {
+	if len(preparation) == 0 || preparation[0] == nil {
+		if err := verifyServingResident(shutdownRequested); err != nil {
+			return err
+		}
+	}
 	ctx, cancel := context.WithCancel(context.WithoutCancel(shutdownRequested))
 	defer cancel()
 	dir, err := hostDirectory()
@@ -408,6 +421,9 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 	h := &noodleHost{budget: budget, contexts: make(map[string]*hostContext), completed: make(chan string, 16), dir: dir, instanceID: id, binaryPath: path, binarySHA: hostDigest(data), newRuntime: func(dir, bin string, cfg config.Config, deps loop.Dependencies) hostRuntime {
 		return loop.New(dir, bin, cfg, deps)
 	}}
+	if len(preparation) != 0 {
+		h.prepareContext = preparation[0]
+	}
 	h.residents, err = admission.OpenResidents(dir)
 	if err != nil {
 		return err
@@ -419,6 +435,7 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 	if err := h.joinRolling(); err != nil {
 		return err
 	}
+	h.bindMachineCapacity()
 	if h.rolling != nil {
 		defer h.rolling.fence.Close()
 	}
@@ -508,6 +525,9 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 	for {
 		if h.shutdown != nil {
 			if err := h.shutdownReady(); err == nil {
+				if err := h.saveResidentExitWitness(); err != nil {
+					return err
+				}
 				h.releaseShutdownLocks()
 				return nil
 			} else {
@@ -524,6 +544,9 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 		case <-switchTick.C:
 			h.reconcileFixtureLifecycle(ctx)
 			if h.shutdown == nil && h.rolling != nil && h.sourceService == nil && h.advanceRolling(ctx) {
+				if err := h.saveResidentExitWitness(); err != nil {
+					return err
+				}
 				return nil
 			}
 		case err := <-webDone:

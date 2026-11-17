@@ -58,3 +58,5 @@ require (
 )
 
 tool github.com/air-verse/air
+
+replace github.com/NVIDIA/OpenShell/sdk/go => ./third_party/openshell-sdk

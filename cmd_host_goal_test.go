@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,90 @@ import (
 	"github.com/poteto/noodle/internal/procx"
 	loopruntime "github.com/poteto/noodle/runtime"
 )
+
+func ensureFixtureGoalHost(ctx context.Context, root, goalFile, template, binary, operation string, launch func(context.Context, string, string) error) (goalHostResult, error) {
+	return ensureGoalHost(ctx, root, goalFile, template, binary, operation, launch, func(_ context.Context, root string, selected goalHostSelection, _ loopruntime.OpenShellProfile) (goalHostSelection, error) {
+		id, err := hostID()
+		if err != nil {
+			return selected, err
+		}
+		selected.Root = filepath.Join(root, "h", id[:16])
+		selected.Preparation = admission.PreparationRef{ID: filepath.Base(selected.Root), SHA256: "original-isolated-goal-source"}
+		return selected, nil
+	})
+}
+
+func TestHostGoalResumesOriginalResidentIntentBeforeRootCreation(t *testing.T) {
+	root, goal, template, binary := goalHostFixture(t)
+	goalRef, err := loopruntime.ReadSessionReadbackFile(goal, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	templateRef, err := loopruntime.ReadSessionReadbackFile(template, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binaryRef, err := hostReadbackBinaryRef(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := goalHostSelection{Schema: 2, Goal: goalRef, Root: filepath.Join(root, "h", strings.Repeat("a", 16)), Template: templateRef, Noodle: binaryRef, Phase: "materializing", Preparation: admission.PreparationRef{ID: "original-nonce", SHA256: "original-bound-source"}}
+	if err = os.MkdirAll(filepath.Join(root, "goals"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "goals", hostDigest([]byte(goalRef.Path+"\x00"+goalRef.SHA256))+".json")
+	if err = saveGoalHostSelection(path, selected); err != nil {
+		t.Fatal(err)
+	}
+	server := &goalHostFixtureServer{}
+	result, err := ensureFixtureGoalHost(t.Context(), root, goal, template, binary, "", server.launch(t))
+	if err != nil || result.HostRoot != selected.Root {
+		t.Fatal("original root intent did not resume", err)
+	}
+	var after goalHostSelection
+	if _, err = loopruntime.ReadSessionReadbackFile(path, &after); err != nil || after.Preparation != selected.Preparation {
+		t.Fatal("resume minted a new resident nonce", err)
+	}
+}
+
+// A native config path is platform-specific: Darwin ignores XDG_CONFIG_HOME.
+// Keep both the real default and its absence unchanged; never restore it here.
+func isolatedGoalTemplatePath(t *testing.T, root string) string {
+	t.Helper()
+	outside, err := goalHostTemplatePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, beforeErr := os.ReadFile(outside)
+	if beforeErr != nil && !os.IsNotExist(beforeErr) {
+		t.Fatal(beforeErr)
+	}
+	t.Cleanup(func() {
+		after, afterErr := os.ReadFile(outside)
+		if os.IsNotExist(beforeErr) {
+			if !os.IsNotExist(afterErr) {
+				t.Errorf("fixture changed original default presence: %s", outside)
+			}
+		} else if afterErr != nil || !bytes.Equal(before, after) {
+			t.Errorf("fixture changed original default bytes: %s (%v)", outside, afterErr)
+		}
+		t.Logf("original default after fixture sha256=%s", hostDigest(after))
+	})
+	// These changes belong only to the test process and testing restores them.
+	t.Setenv("HOME", filepath.Join(root, "fixture-home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "fixture-xdg"))
+	t.Setenv("AppData", filepath.Join(root, "fixture-appdata"))
+	path, err := goalHostTemplatePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relative, err := filepath.Rel(root, path)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) || path == outside {
+		t.Fatalf("native template path escaped fixture before effects: %s (%v)", path, err)
+	}
+	t.Logf("native registration=%s fixture root=%s original default=%s original sha256=%s", path, root, outside, hostDigest(before))
+	return path
+}
 
 func goalHostFixture(t *testing.T) (root, goal, template, binary string) {
 	t.Helper()
@@ -135,7 +220,7 @@ func TestHostGoalReuseIndependentHostsAndFullDoesNotRotate(t *testing.T) {
 	root, goal, template, binary := goalHostFixture(t)
 	f := &goalHostFixtureServer{blocked: map[string]bool{}}
 	launch := f.launch(t)
-	first, err := ensureGoalHost(context.Background(), root, goal, template, binary, "", launch)
+	first, err := ensureFixtureGoalHost(context.Background(), root, goal, template, binary, "", launch)
 	if err != nil || first.Status != "ready" {
 		t.Fatalf("first: %+v %v", first, err)
 	}
@@ -147,7 +232,7 @@ func TestHostGoalReuseIndependentHostsAndFullDoesNotRotate(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			again, err := ensureGoalHost(context.Background(), root, goal, "", binary, "", launch)
+			again, err := ensureFixtureGoalHost(context.Background(), root, goal, "", binary, "", launch)
 			if err != nil || again.HostRoot != first.HostRoot || again.Status != "ready" {
 				t.Errorf("full original Host rotated: %+v %v", again, err)
 			}
@@ -158,7 +243,7 @@ func TestHostGoalReuseIndependentHostsAndFullDoesNotRotate(t *testing.T) {
 	if err = os.WriteFile(other, []byte(`{"goal":"independent"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	second, err := ensureGoalHost(context.Background(), root, other, template, binary, "", launch)
+	second, err := ensureFixtureGoalHost(context.Background(), root, other, template, binary, "", launch)
 	if err != nil || second.HostRoot == first.HostRoot || f.launches != 2 {
 		t.Fatalf("independent Goal shares Host: %+v %v", second, err)
 	}
@@ -168,14 +253,14 @@ func TestHostGoalFaultReplacementAndExplicitSelectionAreIdempotent(t *testing.T)
 	root, goal, template, binary := goalHostFixture(t)
 	f := &goalHostFixtureServer{blocked: map[string]bool{}}
 	launch := f.launch(t)
-	first, err := ensureGoalHost(context.Background(), root, goal, template, binary, "", launch)
+	first, err := ensureFixtureGoalHost(context.Background(), root, goal, template, binary, "", launch)
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.mu.Lock()
 	f.blocked[first.HostRoot] = true
 	f.mu.Unlock()
-	second, err := ensureGoalHost(context.Background(), root, goal, template, binary, "", launch)
+	second, err := ensureFixtureGoalHost(context.Background(), root, goal, template, binary, "", launch)
 	if err != nil || second.HostRoot == first.HostRoot {
 		t.Fatalf("confirmed fault retained: %+v %v", second, err)
 	}
@@ -183,15 +268,62 @@ func TestHostGoalFaultReplacementAndExplicitSelectionAreIdempotent(t *testing.T)
 	if err = os.WriteFile(operation, []byte(`{"new_host":"original operation"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	third, err := ensureGoalHost(context.Background(), root, goal, template, binary, operation, launch)
+	third, err := ensureFixtureGoalHost(context.Background(), root, goal, template, binary, operation, launch)
 	if err != nil || third.HostRoot == second.HostRoot {
 		t.Fatalf("explicit new Host missing: %+v %v", third, err)
 	}
 	for _, request := range []string{operation, "", operation} {
-		again, err := ensureGoalHost(context.Background(), root, goal, "", binary, request, launch)
+		again, err := ensureFixtureGoalHost(context.Background(), root, goal, "", binary, request, launch)
 		if err != nil || again.HostRoot != third.HostRoot || f.launches != 3 {
 			t.Fatalf("selection replayed: %+v %v", again, err)
 		}
+	}
+}
+
+func TestHostGoalRetiredSelectionRequiresDifferentOriginalOperation(t *testing.T) {
+	root, goal, template, binary := goalHostFixture(t)
+	f := &goalHostFixtureServer{blocked: map[string]bool{}}
+	launch := f.launch(t)
+	first, err := ensureFixtureGoalHost(t.Context(), root, goal, template, binary, "", launch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goalRef, err := loopruntime.ReadSessionReadbackFile(goal, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectionPath := filepath.Join(root, "goals", hostDigest([]byte(goalRef.Path+"\x00"+goalRef.SHA256))+".json")
+	var selected goalHostSelection
+	if _, err = loopruntime.ReadSessionReadbackFile(selectionPath, &selected); err != nil {
+		t.Fatal(err)
+	}
+	selected.Phase = "retired"
+	if err = saveGoalHostSelection(selectionPath, selected); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(selectionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = ensureFixtureGoalHost(t.Context(), root, goal, "", binary, "", launch); err == nil || f.launches != 1 {
+		t.Fatalf("retired original selection recreated: launches=%d err=%v", f.launches, err)
+	}
+	if after, err := os.ReadFile(selectionPath); err != nil || !bytes.Equal(before, after) {
+		t.Fatal("refused retired selection changed", err)
+	}
+	operation := filepath.Join(root, "next-operation.json")
+	if err = os.WriteFile(operation, []byte(`{"new_host":"fresh original operation"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	next, err := ensureFixtureGoalHost(t.Context(), root, goal, template, binary, operation, launch)
+	if err != nil || next.Status != "ready" || next.HostRoot == first.HostRoot || f.launches != 2 {
+		t.Fatalf("fresh operation did not select a new Host: %+v launches=%d err=%v", next, f.launches, err)
+	}
+	if _, err = loopruntime.ReadSessionReadbackFile(selectionPath, &selected); err != nil || len(selected.Previous) != 1 || selected.Previous[0].Root != first.HostRoot || selected.Previous[0].Phase != "retired" {
+		t.Fatal("original retired selection history was lost", err)
+	}
+	if again, err := ensureFixtureGoalHost(t.Context(), root, goal, "", binary, operation, launch); err != nil || again.HostRoot != next.HostRoot || f.launches != 2 {
+		t.Fatalf("same new operation replayed: %+v launches=%d err=%v", again, f.launches, err)
 	}
 }
 
@@ -200,7 +332,7 @@ func TestHostGoalUnknownCreationAndLegacyReadbackDoNotReplay(t *testing.T) {
 	launches := 0
 	launch := func(context.Context, string, string) error { launches++; return errors.New("creation outcome lost") }
 	for i := 0; i < 2; i++ {
-		result, err := ensureGoalHost(context.Background(), root, goal, template, binary, "", launch)
+		result, err := ensureFixtureGoalHost(context.Background(), root, goal, template, binary, "", launch)
 		if err == nil || result.Status != "unknown" || launches != 1 {
 			t.Fatalf("unknown creation replayed: %+v %v", result, err)
 		}
@@ -208,7 +340,7 @@ func TestHostGoalUnknownCreationAndLegacyReadbackDoNotReplay(t *testing.T) {
 	root, goal, template, binary = goalHostFixture(t)
 	f := &goalHostFixtureServer{blocked: map[string]bool{}, legacy: true}
 	for i := 0; i < 2; i++ {
-		result, err := ensureGoalHost(context.Background(), root, goal, template, binary, "", f.launch(t))
+		result, err := ensureFixtureGoalHost(context.Background(), root, goal, template, binary, "", f.launch(t))
 		if err == nil || result.Status != "unknown" || f.launches != 1 {
 			t.Fatalf("legacy became healthy: %+v %v", result, err)
 		}
@@ -251,7 +383,7 @@ func TestHostGoalSocketFailureRequiresOriginalProcessAbsence(t *testing.T) {
 	root, goal, template, binary := goalHostFixture(t)
 	f := &goalHostFixtureServer{blocked: map[string]bool{}}
 	launch := f.launch(t)
-	first, err := ensureGoalHost(context.Background(), root, goal, template, binary, "", launch)
+	first, err := ensureFixtureGoalHost(context.Background(), root, goal, template, binary, "", launch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +403,7 @@ func TestHostGoalSocketFailureRequiresOriginalProcessAbsence(t *testing.T) {
 	if err = os.Remove(filepath.Join(first.HostRoot, "host.sock")); err != nil {
 		t.Fatal(err)
 	}
-	unknown, err := ensureGoalHost(context.Background(), root, goal, template, binary, "", launch)
+	unknown, err := ensureFixtureGoalHost(context.Background(), root, goal, template, binary, "", launch)
 	if err == nil || unknown.Status != "unknown" || f.launches != 1 {
 		t.Fatalf("socket failure became death proof: %+v %v", unknown, err)
 	}
@@ -288,7 +420,7 @@ func TestHostGoalSocketFailureRequiresOriginalProcessAbsence(t *testing.T) {
 		t.Fatal(err)
 	}
 	setProcess(procx.ProcessRecord{PID: child.Process.Pid, StartedAt: started})
-	replacement, err := ensureGoalHost(context.Background(), root, goal, template, binary, "", launch)
+	replacement, err := ensureFixtureGoalHost(context.Background(), root, goal, template, binary, "", launch)
 	if err != nil || replacement.HostRoot == first.HostRoot || f.launches != 2 {
 		t.Fatalf("confirmed absent Host blocked fresh task: %+v %v", replacement, err)
 	}
@@ -296,17 +428,13 @@ func TestHostGoalSocketFailureRequiresOriginalProcessAbsence(t *testing.T) {
 
 func TestHostGoalInstalledTemplatePinsDependencies(t *testing.T) {
 	root, goal, template, binary := goalHostFixture(t)
-	t.Setenv("HOME", root)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
-	registration, err := goalHostTemplatePath()
-	if err != nil {
-		t.Fatal(err)
-	}
+	registration := isolatedGoalTemplatePath(t, root)
+	var err error
 	if _, err = registerGoalHostTemplate(context.Background(), registration, template); err != nil {
 		t.Fatal(err)
 	}
 	f := &goalHostFixtureServer{blocked: map[string]bool{}}
-	first, err := ensureGoalHost(context.Background(), root, goal, "", binary, "", f.launch(t))
+	first, err := ensureFixtureGoalHost(context.Background(), root, goal, "", binary, "", f.launch(t))
 	if err != nil || first.Status != "ready" {
 		t.Fatalf("normal dispatch required template assembly: %+v %v", first, err)
 	}
@@ -322,7 +450,7 @@ func TestHostGoalInstalledTemplatePinsDependencies(t *testing.T) {
 	if err = os.WriteFile(other, []byte(`{"goal":"independent"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	refused, err := ensureGoalHost(context.Background(), root, other, "", binary, "", f.launch(t))
+	refused, err := ensureFixtureGoalHost(context.Background(), root, other, "", binary, "", f.launch(t))
 	if err == nil || refused.Status != "refused" || f.launches != 1 {
 		t.Fatalf("changed template dependency admitted: %+v %v", refused, err)
 	}
@@ -503,7 +631,7 @@ func TestHostGoalMissingProfileReadbackDoesNotRecreateOrReplace(t *testing.T) {
 	root, goal, template, binary := goalHostFixture(t)
 	f := &goalHostFixtureServer{blocked: map[string]bool{}}
 	launch := f.launch(t)
-	first, err := ensureGoalHost(context.Background(), root, goal, template, binary, "", func(ctx context.Context, binary, hostRoot string) error {
+	first, err := ensureFixtureGoalHost(context.Background(), root, goal, template, binary, "", func(ctx context.Context, binary, hostRoot string) error {
 		lock, err := lockfile.TryLock(filepath.Join(filepath.Dir(hostRoot), "profiles.lock"))
 		if err != nil {
 			return fmt.Errorf("profile lock still held during Host launch: %w", err)
@@ -517,7 +645,7 @@ func TestHostGoalMissingProfileReadbackDoesNotRecreateOrReplace(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(first.HostRoot, "openshell")); err != nil {
 		t.Fatal(err)
 	}
-	unknown, err := ensureGoalHost(context.Background(), root, goal, template, binary, "", launch)
+	unknown, err := ensureFixtureGoalHost(context.Background(), root, goal, template, binary, "", launch)
 	if err == nil || unknown.Status != "unknown" || unknown.HostRoot != first.HostRoot || f.launches != 1 {
 		t.Fatalf("missing original profile changed the Host selection: %+v %v", unknown, err)
 	}

@@ -381,6 +381,9 @@ func (l *Loop) Run(ctx context.Context) error {
 		l.deps.ModeOverride = state.RunMode(saved.Mode)
 		l.setState(saved.DispatchState)
 	}
+	if err := l.settleCompletedMachineSessions(false); err != nil {
+		l.logger.Warn("original machine settlement recovery remains held", "error", err)
+	}
 	if err := l.Cycle(ctx); err != nil {
 		return err
 	}
@@ -404,6 +407,13 @@ func (l *Loop) Run(ctx context.Context) error {
 	defer watcher.Close()
 	if err := watcher.Add(l.runtimeDir); err != nil {
 		return fmt.Errorf("watch runtime directory: %w", err)
+	}
+	wait, err := l.beginPreparationWait()
+	if err != nil {
+		return fmt.Errorf("original preparation readiness unresolved: %w", err)
+	}
+	if wait != nil {
+		defer wait.Close()
 	}
 	l.startupReady = true
 	l.publishState()

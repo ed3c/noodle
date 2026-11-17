@@ -34,14 +34,16 @@ const openShellRequestID = "e63f82eb-c577-49ba-b145-394483dbdc08"
 
 type openShellNativeServer struct {
 	pb.UnimplementedOpenShellServer
-	get        func(context.Context, *pb.GetSandboxRequest) (*pb.SandboxResponse, error)
-	create     func(context.Context, *pb.CreateSandboxRequest) (*pb.SandboxResponse, error)
-	list       func(context.Context, *pb.ListSandboxesRequest) (*pb.ListSandboxesResponse, error)
-	stop       func(context.Context, *pb.StopSandboxRequest) (*pb.SandboxResponse, error)
-	exec       func(pb.OpenShell_ExecSandboxInteractiveServer) error
-	gets       atomic.Int32
-	execs      atomic.Int32
-	disconnect func()
+	get           func(context.Context, *pb.GetSandboxRequest) (*pb.SandboxResponse, error)
+	create        func(context.Context, *pb.CreateSandboxRequest) (*pb.SandboxResponse, error)
+	list          func(context.Context, *pb.ListSandboxesRequest) (*pb.ListSandboxesResponse, error)
+	stop          func(context.Context, *pb.StopSandboxRequest) (*pb.SandboxResponse, error)
+	deleteMatches func(context.Context, *pb.DeleteStoppedSandboxIfMatchesRequest) (*pb.DeleteStoppedSandboxIfMatchesResponse, error)
+	deleteLegacy  func(context.Context, *pb.DeleteSandboxRequest) (*pb.DeleteSandboxResponse, error)
+	exec          func(pb.OpenShell_ExecSandboxInteractiveServer) error
+	gets          atomic.Int32
+	execs         atomic.Int32
+	disconnect    func()
 }
 
 func (s *openShellNativeServer) CreateSandbox(ctx context.Context, req *pb.CreateSandboxRequest) (*pb.SandboxResponse, error) {
@@ -52,6 +54,20 @@ func (s *openShellNativeServer) ListSandboxes(ctx context.Context, req *pb.ListS
 }
 func (s *openShellNativeServer) StopSandbox(ctx context.Context, req *pb.StopSandboxRequest) (*pb.SandboxResponse, error) {
 	return s.stop(ctx, req)
+}
+
+func (s *openShellNativeServer) DeleteStoppedSandboxIfMatches(ctx context.Context, req *pb.DeleteStoppedSandboxIfMatchesRequest) (*pb.DeleteStoppedSandboxIfMatchesResponse, error) {
+	if s.deleteMatches == nil {
+		return nil, status.Error(codes.Unimplemented, "identity deletion not supported")
+	}
+	return s.deleteMatches(ctx, req)
+}
+
+func (s *openShellNativeServer) DeleteSandbox(ctx context.Context, req *pb.DeleteSandboxRequest) (*pb.DeleteSandboxResponse, error) {
+	if s.deleteLegacy == nil {
+		return nil, status.Error(codes.Unimplemented, "legacy deletion not configured")
+	}
+	return s.deleteLegacy(ctx, req)
 }
 
 func (s *openShellNativeServer) GetSandbox(ctx context.Context, req *pb.GetSandboxRequest) (*pb.SandboxResponse, error) {

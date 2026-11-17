@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/poteto/noodle/internal/admission"
 	"github.com/poteto/noodle/internal/filex"
 	"github.com/poteto/noodle/internal/lockfile"
 	"github.com/poteto/noodle/internal/procx"
@@ -20,6 +21,8 @@ import (
 )
 
 type hostGeneration struct {
+	Preparation   *admission.PreparationRef           `json:"machine_preparation,omitempty"`
+	ResidentExit  *loopruntime.SessionReadbackFileRef `json:"resident_exit,omitempty"`
 	unknown       map[string]json.RawMessage
 	SourceService *loopruntime.SessionReadbackFileRef `json:"source_service,omitempty"`
 	ID            string                              `json:"id"`
@@ -31,6 +34,7 @@ type hostGeneration struct {
 	Error         string                              `json:"error,omitempty"`
 }
 type hostVersionRequest struct {
+	Managed          *managedHostSwitch `json:"managed_switch,omitempty"`
 	unknown          map[string]json.RawMessage
 	MaintenanceState string `json:"maintenance_previous_state,omitempty"`
 	ID               string `json:"id"`
@@ -216,6 +220,13 @@ func launchHostGeneration(ctx context.Context, root, binary, digest string) (hos
 }
 
 func launchHostGenerationWithSource(ctx context.Context, root, binary, digest string, source *loopruntime.SessionReadbackFileRef) (hostGeneration, error) {
+	prepared, ok := ctx.Value(goalPreparationContextKey{}).(goalResidentAdmission)
+	if !ok || prepared.Preparation.ID == "" || prepared.Root != root || prepared.Binary.Path != binary || prepared.Binary.SHA256 != digest {
+		return hostGeneration{}, fmt.Errorf("%w: original resident preparation required before generation effects", admission.ErrDeferred)
+	}
+	// The original Goal producer already fenced this exact lifetime. Carry its
+	// in-process result; the child independently reads the same persisted row.
+	preparation := prepared.Preparation
 	data, err := os.ReadFile(binary)
 	if err != nil || hostDigest(data) != digest {
 		return hostGeneration{}, errors.New("selected Host binary changed")
@@ -224,13 +235,16 @@ func launchHostGenerationWithSource(ctx context.Context, root, binary, digest st
 	if err != nil {
 		return hostGeneration{}, err
 	}
-	g := hostGeneration{ID: id, Directory: filepath.Join(root, "g", id), Binary: binary, SHA: digest, State: "starting", SourceService: source}
+	g := hostGeneration{ID: id, Directory: filepath.Join(root, "g", id), Binary: binary, SHA: digest, State: "starting", SourceService: source, Preparation: &preparation}
 	if err = os.MkdirAll(g.Directory, 0700); err != nil {
 		return g, err
 	}
 	if err = updateHostPool(root, func(p *hostPool) error {
 		count := 0
 		for _, current := range p.Generations {
+			if current.Preparation != nil && *current.Preparation == preparation {
+				return errors.New("original resident lifetime already has a generation; no creation replay")
+			}
 			if generationLive(current) {
 				count++
 			}
@@ -239,6 +253,23 @@ func launchHostGenerationWithSource(ctx context.Context, root, binary, digest st
 			return errors.New("two Host generations already exist")
 		}
 		p.Generations[id] = g
+		if request, ok := ctx.Value(managedSwitchLaunchKey{}).(string); ok {
+			found := false
+			for i := range p.Queue {
+				q := &p.Queue[i]
+				if q.ID != request {
+					continue
+				}
+				if q.State != "starting" || q.Generation != "" || q.Managed == nil || q.Managed.Preparation != preparation || q.Binary != binary || q.SHA != digest || p.Active != "" {
+					return errors.New("original managed launch intent changed; no replay")
+				}
+				q.Generation = id
+				found = true
+			}
+			if !found {
+				return errors.New("original managed launch queue missing")
+			}
+		}
 		return nil
 	}); err != nil {
 		return g, err

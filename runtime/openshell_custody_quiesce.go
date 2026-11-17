@@ -38,6 +38,9 @@ func (c *OpenShellCustody) Quiesce(ctx context.Context) error {
 	var unsettled error
 	for i := range c.state.Records {
 		r := &c.state.Records[i]
+		if r.Retirement != nil && r.Retirement.Retired {
+			continue // audit freshly proved original native and disk absence.
+		}
 		s, err := c.read(ctx, r)
 		if err != nil {
 			return err

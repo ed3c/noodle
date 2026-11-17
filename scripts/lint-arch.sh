@@ -43,6 +43,7 @@ find . \
     -path "./.noodle" -o \
     -path "./bin" -o \
     -path "./brain" -o \
+    -path "./third_party/openshell-sdk" -o \
     -path "./old_noodle" \
   \) -prune -o \
   -type f -name "*.go" -print | sed 's#^\./##' | sort >"$GO_FILES"

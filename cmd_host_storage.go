@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/poteto/noodle/internal/execution"
@@ -25,22 +24,18 @@ func prepareHostStorage(ctx context.Context, req hostRequest, data []byte) (stri
 }
 
 func prepareHostStorageAt(ctx context.Context, req hostRequest, data []byte, selectedStorage string) (string, error) {
+	plan, err := planHostStorage(ctx, req, selectedStorage, "")
+	if err != nil {
+		return "", err
+	}
+	if plan.Source.StorageRoot == "" {
+		return "", nil
+	}
 	e, err := execution.New(req.ProjectDir, req.Environment)
 	if err != nil {
 		return "", err
 	}
-	if err = validateHostEnvironment(e); err != nil {
-		return "", err
-	}
-	common, err := e.Command(ctx, req.ProjectDir, "git", "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
-	if err != nil {
-		return "", nil
-	} // Non-repository manual contexts have no Git custody owner.
-	commonDir := strings.TrimSpace(string(common))
-	if !filepath.IsAbs(commonDir) {
-		return "", errors.New("Host storage Git owner is not absolute")
-	}
-	ownerDir := filepath.Join(commonDir, "noodle-contexts", hostDigest([]byte(e.Root())))
+	ownerDir, commonDir, storage := plan.OwnerDir, plan.Source.CommonDir, plan.Source.StorageRoot
 	if err = os.MkdirAll(ownerDir, 0700); err != nil {
 		return "", err
 	}
@@ -49,35 +44,9 @@ func prepareHostStorageAt(ctx context.Context, req hostRequest, data []byte, sel
 		return "", err
 	}
 	defer lock.Close()
-	if selectedStorage == "" {
-		if raw, readErr := os.ReadFile(filepath.Join(ownerDir, "source.json")); readErr == nil {
-			var original hostStorageSource
-			if json.Unmarshal(raw, &original) != nil || original.Project != e.Root() || original.CommonDir != commonDir || !filepath.IsAbs(original.StorageRoot) {
-				return "", errors.New("original Host storage owner is invalid")
-			}
-			selectedStorage = original.StorageRoot
-		} else if !os.IsNotExist(readErr) {
-			return "", readErr
-		}
-	}
-	home, _ := e.Lookup("HOME")
-	dataDir := filepath.Join(home, ".local", "share")
-	if runtime.GOOS == "darwin" {
-		dataDir = filepath.Join(home, "Library", "Application Support")
-	} else if runtime.GOOS == "windows" {
-		dataDir, _ = os.UserConfigDir()
-	} else if xdg, ok := e.Lookup("XDG_DATA_HOME"); ok && xdg != "" {
-		dataDir = xdg
-	}
-	if !filepath.IsAbs(dataDir) {
-		return "", errors.New("Host data directory source is unavailable")
-	}
-	storage := filepath.Join(dataDir, "noodle", "contexts", hostDigest([]byte(commonDir)), hostDigest([]byte(e.Root())))
-	if selectedStorage != "" {
-		storage = selectedStorage
-	}
-	if !filepath.IsAbs(storage) || strings.HasPrefix(storage, e.Root()+string(filepath.Separator)) || storage == e.Root() || strings.HasPrefix(storage, commonDir+string(filepath.Separator)) || storage == commonDir {
-		return "", errors.New("Host storage remains inside disposable or protected source")
+	after, err := planHostStorage(ctx, req, selectedStorage, "")
+	if err != nil || after != plan {
+		return "", fmt.Errorf("original Host storage plan changed: %w", err)
 	}
 	if err = os.MkdirAll(storage, 0700); err != nil {
 		return "", err

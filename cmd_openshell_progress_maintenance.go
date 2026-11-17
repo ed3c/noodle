@@ -363,12 +363,9 @@ func prepareProgressMaintenance(request, session, archives, output, launcher, la
 	if len(cfg.Runtime.AdmittedOrders) != 1 || cfg.Runtime.AdmittedOrders[0] != dispatch.OrderID {
 		return ref, fmt.Errorf("maintenance task differs from the sole admitted order")
 	}
-	for _, name := range []string{"result.json", "noodle-result.tar", "noodle-session.tar"} {
-		r, err := loopruntime.ReadSessionReadbackFile(filepath.Join(archives, name), nil)
-		if err != nil {
-			return ref, err
-		}
-		p.Archives[name] = r
+	p.Archives, err = loopruntime.ReadProgressMaintenanceArchives(context.Background(), archives)
+	if err != nil {
+		return ref, err
 	}
 	if err = loopruntime.ValidateProgressMaintenance(p, profile); err != nil {
 		return ref, err

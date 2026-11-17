@@ -48,7 +48,7 @@ func TestHostFinishRetainsCustodyAfterReleaseFailure(t *testing.T) {
 			c.done <- nil
 			budget := admission.NewBudget(1)
 			budget.Register(receipt.ContextID)
-			h := &noodleHost{dir: dir, instanceID: "host", binarySHA: "binary", contexts: map[string]*hostContext{receipt.ContextID: c}, receipts: []hostReceipt{receipt}, residents: residents, budget: budget}
+			h := &noodleHost{prepareContext: fixtureTaskPreparation, dir: dir, instanceID: "host", binarySHA: "binary", contexts: map[string]*hostContext{receipt.ContextID: c}, receipts: []hostReceipt{receipt}, residents: residents, budget: budget}
 			if owner == "openshell" {
 				c.openShell = true
 				h.openShell = &loopruntime.OpenShellGateway{}

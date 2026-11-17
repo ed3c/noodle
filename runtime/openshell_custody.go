@@ -26,6 +26,8 @@ import (
 
 const openShellCustodyVersion = 4
 const openShellCredentialCustodyVersion = 5
+const openShellRetirementCustodyVersion = 6
+const openShellCredentialRetirementCustodyVersion = 7
 
 // OpenShellCustodyBinding identifies one dedicated gateway deployment. The
 // operator must assign exactly one state root per gateway. Its advisory local
@@ -58,7 +60,7 @@ type OpenShellStoppedObservation struct {
 }
 
 // Intent is retained even when the RPC was never sent. Unknown effects and all
-// names/UUIDs are permanent history; this API provides no reset, adopt or delete.
+// names/UUIDs are permanent history; this API provides no reset or adopt.
 type OpenShellCustodyRecord struct {
 	Task                  OpenShellTask
 	Name                  string
@@ -74,6 +76,7 @@ type OpenShellCustodyRecord struct {
 	StopRequestID         string
 	StopAcknowledged      bool
 	Stopped               *OpenShellStoppedObservation
+	Retirement            *openShellVMRetirement `json:",omitempty"`
 }
 
 type OpenShellCustodyState struct {
@@ -290,12 +293,14 @@ func (c *OpenShellCustody) validateLedger() error {
 }
 
 func validateOpenShellCustodyLedger(state OpenShellCustodyState) error {
-	if state.Version != openShellCredentialCustodyVersion && len(state.Credentials) != 0 {
+	if state.Version != openShellCredentialCustodyVersion && state.Version != openShellCredentialRetirementCustodyVersion && len(state.Credentials) != 0 {
 		return fmt.Errorf("openshell credential custody schema was downgraded")
 	}
 	if err := validateOpenShellCredentialLedger(state.Credentials); err != nil {
 		return err
 	}
+	retirementSchema := state.Version == openShellRetirementCustodyVersion || state.Version == openShellCredentialRetirementCustodyVersion
+	hasRetirement := false
 	names, ids := map[string]bool{}, map[string]bool{}
 	for _, r := range state.Records {
 		if r.Name == "" || names[r.Name] {
@@ -312,6 +317,15 @@ func validateOpenShellCustodyLedger(state OpenShellCustodyState) error {
 				return fmt.Errorf("custody ledger specification invalid: %w", err)
 			}
 		}
+		if r.Retirement != nil {
+			hasRetirement = true
+			if !retirementSchema {
+				return fmt.Errorf("openshell retirement custody schema was downgraded")
+			}
+			if err := validateVMRetirement(r); err != nil {
+				return err
+			}
+		}
 		if !r.Retained {
 			var intent pb.CreateSandboxRequest
 			if err := proto.Unmarshal(r.CreateIntent, &intent); err != nil {
@@ -321,6 +335,9 @@ func validateOpenShellCustodyLedger(state OpenShellCustodyState) error {
 				return fmt.Errorf("custody ledger create intent binding invalid")
 			}
 		}
+	}
+	if retirementSchema && !hasRetirement {
+		return fmt.Errorf("openshell retirement custody history missing")
 	}
 	for _, ref := range state.PendingRetained {
 		if ref.Name == "" || ref.SandboxID == "" || ref.Workspace != state.Binding.Workspace || names[ref.Name] || ids[ref.SandboxID] {
@@ -372,6 +389,9 @@ func (c *OpenShellCustody) initialize(ctx context.Context) (err error) {
 	// List is not fresh canonical identity evidence for historical records.
 	if c.managed {
 		for i := range c.state.Records {
+			if c.state.Records[i].Retirement != nil {
+				continue // audit already checked retired/pending original identities.
+			}
 			if _, err := c.read(ctx, &c.state.Records[i]); err != nil {
 				return err
 			}
@@ -468,6 +488,11 @@ func (c *OpenShellCustody) snapshotLocked() OpenShellCustodyState {
 		r := &state.Records[i]
 		r.Spec = slices.Clone(r.Spec)
 		r.CreateIntent = slices.Clone(r.CreateIntent)
+		if r.Retirement != nil {
+			saved := *r.Retirement
+			saved.Sources = maps.Clone(saved.Sources)
+			r.Retirement = &saved
+		}
 		if r.Stopped != nil {
 			stopped := *r.Stopped
 			r.Stopped = &stopped
@@ -553,6 +578,21 @@ func (c *OpenShellCustody) audit(ctx context.Context) error {
 		if !r.Retained && !r.CreateAcknowledged {
 			return c.block(fmt.Sprintf("create %s acknowledgement unresolved; replay prohibited", r.Name))
 		}
+		if r.Retirement != nil {
+			if err := validateVMRetirement(*r); err != nil {
+				return err
+			}
+			// Admission checks the original resource, not every historical
+			// archive. Selected cleanup readback owns archive verification.
+			present, err := r.Retirement.Storage.sandboxPresent(r.Worker.Identity.Sandbox.SandboxID)
+			if err != nil {
+				return err
+			}
+			if r.Retirement.Retired && (seen[r.Name] || present) {
+				return c.block(fmt.Sprintf("retired sandbox %s reappeared", r.Name))
+			}
+			continue
+		}
 		if !seen[r.Name] {
 			return c.block(fmt.Sprintf("inventory sandbox %s missing", r.Name))
 		}
@@ -571,7 +611,8 @@ func (c *OpenShellCustody) matches(r *OpenShellCustodyRecord, s *pb.Sandbox) err
 	if r.MainProcessInstanceID != "" && status.GetMainProcessInstanceId() != r.MainProcessInstanceID {
 		return c.block(fmt.Sprintf("sandbox %s native main process instance changed or missing", r.Name))
 	}
-	if (r.Retained || r.Stopped != nil) && status.GetPhase() != pb.SandboxPhase_SANDBOX_PHASE_STOPPED {
+	retiring := r.Retirement != nil && !r.Retirement.Retired && status.GetPhase() == pb.SandboxPhase_SANDBOX_PHASE_DELETING
+	if (r.Retained || r.Stopped != nil) && status.GetPhase() != pb.SandboxPhase_SANDBOX_PHASE_STOPPED && !retiring {
 		return c.block(fmt.Sprintf("sandbox %s lifecycle changed after observed Stopped: %s", r.Name, status.GetPhase()))
 	}
 	// A stopped driver may clear its receipt. Keep the old receipt, and reject

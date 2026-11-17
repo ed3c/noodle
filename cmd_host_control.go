@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/poteto/noodle/internal/admission"
 	"github.com/poteto/noodle/worktree"
 	"github.com/spf13/cobra"
 )
@@ -14,7 +16,9 @@ func newHostControlCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := worktree.PrepareTaskControl(cmd.Context(), root, taskFile)
+			result, err := worktree.PrepareTaskControlWithAdmission(cmd.Context(), root, taskFile, func(ctx context.Context, plan worktree.TaskControl) (admission.PreparationRef, error) {
+				return reserveTaskControlPreparation(ctx, root, plan)
+			})
 			if err != nil {
 				return err
 			}

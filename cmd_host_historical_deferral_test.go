@@ -13,7 +13,7 @@ func TestHostHistoricalDeferralRetainsOriginalRequiredInstance(t *testing.T) {
 	receipt := hostReceipt{RequestID: request.RequestID, ProjectDir: request.ProjectDir, HostInstanceID: "original-host",
 		ContextID: "original-context", ContextState: "detached", BinarySHA256: request.BinarySHA256,
 		ConfigSHA256: request.ConfigSHA256, Mode: "manual", AdmissionRefusal: admission.ErrDeferred.Error()}
-	host := &noodleHost{instanceID: "selected-host", binarySHA: "selected-binary", receipts: []hostReceipt{receipt}}
+	host := &noodleHost{prepareContext: fixtureTaskPreparation, instanceID: "selected-host", binarySHA: "selected-binary", receipts: []hostReceipt{receipt}}
 	response := host.handle(context.Background(), request)
 	if response.Status != "deferred" || response.HostInstanceID != "original-host" || response.ContextID != "original-context" {
 		t.Fatalf("historical readback: %+v", response)

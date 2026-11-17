@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -44,6 +45,11 @@ func (a *App) merge(name string, install bool, opts ...MergeOpts) error {
 		base = o.Into
 	}
 	wtPath := WorktreePath(a.Root, name)
+	guard, err := a.AcquireCheckoutUse(context.Background(), wtPath)
+	if err != nil {
+		return err
+	}
+	defer guard.Close()
 	mergeBranch := a.resolveBranchName(name)
 	if err := a.acquireMergeLock(); err != nil {
 		return err

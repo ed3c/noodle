@@ -90,6 +90,11 @@ func newHostRollingCmd() *cobra.Command {
 		if err = verifyRollingTarget(cmd.Context(), binary, digest); err != nil {
 			return err
 		}
+		if !inspect && !maintenancePlan {
+			if err = verifyMachineRollingTarget(cmd.Context(), binary, digest); err != nil {
+				return err
+			}
+		}
 		if maintenancePlan {
 			if handoverRoot != "" {
 				plan, planErr := planGatewayHandoverWithRecovery(cmd.Context(), root, handoverRoot, binary, digest, requestFiles, failureRecovery, sourcePlan)
@@ -106,6 +111,12 @@ func newHostRollingCmd() *cobra.Command {
 		}
 		if bootstrap {
 			return bootstrapLegacyHost(cmd.Context(), root, binary, digest, requestFiles, json.NewEncoder(cmd.OutOrStdout()))
+		}
+		if result, managed, switchErr := switchManagedHost(cmd.Context(), root, binary, digest, nativeManagedHostSwitch()); managed {
+			if encodeErr := json.NewEncoder(cmd.OutOrStdout()).Encode(result); encodeErr != nil {
+				return encodeErr
+			}
+			return switchErr
 		}
 		if waiting := maintenanceWaitResponse(root); waiting != nil {
 			return errors.New(waiting.Error)
@@ -486,6 +497,10 @@ func (h *noodleHost) advanceRolling(ctx context.Context) bool {
 				h.failVersion(q.ID, err)
 				return false
 			}
+			if err = verifyMachineRollingTarget(ctx, q.Binary, q.SHA); err != nil {
+				h.failVersion(q.ID, err)
+				return false
+			}
 			if err = updateHostPool(r.root, func(p *hostPool) error {
 				for i := range p.Queue {
 					if p.Queue[i].ID == q.ID {
@@ -656,7 +671,7 @@ func (h *noodleHost) failVersion(id string, failure error) {
 }
 func (h *noodleHost) observeRetiredGenerations(p *hostPool) {
 	for id, g := range p.Generations {
-		if (g.State != "exiting" && g.State != "retiring") || g.Process.PID <= 0 {
+		if (g.State != "exiting" && g.State != "retiring" && g.State != "exited") || g.Process.PID <= 0 {
 			continue
 		}
 		if g.State == "retiring" {
@@ -672,13 +687,20 @@ func (h *noodleHost) observeRetiredGenerations(p *hostPool) {
 		if err != nil || !absent {
 			continue
 		}
+		resourceErr := error(nil)
+		if g.Preparation != nil {
+			resourceErr = returnHostResidentResources(h.rolling.root, g)
+		}
 		if err := updateHostPool(h.rolling.root, func(p *hostPool) error {
 			current := p.Generations[id]
+			if resourceErr != nil && !strings.Contains(current.Error, resourceErr.Error()) {
+				current.Error = strings.TrimSpace(current.Error + "\nresident resources retained: " + resourceErr.Error())
+			}
 			if current.State == "exiting" || current.State == "retiring" {
 				// Physical exit does not discharge a task, continuation or quota lease.
 				current.State = "exited"
-				p.Generations[id] = current
 			}
+			p.Generations[id] = current
 			return nil
 		}); err != nil {
 			h.rolling.failure = err.Error()

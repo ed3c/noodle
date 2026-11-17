@@ -55,6 +55,9 @@ func (s *managedGatewayServer) Health(ctx context.Context, _ *pb.HealthRequest) 
 func (s *managedGatewayServer) GetGatewayInfo(context.Context, *pb.GetGatewayInfoRequest) (*pb.GetGatewayInfoResponse, error) {
 	s.event("info")
 	driver := "test-driver"
+	if _, err := os.Stat(filepath.Join(s.root, "vm-retirement-fixture.json")); err == nil {
+		driver = "vm"
+	}
 	if _, err := os.Stat(filepath.Join(s.root, "wrong-driver")); err == nil {
 		driver = "wrong"
 	}
@@ -245,6 +248,7 @@ func TestManagedOpenShellGatewayChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	g, native := custodyServer(t)
+	configureVMRetirementFixture(t, root, g, native)
 	if _, err := os.Stat(filepath.Join(root, "completion-observation")); err == nil {
 		g.afterCreate = func() {
 			for _, sandbox := range g.sandboxes {

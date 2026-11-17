@@ -17,16 +17,17 @@ import (
 )
 
 type goalHostSelection struct {
-	Schema    int                                 `json:"schema"`
-	Goal      loopruntime.SessionReadbackFileRef  `json:"goal"`
-	Operation *loopruntime.SessionReadbackFileRef `json:"operation,omitempty"`
-	Root      string                              `json:"host_root"`
-	Template  loopruntime.SessionReadbackFileRef  `json:"template"`
-	Profile   loopruntime.SessionReadbackFileRef  `json:"profile"`
-	Noodle    loopruntime.SessionReadbackFileRef  `json:"noodle"`
-	Phase     string                              `json:"phase"`
-	Previous  []goalHostSelection                 `json:"previous,omitempty"`
-	Fault     string                              `json:"replacement_reason,omitempty"`
+	Preparation admission.PreparationRef            `json:"machine_preparation"`
+	Schema      int                                 `json:"schema"`
+	Goal        loopruntime.SessionReadbackFileRef  `json:"goal"`
+	Operation   *loopruntime.SessionReadbackFileRef `json:"operation,omitempty"`
+	Root        string                              `json:"host_root"`
+	Template    loopruntime.SessionReadbackFileRef  `json:"template"`
+	Profile     loopruntime.SessionReadbackFileRef  `json:"profile"`
+	Noodle      loopruntime.SessionReadbackFileRef  `json:"noodle"`
+	Phase       string                              `json:"phase"`
+	Previous    []goalHostSelection                 `json:"previous,omitempty"`
+	Fault       string                              `json:"replacement_reason,omitempty"`
 }
 
 type goalHostResult struct {
@@ -95,19 +96,44 @@ func goalHostTemplatePath() (string, error) {
 }
 
 func newHostGoalTemplateCmd() *cobra.Command {
-	var profile string
+	var profile, resourceBudget, gatewayArtifact, progressArtifact string
+	var prepareOnly bool
 	cmd := &cobra.Command{Use: "template", Short: "Register the installed OpenShell template once for normal Goal dispatch", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		path, err := goalHostTemplatePath()
 		if err != nil {
 			return err
 		}
-		ref, err := registerGoalHostTemplate(cmd.Context(), path, profile)
+		selected, err := prepareGoalTemplatePairing(cmd.Context(), path, profile, gatewayArtifact, progressArtifact)
 		if err != nil {
 			return err
 		}
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "status": "registered", "profile": ref})
+		if !filepath.IsAbs(selected) {
+			return errors.New("Host profile template is not absolute")
+		}
+		var ref loopruntime.SessionReadbackFileRef
+		if resourceBudget != "" {
+			ref, err = prepareBudgetedGoalHostTemplate(cmd.Context(), path, selected, resourceBudget, admission.NewSampler())
+		} else {
+			ref, _, err = readGoalHostTemplate(selected)
+		}
+		if err != nil {
+			return err
+		}
+		status := "prepared"
+		if !prepareOnly {
+			ref, err = registerGoalHostTemplate(cmd.Context(), path, ref.Path)
+			if err != nil {
+				return err
+			}
+			status = "registered"
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "status": status, "profile": ref})
 	}}
 	cmd.Flags().StringVar(&profile, "profile", "", "Installed original OpenShell template source")
+	cmd.Flags().StringVar(&resourceBudget, "resource-budget", "", "Explicit once-only conservative-v1 or qualification-small-no-deps-v1 reservation policy")
+	cmd.Flags().StringVar(&gatewayArtifact, "gateway-artifact", "", "Qualified gateway artifact manifest path for this new template")
+	cmd.Flags().StringVar(&progressArtifact, "progress-artifact", "", "Qualified Linux progress artifact manifest path for this new template")
+	cmd.Flags().BoolVar(&prepareOnly, "prepare-only", false, "Return the verified template without changing the default registration")
 	return cmd
 }
 
@@ -139,7 +165,7 @@ func registerGoalHostTemplate(ctx context.Context, path, profile string) (loopru
 	return ref, filex.WriteFileAtomicDurable(path, raw)
 }
 
-func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOperation string, launch func(context.Context, string, string) error) (goalHostResult, error) {
+func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOperation string, launch func(context.Context, string, string) error, preparation ...goalHostPreparation) (goalHostResult, error) {
 	result := goalHostResult{Schema: 1, Status: "refused", Policy: admission.WorkerAdmissionPolicy, RuntimeReadiness: "not_observed"}
 	fail := func(err error) (goalHostResult, error) { result.Error = err.Error(); return result, err }
 	goal, err := loopruntime.ReadSessionReadbackFile(goalFile, nil)
@@ -168,6 +194,21 @@ func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOp
 	if !filepath.IsAbs(root) || filepath.Clean(root) != root {
 		return fail(errors.New("native Host owner root is not absolute"))
 	}
+	selectionFile := filepath.Join(root, "goals", key+".json")
+	var templateRef loopruntime.SessionReadbackFileRef
+	var loadedTemplate loopruntime.OpenShellProfile
+	// A missing Goal contract must fail before even creating its custody root.
+	if _, e := os.Lstat(selectionFile); os.IsNotExist(e) {
+		templateRef, loadedTemplate, err = readGoalHostTemplate(template)
+		if err != nil {
+			return fail(err)
+		}
+		if _, err = loopruntime.ReadOpenShellGoalExecutionConstraints(loadedTemplate, goal); err != nil {
+			return fail(err)
+		}
+	} else if e != nil {
+		return fail(e)
+	}
 	selections := filepath.Join(root, "goals")
 	if err = os.MkdirAll(selections, 0700); err != nil {
 		return fail(err)
@@ -175,7 +216,6 @@ func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOp
 	if canonical, e := filepath.EvalSymlinks(selections); e != nil || canonical != selections {
 		return fail(errors.New("native Goal Host custody path contains a symlink"))
 	}
-	selectionFile := filepath.Join(selections, key+".json")
 	lock, err := lockfile.Acquire(ctx, selectionFile+".lock")
 	if err != nil {
 		return fail(err)
@@ -189,7 +229,7 @@ func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOp
 		if err = json.Unmarshal(raw, &selected); err != nil {
 			return fail(err)
 		}
-		if selected.Schema != 1 || selected.Goal != goal {
+		if (selected.Schema != 1 && selected.Schema != 2) || selected.Goal != goal {
 			return fail(errors.New("original Goal Host selection binding changed"))
 		}
 		if operation != nil && !sameGoalOperation(selected.Operation, operation) {
@@ -200,7 +240,7 @@ func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOp
 				}
 			}
 			if !historical {
-				if selected.Phase != "ready" {
+				if selected.Phase != "ready" && selected.Phase != "retired" {
 					return fail(errors.New("original Host creation is unresolved; new selection refused"))
 				}
 				previous := selected
@@ -243,6 +283,13 @@ func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOp
 				}
 				if readErr != nil {
 					previous.Fault = fmt.Sprintf("original Host process and group absent; readback: %v", readErr)
+					if resourceErr := reclaimGoalResident(selected.Root); resourceErr != nil {
+						previous.Fault += "; resident resources retained: " + resourceErr.Error()
+						selected.Fault = previous.Fault
+						if e := saveGoalHostSelection(selectionFile, selected); e != nil {
+							return fail(e)
+						}
+					}
 				}
 				selected = goalHostSelection{Previous: append(selected.Previous, previous)}
 				exists = false
@@ -274,59 +321,51 @@ func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOp
 		return fail(err)
 	}
 	if !exists {
-		if template == "" {
-			path, e := goalHostTemplatePath()
+		if loadedTemplate.SourcePath == "" {
+			var e error
+			templateRef, loadedTemplate, e = readGoalHostTemplate(template)
 			if e != nil {
 				return fail(e)
 			}
-			var installed goalHostTemplateRegistration
-			raw, e := os.ReadFile(path)
-			if e != nil {
-				return fail(fmt.Errorf("installed Host profile template is unavailable: %w", e))
-			}
-			if e = json.Unmarshal(raw, &installed); e != nil {
-				return fail(e)
-			}
-			actual, e := loopruntime.ReadSessionReadbackFile(installed.Profile.Path, nil)
-			if e != nil || actual != installed.Profile {
-				return fail(errors.New("installed Host profile template changed"))
-			}
-			loaded, e := loopruntime.LoadOpenShellProfile(installed.Profile.Path)
-			if e != nil {
-				return fail(e)
-			}
-			if installed.Schema != 1 || loaded.SourceSHA256 != installed.PolicySHA256 {
-				return fail(errors.New("installed Host profile template dependencies changed"))
-			}
-			template = installed.Profile.Path
 		}
-		templateRef, e := loopruntime.ReadSessionReadbackFile(template, nil)
-		if e != nil {
-			return fail(e)
-		}
-		if _, e = loopruntime.LoadOpenShellProfile(template); e != nil {
+		if _, e := loopruntime.ReadOpenShellGoalExecutionConstraints(loadedTemplate, goal); e != nil {
 			return fail(e)
 		}
 		binaryRef, e := hostReadbackBinaryRef(binary)
 		if e != nil {
 			return fail(e)
 		}
-		id, e := hostID()
+		selected = goalHostSelection{Schema: 2, Goal: goal, Operation: operation, Template: templateRef, Noodle: binaryRef, Phase: "materializing", Previous: selected.Previous}
+		prepare := prepareGoalHostResources
+		if len(preparation) != 0 && preparation[0] != nil {
+			prepare = preparation[0]
+		}
+		selected, e = prepare(ctx, root, selected, loadedTemplate)
 		if e != nil {
 			return fail(e)
 		}
-		selected = goalHostSelection{Schema: 1, Goal: goal, Operation: operation, Root: filepath.Join(root, "h", id[:16]), Template: templateRef, Noodle: binaryRef, Phase: "materializing", Previous: selected.Previous}
-		if e = os.MkdirAll(filepath.Dir(selected.Root), 0700); e != nil {
-			return fail(e)
-		}
-		if e = os.Mkdir(selected.Root, 0700); e != nil {
-			return fail(e)
-		}
+		// Persist the original nonce and planned root before that root exists.
+		// A lost result resumes this same intent, never another Host identity.
 		if e = saveGoalHostSelection(selectionFile, selected); e != nil {
 			return fail(e)
 		}
 	}
+	if selected.Schema != 2 || selected.Preparation.ID == "" {
+		return fail(fmt.Errorf("%w: original Goal resident reservation missing; no legacy adoption", admission.ErrDeferred))
+	}
+	if exists && (len(preparation) == 0 || preparation[0] == nil) {
+		if err = verifyGoalResidentPreparation(selected); err != nil {
+			return fail(err)
+		}
+	}
 	if selected.Phase == "materializing" {
+		canonical, e := hostPlannedPath(selected.Root)
+		if e != nil || canonical != selected.Root {
+			return fail(errors.New("original Goal planned root changed"))
+		}
+		if e = os.MkdirAll(selected.Root, 0700); e != nil {
+			return fail(e)
+		}
 		actual, e := loopruntime.ReadSessionReadbackFile(selected.Template.Path, nil)
 		if e != nil || actual != selected.Template {
 			return fail(errors.New("original Goal template changed"))
@@ -352,6 +391,7 @@ func ensureGoalHost(ctx context.Context, root, goalFile, template, binary, newOp
 	if err = saveGoalHostSelection(selectionFile, selected); err != nil {
 		return fail(err)
 	}
+	ctx = context.WithValue(ctx, goalPreparationContextKey{}, goalResidentAdmission{selected.Root, selected.Noodle, selected.Preparation})
 	if err = launch(ctx, selected.Noodle.Path, selected.Root); err != nil {
 		result.Status = "unknown"
 		result.Next = goalHostNext(selected.Noodle.Path, goalFile, newOperation)

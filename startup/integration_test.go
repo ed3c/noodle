@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/poteto/noodle/config"
+	"github.com/poteto/noodle/internal/admission"
 	"github.com/poteto/noodle/startup"
 )
 
@@ -62,11 +63,10 @@ func TestCLIIntegrationStartScaffolds(t *testing.T) {
 	cmd.Env = append(os.Environ(), "PATH="+binDir+":"+os.Getenv("PATH"))
 
 	output, err := cmd.CombinedOutput()
-	// start --once exits non-zero in a fresh project because skills haven't
-	// been installed yet (that's the agent's job after scaffolding). Verify
-	// the failure is from missing skills, not from config or scaffolding.
+	// Scaffolding can precede the missing-skill or standalone-admission refusal.
+	// Neither refusal makes this unconfigured project eligible to dispatch.
 	if err != nil {
-		if !strings.Contains(string(output), "skill") {
+		if !expectedScaffoldStartFailure(output) {
 			t.Fatalf("noodle start --once failed for unexpected reason:\n%s", output)
 		}
 	}
@@ -104,7 +104,7 @@ func TestCLIIntegrationStartScaffolds(t *testing.T) {
 	cmd2.Env = append(os.Environ(), "PATH="+binDir+":"+os.Getenv("PATH"))
 	output2, err := cmd2.CombinedOutput()
 	if err != nil {
-		if !strings.Contains(string(output2), "skill") {
+		if !expectedScaffoldStartFailure(output2) {
 			t.Fatalf("second run failed for unexpected reason:\n%s", output2)
 		}
 	}
@@ -116,6 +116,32 @@ func TestCLIIntegrationStartScaffolds(t *testing.T) {
 	}
 	if string(configData) != string(configData2) {
 		t.Fatal("config was modified on second run — not idempotent")
+	}
+}
+
+func expectedScaffoldStartFailure(output []byte) bool {
+	return strings.Contains(string(output), "skill") || strings.Contains(string(output),
+		admission.ErrDeferred.Error()+": standalone runtime preparation unsupported; use the original Goal Host admission")
+}
+
+func TestScaffoldStartFailureKeepsAdmissionBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{"missing-skills", "no skills installed", true},
+		{"standalone-refusal", admission.ErrDeferred.Error() + ": standalone runtime preparation unsupported; use the original Goal Host admission", true},
+		{"different-admission-refusal", admission.ErrDeferred.Error() + ": original lifecycle resource source changed", false},
+		{"untyped-standalone-message", "standalone runtime preparation unsupported; use the original Goal Host admission", false},
+		{"unrelated-error", "configuration parse failed", false},
+		{"empty-output", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := expectedScaffoldStartFailure([]byte(tc.output)); got != tc.want {
+				t.Fatalf("expected scaffold failure = %t, want %t for %q", got, tc.want, tc.output)
+			}
+		})
 	}
 }
 

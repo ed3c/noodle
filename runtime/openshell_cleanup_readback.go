@@ -28,10 +28,11 @@ func (r *OpenShellRuntime) ReadCleanupSession(ctx context.Context, b CompletedSe
 	}
 	progress := expected != StatusCompleted
 	observe := func(ctx context.Context, id OpenShellIdentity) (OpenShellCompletedObservation, error) {
+		kind := cleanupCompletedObservation
 		if progress {
-			return r.config.Gateway.ObserveSavedProgress(ctx, r.config.ContextID, id)
+			kind = cleanupSavedObservation
 		}
-		return r.config.Gateway.ObserveCompleted(ctx, r.config.ContextID, id)
+		return r.config.Gateway.observeSettled(ctx, r.config.ContextID, id, kind)
 	}
 	retained := func(ctx context.Context, receipt openShellDispatchReceipt, head string) error {
 		if err := verifyCleanupProgressArchives(ctx, filepath.Join(r.config.RuntimeDir, "sessions", b.SessionID), receipt); err != nil {
@@ -49,6 +50,9 @@ func (r *OpenShellRuntime) ReadCleanupSession(ctx context.Context, b CompletedSe
 	head := result.completed.CandidateHead
 	if progress {
 		head = result.progressHead
+	}
+	if result.completed.Retirement != nil {
+		result.completed.Retirement.OutcomeStatus = result.status
 	}
 	return CleanupSessionReadback{OutcomeStatus: result.status, PublishedHead: head, Execution: result.completed}, nil
 }

@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"context"
 	"fmt"
 	"os"
 )
@@ -43,6 +44,11 @@ func (a *App) Cleanup(name string, opts ...CleanupOpts) error {
 		a.printf("Done. Cleaned up refs for %s.\n", name)
 		return nil
 	}
+	guard, err := a.AcquireCheckoutUse(context.Background(), wtPath)
+	if err != nil {
+		return err
+	}
+	defer guard.Close()
 
 	cwd, err := os.Getwd()
 	if err != nil {

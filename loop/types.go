@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -22,6 +23,7 @@ import (
 	"github.com/poteto/noodle/monitor"
 	loopruntime "github.com/poteto/noodle/runtime"
 	"github.com/poteto/noodle/worktree"
+	"github.com/poteto/noodle/worktree/archive"
 )
 
 type State string
@@ -154,28 +156,30 @@ type Monitor interface {
 }
 
 type Dependencies struct {
-	ReturnHostInstance string
-	Execution          *execution.Context
-	Admission          *admission.Budget
-	AdmissionContext   string
-	HostContinuation   *HostContinuation
-	DispatchBlocked    string
-	CleanupCompleted   bool
-	OpenShellGateway   *loopruntime.OpenShellGateway
-	OpenShellProfile   *loopruntime.OpenShellProfile
-	Runtimes           map[string]loopruntime.Runtime
-	Worktree           WorktreeManager
-	Adapter            AdapterRunner
-	Mise               MiseBuilder
-	Monitor            Monitor
-	Registry           taskreg.Registry
-	ModeOverride       state.RunMode
-	EventSink          dispatcher.SessionEventSink
-	Logger             *slog.Logger
-	Now                func() time.Time
-	OrdersFile         string
-	OrdersNextFile     string
-	StatusFile         string
+	ReturnHostInstance    string
+	Execution             *execution.Context
+	Admission             *admission.Budget
+	AdmissionContext      string
+	PreparationReady      func() (io.Closer, error)
+	HostContinuation      *HostContinuation
+	DispatchBlocked       string
+	CleanupCompleted      bool
+	CheckoutArchivePolicy *archive.FileRef
+	OpenShellGateway      *loopruntime.OpenShellGateway
+	OpenShellProfile      *loopruntime.OpenShellProfile
+	Runtimes              map[string]loopruntime.Runtime
+	Worktree              WorktreeManager
+	Adapter               AdapterRunner
+	Mise                  MiseBuilder
+	Monitor               Monitor
+	Registry              taskreg.Registry
+	ModeOverride          state.RunMode
+	EventSink             dispatcher.SessionEventSink
+	Logger                *slog.Logger
+	Now                   func() time.Time
+	OrdersFile            string
+	OrdersNextFile        string
+	StatusFile            string
 }
 
 func (l *Loop) effectiveMode() state.RunMode {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 
@@ -23,6 +24,200 @@ func resourceBudget(l *Loop, max int) *admission.Budget {
 	l.deps.Admission = b
 	l.deps.AdmissionContext = l.projectDir
 	return b
+}
+
+func loopMachineFixture(t *testing.T, l *Loop, machine, quota, owner string) *admission.Budget {
+	t.Helper()
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" { t.Skip("native machine identity unsupported") }
+	b := resourceBudget(l, 9)
+	if err := b.BindSharedQuota(quota, owner); err != nil { t.Fatal(err) }
+	if err := b.BindMachineCapacity(machine, owner); err != nil { t.Fatal(err) }
+	diskRoot, err := filepath.EvalSymlinks(l.projectDir)
+	if err != nil { t.Fatal(err) }
+	b.BindResourceSource(l.projectDir, "process", func(string) (admission.ResourceClaim, error) {
+		return admission.ResourceClaim{Source: "isolated-original-owner-fixture", MemoryBytes: 1, CPUs: 1, DiskBytes: 1, DiskPaths: []string{diskRoot}, Policy: admission.CapacityPolicy{MemoryBytes: 1, CPUs: 10, DiskSafetyBytes: 1, RecoverySamples: 2}}, nil
+	})
+	for i := 3; i >= 0; i-- {
+		b.Observe(admission.Sample{At: time.Now().Add(-time.Duration(i)*time.Second), Pressure: admission.Normal, TotalMemoryBytes: 100, CPUs: 10}, nil)
+	}
+	return b
+}
+
+func TestMachineAdmissionOriginalLoopTwoHostsQueueBeforeWorktreeAndDispatch(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil { t.Fatal(err) }
+	rt1, rt2 := newMockRuntime(), newMockRuntime()
+	first, second := newSteerTestLoop(t, rt1), newSteerTestLoop(t, rt2)
+	b1 := loopMachineFixture(t, first, filepath.Join(root, "machine"), filepath.Join(root, "host-a"), "host-a-old")
+	b2 := loopMachineFixture(t, second, filepath.Join(root, "machine"), filepath.Join(root, "host-b"), "host-b-current")
+	reserved, err := b1.TryAcquireTask(first.projectDir, "first", "process")
+	if err != nil { t.Fatal(err) }
+	defer reserved.Release()
+	stage := Stage{TaskKey: "execute", Skill: "execute", Status: StageStatusPending}
+	order := Order{ID: "42", Status: OrderStatusActive, Stages: []Stage{stage}}
+	candidate := dispatchCandidate{OrderID: order.ID, Stage: stage}
+	before := resourceTree(t, second.projectDir)
+	err = second.spawnCook(context.Background(), candidate, order, spawnOptions{})
+	if !errors.Is(err, admission.ErrDeferred) || len(rt2.calls) != 0 || !reflect.DeepEqual(before, resourceTree(t, second.projectDir)) || b2.Snapshot().Active != 0 { t.Fatal("machine resource shortage reached preparation or Dispatch", err) }
+	reserved.Release()
+	if err = second.spawnCook(context.Background(), candidate, order, spawnOptions{}); err != nil { t.Fatal("safe return did not continue original Loop", err) }
+	if len(rt2.calls) != 1 || b2.Snapshot().Active != 1 { t.Fatal("original Loop did not dispatch exactly once") }
+	session := second.cooks.activeCooksByOrder[order.ID].session
+	rt2.sessions[0].complete("completed")
+	<-session.Done()
+	if s := b2.Snapshot(); s.Active != 0 || s.MachineCapacity.Leases != 1 { t.Fatal("Session.Done was promoted to disk/VM release proof") }
+	second.watcherWG.Wait()
+}
+
+func TestMachineAdmissionOriginalLoopSampleAndSourceDeferrals(t *testing.T) {
+	for _, condition := range []string{"missing", "stale", "unsupported", "source"} {
+		t.Run(condition, func(t *testing.T) {
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil { t.Fatal(err) }
+			rt := newMockRuntime()
+			l := newSteerTestLoop(t, rt)
+			b := loopMachineFixture(t, l, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner")
+			switch condition {
+			case "missing": b.Observe(admission.Sample{}, nil)
+			case "stale": b.Observe(admission.Sample{At: time.Now().Add(-admission.MaxSampleAge-time.Second), Pressure: admission.Normal, TotalMemoryBytes: 100, CPUs: 10}, nil)
+			case "unsupported": b.Observe(admission.Sample{At: time.Now(), Unsupported: true}, nil)
+			case "source": b.Unregister(l.projectDir); b.Register(l.projectDir)
+			}
+			stage := Stage{TaskKey: "execute", Skill: "execute", Status: StageStatusPending}
+			before := resourceTree(t, l.projectDir)
+			err = l.spawnCook(context.Background(), dispatchCandidate{OrderID: "42", Stage: stage}, Order{ID: "42"}, spawnOptions{})
+			if !errors.Is(err, admission.ErrDeferred) || len(rt.calls) != 0 || !reflect.DeepEqual(before, resourceTree(t, l.projectDir)) || b.Snapshot().MachineCapacity.Leases != 0 { t.Fatal("unobserved worker crossed original preparation boundary", err) }
+		})
+	}
+}
+
+func TestMachineAdmissionAllOriginalSpawnEntrancesPreservePreparation(t *testing.T) {
+	for _, entry := range []string{"cook", "schedule", "bootstrap", "planned"} {
+		t.Run(entry, func(t *testing.T) {
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil { t.Fatal(err) }
+			rt := newMockRuntime()
+			l := newSteerTestLoop(t, rt)
+			b := loopMachineFixture(t, l, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner")
+			p, err := b.TryAcquireTask(l.projectDir, "occupied", "process")
+			if err != nil { t.Fatal(err) }
+			defer p.Release()
+			stage := Stage{TaskKey: "execute", Skill: "execute", Status: StageStatusPending}
+			order := Order{ID: "42", Status: OrderStatusActive, Stages: []Stage{stage}}
+			candidate := dispatchCandidate{OrderID: order.ID, Stage: stage}
+			l.schedulePromoted, l.lastPromotionError, l.scheduleDispatchDigest = true, "retain", "retain"
+			before := resourceTree(t, l.projectDir)
+			switch entry {
+			case "cook": err = l.spawnCook(context.Background(), candidate, order, spawnOptions{})
+			case "schedule": err = l.spawnSchedule(context.Background(), order, 0, "")
+			case "bootstrap": err = l.spawnBootstrapIfNeeded(context.Background(), order)
+			case "planned": err = l.spawnPlannedCandidates(context.Background(), []dispatchCandidate{candidate}, OrdersFile{Orders: []Order{order}}, mise.Brief{})
+			}
+			if entry == "planned" { if err != nil { t.Fatal(err) }
+			} else if !errors.Is(err, admission.ErrDeferred) { t.Fatal("resource wait did not propagate", err) }
+			if len(rt.calls) != 0 || len(l.cooks.activeCooksByOrder) != 0 || l.bootstrapAttempts != 0 || !l.schedulePromoted || l.lastPromotionError != "retain" || l.scheduleDispatchDigest != "retain" || !reflect.DeepEqual(before, resourceTree(t, l.projectDir)) { t.Fatal("machine queue changed original preparation state") }
+		})
+	}
+}
+
+func TestMachineAdmissionNestedPermitReplacementAndUnknownRetention(t *testing.T) {
+	for _, unknown := range []bool{false, true} {
+		t.Run(map[bool]string{false: "replacement", true: "unknown"}[unknown], func(t *testing.T) {
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil { t.Fatal(err) }
+			rt := newMockRuntime()
+			l := newSteerTestLoop(t, rt)
+			b := loopMachineFixture(t, l, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner")
+			runtimeName := "process"
+			if unknown { runtimeName = "sprites"; rt.dispatchErr = errors.New("fixture remote ACK lost"); l.deps.Runtimes[runtimeName] = rt }
+			var session loopruntime.SessionHandle
+			err = l.withAdmission(context.Background(), runtimeName, "original", func(ctx context.Context) error {
+				return l.withAdmission(ctx, runtimeName, "original", func(ctx context.Context) error {
+					var e error
+					session, _, e = l.dispatchSession(ctx, loopruntime.DispatchRequest{Name: "original", Runtime: runtimeName})
+					return e
+				})
+			})
+			if unknown {
+				if !errors.Is(err, errDispatchUnknown) || b.Snapshot().Active != 1 || b.Snapshot().MachineCapacity.Leases != 1 { t.Fatal("unknown lost original quota or resource owner", err) }
+				if err = l.withAdmission(context.Background(), runtimeName, "next", func(context.Context) error { t.Fatal("unknown dispatch replayed"); return nil }); !errors.Is(err, errDispatchUnknown) { t.Fatal(err) }
+				return
+			}
+			if err != nil { t.Fatal(err) }
+			b.Observe(admission.Sample{At: time.Now(), Pressure: admission.Critical}, nil)
+			err = l.withReplacement(&cookHandle{session: session}, func(context.Context) error { t.Fatal("replacement reached launch before resource retirement"); return nil })
+			if !errors.Is(err, admission.ErrDeferred) || b.Snapshot().Active != 1 || b.Snapshot().MachineCapacity.Leases != 1 || len(rt.calls) != 1 { t.Fatal("replacement lost original resource custody", err) }
+			rt.sessions[0].complete("completed"); <-session.Done()
+			if b.Snapshot().Active != 0 || b.Snapshot().MachineCapacity.Leases != 1 { t.Fatal("Done claimed GC/VM retirement") }
+		})
+	}
+}
+
+func TestMachineAdmissionSteerDefersBeforeKillWithoutResourceRetirement(t *testing.T) {
+	for _, pressure := range []admission.Pressure{admission.Normal, admission.Critical} {
+		t.Run(string(pressure), func(t *testing.T) {
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil { t.Fatal(err) }
+			rt := newMockRuntime()
+			l := newControlTestLoop(t, &fakeWorktree{}, rt)
+			b := loopMachineFixture(t, l, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner")
+			stage := Stage{TaskKey: "execute", Skill: "execute", Status: StageStatusPending}
+			order := Order{ID: "42", Status: OrderStatusActive, Stages: []Stage{stage}}
+			if err = l.spawnCook(context.Background(), dispatchCandidate{OrderID: order.ID, Stage: stage}, order, spawnOptions{}); err != nil { t.Fatal(err) }
+			old := l.cooks.activeCooksByOrder[order.ID]
+			b.Observe(admission.Sample{At: time.Now(), Pressure: pressure, TotalMemoryBytes: 100, CPUs: 10}, nil)
+			before := resourceTree(t, l.projectDir)
+			for range 3 {
+				err = l.steerRespawn(old, "retain original worker and direction")
+				if !errors.Is(err, admission.ErrDeferred) || b.Snapshot().MachineCapacity.Reason != "replacement_resource_retirement_required" { t.Fatal("steer reused finite resources without retirement", err) }
+				select { case <-old.session.Done(): t.Fatal("deferred steer killed original worker"); default: }
+				if len(rt.calls) != 1 || rt.sessions[0].status != "running" || l.cooks.activeCooksByOrder[order.ID] != old ||
+					!reflect.DeepEqual(before, resourceTree(t, l.projectDir)) { t.Fatal("deferred replacement changed files, Dispatch or original worker identity") }
+				if s := b.Snapshot(); s.Active != 1 || s.SharedQuota.Allocations != 1 || s.MachineCapacity.Leases != 1 { t.Fatal("deferred replacement changed original quota or resource custody") }
+			}
+			rt.sessions[0].complete("completed")
+			<-old.session.Done()
+			l.watcherWG.Wait()
+			if s := b.Snapshot(); s.Active != 0 || s.SharedQuota.Allocations != 0 || s.MachineCapacity.Leases != 1 { t.Fatal("worker Done released physical resources") }
+		})
+	}
+}
+
+func TestMachineAdmissionSwapRecoveryBeforeWorktreeAndDispatch(t *testing.T) {
+	for _, pressure := range []string{"used", "rate"} {
+		t.Run(pressure, func(t *testing.T) {
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil { t.Fatal(err) }
+			rt := newMockRuntime()
+			l := newSteerTestLoop(t, rt)
+			b := loopMachineFixture(t, l, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner")
+			now := time.Now().Add(-10 * time.Second)
+			var swapouts uint64
+			for range 4 {
+				now = now.Add(time.Second)
+				sample := admission.Sample{At: now, Pressure: admission.Normal, TotalMemoryBytes: 100, CPUs: 10}
+				if pressure == "used" { sample.SwapUsedBytes = 1 } else { swapouts++ }
+				sample.Swapouts = swapouts
+				b.Observe(sample, nil)
+			}
+			stage := Stage{TaskKey: "execute", Skill: "execute", Status: StageStatusPending}
+			order := Order{ID: "42", Status: OrderStatusActive, Stages: []Stage{stage}}
+			before := resourceTree(t, l.projectDir)
+			for i := 1; i <= 2; i++ {
+				now = now.Add(time.Second)
+				b.Observe(admission.Sample{At: now, Pressure: admission.Normal, TotalMemoryBytes: 100, CPUs: 10, Swapouts: swapouts}, nil)
+				err = l.spawnCook(context.Background(), dispatchCandidate{OrderID: order.ID, Stage: stage}, order, spawnOptions{})
+				if i == 1 {
+					if !errors.Is(err, admission.ErrDeferred) || len(rt.calls) != 0 || !reflect.DeepEqual(before, resourceTree(t, l.projectDir)) { t.Fatal("Swap recovery crossed preparation before healthy sequence", err) }
+					if s := b.Snapshot(); s.Active != 0 || s.MachineCapacity.Leases != 0 { t.Fatal("recovering pressure acquired resource lease") }
+				} else if err != nil || len(rt.calls) != 1 { t.Fatal("healthy sequence did not resume original Loop", err) }
+			}
+			session := l.cooks.activeCooksByOrder[order.ID].session
+			rt.sessions[0].complete("completed")
+			<-session.Done()
+			l.watcherWG.Wait()
+		})
+	}
 }
 
 func healthyResourceBudget(b *admission.Budget) {

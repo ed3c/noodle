@@ -126,7 +126,7 @@ func (p *hostGeneration) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &value); err != nil {
 		return err
 	}
-	unknown, err := hostMetadataUnknown(data, "source_service", "id", "directory", "binary_path", "binary_sha256", "state", "process", "error")
+	unknown, err := hostMetadataUnknown(data, "source_service", "machine_preparation", "resident_exit", "id", "directory", "binary_path", "binary_sha256", "state", "process", "error")
 	if err != nil {
 		return err
 	}
@@ -166,7 +166,7 @@ func (p *hostVersionRequest) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &value); err != nil {
 		return err
 	}
-	unknown, err := hostMetadataUnknown(data, "maintenance_previous_state", "id", "binary_path", "binary_sha256", "state", "generation", "error")
+	unknown, err := hostMetadataUnknown(data, "managed_switch", "maintenance_previous_state", "id", "binary_path", "binary_sha256", "state", "generation", "error")
 	if err != nil {
 		return err
 	}

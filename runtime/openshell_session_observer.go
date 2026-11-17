@@ -61,12 +61,15 @@ func ReadOpenShellCompletedEvidence(ctx context.Context, profile OpenShellProfil
 	if err != nil {
 		return result.completed, err
 	}
-	if err = VerifyCompletedSessionReadback(result.completed, profile, contextID, b.OrderID, b.SessionID); err != nil {
-		return CompletedSessionReadback{}, err
-	}
+	// The original reader verifies the complete profile and selected evidence
+	// before and after Get. Preserve that result rather than repeating its read.
 	afterRoot, err := filepath.EvalSymlinks(profile.Gateway.Binding.StateRoot)
 	if err != nil || afterRoot != spec.Binding.StateRoot {
 		return CompletedSessionReadback{}, fmt.Errorf("original observer custody root changed")
+	}
+	afterControl, err := filepath.EvalSymlinks(profile.Gateway.ControlRoot)
+	if err != nil || afterControl != spec.ControlRoot {
+		return CompletedSessionReadback{}, fmt.Errorf("original observer control root changed")
 	}
 	afterRuntime, err := filepath.EvalSymlinks(runtimeSource)
 	if err != nil || afterRuntime != runtimeDir {

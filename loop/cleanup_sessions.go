@@ -27,6 +27,7 @@ type cleanupAttempt struct {
 func (l *Loop) observeCleanupSessions() error {
 	expected := map[string]cleanupAttempt{}
 	refs := map[string]loopruntime.SessionReadbackFileRef{}
+	var observedSources []map[string]loopruntime.SessionReadbackFileRef
 	for key, order := range l.canonical.Orders {
 		for index, stage := range order.Stages {
 			for retry, attempt := range stage.Attempts {
@@ -103,14 +104,19 @@ func (l *Loop) observeCleanupSessions() error {
 			if err != nil {
 				return fmt.Errorf("session %s: %w", entry.Name(), err)
 			}
-			if observed.OutcomeStatus != attempt.status || observed.PublishedHead == "" || len(observed.Execution.Sources) == 0 || !observed.Execution.StopAcknowledged || observed.Execution.NativePhase != "Stopped" || observed.Execution.NativeExecExitCode != 0 {
-				return fmt.Errorf("cleanup original runtime returned incomplete outcome: %s", entry.Name())
+			if err := verifyCleanupRuntimeOutcome(observed, attempt.binding, attempt.status); err != nil {
+				return err
 			}
-			for name, ref := range observed.Execution.Sources {
-				refs[entry.Name()+"/"+name] = ref
-			}
+			// Keep the original source roles: namespace prefixes would turn the
+			// receipt-bound archive streams back into generic small-file reads.
+			observedSources = append(observedSources, observed.Execution.Sources)
 		default:
 			return fmt.Errorf("cleanup observation unavailable for runtime %q", attempt.runtime)
+		}
+	}
+	for _, original := range observedSources {
+		if err := loopruntime.VerifySessionReadbackFiles(original); err != nil {
+			return err
 		}
 	}
 	return loopruntime.VerifySessionReadbackFiles(refs)
