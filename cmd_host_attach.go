@@ -144,6 +144,9 @@ func (h *noodleHost) attachContinuation(ctx context.Context, req hostRequest, co
 		return failBeforeRuntime(err)
 	}
 	deps := loop.Dependencies{ReturnHostInstance: h.instanceID, ModeOverride: state.RunMode(req.Mode), Execution: e, Admission: h.budget, AdmissionContext: id, CleanupCompleted: req.CleanupCompleted, HostContinuation: continuation, DispatchBlocked: req.DispatchBlocked}
+	if preparationPlan.Source.Purpose == "task-preparation" && h.budget != nil {
+		deps.PreparationReady = h.preparationReady(preparation, preparationPlan, cfg.Runtime.AdmittedOrders[0])
+	}
 	if req.CleanupCompleted && len(cfg.Runtime.AdmittedOrders) != 0 {
 		deps.CheckoutArchivePolicy, err = prepareHostCheckoutArchive(ctx, e)
 		if err != nil {

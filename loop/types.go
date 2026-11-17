@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -159,6 +160,7 @@ type Dependencies struct {
 	Execution             *execution.Context
 	Admission             *admission.Budget
 	AdmissionContext      string
+	PreparationReady      func() (io.Closer, error)
 	HostContinuation      *HostContinuation
 	DispatchBlocked       string
 	CleanupCompleted      bool

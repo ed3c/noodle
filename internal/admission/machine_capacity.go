@@ -355,10 +355,11 @@ func (m *machineCapacity) reserve(s *machineState, id, contextID, orderID, runti
 			if free < c.Policy.DiskSafetyBytes { return false, errors.New("disk_safety_margin") }
 			disks[volume] = free - c.Policy.DiskSafetyBytes
 		}
-		consume := func(l machineLease) error {
+		consume := func(id string, l machineLease) error {
+			chargeCPUs := m.preparationCPUs(id, l)
 			if l.MemoryBytes > memory { return errors.New("ram_reservation_capacity_insufficient") }
-			if l.CPUs > cpus { return errors.New("cpu_reservation_capacity_insufficient") }
-			memory -= l.MemoryBytes; cpus -= l.CPUs
+			if chargeCPUs > cpus { return errors.New("cpu_reservation_capacity_insufficient") }
+			memory -= l.MemoryBytes; cpus -= chargeCPUs
 			peak := uint64(0)
 			for _, size := range l.Disks { peak = max(peak, size) }
 			// APFS volumes may share free storage. Charge every held peak against
@@ -369,11 +370,11 @@ func (m *machineCapacity) reserve(s *machineState, id, contextID, orderID, runti
 			}
 			return nil
 		}
-		for _, held := range s.Leases {
+		for heldID, held := range s.Leases {
 			if held.Settlement != nil || held.PreparationClosed != nil { continue }
-			if err := consume(held); err != nil { return false, err }
+			if err := consume(heldID, held); err != nil { return false, err }
 		}
-		if err := consume(lease); err != nil { return false, err }
+		if err := consume(id, lease); err != nil { return false, err }
 		policy := c.Policy
 		s.Capacity = &policy
 		s.Leases[id] = lease
@@ -562,11 +563,12 @@ func (b *Budget) machineSnapshot() *MachineSnapshot {
 	err := b.machine.access(false, func(state *machineState) (bool, error) {
 		s.Leases = 0
 		if state.Capacity != nil { capacity := *state.Capacity; s.Capacity = &capacity }
-		for _, lease := range state.Leases {
+		for id, lease := range state.Leases {
 			if lease.Settlement != nil || lease.PreparationClosed != nil { continue }
 			s.Leases++
-			if lease.MemoryBytes > math.MaxUint64-s.MemoryBytes || lease.CPUs > math.MaxUint64-s.CPUs { return false, errors.New("machine capacity totals overflow") }
-			s.MemoryBytes += lease.MemoryBytes; s.CPUs += lease.CPUs
+			cpus := b.machine.preparationCPUs(id, lease)
+			if lease.MemoryBytes > math.MaxUint64-s.MemoryBytes || cpus > math.MaxUint64-s.CPUs { return false, errors.New("machine capacity totals overflow") }
+			s.MemoryBytes += lease.MemoryBytes; s.CPUs += cpus
 			peak := uint64(0)
 			for _, size := range lease.Disks { peak = max(peak, size) }
 			if peak > math.MaxUint64-s.DiskBytes { return false, errors.New("machine disk capacity totals overflow") }
