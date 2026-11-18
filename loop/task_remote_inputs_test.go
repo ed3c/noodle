@@ -35,6 +35,7 @@ func TestRemoteTaskInputsReachSelectedHarness(t *testing.T) {
 	for _, provider := range []string{"codex", "pi"} {
 		t.Run(provider, func(t *testing.T) {
 			l, cand, rt := remoteInputFixture(t, provider)
+			localTaskRealWorktree(t, l)
 			if err := l.spawnCookAdmitted(context.Background(), cand, Order{ID: cand.OrderID}, spawnOptions{}); err != nil {
 				t.Fatal(err)
 			}
@@ -50,6 +51,9 @@ func TestRemoteTaskInputsReachSelectedHarness(t *testing.T) {
 			req := rt.mockRuntime.calls[0]
 			if req.InstructionBundle == nil || req.InstructionBundle.SHA256 != strings.Repeat("a", 64) || req.ReasoningLevel != "high" || req.Provider != provider || req.EnvVars["NOODLE_ORDER_ID"] != cand.OrderID {
 				t.Fatal("selected frozen inputs or effort lost at runtime dispatch")
+			}
+			if scope := req.LocalTaskScope; scope == nil || scope.IntegrationBranch != "control" || len(scope.WritePaths) != 1 || scope.WritePaths[0] != "candidate.txt" {
+				t.Fatalf("original local task scope lost at runtime dispatch: %+v", scope)
 			}
 		})
 	}

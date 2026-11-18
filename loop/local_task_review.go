@@ -124,14 +124,15 @@ func (l *Loop) validateLocalTaskSession(order state.OrderNode, stage state.Stage
 }
 
 type localTaskCandidate struct {
-	Schema      int    `json:"schema"`
-	OrderID     string `json:"order_id"`
-	SessionID   string `json:"session_id"`
-	AttemptID   string `json:"attempt_id"`
-	Worktree    string `json:"worktree"`
-	Head        string `json:"head"`
-	SpawnSHA256 string `json:"spawn_sha256"`
-	IndexSHA256 string `json:"index_sha256"`
+	Schema      int      `json:"schema"`
+	OrderID     string   `json:"order_id"`
+	SessionID   string   `json:"session_id"`
+	AttemptID   string   `json:"attempt_id"`
+	Worktree    string   `json:"worktree"`
+	Head        string   `json:"head"`
+	SpawnSHA256 string   `json:"spawn_sha256"`
+	IndexSHA256 string   `json:"index_sha256"`
+	WritePaths  []string `json:"write_paths"`
 	Files       map[string]*struct {
 		SHA256     string `json:"sha256"`
 		Executable bool   `json:"executable"`

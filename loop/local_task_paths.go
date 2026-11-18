@@ -2,23 +2,20 @@ package loop
 
 import (
 	"fmt"
-	"github.com/poteto/noodle/internal/execution"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/poteto/noodle/internal/execution"
+	"github.com/poteto/noodle/internal/workspaceartifacts"
 )
 
-// Local task paths are literal file or subtree boundaries, never glob patterns.
 func localTaskPathAllowed(scopes []string, name string) bool {
-	if !localTaskSafePath(name) {
-		return false
-	}
-	for _, scope := range scopes {
-		if localTaskSafePath(scope) && (name == scope || strings.HasPrefix(name, scope+"/")) {
-			return true
-		}
-	}
-	return false
+	return workspaceartifacts.LocalTaskPathAllowed(scopes, name)
+}
+
+func localTaskSafePath(name string) bool {
+	return workspaceartifacts.LocalTaskSafePath(name)
 }
 
 // Expand Git-visible files, including tracked deletions. Ignored build output

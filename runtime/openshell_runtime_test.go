@@ -20,6 +20,7 @@ import (
 
 	pb "github.com/NVIDIA/OpenShell/sdk/go/proto/openshellv1"
 	"github.com/poteto/noodle/internal/guestprogress"
+	"github.com/poteto/noodle/internal/workspaceartifacts"
 )
 
 // Transfers finish all I/O synchronously. Only this short-lived fixture child
@@ -182,6 +183,18 @@ func progressFixtureArchive(t *testing.T, archive string) []byte {
 			}
 		}
 	}
+	if archive != "noodle-session.tar" {
+		if name := os.Getenv("NOODLE_PROGRESS_FIXTURE_LINK"); name != "" {
+			if err := tw.WriteHeader(&tar.Header{Name: name, Linkname: "result.txt", Typeflag: tar.TypeSymlink, Mode: 0777}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if os.Getenv("NOODLE_PROGRESS_FIXTURE_INVALID_NAME") == "1" {
+			if err := tw.WriteHeader(&tar.Header{Name: "source/invalid\tname", Mode: 0644}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	if archive == "noodle-session.tar" {
 		if err := tw.WriteHeader(&tar.Header{Name: "codex/tmp/arg0-linux/codex-arg0fixture/apply_patch", Typeflag: tar.TypeSymlink, Linkname: "/sandbox/payload/codex/bin/codex", Mode: 0777}); err != nil {
 			t.Fatal(err)
@@ -296,6 +309,152 @@ func TestOpenShellRuntimeReturnsArtifactsAfterOriginalStop(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestOpenShellLocalTaskChecksFinalCandidateScope(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		writePath     string
+		priorProgress string
+		refused       bool
+		roleReadOnly  bool
+		link          string
+		linkGrant     string
+		inheritedLink bool
+		linkOutside   bool
+		invalidPath   bool
+	}{
+		{name: "admitted output", writePath: "result.txt"},
+		{name: "out of scope output", writePath: "readme.md", refused: true},
+		{name: "out of scope unchanged progress", writePath: "readme.md", priorProgress: "result.txt", refused: true},
+		{name: "removed out of scope progress", writePath: "result.txt", priorProgress: "dist"},
+		{name: "read-only role retains previous candidate", writePath: "result.txt", priorProgress: "result.txt", roleReadOnly: true},
+		{name: "read-only role changes admitted task output", writePath: "result.txt", priorProgress: "dist", roleReadOnly: true, refused: true},
+		{name: "in-scope relative symlink", writePath: "result.txt", link: "link.txt", refused: true},
+		{name: "unchanged admitted relative symlink", writePath: "result.txt", link: "link.txt", inheritedLink: true, refused: true},
+		{name: "unchanged ancestor of explicit write path is a symlink", writePath: "result.txt", link: "link.txt", linkGrant: "link.txt/child", inheritedLink: true, refused: true},
+		{name: "unrelated relative symlink", writePath: "result.txt", link: "link.txt", inheritedLink: true, linkOutside: true},
+		{name: "in-scope invalid path", writePath: "result.txt", invalidPath: true, refused: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, f, target := openShellRuntimeFixture(t)
+			managedMarker(t, f.root, "completion-observation")
+			git := func(args ...string) {
+				t.Helper()
+				cmd := exec.Command("git", args...)
+				cmd.Dir = target
+				if raw, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git %v: %v %s", args, err, raw)
+				}
+			}
+			if tc.inheritedLink {
+				for _, name := range []string{tc.link, "result.txt"} {
+					var err error
+					if name == tc.link {
+						err = os.Symlink("result.txt", filepath.Join(target, name))
+					} else {
+						err = os.WriteFile(filepath.Join(target, name), []byte("accepted output\n"), 0600)
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					git("add", "--", name)
+				}
+				git("commit", "-m", "baseline contains existing link")
+			}
+			git("branch", "integration")
+			if tc.priorProgress != "" {
+				if err := os.WriteFile(filepath.Join(target, tc.priorProgress), []byte("accepted output\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				git("add", "--", tc.priorProgress)
+				git("commit", "-m", "retain earlier progress")
+			}
+			scope := &workspaceartifacts.LocalTaskScope{IntegrationBranch: "integration", WritePaths: []string{tc.writePath}}
+			if tc.roleReadOnly {
+				cmd := exec.Command("git", "rev-parse", "HEAD")
+				cmd.Dir = target
+				raw, err := cmd.Output()
+				if err != nil {
+					t.Fatal(err)
+				}
+				scope.PriorCandidateHead = strings.TrimSpace(string(raw))
+			}
+			if tc.link != "" {
+				if !tc.linkOutside {
+					grant := tc.linkGrant
+					if grant == "" {
+						grant = tc.link
+					}
+					scope.WritePaths = append(scope.WritePaths, grant)
+				}
+				r.config.Profile.Environment = append(r.config.Profile.Environment, "NOODLE_PROGRESS_FIXTURE_LINK="+tc.link)
+			}
+			if tc.invalidPath {
+				scope.WritePaths = append(scope.WritePaths, "source")
+				r.config.Profile.Environment = append(r.config.Profile.Environment, "NOODLE_PROGRESS_FIXTURE_INVALID_NAME=1")
+			}
+			h, err := r.Dispatch(t.Context(), DispatchRequest{Name: "scoped", Provider: "codex", Model: "fixture", Prompt: "produce result", SystemPrompt: "test", Runtime: "openshell", WorktreePath: target, AllowPrimaryCheckout: true, LocalTaskScope: scope, EnvVars: map[string]string{"NOODLE_ORDER_ID": "scoped", "NOODLE_STAGE_INDEX": "0"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-h.Done():
+			case <-time.After(10 * time.Second):
+				t.Fatalf("attempt unresolved: %+v", h.Outcome())
+			}
+			s := h.(*openShellSession)
+			var receipt openShellDispatchReceipt
+			dispatchRef, err := ReadSessionReadbackFile(filepath.Join(s.dir, "openshell-dispatch.json"), &receipt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if receipt.Phase != "settled" || receipt.Error != "" || receipt.Outcome.ExitCode != 0 || receipt.Delivery == nil {
+				t.Fatalf("original guest execution or delivery evidence changed: %+v", receipt)
+			}
+			if tc.refused {
+				if receipt.Outcome.Status != StatusFailed || receipt.CandidateHead != "" || receipt.ProgressHead == "" || !receipt.Delivery.LocalTaskRefused() || !strings.HasPrefix(receipt.Outcome.Reason, LocalTaskCandidateRefusalPrefix) {
+					t.Fatalf("out-of-scope result did not settle as stopped progress: %+v, delivery=%+v", receipt, receipt.Delivery)
+				}
+				if receipt.Worker == nil || receipt.Worker.ModelOutcome.Status != StatusCompleted || receipt.Worker.ModelOutcome.ExitCode != 0 {
+					t.Fatalf("host refusal overwrote the provider outcome: %+v", receipt.Worker)
+				}
+				switch {
+				case tc.roleReadOnly:
+					if len(receipt.Delivery.RoleScopeViolations) != 2 || len(receipt.Delivery.ScopeViolations) != 0 {
+						t.Fatalf("incorrect role scope diagnostics: %+v", receipt.Delivery)
+					}
+				case tc.link != "":
+					if len(receipt.Delivery.UnsupportedPaths) != 1 || receipt.Delivery.UnsupportedPaths[0] != tc.link || len(receipt.Delivery.ScopeViolations) != 0 {
+						t.Fatalf("incorrect file type diagnostics: %+v", receipt.Delivery)
+					}
+				case tc.invalidPath:
+					if len(receipt.Delivery.InvalidPaths) != 1 || receipt.Delivery.InvalidPaths[0] != "source/invalid\tname" || len(receipt.Delivery.ScopeViolations) != 0 {
+						t.Fatalf("incorrect path diagnostics: %+v", receipt.Delivery)
+					}
+				default:
+					if len(receipt.Delivery.ScopeViolations) != 1 || receipt.Delivery.ScopeViolations[0] != "result.txt" {
+						t.Fatalf("incorrect task scope diagnostics: %+v", receipt.Delivery)
+					}
+				}
+				if tc.priorProgress == "result.txt" && receipt.ProgressHead != receipt.Baseline.Head {
+					t.Fatal("unchanged refused draft should retain its original commit")
+				}
+				writeReadbackJSON(t, filepath.Join(s.dir, "meta.json"), map[string]any{"session_id": h.ID(), "provider": "codex", "model": "fixture", "runtime": "openshell", "status": "exited", "alive": false})
+				binding := CompletedSessionBinding{OrderID: "scoped", SessionID: h.ID(), Provider: "codex", Model: "fixture", WorktreePath: target}
+				observed, err := r.ReadSavedProgress(t.Context(), binding)
+				if err != nil || observed.Status != "saved" || observed.ProgressHead != receipt.ProgressHead || observed.HarnessExitCode != 0 || observed.Sources["openshell-dispatch.json"] != dispatchRef {
+					t.Fatalf("original owner could not read refused progress: %+v %v", observed, err)
+				}
+				if _, err := r.ReadCompletedSession(t.Context(), binding); err == nil {
+					t.Fatal("completed candidate reader accepted refused progress")
+				}
+			} else if receipt.Outcome.Status != StatusCompleted || receipt.CandidateHead == "" || receipt.ProgressHead != "" || receipt.Delivery.LocalTaskRefused() {
+				t.Fatalf("in-scope result did not settle as candidate: %+v, delivery=%+v", receipt, receipt.Delivery)
+			}
+		})
+	}
+}
+
 func TestOpenShellRuntimeRecoveryStopsOnlyOnExplicitRequest(t *testing.T) {
 	r, f, _ := openShellRuntimeFixture(t)
 	c, err := f.owner.Acquire(t.Context(), "a")

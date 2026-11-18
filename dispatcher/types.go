@@ -8,6 +8,7 @@ import (
 
 	"github.com/poteto/noodle/event"
 	"github.com/poteto/noodle/internal/instructionbundle"
+	"github.com/poteto/noodle/internal/workspaceartifacts"
 )
 
 // ProviderConfig holds optional CLI binary directory and extra flags by provider.
@@ -34,6 +35,7 @@ type DispatchRequest struct {
 	Skill                 string
 	ReasoningLevel        string
 	InstructionBundle     *InstructionBundleRef
+	LocalTaskScope        *workspaceartifacts.LocalTaskScope
 	WorktreePath          string
 	MaxTurns              int
 	EnvVars               map[string]string

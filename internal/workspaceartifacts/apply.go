@@ -11,12 +11,20 @@ import (
 )
 
 type Result struct {
-	Applied           bool   `json:"applied"`
-	State             string `json:"state"`
-	PatchPath         string `json:"patch_path"`
-	ReturnedDirectory string `json:"returned_directory"`
-	Error             string `json:"error"`
-	scratch           *publicationScratch
+	Applied             bool     `json:"applied"`
+	State               string   `json:"state"`
+	PatchPath           string   `json:"patch_path"`
+	ReturnedDirectory   string   `json:"returned_directory"`
+	Error               string   `json:"error"`
+	ScopeViolations     []string `json:"scope_violations,omitempty"`
+	RoleScopeViolations []string `json:"role_scope_violations,omitempty"`
+	UnsupportedPaths    []string `json:"unsupported_paths,omitempty"`
+	InvalidPaths        []string `json:"invalid_paths,omitempty"`
+	scratch             *publicationScratch
+}
+
+func (r *Result) LocalTaskRefused() bool {
+	return len(r.ScopeViolations)+len(r.RoleScopeViolations)+len(r.UnsupportedPaths)+len(r.InvalidPaths) != 0
 }
 
 // Apply validates a complete returned directory and applies its binary diff.

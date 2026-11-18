@@ -19,6 +19,7 @@ func TestLocalTaskSavedProgressAfterRequestChangesRevision(t *testing.T) {
 	for _, outcome := range []string{"cancelled", "failed"} {
 		t.Run(outcome, func(t *testing.T) {
 			l, cand, original := remoteInputFixture(t, "pi")
+			localTaskRealWorktree(t, l)
 			l.registry = taskreg.NewFromSkills([]skill.SkillMeta{{Name: "local-task", Path: "/skills/local-task", Frontmatter: skill.Frontmatter{Schedule: "admitted task"}}})
 			review := l.canonical.PendingReviews[cand.OrderID]
 			review.Prompt = cand.Stage.Prompt
@@ -115,6 +116,9 @@ func TestLocalTaskSavedProgressAfterRequestChangesRevision(t *testing.T) {
 			next := rt.mockRuntime.calls[1]
 			if next.RetryCount != 2 || next.ResumeSessionID != "" || next.Provider != req.Provider || next.Model != req.Model || next.ReasoningLevel != req.ReasoningLevel || !recoveryJSONEqual(next.InstructionBundle, req.InstructionBundle) || next.WorktreePath != req.WorktreePath || !strings.Contains(next.Prompt, head) {
 				t.Fatalf("successor lost original inputs: %+v", next)
+			}
+			if req.LocalTaskScope == nil || !recoveryJSONEqual(next.LocalTaskScope, req.LocalTaskScope) {
+				t.Fatalf("successor lost original candidate scope: %+v", next.LocalTaskScope)
 			}
 			node := l.canonical.Orders[cand.OrderID]
 			attempts := node.Stages[0].Attempts
