@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/ingest"
 	"github.com/poteto/noodle/internal/stringx"
+	"github.com/poteto/noodle/internal/workspaceartifacts"
 	loopruntime "github.com/poteto/noodle/runtime"
 	"github.com/poteto/noodle/worktree"
 )
@@ -64,6 +66,32 @@ func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, or
 	instructions, reasoning, err := l.remoteTaskInputs(cand)
 	if err != nil {
 		return err
+	}
+	var taskScope *workspaceartifacts.LocalTaskScope
+	if instructions != nil {
+		app, ok := l.deps.Worktree.(*worktree.App)
+		if !ok || app.IntegrationBranch == "" {
+			return fmt.Errorf("local task integration owner is unbound")
+		}
+		var prompt struct {
+			WritePaths     []string         `json:"write_paths"`
+			Role           *taskRoleFile    `json:"task_role"`
+			PriorCandidate localTaskFileRef `json:"prior_candidate"`
+		}
+		if err := json.Unmarshal([]byte(stage.Prompt), &prompt); err != nil {
+			return fmt.Errorf("local task candidate scope: %w", err)
+		}
+		taskScope = &workspaceartifacts.LocalTaskScope{IntegrationBranch: app.IntegrationBranch, WritePaths: prompt.WritePaths}
+		if prompt.Role != nil {
+			prior, err := readLocalTaskCandidate(prompt.PriorCandidate)
+			if err != nil {
+				return fmt.Errorf("local task role prior candidate: %w", err)
+			}
+			if prior.OrderID != cand.OrderID || prior.Worktree != l.worktreePath(cookBaseName(cand.OrderID, cand.StageIndex, stage.TaskKey)) || len(prior.WritePaths) == 0 {
+				return fmt.Errorf("local task role prior candidate custody differs")
+			}
+			taskScope.WritePaths, taskScope.RoleWritePaths, taskScope.PriorCandidateHead = prior.WritePaths, prompt.WritePaths, prior.Head
+		}
 	}
 	interruption, err := l.interruptionForDispatch(cand, opts.attempt)
 	if err != nil {
@@ -118,6 +146,7 @@ func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, or
 	taskType, _ := l.registry.ByKey(stage.TaskKey)
 	req := loopruntime.DispatchRequest{
 		InstructionBundle: instructions,
+		LocalTaskScope:    taskScope,
 		ReasoningLevel:    reasoning,
 		Name:              name,
 		Prompt:            prompt,

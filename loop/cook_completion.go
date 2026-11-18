@@ -14,6 +14,7 @@ import (
 	"github.com/poteto/noodle/internal/mode"
 	"github.com/poteto/noodle/internal/state"
 	"github.com/poteto/noodle/internal/stringx"
+	loopruntime "github.com/poteto/noodle/runtime"
 )
 
 func (l *Loop) drainCompletions(ctx context.Context) error {
@@ -125,7 +126,11 @@ func (l *Loop) handleCompletion(ctx context.Context, cook *cookHandle, resultSta
 			if resultStatus == StageResultCancelled {
 				status = state.AttemptCancelled
 			}
-			return l.parkPendingReviewAttempt(cook, "OpenShell task stopped; saved progress requires original-owner inspection", status)
+			reason := "OpenShell task stopped; saved progress requires original-owner inspection"
+			if outcome := cook.session.Outcome(); strings.HasPrefix(outcome.Reason, loopruntime.LocalTaskCandidateRefusalPrefix) {
+				reason = outcome.Reason
+			}
+			return l.parkPendingReviewAttempt(cook, reason, status)
 		}
 	}
 	if resultStatus == StageResultFailed {

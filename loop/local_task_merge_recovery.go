@@ -95,10 +95,6 @@ func withinLocalTaskPath(root, path string) bool {
 	return err == nil && (rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))))
 }
 
-func localTaskSafePath(name string) bool {
-	return name != "" && name != ".git" && !strings.HasPrefix(name, ".git/") && name != "." && name != ".." && !filepath.IsAbs(name) && filepath.Clean(name) == name && !strings.HasPrefix(name, ".."+string(filepath.Separator))
-}
-
 func (l *Loop) originalLocalMergeFailure(order state.OrderNode, b requestChangesBinding, ackID string) error {
 	data, err := os.ReadFile(filepath.Join(l.runtimeDir, "control-ack.ndjson"))
 	if err != nil {

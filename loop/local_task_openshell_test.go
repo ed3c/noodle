@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +11,27 @@ import (
 	"github.com/poteto/noodle/internal/state"
 	loopruntime "github.com/poteto/noodle/runtime"
 )
+
+type localTaskRefusedSession struct{ loopruntime.SessionHandle }
+
+const localTaskTestRefusal = loopruntime.LocalTaskCandidateRefusalPrefix + " write_paths=[\"dist/index.js\"]"
+
+func (s localTaskRefusedSession) Outcome() loopruntime.SessionOutcome {
+	return loopruntime.SessionOutcome{Status: loopruntime.StatusFailed, Reason: localTaskTestRefusal}
+}
+
+func TestOpenShellLocalTaskReviewCarriesHostRefusal(t *testing.T) {
+	l, cook, _, rt := openShellLocalTaskFixture(t, "codex")
+	cook.session = localTaskRefusedSession{cook.session}
+	if err := l.handleCompletion(context.Background(), cook, StageResultFailed, "failed"); err != nil {
+		t.Fatal(err)
+	}
+	review := l.canonical.PendingReviews[cook.orderID]
+	attempt := l.canonical.Orders[cook.orderID].Stages[0].Attempts[0]
+	if review.Reason != localTaskTestRefusal || review.SessionID != cook.session.ID() || attempt.Status != state.AttemptFailed || len(rt.mockRuntime.calls) != 0 {
+		t.Fatalf("original review lost host refusal or dispatched a successor: review=%+v attempt=%+v", review, attempt)
+	}
+}
 
 func openShellLocalTaskFixture(t *testing.T, provider string) (*Loop, *cookHandle, ControlCommand, *readbackRuntime) {
 	t.Helper()

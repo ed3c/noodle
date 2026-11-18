@@ -98,7 +98,7 @@ func recoverUnstarted(project, requestFile string) (hostResponse, error) {
 	if hostDigest(cfg) != binding.ConfigSHA256 {
 		return fail(errors.New("original config drifted"))
 	}
-	evidence, err := unstartedEvidence(runtimeDir)
+	evidence, err := unstartedEvidence(runtimeDir, "")
 	if err != nil {
 		return fail(err)
 	}
@@ -132,7 +132,7 @@ func recoverUnstarted(project, requestFile string) (hostResponse, error) {
 	return hostResponse{receipts[index], "ok", ""}, nil
 }
 
-func unstartedEvidence(dir string) (map[string]string, error) {
+func unstartedEvidence(dir, requiredOrder string) (map[string]string, error) {
 	evidence := map[string]string{}
 	for _, name := range []string{"sessions", "../.worktrees"} {
 		entries, err := os.ReadDir(filepath.Join(dir, name))
@@ -168,6 +168,20 @@ func unstartedEvidence(dir string) (map[string]string, error) {
 	if snapshot.State.SchemaVersion != 1 || snapshot.State.Orders == nil || len(snapshot.State.PendingReviews) != 0 {
 		return nil, errors.New("native snapshot has missing state or effect/review history")
 	}
+	if requiredOrder != "" {
+		order, ok := snapshot.State.Orders[requiredOrder]
+		if !ok || requiredOrder == "schedule" || order.OrderID != requiredOrder || len(order.Stages) == 0 || len(snapshot.Ledger) != 1 {
+			return nil, errors.New("original pending order and its initial admission effect are required")
+		}
+		// The offline observer also sees the inert native schedule bootstrap.
+		// Its stages must pass the same pending/attempt/merge checks below.
+		for id, other := range snapshot.State.Orders {
+			if id != requiredOrder && (id != "schedule" || other.OrderID != id || len(other.Stages) != 1 ||
+				other.Stages[0].TaskKey != id || other.Stages[0].Skill != id) {
+				return nil, errors.New("offline task history has a foreign order")
+			}
+		}
+	}
 	for _, raw := range snapshot.Ledger {
 		var entry struct {
 			ID     string `json:"effect_id"`
@@ -187,6 +201,9 @@ func unstartedEvidence(dir string) (map[string]string, error) {
 		}
 		if err := json.Unmarshal(raw, &entry); err != nil {
 			return nil, err
+		}
+		if requiredOrder != "" && entry.Effect.Payload.OrderID != requiredOrder {
+			return nil, errors.New("initial admission effect is not the original task")
 		}
 		if entry.Effect.Type != "initial_admission" || entry.Status != "done" || entry.Result.Status != "completed" || entry.Result.Error != "" || entry.ID == "" || entry.ID != entry.Effect.ID || entry.ID != entry.Result.ID || snapshot.State.Orders[entry.Effect.Payload.OrderID].OrderID != entry.Effect.Payload.OrderID || entry.Effect.Payload.OrderID == "" {
 			return nil, errors.New("native effect is not a completed initial admission")

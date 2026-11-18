@@ -198,21 +198,9 @@ func returnHostResidentResourcesWithGroupReadback(root string, g hostGeneration,
 		if source.Bindings["host_root"] != root || source.Bindings["binary_path"] != g.Binary || source.Bindings["binary_sha256"] != g.SHA {
 			return nil, errors.New("original resident execution source differs")
 		}
-		if g.ResidentExit == nil || g.ResidentExit.Path != filepath.Join(g.Directory, "resource-resident-exit.json") || g.Process.PID <= 0 || g.Process.SessionID != g.ID || g.Process.StartedAt.IsZero() {
-			return nil, errors.New("original resident exit proof missing")
-		}
-		var witness residentExitWitness
-		ref, err := loopruntime.ReadSessionReadbackFile(g.ResidentExit.Path, &witness)
-		if err != nil || ref != *g.ResidentExit {
-			return nil, errors.New("original resident exit proof changed")
-		}
-		if witness.Schema != 1 || witness.Root != root || witness.Generation != g.ID || witness.PID != g.Process.PID || witness.Preparation != *g.Preparation || witness.Residents == nil {
-			return nil, errors.New("original resident exit subject differs")
-		}
-		for _, row := range witness.Residents {
-			if row.State != "exited" || len(row.Contexts) != 0 {
-				return nil, errors.New("original resident effects unresolved")
-			}
+		ref, err := readResidentExitWitness(root, g)
+		if err != nil {
+			return nil, err
 		}
 		absent, err := groupAbsent(g.Process)
 		if err != nil || !absent {
@@ -220,4 +208,27 @@ func returnHostResidentResourcesWithGroupReadback(root string, g hostGeneration,
 		}
 		return map[string]admission.MachineSettlementFile{"resident_exit": {Path: ref.Path, SHA256: ref.SHA256}}, nil
 	})
+}
+
+func readResidentExitWitness(root string, g hostGeneration) (loopruntime.SessionReadbackFileRef, error) {
+	var zero loopruntime.SessionReadbackFileRef
+	if g.Preparation == nil || g.ResidentExit == nil || g.ResidentExit.Path != filepath.Join(g.Directory, "resource-resident-exit.json") ||
+		g.Process.PID <= 0 || g.Process.SessionID != g.ID || g.Process.StartedAt.IsZero() {
+		return zero, errors.New("original resident exit proof missing")
+	}
+	var witness residentExitWitness
+	ref, err := loopruntime.ReadSessionReadbackFile(g.ResidentExit.Path, &witness)
+	if err != nil || ref != *g.ResidentExit {
+		return zero, errors.New("original resident exit proof changed")
+	}
+	if witness.Schema != 1 || witness.Root != root || witness.Generation != g.ID || witness.PID != g.Process.PID ||
+		witness.Preparation != *g.Preparation || witness.Residents == nil {
+		return zero, errors.New("original resident exit subject differs")
+	}
+	for _, row := range witness.Residents {
+		if row.State != "exited" || len(row.Contexts) != 0 {
+			return zero, errors.New("original resident effects unresolved")
+		}
+	}
+	return ref, nil
 }

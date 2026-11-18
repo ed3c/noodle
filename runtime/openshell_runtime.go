@@ -18,6 +18,8 @@ import (
 	"github.com/poteto/noodle/worktree"
 )
 
+const LocalTaskCandidateRefusalPrefix = "local task candidate refused:"
+
 type OpenShellRuntimeConfig struct {
 	RuntimeDir, ContextID string
 	Gateway               *OpenShellGateway
@@ -471,15 +473,32 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 				return
 			}
 			message := fmt.Sprintf("feat: retain OpenShell worker output\n\nRecord the validated result for order %s from native session %s after its original VM stopped. The candidate remains subject to the existing review process.", s.receipt.OrderID, s.id)
+			scope := req.LocalTaskScope
 			if s.Outcome().Status != StatusCompleted || s.interrupted() {
 				message = fmt.Sprintf("chore: preserve interrupted OpenShell progress\n\nSave the validated workspace for order %s from native session %s after its original VM stopped. This progress version is not a completed or accepted candidate.", s.receipt.OrderID, s.id)
+				scope = nil
 			}
-			candidate, publishErr := workspaceartifacts.Publish(context.Background(), req.WorktreePath, s.receipt.Baseline, delivery, message)
+			refusedMessage := fmt.Sprintf("chore: preserve refused OpenShell candidate as progress\n\nRetain order %s from native session %s for original-owner inspection after it failed the admitted candidate contract.", s.receipt.OrderID, s.id)
+			candidate, publishErr := workspaceartifacts.PublishLocalTask(context.Background(), req.WorktreePath, s.receipt.Baseline, delivery, message, scope, refusedMessage)
 			if publishErr != nil {
 				s.fail(publishErr)
 				return
 			} else {
 				s.mu.Lock()
+				if delivery.LocalTaskRefused() {
+					s.receipt.Outcome.Status = StatusFailed
+					s.receipt.Outcome.HasDeliverable = false
+					reason := LocalTaskCandidateRefusalPrefix
+					for _, finding := range []struct {
+						field string
+						paths []string
+					}{{"write_paths", delivery.ScopeViolations}, {"task_role.write_paths", delivery.RoleScopeViolations}, {"files.type", delivery.UnsupportedPaths}, {"files.path", delivery.InvalidPaths}} {
+						if len(finding.paths) != 0 {
+							reason += fmt.Sprintf(" %s=%q", finding.field, finding.paths)
+						}
+					}
+					s.receipt.Outcome.Reason = reason
+				}
 				if s.receipt.Outcome.Status == StatusCompleted && !s.interrupted() {
 					s.receipt.CandidateHead = candidate
 				} else {
@@ -493,7 +512,9 @@ func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarne
 			}
 		}
 	}
-	worker.RecordModelOutcome(s.Outcome())
+	if s.receipt.Delivery == nil || !s.receipt.Delivery.LocalTaskRefused() {
+		worker.RecordModelOutcome(s.Outcome())
+	}
 	if s.Outcome().Status == StatusCompleted && !s.interrupted() && s.receipt.Delivery != nil {
 		if err = workspaceartifacts.ReleasePublicationScratch(context.Background(), req.WorktreePath, s.receipt.Baseline, s.receipt.Delivery, s.receipt.CandidateHead); err != nil {
 			if !errors.Is(err, workspaceartifacts.ErrPublicationScratchHeld) {

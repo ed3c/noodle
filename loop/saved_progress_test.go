@@ -31,6 +31,7 @@ func (r *savedRuntime) ReadSavedProgress(_ context.Context, b loopruntime.Comple
 func savedProgressFixture(t *testing.T) (*Loop, string, string, *savedRuntime) {
 	t.Helper()
 	l, cand, old := remoteInputFixture(t, "pi")
+	localTaskRealWorktree(t, l)
 	l.registry = taskreg.NewFromSkills([]skill.SkillMeta{{Name: "local-task", Path: "/skills/local-task", Frontmatter: skill.Frontmatter{Schedule: "admitted task"}}})
 	node := l.canonical.Orders[cand.OrderID]
 	s := node.Stages[0]
@@ -171,6 +172,9 @@ func TestSavedProgressNewAttemptUsesOriginalQueueAndPreservesHistory(t *testing.
 	}
 	if req.RetryCount != 1 || req.ResumeSessionID != "" || req.Provider != "pi" || req.Model != observed.Model || actualWorktree != observed.WorktreePath || req.ReasoningLevel != "high" || !strings.Contains(req.Prompt, "saved-head") {
 		t.Fatalf("new attempt lost predecessor binding: %+v", req)
+	}
+	if scope := req.LocalTaskScope; scope == nil || scope.IntegrationBranch != "control" || len(scope.WritePaths) != 1 || scope.WritePaths[0] != "candidate.txt" {
+		t.Fatalf("new attempt lost original candidate scope: %+v", scope)
 	}
 	node := l.canonical.Orders[order]
 	if len(node.Stages[0].Attempts) != 2 || node.Stages[0].Attempts[0].Status != state.AttemptCancelled || node.Stages[0].Attempts[0].SessionID != session || node.Stages[0].Attempts[1].SessionID == session || l.state != StatePaused {

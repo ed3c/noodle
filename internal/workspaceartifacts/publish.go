@@ -46,8 +46,14 @@ type publicationReceipt struct {
 // Git mutation begins, any failure leaves result unknown and preserves index
 // evidence. Publication is one-shot; hooks run normally and are never bypassed.
 func Publish(ctx context.Context, target string, baseline *Baseline, result *Result, message string) (candidate string, resultErr error) {
+	return PublishLocalTask(ctx, target, baseline, result, message, nil, "")
+}
+
+// PublishLocalTask checks the exact proposed tree before committing it. A
+// refused tree is retained locally as progress for the original attempt.
+func PublishLocalTask(ctx context.Context, target string, baseline *Baseline, result *Result, message string, scope *LocalTaskScope, progressMessage string) (candidate string, resultErr error) {
 	if baseline != nil && result != nil && !result.Applied && result.State == "unchanged" && result.Error == "" {
-		return retainUnchanged(ctx, target, baseline, result)
+		return retainUnchanged(ctx, target, baseline, result, scope)
 	}
 	if baseline == nil || result == nil || !result.Applied || result.State != "applied" {
 		return "", fmt.Errorf("artifact publication has no verified applied result")
@@ -213,6 +219,12 @@ func Publish(ctx context.Context, target string, baseline *Baseline, result *Res
 		return "", err
 	}
 	receipt.ExpectedTree = strings.TrimSpace(string(tree))
+	if err := scope.check(ctx, target, baseline.Head, receipt.ExpectedTree, result); err != nil {
+		return "", err
+	}
+	if result.LocalTaskRefused() {
+		message = progressMessage
+	}
 	receipt.Phase = "committing"
 	if err := writeJSON(receiptPath, receipt); err != nil {
 		return "", err
@@ -276,7 +288,7 @@ func createPublicationReceipt(path string, receipt publicationReceipt) error {
 }
 
 // retainUnchanged records a read-only candidate without creating a new commit.
-func retainUnchanged(ctx context.Context, target string, baseline *Baseline, result *Result) (string, error) {
+func retainUnchanged(ctx context.Context, target string, baseline *Baseline, result *Result, scope *LocalTaskScope) (string, error) {
 	root, err := repositoryRoot(ctx, target)
 	if err != nil {
 		return "", err
@@ -294,6 +306,14 @@ func retainUnchanged(ctx context.Context, target string, baseline *Baseline, res
 	}
 	if err := unchanged(ctx, root, baseline); err != nil {
 		return "", err
+	}
+	if err := scope.check(ctx, root, baseline.Head, baseline.Head, result); err != nil {
+		return "", err
+	}
+	if result.LocalTaskRefused() {
+		if err := writeJSON(filepath.Join(evidence, "result.json"), result); err != nil {
+			return "", err
+		}
 	}
 	receipt := publicationReceipt{Phase: "unchanged", Parent: baseline.Head, ObservedHead: baseline.Head,
 		OriginalIndexSHA256: baseline.IndexSHA256, ObservedIndexSHA256: baseline.IndexSHA256}
