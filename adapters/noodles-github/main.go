@@ -27,17 +27,17 @@ func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: noodles-github receive|sync|schedule|handoff|land|done|refuse")
 	}
-	if args[0] == "schedule" {
-		if len(args) != 1 {
-			return fmt.Errorf("schedule accepts no arguments; run: go run ./adapters/noodles-github schedule")
-		}
-		return scheduleTargetOrder(".")
+	if args[0] == "schedule" && len(args) != 1 {
+		return fmt.Errorf("schedule accepts no arguments; run: go run ./adapters/noodles-github schedule")
 	}
 	policyPath := envOrDefault("NOODLES_GITHUB_POLICY", "policy/github.json")
 	capabilitiesPath := envOrDefault("NOODLES_REPO_CAPABILITIES", "policy/repo-capabilities.json")
 	policy, err := loadStrictJSON[Policy](policyPath)
 	if err != nil {
 		return err
+	}
+	if args[0] == "schedule" {
+		return scheduleTargetOrder(".", policy)
 	}
 	capabilities, err := loadStrictJSON[Capabilities](capabilitiesPath)
 	if err != nil {
@@ -126,9 +126,12 @@ func run(ctx context.Context, args []string) error {
 	}
 }
 
-func scheduleTargetOrder(root string) error {
+func scheduleTargetOrder(root string, policy Policy) error {
+	if err := validatePolicy(policy); err != nil {
+		return err
+	}
 	runtimeDir := filepath.Join(root, ".noodle")
-	items, err := readTargetBacklog(filepath.Join(runtimeDir, "mise.json"))
+	items, err := readTargetBacklog(filepath.Join(runtimeDir, "mise.json"), policy)
 	if err != nil {
 		return err
 	}
@@ -178,7 +181,7 @@ func scheduleTargetOrder(root string) error {
 	return nil
 }
 
-func readTargetBacklog(path string) ([]BacklogItem, error) {
+func readTargetBacklog(path string, policy Policy) ([]BacklogItem, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read target mise: %w", err)
@@ -205,7 +208,7 @@ func readTargetBacklog(path string) ([]BacklogItem, error) {
 		if err := rowDecoder.Decode(&item); err != nil {
 			return nil, fmt.Errorf("decode target backlog row %d: %w", index, err)
 		}
-		if err := validateTargetBacklogItem(item); err != nil {
+		if err := validateTargetBacklogItem(item, policy); err != nil {
 			return nil, fmt.Errorf("target backlog row %d: %w", index, err)
 		}
 		if _, exists := seen[item.ID]; exists {
@@ -217,7 +220,7 @@ func readTargetBacklog(path string) ([]BacklogItem, error) {
 	return items, nil
 }
 
-func validateTargetBacklogItem(item BacklogItem) error {
+func validateTargetBacklogItem(item BacklogItem, policy Policy) error {
 	number, err := parseSubject(item.ID)
 	if err != nil {
 		return err
@@ -242,7 +245,7 @@ func validateTargetBacklogItem(item BacklogItem) error {
 	}
 	declaration := authorization.Declaration
 	bodySum := sha256.Sum256([]byte(item.Body))
-	if declaration.SourceRepository != sourceRepository || declaration.Target != targetRepository ||
+	if !sourceAdmitted(policy, declaration.SourceRepository, authorization.Sender) || declaration.Target != targetRepository ||
 		declaration.Subject != item.ID || declaration.SubjectBodySHA256 != hex.EncodeToString(bodySum[:]) ||
 		!sha40Pattern.MatchString(declaration.BaseSHA) || declaration.Runtime != contract.Runtime ||
 		declaration.Evidence != contract.Evidence || !equalStrings(declaration.WriteBoundary, contract.WriteBoundary) {

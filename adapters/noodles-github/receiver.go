@@ -77,7 +77,7 @@ func Receive(ctx context.Context, client *GitHubClient, policy Policy, capabilit
 	if event.Action != dispatchEventType || event.Repository != targetRepository {
 		return AdmissionResult{}, fmt.Errorf("event action/target is %q/%q, want %q/%q", event.Action, event.Repository, dispatchEventType, targetRepository)
 	}
-	if event.Sender != policy.RepositoryDispatchSender || payload.SourceRepository != sourceRepository {
+	if !sourceAdmitted(policy, payload.SourceRepository, event.Sender) {
 		return AdmissionResult{}, fmt.Errorf("event sender/source is not target-authorized")
 	}
 	if payload.Target != targetRepository {
