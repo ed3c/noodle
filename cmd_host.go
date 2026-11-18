@@ -180,8 +180,15 @@ func newHostCmd(app *App) *cobra.Command {
 	}})
 	for _, operation := range []string{"attach", "once", "status", "detach"} {
 		var mode, contextID, instanceID, requiredInstanceID, configSHA, requestFile, configPath string
-		var cleanupCompleted bool
+		var cleanupCompleted, offlineReadback bool
 		child := &cobra.Command{Use: operation, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+			if offlineReadback {
+				if requestFile == "" || cmd.Flags().Changed("context-id") || cmd.Flags().Changed("instance-id") ||
+					cmd.Flags().Changed("config-sha256") || cmd.Flags().Changed("mode") {
+					return errors.New("offline original readback requires only the native --request-file")
+				}
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(observeOfflineHostRequest(app.projectDir, requestFile))
+			}
 			if cmd.Flags().Changed("require-existing-instance") && requiredInstanceID == "" {
 				return errors.New("required original Host instance is empty")
 			}
@@ -212,6 +219,7 @@ func newHostCmd(app *App) *cobra.Command {
 		}
 		if operation == "status" {
 			child.Flags().StringVar(&configSHA, "config-sha256", "", "Original config digest for lost response lookup")
+			child.Flags().BoolVar(&offlineReadback, "offline-readback", false, "Observe the original accepted request after Host loss without changing custody")
 		}
 		cmd.AddCommand(child)
 	}
@@ -237,7 +245,7 @@ func hostCapabilities(platform string) map[string]any {
 	if platform == "darwin" && procx.NativeFixtureControlAvailable() {
 		sourceService = 1
 	}
-	return map[string]any{"schema": 1, "protocol": hostProtocol, "stateless_fixture_recovery": 1, "resident_request_binding": 1, "restricted_host_maintenance": 1, "existing_instance_admission": 1, "unaccepted_admission_transfer_readback": 1, "native_consumer_leases": 1, "native_consumer_worktrees": 1, "shared_service_adapter": "stateless_fixtures_only", "completed_context_cleanup": 1, "external_task_config": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1, "codex_native_runtime": force, "safe_host_switch": 0, "rolling_host_version": rolling, "shared_worker_quota": rolling, "openshell_pool_owner": rolling, "openshell_custody_version": 5, "openshell_session_readback_observer": sourceService, "openshell_session_archive_streams": 1, "source_service_restore": sourceService, "source_service_upgrade": sourceService, "openshell_custody_versions": []int{4, 5, 6, 7}, "openshell_credential_delivery": 1, "gateway_host_handover": 1, "gateway_custody_release": 3, "worker_admission_policy": admission.WorkerAdmissionPolicy, "machine_worker_admission": 1, "machine_admission_policy": admission.MachineAdmissionPolicy, "machine_native_sample": machineMonitor, "machine_filesystem_sample": rolling, "machine_pre_control_admission": 1, "machine_preparation_observation_window_seconds": int(admission.MaxPreparationObservationWindow / time.Second), "machine_gc_release": 1, "machine_safe_pause": 0, "local_task_branch_retention": 1}
+	return map[string]any{"schema": 1, "protocol": hostProtocol, "stateless_fixture_recovery": 1, "resident_request_binding": 1, "restricted_host_maintenance": 1, "existing_instance_admission": 1, "unaccepted_admission_transfer_readback": 1, "native_consumer_leases": 1, "native_consumer_worktrees": 1, "shared_service_adapter": "stateless_fixtures_only", "completed_context_cleanup": 1, "external_task_config": 1, "resident_force_after_grace": force, "local_task_interrupt_custody": 1, "codex_native_runtime": force, "safe_host_switch": 0, "rolling_host_version": rolling, "shared_worker_quota": rolling, "openshell_pool_owner": rolling, "openshell_custody_version": 5, "openshell_session_readback_observer": sourceService, "openshell_session_archive_streams": 1, "source_service_restore": sourceService, "source_service_upgrade": sourceService, "openshell_custody_versions": []int{4, 5, 6, 7}, "openshell_credential_delivery": 1, "gateway_host_handover": 1, "gateway_custody_release": 3, "worker_admission_policy": admission.WorkerAdmissionPolicy, "machine_worker_admission": 1, "machine_admission_policy": admission.MachineAdmissionPolicy, "machine_native_sample": machineMonitor, "machine_filesystem_sample": rolling, "machine_pre_control_admission": 1, "machine_preparation_observation_window_seconds": int(admission.MaxPreparationObservationWindow / time.Second), "machine_gc_release": 1, "machine_safe_pause": 0, "local_task_branch_retention": 1, "offline_original_request_readback": 1}
 }
 
 func hostDirectory() (string, error) {
