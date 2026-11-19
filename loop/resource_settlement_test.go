@@ -14,9 +14,9 @@ import (
 	"github.com/poteto/noodle/worktree"
 )
 
-func bindCompletedResourceFixture(t *testing.T, l *Loop, cook *cookHandle, machine, quota, owner, runtime string) *admission.Budget {
+func bindCompletedResourceFixture(t *testing.T, l *Loop, cook *cookHandle, machine, quota, owner, runtime string, diskPeak uint64) *admission.Budget {
 	t.Helper()
-	b := loopMachineFixture(t, l, machine, quota, owner)
+	b := loopMachineFixture(t, l, machine, quota, owner, diskPeak)
 	// The same original profile handler supplies this runtime's finite peak.
 	if runtime != "process" {
 		root, err := canonicalDirectory(l.projectDir)
@@ -26,7 +26,7 @@ func bindCompletedResourceFixture(t *testing.T, l *Loop, cook *cookHandle, machi
 		b.Unregister(l.deps.AdmissionContext)
 		b.Register(l.deps.AdmissionContext)
 		b.BindResourceSource(l.deps.AdmissionContext, runtime, func(string) (admission.ResourceClaim, error) {
-			return admission.ResourceClaim{Source: "isolated-original-owner-fixture", MemoryBytes: 1, CPUs: 1, DiskBytes: 1, DiskPaths: []string{root}, Policy: admission.CapacityPolicy{MemoryBytes: 1, CPUs: 10, DiskSafetyBytes: 1, RecoverySamples: 2}}, nil
+			return admission.ResourceClaim{Source: "isolated-original-owner-fixture", MemoryBytes: 1, CPUs: 1, DiskBytes: diskPeak, DiskPaths: []string{root}, Policy: admission.CapacityPolicy{MemoryBytes: 1, CPUs: 10, DiskSafetyBytes: 1, RecoverySamples: 2}}, nil
 		})
 		settlementHealthy(b)
 	}
@@ -95,17 +95,20 @@ func TestMachineSettlementOriginalCleanupContinuesQueuedOtherHost(t *testing.T) 
 	localTaskRealWorktree(t, first)
 	completedCheckoutLoopPolicy(t, first, cook)
 	machine := filepath.Join(root, "machine")
-	b1 := bindCompletedResourceFixture(t, first, cook, machine, filepath.Join(root, "host-a"), "original-host-a", "process")
+	diskPeak := contendedDiskPeak(t, root)
+	b1 := bindCompletedResourceFixture(t, first, cook, machine, filepath.Join(root, "host-a"), "original-host-a", "process", diskPeak)
 	rt := newMockRuntime()
 	second := newSteerTestLoop(t, rt)
 	second.deps.Worktree = settlementCreatingWorktree{WorktreeManager: second.deps.Worktree, path: second.worktreePath}
-	b2 := loopMachineFixture(t, second, machine, filepath.Join(root, "host-b"), "original-host-b")
+	b2 := loopMachineFixture(t, second, machine, filepath.Join(root, "host-b"), "original-host-b", diskPeak)
 	stage := Stage{TaskKey: "execute", Skill: "execute", Status: StageStatusPending}
 	order := Order{ID: "42", Status: OrderStatusActive, Stages: []Stage{stage}}
 	candidate := dispatchCandidate{OrderID: order.ID, Stage: stage}
 	before := resourceTree(t, second.projectDir)
-	if err := second.spawnCook(context.Background(), candidate, order, spawnOptions{}); !errors.Is(err, admission.ErrDeferred) || len(rt.calls) != 0 || !reflect.DeepEqual(before, resourceTree(t, second.projectDir)) {
-		t.Fatal("resource queue crossed its original dispatch boundary", err)
+	if err := second.spawnCook(context.Background(), candidate, order, spawnOptions{}); !errors.Is(err, admission.ErrDeferred) ||
+		b2.Snapshot().MachineCapacity.Reason != "disk_reservation_capacity_insufficient" ||
+		len(rt.calls) != 0 || !reflect.DeepEqual(before, resourceTree(t, second.projectDir)) {
+		t.Fatal("shared disk reservation did not queue before preparation or Dispatch", err)
 	}
 	if err := first.settleCompletedMachineSessions(false); err == nil || b1.Snapshot().MachineCapacity.Leases != 1 {
 		t.Fatal("unaccepted candidate returned physical resources", err)
@@ -173,7 +176,7 @@ func TestMachineSettlementOriginalVMUnknownAndStartupReadback(t *testing.T) {
 			localTaskRealWorktree(t, l)
 			completedCheckoutLoopPolicy(t, l, cook)
 			machine, quota := filepath.Join(root, "machine"), filepath.Join(root, "host-quota")
-			b := bindCompletedResourceFixture(t, l, cook, machine, quota, "original-host", "openshell")
+			b := bindCompletedResourceFixture(t, l, cook, machine, quota, "original-host", "openshell", 1)
 			custody := filepath.Join(l.runtimeDir, "original-native-custody.json")
 			recoveryWriteJSON(t, custody, map[string]any{"state": "stopped"})
 			retired, pending, retireCalls, deleteCalls := false, false, 0, 0
@@ -255,7 +258,7 @@ func TestMachineSettlementOriginalVMUnknownAndStartupReadback(t *testing.T) {
 			}
 			// The original process/context restarts with the same generation and
 			// source. It reads the durable nonce, never reconstructs an allocation.
-			b = loopMachineFixture(t, l, machine, quota, "original-host")
+			b = loopMachineFixture(t, l, machine, quota, "original-host", 1)
 			b.Unregister(l.deps.AdmissionContext)
 			b.Register(l.deps.AdmissionContext)
 			b.BindResourceSource(l.deps.AdmissionContext, "openshell", func(string) (admission.ResourceClaim, error) {
