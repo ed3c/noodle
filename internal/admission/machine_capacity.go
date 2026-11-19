@@ -38,15 +38,15 @@ func DefaultMachineCapacityDirectory() (string, error) {
 }
 
 // CapacityPolicy comes from the bound operator configuration, never an order.
-// Memory and CPU are reservation ceilings; Sample has no free-RAM or CPU-load measurement.
+// MemoryBytes and CPUs preserve legacy budget values for readback.
 type CapacityPolicy struct {
-	MemoryBytes uint64 `json:"memory_bytes"`
-	CPUs uint64 `json:"cpus"`
-	DiskSafetyBytes uint64 `json:"disk_safety_bytes"`
-	MaxSwapUsedBytes uint64 `json:"max_swap_used_bytes"`
-	MaxSwapoutBytesPerSecond uint64 `json:"max_swapout_bytes_per_second"`
-	RecoverySamples int `json:"recovery_samples"`
-	RequireIOObservation bool `json:"require_io_observation"`
+	MemoryBytes uint64 `json:"memory_bytes" toml:"memory_bytes"`
+	CPUs uint64 `json:"cpus" toml:"cpus"`
+	DiskSafetyBytes uint64 `json:"disk_safety_bytes" toml:"disk_safety_bytes"`
+	MaxSwapUsedBytes uint64 `json:"max_swap_used_bytes" toml:"max_swap_used_bytes"`
+	MaxSwapoutBytesPerSecond uint64 `json:"max_swapout_bytes_per_second" toml:"max_swapout_bytes_per_second"`
+	RecoverySamples int `json:"recovery_samples" toml:"recovery_samples"`
+	RequireIOObservation bool `json:"require_io_observation" toml:"require_io_observation"`
 }
 
 type ResourceClaim struct {
@@ -73,7 +73,9 @@ type MachineSnapshot struct {
 	Policy string `json:"policy"`
 	Reason string `json:"reason"`
 	RAM string `json:"ram_observation"`
+	RAMObservationError string `json:"ram_observation_error,omitempty"`
 	CPU string `json:"cpu_observation"`
+	CPUCountRole string `json:"cpu_count_role"`
 	Swap string `json:"swap_observation"`
 	Disk string `json:"disk_observation"`
 	IO string `json:"io_observation"`
@@ -139,6 +141,54 @@ func canonicalCapacityPath(path string) error {
 	return nil
 }
 
+// MachineCapacityPolicyReadback is a copy of the native machine's fixed policy.
+// It grants no lease or permission to change the original journal.
+type MachineCapacityPolicyReadback struct {
+	Source   string         `toml:"source"`
+	Capacity CapacityPolicy `toml:"capacity"`
+}
+
+// ReadMachineCapacityPolicy never initializes a pool. A missing first pool has
+// no policy; missing state after a lock exists requires original owner readback.
+func ReadMachineCapacityPolicy(dir string) (*MachineCapacityPolicyReadback, error) {
+	if !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
+		return nil, errors.New("machine capacity directory is not canonical")
+	}
+	if _, err := os.Lstat(dir); os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	if err := canonicalCapacityPath(dir); err != nil {
+		return nil, err
+	}
+	if err := capacityFileIdentity(dir, true); err != nil {
+		return nil, err
+	}
+	lockPath := filepath.Join(dir, "capacity.lock")
+	if _, err := os.Lstat(lockPath); os.IsNotExist(err) {
+		if _, stateErr := os.Lstat(filepath.Join(dir, "capacity.json")); !os.IsNotExist(stateErr) {
+			return nil, errors.New("machine capacity lock missing; original owner readback required")
+		}
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	identity, err := nativeMachineIdentity()
+	if err != nil {
+		return nil, err
+	}
+	m := &machineCapacity{dir: dir, identity: identity}
+	var result *MachineCapacityPolicyReadback
+	err = m.access(false, func(state *machineState) (bool, error) {
+		if state.Capacity != nil {
+			result = &MachineCapacityPolicyReadback{Source: filepath.Join(dir, "capacity.json"), Capacity: *state.Capacity}
+		}
+		return false, nil
+	})
+	return result, err
+}
+
 // BindMachineCapacity shares only resource leases across native Hosts. Existing
 // quota/custody journals remain the authority for workers and original effects.
 func (b *Budget) BindMachineCapacity(dir, owner string) error {
@@ -170,27 +220,22 @@ func (b *Budget) BindResourceSource(id, runtime string, source ResourceSource) {
 	if _, exists := b.resourceSources[id]; !exists { b.resourceSources[id] = &resourceSource{runtime: runtime, read: source} }
 }
 
-func machinePressureAllowsAdmission(pressure Pressure) bool {
-	return pressure == Normal || pressure == Warning
-}
-
-// Health belongs to a verified operator policy. It changes on every original
-// Sample, including idle pressure periods with no attempted worker admission.
-func (b *Budget) observeMachineHealth(previous *Sample) {
+// Swap recovery tracks each sample under the verified operator policy, even
+// when no worker is waiting to start.
+func (b *Budget) observeMachineHealth() {
 	for _, source := range b.resourceSources {
 		normals := source.normals
 		source.normals = 0
-		if source.read == nil || source.runtime == "" || b.stale() || b.unsupported || !b.rateValid || previous == nil { continue }
+		if source.read == nil || source.runtime == "" || b.stale() || b.unsupported || !b.rateValid { continue }
 		claim, err := source.read(source.runtime)
 		if err != nil || validateResourceClaim(claim) != nil {
 			source.source = ""
 			continue
 		}
-		if source.source != claim.Source || source.policy != claim.Policy { normals = 0 }
+		if source.source != claim.Source || !sameAdmissionCapacity(source.policy, claim.Policy) { normals = 0 }
 		source.source, source.policy = claim.Source, claim.Policy
 		sample := b.previous
-		if !machinePressureAllowsAdmission(sample.Pressure) || !machinePressureAllowsAdmission(previous.Pressure) || sample.TotalMemoryBytes == 0 || sample.CPUs <= 0 ||
-			math.IsNaN(b.rate) || math.IsInf(b.rate, 0) || b.rate < 0 ||
+		if math.IsNaN(b.rate) || math.IsInf(b.rate, 0) || b.rate < 0 ||
 			sample.SwapUsedBytes > claim.Policy.MaxSwapUsedBytes || b.rate > float64(claim.Policy.MaxSwapoutBytesPerSecond) { continue }
 		source.normals = min(normals+1, MaxRecoverySamples)
 	}
@@ -307,8 +352,15 @@ func validateResourceClaim(c ResourceClaim) error {
 	return validateCapacityPolicy(c.Policy)
 }
 
+// Frozen claims retain their original counts. Live compatibility compares the enforced policy.
+func sameAdmissionCapacity(a, b CapacityPolicy) bool {
+	a.MemoryBytes, b.MemoryBytes = 0, 0
+	a.CPUs, b.CPUs = 0, 0
+	return a == b
+}
+
 func validateCapacityPolicy(p CapacityPolicy) error {
-	if p.MemoryBytes == 0 || p.CPUs == 0 || p.DiskSafetyBytes == 0 || p.RecoverySamples < 2 || p.RecoverySamples > MaxRecoverySamples {
+	if p.DiskSafetyBytes == 0 || p.RecoverySamples < 2 || p.RecoverySamples > MaxRecoverySamples {
 		return errors.New("operator_machine_policy_missing_or_invalid")
 	}
 	return nil
@@ -333,7 +385,7 @@ func (m *machineCapacity) reserve(s *machineState, id, contextID, orderID, runti
 			lease.Disks[disk.Volume] = c.DiskBytes
 			if old, ok := available[disk.Volume]; !ok || disk.Available < old { available[disk.Volume] = disk.Available }
 		}
-		if s.Capacity != nil && *s.Capacity != c.Policy {
+		if s.Capacity != nil && !sameAdmissionCapacity(*s.Capacity, c.Policy) {
 			for _, held := range s.Leases {
 				if held.Settlement == nil && held.PreparationClosed == nil { return false, errors.New("machine_operator_policy_differs_with_held_leases") }
 			}
@@ -342,9 +394,6 @@ func (m *machineCapacity) reserve(s *machineState, id, contextID, orderID, runti
 		case sample.At.IsZero(): return false, errors.New("machine_sample_missing")
 		case now.Before(sample.At) || now.Sub(sample.At) > MaxSampleAge: return false, errors.New("machine_sample_stale")
 		case sample.Unsupported: return false, errors.New("machine_sample_unsupported")
-		case sample.TotalMemoryBytes == 0: return false, errors.New("ram_observation_unknown")
-		case sample.CPUs <= 0: return false, errors.New("cpu_capacity_unknown")
-		case !machinePressureAllowsAdmission(sample.Pressure): return false, fmt.Errorf("ram_pressure_%s", sample.Pressure)
 		case !rateValid || math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0: return false, errors.New("swap_rate_unavailable")
 		case sample.SwapUsedBytes > c.Policy.MaxSwapUsedBytes: return false, errors.New("swap_used_pressure")
 		case rate > float64(c.Policy.MaxSwapoutBytesPerSecond): return false, errors.New("swapout_pressure")
@@ -355,17 +404,12 @@ func (m *machineCapacity) reserve(s *machineState, id, contextID, orderID, runti
 			if !reflect.DeepEqual(original, lease) { return false, errors.New("original_machine_lease_binding_differs_or_effects_possible") }
 			return false, nil
 		}
-		memory, cpus := min(sample.TotalMemoryBytes, c.Policy.MemoryBytes), min(uint64(sample.CPUs), c.Policy.CPUs)
 		disks := map[string]uint64{}
 		for volume, free := range available {
 			if free < c.Policy.DiskSafetyBytes { return false, errors.New("disk_safety_margin") }
 			disks[volume] = free - c.Policy.DiskSafetyBytes
 		}
-		consume := func(id string, l machineLease) error {
-			chargeCPUs := m.preparationCPUs(id, l)
-			if l.MemoryBytes > memory { return errors.New("ram_reservation_capacity_insufficient") }
-			if chargeCPUs > cpus { return errors.New("cpu_reservation_capacity_insufficient") }
-			memory -= l.MemoryBytes; cpus -= chargeCPUs
+		consume := func(l machineLease) error {
 			peak := uint64(0)
 			for _, size := range l.Disks { peak = max(peak, size) }
 			// APFS volumes may share free storage. Charge every held peak against
@@ -376,12 +420,15 @@ func (m *machineCapacity) reserve(s *machineState, id, contextID, orderID, runti
 			}
 			return nil
 		}
-		for heldID, held := range s.Leases {
+		for _, held := range s.Leases {
 			if held.Settlement != nil || held.PreparationClosed != nil { continue }
-			if err := consume(heldID, held); err != nil { return false, err }
+			if err := consume(held); err != nil { return false, err }
 		}
-		if err := consume(id, lease); err != nil { return false, err }
+		if err := consume(lease); err != nil { return false, err }
 		policy := c.Policy
+		if s.Capacity != nil && sameAdmissionCapacity(*s.Capacity, policy) {
+			policy = *s.Capacity
+		}
 		s.Capacity = &policy
 		s.Leases[id] = lease
 		return true, nil
@@ -432,7 +479,7 @@ func (b *Budget) acquireMachineTask(contextID, order, runtime string) (*Permit, 
 		if runtime == source.runtime { source.source, source.normals = "", 0 }
 		return deferReason(err.Error())
 	}
-	if source.source != claim.Source || source.policy != claim.Policy { source.normals = 0 }
+	if source.source != claim.Source || !sameAdmissionCapacity(source.policy, claim.Policy) { source.normals = 0 }
 	key := contextID + "\x00" + order
 	if b.machineAllocations[key] != nil { return deferReason("original_machine_allocation_active") }
 	pending, exists := b.pendingMachineAcquires[key]
@@ -460,7 +507,7 @@ func (b *Budget) acquireMachineTask(contextID, order, runtime string) (*Permit, 
 	sample := Sample{}
 	if b.previous != nil { sample = *b.previous }
 	normals := 0
-	if source.source == claim.Source && source.policy == claim.Policy { normals = source.normals }
+	if source.source == claim.Source && sameAdmissionCapacity(source.policy, claim.Policy) { normals = source.normals }
 	if pending.preparation != nil {
 		err = b.machine.promotePreparation(*pending.preparation, contextID, order, runtime, claim, sample, b.rate, b.rateValid, normals, b.now())
 	} else {
@@ -556,11 +603,12 @@ func (b *Budget) returnUnstartedMachine(id string) {
 
 func (b *Budget) machineSnapshot() *MachineSnapshot {
 	if !b.machineRequired { return nil }
-	s := &MachineSnapshot{Scope: "native_uid_participating_reservations_and_machine_telemetry", Uncovered: "legacy_and_nonparticipating_processes_not_assumed_reserved", Policy: MachineAdmissionPolicy, Reason: b.machineReason, RAM: "total_and_pressure_only", CPU: "capacity_only_no_load", Swap: "used_and_swapout_rate", Disk: "statfs_at_admission_only_all_machine_peaks_deducted", IO: "unknown_no_reliable_observer", Retention: "effects_possible_held_for_vm_retirement_and_gc", Next: "original_resource_owner_return_or_pressure_recovery"}
-	if b.stale() || b.unsupported { s.RAM = "unknown"; s.CPU = "unknown"; s.Swap = "unknown" }
+	s := &MachineSnapshot{Scope: "native_uid_participating_reservations_and_machine_telemetry", Uncovered: "legacy_and_nonparticipating_processes_not_assumed_reserved", Policy: MachineAdmissionPolicy, Reason: b.machineReason, RAM: "unknown", CPU: "observation_only", CPUCountRole: "configuration_and_legacy_lease_counts_not_busy_percent", Swap: "used_and_swapout_rate", Disk: "statfs_at_admission_only_all_machine_peaks_deducted", IO: "unknown_no_reliable_observer", Retention: "effects_possible_held_for_vm_retirement_and_gc", Next: "original_resource_owner_return_or_pressure_recovery"}
+	if b.stale() || b.unsupported { s.CPU = "unknown"; s.Swap = "unknown" }
 	if !b.stale() && !b.unsupported && b.previous != nil {
 		memory, cpus := b.previous.TotalMemoryBytes, b.previous.CPUs
-		if memory != 0 { s.ObservedMemoryBytes = &memory }
+		if memory != 0 { s.ObservedMemoryBytes = &memory; s.RAM = "observation_only" }
+		s.RAMObservationError = b.previous.MemoryObservationError
 		if cpus > 0 { s.ObservedCPUs = &cpus }
 	}
 	if len(b.pendingMachineAcquires) != 0 || len(b.pendingMachineReturns) != 0 || b.machineFault != "" { s.Next = "original_machine_nonce_readback" }

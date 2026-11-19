@@ -109,7 +109,7 @@ func TestMachineSettlementPolicyChangeRequiresAllResourcesReturned(t *testing.T)
 				permit.Release()
 			}
 			claim := capacityFixtureClaim(root)
-			claim.Source, claim.Policy.MemoryBytes = "new-unfrozen-profile", 40
+			claim.Source, claim.Policy.DiskSafetyBytes = "new-unfrozen-profile", 40
 			next, _ := capacityFixtureBudget(t, b.machine.dir, filepath.Join(root, "next-quota"), "next-host", claim)
 			permit, err := next.TryAcquireTask("next-host", "new-task", "openshell")
 			if kind == "held" {

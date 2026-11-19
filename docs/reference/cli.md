@@ -172,10 +172,9 @@ detach 在呼叫前持久保存原意圖。後續呼叫只查同一 context 的 
 每個 Loop 原有的並行設定仍有效；共享額度是額外的全 Host 限制。每個 Host 最多 9 個 worker；rolling 兩代合計共用這 9 個名額。
 OpenShell gateway resident 另列 allocation，不扣 worker 名額。它仍有原生程序、租約與退出讀回責任。
 
-macOS Host 每 5 秒讀取系統 memory pressure、`vm.swapusage` 已使用容量與累計 Swapouts bytes。每次採樣最多等待 1 秒。
-Swapout 速率是相鄰有效樣本的差值除以時間，不是目前 Swap 使用量。
-memory pressure、Swap 容量、換出速率與採樣狀態都是觀察資料。critical、缺少樣本、採樣失敗、樣本過期與不支援監控都不縮減 worker 名額。
-目前沒有 Swap 容量 gate、採樣啟動 credit、硬體推算上限或 warning grant API；`NOODLE_HOST_SWAP_USED_LIMIT_BYTES` 不再選擇 Host 政策。
+macOS Host 每 5 秒讀取全機 CPU、實體 RAM、memory pressure、`vm.swapusage` 已使用容量與累計 Swapouts bytes。每次採樣最多等待 1 秒。全機 CPU 忙碌率以相鄰有效 ticks 或內建 `top` 的區間樣本算出 0–100%，缺新鮮觀察時回報未知。
+CPU 忙碌率、實體 RAM 與 memory pressure 供觀察；低或未知的 RAM、critical pressure 和舊 profile 的 CPU／RAM 預留數值不阻擋 admission。
+共享的 machine capacity owner 保留固定的 Swap 使用量上限、換出速率門檻、復原樣本要求和磁碟保護。Swapout 速率是相鄰有效樣本的差值除以時間。第一次建立資源政策、尚無固定政策且讀不到實體 RAM 時，使用向上取整至 MiB 的當前 Swap 用量加 3 GiB。既有固定政策與租約保留原值。
 worker 名額用完時，原佇列留在同一 Host 等待。未解決的 resident ownership、quota 歸還或帳本錯誤仍會阻擋 admission；這些是 custody 條件。
 新政策使用 quota schema 3。舊 schema 或不一致的 Host 上限拒絕加入，且保留原檔；正常換版不自動移轉帳本。
 `host resources` 的 `worker_admission_policy` 為 `host-workers-v1`，`maximum_workers` 為 9。`active_workers`、`active_residents` 與 `active_allocations` 分開列示。

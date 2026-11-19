@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -105,22 +106,184 @@ func TestSamplerReadCanceled(t *testing.T) {
 	}
 }
 
+func TestDarwinPressureObservationPreservesCPUAndSwap(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		level      uint32
+		err        error
+		pressure   Pressure
+		diagnostic string
+	}{
+		{name: "critical", level: 4, pressure: Critical},
+		{name: "unknown level", level: 3, pressure: Unknown, diagnostic: "unknown Darwin memory pressure level: 3"},
+		{name: "unavailable", err: errors.New("sysctl failed"), pressure: Unknown, diagnostic: "read memory pressure: sysctl failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sample := Sample{At: time.Unix(123, 0), Swapouts: 31, SwapUsedBytes: 1024, CPUs: 8, CPUCounters: &CPUCounters{User: 10, Idle: 20}}
+			want := sample
+			want.Pressure, want.PressureObservationError = tc.pressure, tc.diagnostic
+			observeDarwinPressure(&sample, func() (uint32, error) { return tc.level, tc.err })
+			if !reflect.DeepEqual(sample, want) {
+				t.Fatalf("pressure observation changed unrelated data: got %+v, want %+v", sample, want)
+			}
+		})
+	}
+}
+
+func TestDarwinMemoryObservationPreservesPressureAndSwap(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		total      uint64
+		err        error
+		wantTotal  uint64
+		diagnostic string
+	}{
+		{name: "available", total: 16 << 30, wantTotal: 16 << 30},
+		{name: "zero", diagnostic: "invalid physical memory capacity: 0"},
+		{name: "unavailable", err: errors.New("sysctl failed"), diagnostic: "read physical memory: sysctl failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sample := Sample{At: time.Unix(123, 0), Pressure: Warning, Swapouts: 31, SwapUsedBytes: 1024}
+			want := sample
+			want.TotalMemoryBytes, want.MemoryObservationError = tc.wantTotal, tc.diagnostic
+			observeDarwinMemory(&sample, func() (uint64, error) { return tc.total, tc.err })
+			if !reflect.DeepEqual(sample, want) {
+				t.Fatalf("memory observation changed unrelated data: got %+v, want %+v", sample, want)
+			}
+		})
+	}
+}
+
+func TestDarwinCPUObservationPreservesMemoryAndSwap(t *testing.T) {
+	ticks := &CPUCounters{User: 10, System: 20, Nice: 3, Idle: 40}
+	for _, tc := range []struct {
+		name               string
+		count              uint32
+		countErr, ticksErr error
+		wantCount          int
+		wantTicks          *CPUCounters
+		wantDiagnostics    []string
+	}{
+		{name: "available", count: 8, wantCount: 8, wantTicks: ticks},
+		{name: "count unavailable", countErr: errors.New("sysctl failed"), wantTicks: ticks, wantDiagnostics: []string{"logical CPU count unavailable", "sysctl failed"}},
+		{name: "count zero", wantTicks: ticks, wantDiagnostics: []string{"invalid logical CPU count: 0"}},
+		{name: "ticks unavailable", count: 8, ticksErr: errors.New("Mach read failed"), wantCount: 8, wantDiagnostics: []string{"Mach read failed"}},
+		{name: "both unavailable", countErr: errors.New("sysctl failed"), ticksErr: errors.New("Mach read failed"), wantDiagnostics: []string{"sysctl failed", "Mach read failed"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			original := Sample{At: time.Unix(123, 0), Pressure: Normal, Swapouts: 31, SwapUsedBytes: 1024, TotalMemoryBytes: 16 << 30}
+			sample := original
+			observeDarwinCPU(&sample, func() (uint32, error) { return tc.count, tc.countErr }, func() (*CPUCounters, error) { return ticks, tc.ticksErr })
+			if sample.CPUs != tc.wantCount || !reflect.DeepEqual(sample.CPUCounters, tc.wantTicks) {
+				t.Fatalf("CPU observation differs: %+v", sample)
+			}
+			for _, diagnostic := range tc.wantDiagnostics {
+				if !strings.Contains(sample.CPUObservationError, diagnostic) {
+					t.Fatalf("missing CPU diagnostic %q: %q", diagnostic, sample.CPUObservationError)
+				}
+			}
+			if len(tc.wantDiagnostics) == 0 && sample.CPUObservationError != "" {
+				t.Fatalf("valid CPU observation has error: %q", sample.CPUObservationError)
+			}
+			sample.CPUs, sample.CPUCounters, sample.CPUObservationError = 0, nil, ""
+			if !reflect.DeepEqual(sample, original) {
+				t.Fatalf("CPU failure changed original memory/swap observation: %+v", sample)
+			}
+		})
+	}
+}
+
+func TestParseDarwinCPUInterval(t *testing.T) {
+	const initial = "CPU usage: 5% user, 5% sys, 90% idle\n"
+	for _, tc := range []struct {
+		name, second string
+		want         float64
+		invalid      bool
+	}{
+		{name: "second report only", second: "CPU usage: 50% user, 20% sys, 30% idle", want: 70},
+		{name: "zero is observed", second: "CPU usage: 0% user, 0% sys, 100% idle"},
+		{name: "all busy", second: "CPU usage: 70% user, 30% sys, 0% idle", want: 100},
+		{name: "no interval", invalid: true},
+		{name: "unrecognized report", second: "CPU usage: 0% user, 0% sys, 50 idle", invalid: true},
+		{name: "nonfinite interval", second: "CPU usage: 0% user, 0% sys, NaN% idle", invalid: true},
+		{name: "out of range", second: "CPU usage: 0% user, 0% sys, 101% idle", invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseDarwinCPUInterval(initial + tc.second)
+			if (err != nil) != tc.invalid || got != tc.want {
+				t.Fatalf("readback=%v, error=%v, want %v", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestDarwinCPUIntervalFallbackClearlySeparatesSwap(t *testing.T) {
+	original := Sample{At: time.Now(), Pressure: Critical, Swapouts: 42, SwapUsedBytes: 30, CPUObservationError: "ticks unavailable"}
+	sample := original
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	observeDarwinCPUInterval(ctx, &sample, func(ctx context.Context) (float64, error) {
+		return 0, ctx.Err()
+	})
+	if sample.CPUBusyPercent != nil || sample.CPUObservationError != "context canceled" {
+		t.Fatalf("cancelled CPU interval became an observation: %+v", sample)
+	}
+	sample.CPUObservationError = original.CPUObservationError
+	if !reflect.DeepEqual(sample, original) {
+		t.Fatalf("CPU timeout discarded valid Swap or pressure: %+v", sample)
+	}
+	observeDarwinCPUInterval(context.Background(), &sample, func(ctx context.Context) (float64, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) > SampleTimeout {
+			t.Fatal("optional CPU command has no bounded deadline")
+		}
+		return 12.5, nil
+	})
+	observation := cpuObservation(nil, &sample)
+	if observation.BusyPercent == nil || *observation.BusyPercent != 12.5 || sample.CPUCounters != nil || observation.Error != "" {
+		t.Fatalf("actual interval was lost or converted to fake counters: %+v", observation)
+	}
+}
+
 func TestSamplerReadLive(t *testing.T) {
 	if os.Getenv("NOODLE_TEST_LIVE_SAMPLER") != "1" {
-		t.Skip("one read-only native sample requires explicit opt-in")
+		t.Skip("two read-only native samples require explicit opt-in")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	sample, err := NewSampler().Read(ctx)
-	if err != nil {
-		t.Fatal(err)
+	var previous *Sample
+	observed := false
+	for i := 0; i < 2; i++ {
+		if i != 0 {
+			select {
+			case <-time.After(250 * time.Millisecond):
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+		}
+		sample, err := NewSampler().Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sample.Unsupported || sample.At.IsZero() || sample.TotalMemoryBytes == 0 || sample.CPUs < 0 {
+			t.Fatalf("invalid native sample: %+v", sample)
+		}
+		if sample.CPUCounters == nil && sample.CPUBusyPercent == nil && sample.CPUObservationError == "" {
+			t.Fatalf("missing CPU sources have no unknown diagnostic: %+v", sample)
+		}
+		data, err := json.Marshal(sample)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("native_sample_%d=%s", i+1, data)
+		observation := cpuObservation(previous, &sample)
+		if observation.BusyPercent != nil {
+			observed = true
+			t.Logf("native_busy_percent=%.2f", *observation.BusyPercent)
+		}
+		previous = &sample
 	}
-	if sample.Unsupported || sample.At.IsZero() || sample.TotalMemoryBytes == 0 || sample.CPUs < 1 {
-		t.Fatalf("invalid native sample: %+v", sample)
+	if !observed {
+		t.Fatal("neither native sampling path observed an interval CPU percentage")
 	}
-	data, err := json.Marshal(sample)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("native_sample=%s", data)
 }

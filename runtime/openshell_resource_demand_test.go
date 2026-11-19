@@ -61,7 +61,7 @@ func TestOpenShellWorkerDemandUsesOnlyBoundOperatorConfig(t *testing.T) {
 }
 
 func TestOpenShellWorkerDemandMissingPeaksNeverBackfills(t *testing.T) {
-	for _, field := range []string{"mem_mib", "vcpus", "overlay_disk_mib", "memory_peak_mib", "disk_peak_mib", "checkout_peak_mib", "dependency_peak_mib", "return_tar_peak_mib", "restore_peak_mib", "memory_budget_mib", "cpu_budget", "disk_safety_mib", "max_swap_used_mib", "max_swapout_bytes_per_second", "recovery_samples", "schema"} {
+	for _, field := range []string{"mem_mib", "vcpus", "overlay_disk_mib", "memory_peak_mib", "disk_peak_mib", "checkout_peak_mib", "dependency_peak_mib", "return_tar_peak_mib", "restore_peak_mib", "memory_budget_mib", "disk_safety_mib", "max_swap_used_mib", "max_swapout_bytes_per_second", "recovery_samples", "schema"} {
 		t.Run(field, func(t *testing.T) {
 			p := resourceProfileFixture(t, func(config string) string {
 				var lines []string
@@ -103,5 +103,17 @@ func TestOpenShellWorkerDemandRejectsChangedAndUnsupportedSources(t *testing.T) 
 			}
 			if _, err := OpenShellWorkerResourceClaim(p, filepath.Dir(p.SourcePath)); err == nil { t.Fatal("untrusted or unsupported demand accepted") }
 		})
+	}
+}
+
+func TestOpenShellWorkerDemandUnknownCPUCountDoesNotRejectValidResources(t *testing.T) {
+	for _, value := range []string{"", "cpu_budget=0", "cpu_budget=-1", "cpu_budget=\"unknown\"", "cpu_budget=true"} {
+		p := resourceProfileFixture(t, func(config string) string { return strings.Replace(config, "cpu_budget=8", value, 1) })
+		before, err := os.ReadFile(p.Gateway.Binding.ConfigSource)
+		if err != nil { t.Fatal(err) }
+		claim, err := OpenShellWorkerResourceClaim(p, filepath.Dir(p.SourcePath))
+		if err != nil || claim.Policy.CPUs != 0 || claim.CPUs != 2 || claim.MemoryBytes != 6<<20 || claim.DiskBytes != 7<<20 { t.Fatal("CPU metadata rejected valid RAM/disk/VM resources", value, claim, err) }
+		after, err := os.ReadFile(p.Gateway.Binding.ConfigSource)
+		if err != nil || !bytes.Equal(before, after) { t.Fatal("CPU metadata was backfilled", err) }
 	}
 }

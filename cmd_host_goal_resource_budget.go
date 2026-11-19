@@ -14,7 +14,7 @@ import (
 )
 
 // The existing template command is the only policy registration entry. Its
-// native sampler supplies physical capacity once, not per-task estimates.
+// native sampler supplies the original observations used by the Swap policy.
 func registerBudgetedGoalHostTemplate(ctx context.Context, path, profile, class string, sampler admission.Sampler) (loopruntime.SessionReadbackFileRef, error) {
 	ref, err := prepareBudgetedGoalHostTemplate(ctx, path, profile, class, sampler)
 	if err != nil {
@@ -23,7 +23,7 @@ func registerBudgetedGoalHostTemplate(ctx context.Context, path, profile, class 
 	return registerGoalHostTemplate(ctx, path, ref.Path)
 }
 
-func prepareBudgetedGoalHostTemplate(ctx context.Context, path, profile, class string, sampler admission.Sampler) (loopruntime.SessionReadbackFileRef, error) {
+func prepareBudgetedGoalHostTemplate(ctx context.Context, path, profile, class string, sampler admission.Sampler, readers ...func() (*admission.MachineCapacityPolicyReadback, error)) (loopruntime.SessionReadbackFileRef, error) {
 	var empty loopruntime.SessionReadbackFileRef
 	if (class != loopruntime.ConservativeGoalResourceBudget && class != loopruntime.QualificationGoalResourceBudget) || sampler == nil || !filepath.IsAbs(path) || !filepath.IsAbs(profile) {
 		return empty, errors.New("unsupported Goal resource budget or original source")
@@ -43,8 +43,8 @@ func prepareBudgetedGoalHostTemplate(ctx context.Context, path, profile, class s
 	if err != nil {
 		return empty, fmt.Errorf("%w: native resource class hardware: %v", admission.ErrDeferred, err)
 	}
-	if hardware.Unsupported || hardware.TotalMemoryBytes == 0 || hardware.CPUs <= 0 {
-		return empty, fmt.Errorf("%w: native resource class hardware unavailable", admission.ErrDeferred)
+	if hardware.Unsupported {
+		return empty, fmt.Errorf("%w: native resource class sampler unsupported", admission.ErrDeferred)
 	}
 	if err = loopruntime.VerifyOpenShellProfile(original); err != nil {
 		return empty, err
@@ -57,7 +57,7 @@ func prepareBudgetedGoalHostTemplate(ctx context.Context, path, profile, class s
 		return empty, err
 	}
 	defer publication.Close()
-	registeredBaseline := false
+	boundBaseline := false
 	// The original registered template fixes the first observed stock. A
 	// second class uses that same policy; retries cannot ratchet it upward.
 	if raw, readErr := os.ReadFile(path); readErr == nil {
@@ -76,18 +76,28 @@ func prepareBudgetedGoalHostTemplate(ctx context.Context, path, profile, class s
 		if e != nil || ref != installed.Profile || prior.SourceSHA256 != installed.PolicySHA256 {
 			return empty, errors.New("original registered resource template changed")
 		}
-		baseline, ok, e := loopruntime.GoalResourceBudgetBaseline(prior, original, hardware)
+		observed, ok, e := loopruntime.ReadGoalResourceBudgetHardware(prior, original)
 		if e != nil {
 			return empty, e
 		}
 		if ok {
-			hardware.SwapUsedBytes = baseline
-			registeredBaseline = true
+			if hardware.TotalMemoryBytes>>20 != observed.TotalMemoryBytes>>20 {
+				priorClass, e := loopruntime.OpenShellResourceBudgetClass(prior)
+				if e != nil {
+					return empty, e
+				}
+				if priorClass == class {
+					return ref, loopruntime.VerifyOpenShellProfile(original)
+				}
+				hardware.TotalMemoryBytes = observed.TotalMemoryBytes
+			}
+			hardware.SwapUsedBytes = observed.SwapUsedBytes
+			boundBaseline = true
 		}
 	} else if !os.IsNotExist(readErr) {
 		return empty, readErr
 	}
-	// Capacity, never instantaneous free space/RSS/pressure, fixes the class.
+	// Preserve access to the previous publication identity.
 	identity, err := json.Marshal(struct {
 		Class, Source string
 		Memory        uint64
@@ -119,24 +129,39 @@ func prepareBudgetedGoalHostTemplate(ctx context.Context, path, profile, class s
 		if !ok {
 			return empty, errors.New("original resource template publication class, source or hardware differs")
 		}
-		if registeredBaseline && hardware.SwapUsedBytes != baseline {
+		if boundBaseline && hardware.SwapUsedBytes != baseline {
 			return empty, errors.New("original registered and prepared resource publication baselines conflict")
 		}
 		hardware.SwapUsedBytes = baseline
+		boundBaseline = true
 	} else if !os.IsNotExist(readErr) {
 		return empty, readErr
 	}
-	// The native input format changed, not the policy or any existing claim.
-	// Keep the legacy publication and its first stock intact; future builds use
-	// this same format key instead of creating one cache per binary revision.
-	identity, err = json.Marshal(struct {
-		Format   string
-		Identity json.RawMessage
-	}{"native-dual-config-v1", identity})
+	publicationIdentity, err := json.Marshal(struct {
+		Format, Class, Source, Path string
+	}{"native-ram-observation-only-v1", class, original.SourceSHA256, original.SourcePath})
 	if err != nil {
 		return empty, err
 	}
-	root := filepath.Join(filepath.Dir(path), "resource-templates", hostDigest(identity))
+	root := filepath.Join(filepath.Dir(path), "resource-templates", hostDigest(publicationIdentity))
+	previousPublication := false
+	// A verified publication under the previous identity remains reusable.
+	if hardware.TotalMemoryBytes != 0 {
+		if _, readErr := os.Lstat(root); os.IsNotExist(readErr) {
+			previousRoot, e := previousGoalResourceTemplateRoot(path, class, original.SourceSHA256, hardware.TotalMemoryBytes)
+			if e != nil {
+				return empty, e
+			}
+			if _, e = os.Lstat(filepath.Join(previousRoot, "openshell")); e == nil {
+				root = previousRoot
+				previousPublication = true
+			} else if !os.IsNotExist(e) {
+				return empty, e
+			}
+		} else if readErr != nil {
+			return empty, readErr
+		}
+	}
 	if err = os.MkdirAll(root, 0700); err != nil {
 		return empty, err
 	}
@@ -148,7 +173,28 @@ func prepareBudgetedGoalHostTemplate(ctx context.Context, path, profile, class s
 		return empty, err
 	}
 	defer lock.Close()
-	receipt, err := loopruntime.MaterializeBudgetedGoalOpenShellProfile(profile, root, class, hardware)
+	if boundBaseline || previousPublication {
+		priorPath := filepath.Join(root, "openshell", "profile.json")
+		if _, e := os.Lstat(priorPath); e == nil {
+			prior, e := loopruntime.LoadOpenShellProfile(priorPath)
+			if e != nil {
+				return empty, e
+			}
+			observed, ok, e := loopruntime.ReadGoalResourceBudgetHardware(prior, original)
+			if e != nil {
+				return empty, e
+			}
+			if previousPublication && (!ok || observed.TotalMemoryBytes>>20 != hardware.TotalMemoryBytes>>20) {
+				return empty, errors.New("original resource template publication source or hardware differs")
+			}
+			if boundBaseline && ok && observed.SwapUsedBytes != hardware.SwapUsedBytes {
+				return empty, errors.New("original registered and prepared resource publication baselines conflict")
+			}
+		} else if !os.IsNotExist(e) {
+			return empty, e
+		}
+	}
+	receipt, err := loopruntime.MaterializeBudgetedGoalOpenShellProfile(profile, root, class, hardware, readers...)
 	if err != nil {
 		return empty, err
 	}
@@ -156,4 +202,22 @@ func prepareBudgetedGoalHostTemplate(ctx context.Context, path, profile, class s
 		return empty, err
 	}
 	return receipt.Profile, nil
+}
+
+func previousGoalResourceTemplateRoot(path, class, source string, memory uint64) (string, error) {
+	identity, err := json.Marshal(struct {
+		Class, Source string
+		Memory        uint64
+	}{class, source, memory})
+	if err != nil {
+		return "", err
+	}
+	identity, err = json.Marshal(struct {
+		Format   string
+		Identity json.RawMessage
+	}{"native-cpu-observation-only-v1", identity})
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(path), "resource-templates", hostDigest(identity)), nil
 }

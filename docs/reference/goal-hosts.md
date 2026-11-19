@@ -29,7 +29,7 @@ noodle host ensure --goal-file /absolute/original/goal.json \
 
 每個 Goal Host 最多有 9 個 worker。同一 Host 的 rolling generations 合計共用 9 個名額；不同 Host 各有自己的帳本。
 OpenShell gateway resident 另列 allocation，不扣 worker 名額。名額用完時，原佇列留在同一 Host 等待；capacity 不構成 Host fault。
-memory pressure、Swap 使用量、換出速率與採樣失敗都是觀察資料，不是 admission gate。未解決的 ownership、quota 寫入與歸還仍會阻擋 admission。
+CPU 忙碌率、實體 RAM 與 memory pressure 供觀察。Goal 準備與 worker admission 若使用全機資源帳本，仍須通過原 Swap 使用量、換出速率與磁碟檢查。未解決的 ownership、quota 寫入與歸還仍會阻擋 admission。
 
 原 profile materializer 為每個 Host 建立獨立 gateway 設定、loopback 端點、mTLS／JWT／加密 key、client 設定、SQLite、VM state 與 custody 路徑。
 payload 與 route spec 保留原來源。materializer 只準備本機檔案，不執行模型 credential provisioning；隔離設定不代表 gateway、VM 或模型憑證已可使用。
