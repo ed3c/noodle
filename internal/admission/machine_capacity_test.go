@@ -4,6 +4,7 @@ package admission
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -139,6 +140,7 @@ func TestMachineCapacityTwoHostsGenerationsAtomic(t *testing.T) {
 	root := capacityFixtureRoot(t)
 	machine := filepath.Join(root, "machine")
 	claim := capacityFixtureClaim(root)
+	claim.DiskBytes = 3000
 	var budgets []*Budget
 	for _, host := range []string{"host-a", "host-b"} {
 		for _, generation := range []string{"old", "current"} {
@@ -194,8 +196,113 @@ func TestMachineCapacityKeepsNinePerHostAcrossGenerations(t *testing.T) {
 	for _, p := range all { p.Release() }
 }
 
-func TestMachineCapacityMissingStaleUnsupportedAndPressureRecovery(t *testing.T) {
-	for _, condition := range []string{"missing", "stale", "future", "unsupported", "failed", "unknown", "critical", "ram", "cpu", "swap-used", "swap-rate", "io", "peak"} {
+func TestMachineCapacityRAMTotalsAndLegacyBudgetAreObservations(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		total uint64
+		peak  uint64
+	}{
+		{name: "combined peaks exceed physical RAM", total: 15, peak: 10},
+		{name: "single peak exceeds physical RAM", total: 15, peak: 20},
+		{name: "physical RAM unknown", peak: 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := capacityFixtureRoot(t)
+			machine := filepath.Join(root, "machine")
+			claim := capacityFixtureClaim(root)
+			claim.Policy.MemoryBytes = 5
+			originalPolicy := claim.Policy
+			b, now := capacityFixtureBudget(t, machine, filepath.Join(root, "quota"), "owner", claim)
+			b.resourceSources["owner"].read = func(string) (ResourceClaim, error) { return claim, nil }
+			first, err := b.TryAcquireTask("owner", "first", "openshell")
+			if err != nil {
+				t.Fatal("legacy RAM budget deferred the original worker", err)
+			}
+			t.Cleanup(first.Release)
+			if err = first.StartResourceEffects(); err != nil {
+				t.Fatal(err)
+			}
+			claim.Policy.MemoryBytes = 0
+			claim.MemoryBytes = tc.peak
+			*now = now.Add(PollInterval)
+			sample := Sample{At: *now, Pressure: Normal, TotalMemoryBytes: tc.total, CPUs: 128}
+			if tc.total == 0 {
+				sample.MemoryObservationError = "fixture RAM observation unavailable"
+			}
+			b.Observe(sample, nil)
+			second, err := b.TryAcquireTask("owner", "second", "openshell")
+			if err != nil {
+				t.Fatal("RAM observation or changed legacy budget deferred admission", err)
+			}
+			t.Cleanup(second.Release)
+			got := b.Snapshot().MachineCapacity
+			if got.Leases != 2 || got.MemoryBytes != 10+tc.peak || got.RAMObservationError != sample.MemoryObservationError {
+				t.Fatalf("held RAM or observation diagnostic changed: %+v", got)
+			}
+			if tc.total == 0 {
+				if got.ObservedMemoryBytes != nil || got.RAM != "unknown" {
+					t.Fatalf("unavailable RAM was reported as observed: %+v", got)
+				}
+			} else if got.ObservedMemoryBytes == nil || *got.ObservedMemoryBytes != tc.total || got.RAM != "observation_only" {
+				t.Fatalf("physical RAM observation lost: %+v", got)
+			}
+			fixed, err := ReadMachineCapacityPolicy(machine)
+			if err != nil || fixed == nil || fixed.Capacity != originalPolicy {
+				t.Fatal("admission changed the original machine policy readback", fixed, err)
+			}
+		})
+	}
+}
+
+func TestMachineCapacityAdmitsNewHostWithoutRewritingHeldLegacyPolicy(t *testing.T) {
+	root := capacityFixtureRoot(t)
+	machine := filepath.Join(root, "machine")
+	legacy := capacityFixtureClaim(root)
+	old, _ := capacityFixtureBudget(t, machine, filepath.Join(root, "old-quota"), "old-owner", legacy)
+	held, err := old.TryAcquireTask("old-owner", "held-order", "openshell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = held.StartResourceEffects(); err != nil {
+		t.Fatal(err)
+	}
+	readLedger := func() (CapacityPolicy, map[string]json.RawMessage) {
+		t.Helper()
+		var ledger struct {
+			Capacity CapacityPolicy
+			Leases   map[string]json.RawMessage
+		}
+		data, err := os.ReadFile(filepath.Join(machine, "capacity.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = json.Unmarshal(data, &ledger); err != nil {
+			t.Fatal(err)
+		}
+		return ledger.Capacity, ledger.Leases
+	}
+	fixed, before := readLedger()
+	nextClaim := legacy
+	nextClaim.Source = "new-observation-only-profile"
+	nextClaim.Policy.MemoryBytes, nextClaim.Policy.CPUs = 0, 0
+	current, now := capacityFixtureBudget(t, machine, filepath.Join(root, "current-quota"), "current-owner", nextClaim)
+	*now = now.Add(PollInterval)
+	current.Observe(Sample{At: *now, Pressure: Unknown}, nil)
+	next, err := current.TryAcquireTask("current-owner", "new-order", "openshell")
+	if err != nil {
+		t.Fatal("legacy metadata and unknown observations withheld the new Host", err)
+	}
+	t.Cleanup(next.Release)
+	policy, after := readLedger()
+	heldID := held.allocation.machineID
+	if fixed != legacy.Policy || policy != fixed || len(before) != 1 || len(after) != 2 ||
+		!bytes.Equal(before[heldID], after[heldID]) || len(after[next.allocation.machineID]) == 0 {
+		t.Fatal("new Host changed the legacy policy or custody")
+	}
+}
+
+func TestMachineCapacityMissingStaleUnsupportedAndUnsafeResources(t *testing.T) {
+	for _, condition := range []string{"missing", "stale", "future", "unsupported", "failed", "swap-used", "swap-rate", "io", "peak"} {
 		t.Run(condition, func(t *testing.T) {
 			root := capacityFixtureRoot(t)
 			claim := capacityFixtureClaim(root)
@@ -210,26 +317,12 @@ func TestMachineCapacityMissingStaleUnsupportedAndPressureRecovery(t *testing.T)
 			case "stale": *now = now.Add(MaxSampleAge+time.Second)
 			case "future": sample.At = now.Add(time.Second); b.Observe(sample, nil)
 			case "unsupported": sample.Unsupported = true; b.Observe(sample, nil)
-			case "unknown": sample.Pressure = Unknown; b.Observe(sample, nil)
-			case "critical": sample.Pressure = Critical; b.Observe(sample, nil)
-			case "ram": sample.TotalMemoryBytes = 0; b.Observe(sample, nil)
-			case "cpu": sample.CPUs = 0; b.Observe(sample, nil)
 			case "swap-used": sample.SwapUsedBytes = 11; b.Observe(sample, nil)
 			case "swap-rate": *now = now.Add(time.Second); sample.At = *now; sample.Swapouts = 100; b.Observe(sample, nil)
 			}
 			if _, err := b.TryAcquireTask("owner", "task", "openshell"); !errors.Is(err, ErrDeferred) { t.Fatal("unobserved or pressured worker admitted", err) }
 			if s := b.Snapshot(); s.MachineCapacity.Reason == "" || s.MachineCapacity.Reason == "admitted" || s.Active != 0 || s.MachineCapacity.Leases != 0 { t.Fatalf("unnamed queue or leaked reservation: %+v", s) }
 		})
-	}
-	root := capacityFixtureRoot(t)
-	b, now := capacityFixtureBudget(t, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner", capacityFixtureClaim(root))
-	b.Observe(Sample{At: *now, Pressure: Critical, CPUs: 128, TotalMemoryBytes: 10000}, nil)
-	for i := range 3 {
-		*now = now.Add(PollInterval)
-		b.Observe(Sample{At: *now, Pressure: Normal, CPUs: 128, TotalMemoryBytes: 10000}, nil)
-		p, err := b.TryAcquireTask("owner", "task", "openshell")
-		if i < 2 && !errors.Is(err, ErrDeferred) { t.Fatal("pressure hysteresis recovered too early") }
-		if i == 2 { if err != nil { t.Fatal("pressure hysteresis never recovered", err) }; p.Release() }
 	}
 }
 
@@ -315,7 +408,7 @@ func TestMachineCapacitySwapRecoveryWithoutAcquireDuringPressure(t *testing.T) {
 			}
 			for i := 1; i <= claim.Policy.RecoverySamples; i++ {
 				*now = now.Add(PollInterval)
-				b.Observe(Sample{At: *now, Pressure: Normal, TotalMemoryBytes: 10000, CPUs: 128, Swapouts: swapouts}, nil)
+				b.Observe(Sample{At: *now, Pressure: Critical, TotalMemoryBytes: 10000, CPUs: 128, Swapouts: swapouts}, nil)
 				p, err := b.TryAcquireTask("owner", "after-pressure", "openshell")
 				if i < claim.Policy.RecoverySamples {
 					if p != nil || !errors.Is(err, ErrDeferred) || !strings.Contains(err.Error(), "machine_pressure_recovering") { t.Fatal("idle Swap pressure failed to reset recovery", err) }
@@ -330,7 +423,7 @@ func TestMachineCapacitySwapRecoveryWithoutAcquireDuringPressure(t *testing.T) {
 }
 
 func TestMachineCapacityRecoveryInvalidatesUnverifiableSequence(t *testing.T) {
-	for _, condition := range []string{"missing", "stale", "future", "unsupported", "error", "counter-reset", "gap", "ram", "cpu", "policy-change", "source-change", "source-error"} {
+	for _, condition := range []string{"missing", "stale", "future", "unsupported", "error", "counter-reset", "gap", "policy-change", "source-change", "source-error"} {
 		t.Run(condition, func(t *testing.T) {
 			root := capacityFixtureRoot(t)
 			claim := capacityFixtureClaim(root)
@@ -353,8 +446,6 @@ func TestMachineCapacityRecoveryInvalidatesUnverifiableSequence(t *testing.T) {
 			case "error": sampleError = errors.New("fixture sampler unavailable")
 			case "counter-reset": swapouts = 0; sample.Swapouts = swapouts
 			case "gap": *now = now.Add(MaxSampleAge); sample.At = *now
-			case "ram": sample.TotalMemoryBytes = 0
-			case "cpu": sample.CPUs = 0
 			case "policy-change": claim.Policy.MaxSwapUsedBytes++
 			case "source-change": claim.Source = "new-operator-source"
 			case "source-error": sourceError = errors.New("original operator source unavailable")
@@ -430,7 +521,9 @@ func TestMachineCapacityProcessFixtureChild(t *testing.T) {
 	root := os.Getenv("NOODLE_MACHINE_CAPACITY_FIXTURE")
 	if root == "" { return }
 	owner := os.Getenv("NOODLE_MACHINE_CAPACITY_OWNER")
-	b, _ := capacityFixtureBudget(t, filepath.Join(root, "machine"), filepath.Join(root, owner), owner, capacityFixtureClaim(root))
+	claim := capacityFixtureClaim(root)
+	claim.DiskBytes = 3000
+	b, _ := capacityFixtureBudget(t, filepath.Join(root, "machine"), filepath.Join(root, owner), owner, claim)
 	_, err := b.TryAcquireTask(owner, "fixture", "openshell")
 	result := "admitted"
 	if errors.Is(err, ErrDeferred) { result = "deferred" } else if err != nil { t.Fatal(err) }
@@ -465,8 +558,186 @@ func TestMachineCapacityAcrossProcessesRetainsUnknownOwner(t *testing.T) {
 	path := filepath.Join(root, "machine", "capacity.json")
 	before, err := os.ReadFile(path)
 	if err != nil { t.Fatal(err) }
-	b, _ := capacityFixtureBudget(t, filepath.Join(root, "machine"), filepath.Join(root, "after-exit"), "new-generation", capacityFixtureClaim(root))
+	claim := capacityFixtureClaim(root)
+	claim.DiskBytes = 3000
+	b, _ := capacityFixtureBudget(t, filepath.Join(root, "machine"), filepath.Join(root, "after-exit"), "new-generation", claim)
 	if _, err = b.TryAcquireTask("new-generation", "after-exit", "openshell"); !errors.Is(err, ErrDeferred) { t.Fatal("process exit expired old machine lease") }
 	after, err := os.ReadFile(path)
 	if err != nil || !bytes.Equal(before, after) { t.Fatal("new generation readback changed unknown resource leases", err) }
+}
+
+func TestReadMachineCapacityPolicyCopiesHeldPolicyWithoutWritingState(t *testing.T) {
+	root := capacityFixtureRoot(t)
+	machine := filepath.Join(root, "machine")
+	claim := capacityFixtureClaim(root)
+	b, _ := capacityFixtureBudget(t, machine, filepath.Join(root, "quota"), "unknown-owner", claim)
+	permit, err := b.TryAcquireTask("unknown-owner", "held", "openshell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = permit.StartResourceEffects(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(machine, "capacity.json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		got, err := ReadMachineCapacityPolicy(machine)
+		if err != nil || got == nil || got.Source != path || got.Capacity != claim.Policy {
+			t.Fatal("original held policy was not returned", got, err)
+		}
+		got.Capacity.MaxSwapUsedBytes++
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("reader modified held state", err)
+	}
+	// A reader-backed claim still passes through the original pressure gate.
+	fixed, err := ReadMachineCapacityPolicy(machine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim.Policy = fixed.Capacity
+	next, now := capacityFixtureBudget(t, machine, filepath.Join(root, "next-quota"), "next", claim)
+	*now = now.Add(PollInterval)
+	next.Observe(Sample{At: *now, Pressure: Normal, TotalMemoryBytes: 10000, CPUs: 128, SwapUsedBytes: claim.Policy.MaxSwapUsedBytes + 1}, nil)
+	if _, err = next.TryAcquireTask("next", "over-original-swap-limit", "openshell"); !errors.Is(err, ErrDeferred) || !strings.Contains(err.Error(), "swap_used_pressure") {
+		t.Fatal("fixed policy readback bypassed original swap gate", err)
+	}
+	after, err = os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("deferred admission changed held leases", err)
+	}
+}
+
+func TestReadMachineCapacityPolicyDistinguishesFirstUseFromDamagedState(t *testing.T) {
+	for _, fault := range []string{"absent-directory", "empty-directory", "initialized-empty", "missing-state", "missing-lock", "corrupt", "duplicate", "foreign-identity", "foreign-mode", "aliased-state", "invalid-lease"} {
+		t.Run(fault, func(t *testing.T) {
+			root := capacityFixtureRoot(t)
+			machine := filepath.Join(root, "machine")
+			if fault == "empty-directory" {
+				if err := os.Mkdir(machine, 0700); err != nil {
+					t.Fatal(err)
+				}
+			} else if fault != "absent-directory" {
+				b, _ := capacityFixtureBudget(t, machine, filepath.Join(root, "quota"), "owner", capacityFixtureClaim(root))
+				if fault != "initialized-empty" {
+					if _, err := b.TryAcquireTask("owner", "held", "openshell"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				path := filepath.Join(machine, "capacity.json")
+				raw, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				switch fault {
+				case "missing-state":
+					err = os.Remove(path)
+				case "missing-lock":
+					err = os.Remove(filepath.Join(machine, "capacity.lock"))
+				case "corrupt":
+					err = os.WriteFile(path, []byte("{"), 0600)
+				case "duplicate":
+					err = os.WriteFile(path, append([]byte(`{"schema":1,`), raw[1:]...), 0600)
+				case "foreign-mode":
+					err = os.Chmod(path, 0666)
+				case "aliased-state":
+					err = os.Link(path, filepath.Join(machine, "alias"))
+				case "foreign-identity", "invalid-lease":
+					var state machineState
+					if err = json.Unmarshal(raw, &state); err != nil {
+						t.Fatal(err)
+					}
+					if fault == "foreign-identity" {
+						state.Identity = "foreign-native-machine"
+					} else {
+						for id, lease := range state.Leases {
+							lease.Owner = ""
+							state.Leases[id] = lease
+						}
+					}
+					raw, err = json.Marshal(state)
+					if err == nil {
+						err = os.WriteFile(path, raw, 0600)
+					}
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := ReadMachineCapacityPolicy(machine)
+			if fault == "absent-directory" || fault == "empty-directory" || fault == "initialized-empty" {
+				if err != nil || got != nil {
+					t.Fatal("first use invented a policy", got, err)
+				}
+				if fault == "absent-directory" {
+					if _, err = os.Lstat(machine); !os.IsNotExist(err) {
+						t.Fatal("reader created pool", err)
+					}
+				} else if fault == "empty-directory" {
+					entries, err := os.ReadDir(machine)
+					if err != nil || len(entries) != 0 {
+						t.Fatal("reader initialized pool", entries, err)
+					}
+				}
+			} else if err == nil || got != nil {
+				t.Fatal("damaged original pool fell back to a new policy", got, err)
+			}
+		})
+	}
+}
+
+func TestMachineCPUCountsDoNotControlAdmission(t *testing.T) {
+	for _, state := range []string{"low-busy", "all-busy", "unknown-count-and-ticks", "only-policy-cpu-differs"} {
+		t.Run(state, func(t *testing.T) {
+			root := capacityFixtureRoot(t)
+			claim := capacityFixtureClaim(root)
+			claim.CPUs = 64
+			claim.Policy.CPUs = 1
+			b, now := capacityFixtureBudget(t, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner", claim)
+			b.resourceSources["owner"].read = func(string) (ResourceClaim, error) { return claim, nil }
+			for i := range 4 {
+				*now = now.Add(PollInterval)
+				sample := Sample{At: *now, Pressure: Normal, TotalMemoryBytes: 10000, CPUs: 1, CPUCounters: &CPUCounters{User: uint64(i), Idle: uint64(i * 99)}}
+				if state == "all-busy" {
+					sample.CPUCounters = &CPUCounters{User: uint64(i * 100)}
+				}
+				if state == "unknown-count-and-ticks" {
+					sample.CPUs = 0
+					sample.CPUCounters = nil
+					sample.CPUObservationError = "native ticks unavailable"
+				}
+				b.Observe(sample, nil)
+			}
+			observation := b.Snapshot().CPUObservation
+			if state == "unknown-count-and-ticks" {
+				if observation.BusyPercent != nil || observation.Reason == "" { t.Fatal("unknown CPU became zero", observation) }
+			} else {
+				want := float64(1)
+				if state == "all-busy" { want = 100 }
+				if observation.BusyPercent == nil || *observation.BusyPercent != want { t.Fatal("native tick deltas did not reach snapshot", observation) }
+			}
+			first, err := b.TryAcquireTask("owner", "first", "openshell")
+			if err != nil {
+				t.Fatal("CPU observation or configured count deferred worker", err)
+			}
+			if err = first.StartResourceEffects(); err != nil {
+				t.Fatal(err)
+			}
+			if state == "only-policy-cpu-differs" {
+				claim.Policy.CPUs = 0
+			}
+			second, err := b.TryAcquireTask("owner", "second", "openshell")
+			if err != nil {
+				t.Fatal("held high-vCPU lease deferred worker", err)
+			}
+			second.Release()
+			if got := b.Snapshot(); got.MachineCapacity.Capacity.CPUs != 1 || got.MachineCapacity.Leases != 1 {
+				t.Fatal("new CPU semantics rewrote legacy policy or held lease", got)
+			}
+		})
+	}
 }

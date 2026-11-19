@@ -222,7 +222,7 @@ func (b *Budget) SettleMachineSession(original MachineSessionLease, proof Machin
 			return false, errors.New("original machine profile source unavailable")
 		}
 		claim, err := source.read(proof.Binding.Runtime)
-		if err != nil || validateResourceClaim(claim) != nil || claim.Source != lease.Source || state.Capacity == nil || claim.Policy != *state.Capacity {
+		if err != nil || validateResourceClaim(claim) != nil || claim.Source != lease.Source || state.Capacity == nil || !sameAdmissionCapacity(claim.Policy, *state.Capacity) {
 			return false, errors.New("original machine profile source changed")
 		}
 		if err := validateMachineReclamation(proof); err != nil {

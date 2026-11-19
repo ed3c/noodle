@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,70 +108,29 @@ func beginWaiting(t *testing.T, f waitingPreparationFixture) io.Closer {
 	return closer
 }
 
-func TestPreparationWaitingTwoHostsOriginalNonceProgressesOnlyAfterRealReturn(t *testing.T) {
+func TestPreparationWaitingTwoHostsDoesNotBlockOnConfiguredCPUCount(t *testing.T) {
 	root := capacityFixtureRoot(t)
-	a := waitingPreparation(t, root, "A")
-	b := waitingPreparation(t, root, "B")
+	a, b := waitingPreparation(t, root, "A"), waitingPreparation(t, root, "B")
 	fixedPreparationBase(t, a)
-	for _, f := range []waitingPreparationFixture{a, b} {
-		if p, err := f.b.TryAcquireTask(f.ref.ID, f.order, "openshell"); !errors.Is(err, ErrDeferred) || p != nil {
-			t.Fatal("original CPU6/base4/two prep1 did not reproduce mutual promotion wait", err)
-		}
-	}
 	before, err := os.ReadFile(filepath.Join(a.b.machine.dir, "capacity.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	if err != nil { t.Fatal(err) }
 	beginWaiting(t, a)
 	beginWaiting(t, b)
 	after, err := os.ReadFile(filepath.Join(a.b.machine.dir, "capacity.json"))
-	if err != nil || !bytes.Equal(before, after) {
-		t.Fatal("ready observation changed original row/source", err)
-	}
+	if err != nil || !bytes.Equal(before, after) { t.Fatal("ready observation changed original row/source", err) }
 	if snapshot := a.b.Snapshot().MachineCapacity; snapshot.CPUs != 4 || snapshot.Leases != 6 || snapshot.MemoryBytes != 24 || snapshot.DiskBytes != 44 {
 		t.Fatal("waiting changed memory/disk or lost unknown reservations", snapshot)
 	}
-	first, err := a.b.TryAcquireTask(a.ref.ID, a.order, "openshell")
-	if err != nil {
-		t.Fatal("first full worker2 cannot fit6", err)
+	for _, f := range []waitingPreparationFixture{a, b} {
+		permit, err := f.b.TryAcquireTask(f.ref.ID, f.order, "openshell")
+		if err != nil { t.Fatal("legacy CPU6/base4/two prep1 blocked original worker", err) }
+		if permit.allocation.machineID != f.ref.ID { t.Fatal("promotion replaced original nonce") }
+		if err = permit.StartResourceEffects(); err != nil { t.Fatal(err) }
+		permit.Release()
 	}
-	if err = first.StartResourceEffects(); err != nil {
-		t.Fatal(err)
+	if snapshot := a.b.Snapshot().MachineCapacity; snapshot.Leases != 6 || snapshot.MemoryBytes != 24 || snapshot.DiskBytes != 44 || snapshot.Capacity.CPUs != 6 {
+		t.Fatal("CPU correction reclaimed unknown resources or rewrote historical policy", snapshot)
 	}
-	if p, err := b.b.TryAcquireTask(b.ref.ID, b.order, "openshell"); !errors.Is(err, ErrDeferred) || p != nil {
-		t.Fatal("second worker bypassed full2 reservation", err)
-	}
-	if a.b.Snapshot().MachineCapacity.CPUs != 6 {
-		t.Fatal("promoted row reused stale zero-CPU receipt")
-	}
-	// Native completion alone returns quota, never the machine lease.
-	binding := MachineSessionBinding{ContextID: a.ref.ID, ProjectDir: root, OrderID: a.order, AttemptID: "original-attempt", SessionID: "original-session", Runtime: "openshell", WorktreePath: filepath.Join(root, "worker")}
-	if err = first.BindSession(binding); err != nil {
-		t.Fatal(err)
-	}
-	first.Release()
-	if p, err := b.b.TryAcquireTask(b.ref.ID, b.order, "openshell"); !errors.Is(err, ErrDeferred) || p != nil {
-		t.Fatal("Done returned VM resources", err)
-	}
-	rows, err := a.b.MachineSessionLeases(a.ref.ID, root)
-	if err != nil || len(rows) != 1 {
-		t.Fatal(rows, err)
-	}
-	proof := MachineReclamation{Binding: binding, CheckoutOperation: "actual-restore-and-removal", Sources: map[string]MachineSettlementFile{}, RuntimeState: "retired", NativeAttemptID: "native-attempt", SandboxID: "native-uuid", NativeDeletionOutcome: "DELETION_OUTCOME_COMPLETED"}
-	for _, role := range []string{"main_ack", "checkout_packet", "checkout_removal", "checkout_verification_release"} {
-		proof.Sources[role] = a.files["control"]
-	}
-	if err = a.b.SettleMachineSession(rows[0], proof); err != nil {
-		t.Fatal(err)
-	}
-	second, err := b.b.TryAcquireTask(b.ref.ID, b.order, "openshell")
-	if err != nil {
-		t.Fatal("original B nonce did not continue after original return", err)
-	}
-	if second.allocation.machineID != b.ref.ID {
-		t.Fatal("continuation minted another nonce")
-	}
-	second.Release()
 }
 
 func TestPreparationWaitingUnknownStaleAndForeignEvidenceRetainsOriginalCPU(t *testing.T) {
@@ -336,5 +296,25 @@ func TestPreparationWaitingDoesNotCertifyUnknownResourceMutation(t *testing.T) {
 				t.Fatal("unknown resource mutation discounted original preparation")
 			}
 		})
+	}
+}
+
+func TestPreparationFrozenCPUClaimIdentityIsRetained(t *testing.T) {
+	root := capacityFixtureRoot(t)
+	f := waitingPreparation(t, root, "A")
+	claim := f.claim
+	claim.CPUs = 2
+	claim.Policy.CPUs++
+	f.b.resourceSources[f.ref.ID].read = func(string) (ResourceClaim, error) { return claim, nil }
+	before, err := os.ReadFile(filepath.Join(f.b.machine.dir, "capacity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.b.TryAcquireTask(f.ref.ID, f.order, "openshell"); !errors.Is(err, ErrDeferred) || !strings.Contains(err.Error(), "original preparation operator policy changed") {
+		t.Fatal("CPU availability correction loosened original frozen identity", err)
+	}
+	after, err := os.ReadFile(filepath.Join(f.b.machine.dir, "capacity.json"))
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("frozen claim refusal changed journal", err)
 	}
 }

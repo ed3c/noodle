@@ -26,13 +26,19 @@ const (
 var ErrDeferred = errors.New("worker resource admission deferred")
 
 type Sample struct {
-	At               time.Time
-	Pressure         Pressure
-	Swapouts         uint64 // cumulative bytes
-	SwapUsedBytes    uint64 // current system-wide allocation
-	TotalMemoryBytes uint64
-	CPUs             int
-	Unsupported      bool
+	At                  time.Time
+	Pressure            Pressure
+	Swapouts            uint64 // cumulative bytes
+	SwapUsedBytes       uint64 // current system-wide allocation
+	TotalMemoryBytes    uint64 // observation only; zero means unknown
+	CPUs                int // configuration count only, never admission capacity
+	CPUCounters         *CPUCounters
+	CPUBusyPercent      *float64 // measured interval when native counters are unavailable
+	CPUObservationError string
+	Unsupported         bool
+
+	MemoryObservationError   string `json:",omitempty"`
+	PressureObservationError string `json:",omitempty"`
 }
 
 type Sampler interface {
@@ -40,6 +46,7 @@ type Sampler interface {
 }
 
 type Snapshot struct {
+	CPUObservation      CPUObservation       `json:"cpu_observation"`
 	MachineCapacity     *MachineSnapshot     `json:"machine_capacity,omitempty"`
 	AdmissionPolicy     string               `json:"worker_admission_policy"`
 	SharedQuota         *SharedQuotaSnapshot `json:"shared_quota,omitempty"`
@@ -57,6 +64,8 @@ type Snapshot struct {
 	SwapoutRate         *float64             `json:"swapout_bytes_per_second"`
 	SampleAgeSeconds    float64              `json:"sample_age_seconds"`
 	Unsupported         bool                 `json:"unsupported_monitor"`
+
+	PressureObservationError string `json:"pressure_observation_error,omitempty"`
 }
 
 type Budget struct {
@@ -78,6 +87,7 @@ type Budget struct {
 	mu                   sync.Mutex
 	maximum, active      int
 	residents            int
+	cpuObservation       CPUObservation
 	previous             *Sample
 	pressure             Pressure
 	rate                 float64
@@ -173,7 +183,8 @@ func (b *Budget) Observe(s Sample, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	previous := b.previous
-	defer b.observeMachineHealth(previous)
+	b.cpuObservation = cpuObservation(previous, &s)
+	defer b.observeMachineHealth()
 	for id := range b.pendingMachineReturns {
 		b.returnUnstartedMachine(id)
 	}
@@ -187,9 +198,17 @@ func (b *Budget) Observe(s Sample, err error) {
 		b.sampleError = &message
 	}
 	if err != nil || s.At.IsZero() {
+		b.cpuObservation = cpuObservation(nil, nil)
+		if err != nil {
+			b.cpuObservation.Error = err.Error()
+		}
 		b.pressure = Unknown
 		b.previous = nil
 		return
+	}
+	if s.CPUCounters != nil {
+		counters := *s.CPUCounters
+		s.CPUCounters = &counters
 	}
 	b.previous = &s
 	b.unsupported = s.Unsupported
@@ -318,6 +337,18 @@ func (b *Budget) Snapshot() Snapshot {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	s := Snapshot{AdmissionPolicy: WorkerAdmissionPolicy, Pressure: b.pressure, Reason: "ready", Active: b.active - b.residents, Residents: b.residents, Allocations: b.active, Maximum: b.maximum, Limit: b.maximum, Unsupported: b.unsupported}
+	s.CPUObservation = b.cpuObservation
+	if s.CPUObservation.Mode == "" {
+		s.CPUObservation = cpuObservation(nil, nil)
+	}
+	if s.CPUObservation.BusyPercent != nil {
+		percent := *s.CPUObservation.BusyPercent
+		s.CPUObservation.BusyPercent = &percent
+	}
+	if b.previous != nil && b.stale() {
+		s.CPUObservation.BusyPercent = nil
+		s.CPUObservation.Reason = "cpu_sample_stale"
+	}
 	s.MachineCapacity = b.machineSnapshot()
 	s.SampleAgeSeconds = -1
 	if b.sampleError != nil {
@@ -331,12 +362,14 @@ func (b *Budget) Snapshot() Snapshot {
 	if b.previous != nil && !b.unsupported {
 		used := b.previous.SwapUsedBytes
 		s.SwapUsedBytes = &used
+		s.PressureObservationError = b.previous.PressureObservationError
 	}
 	if b.previous != nil {
 		s.SampleAgeSeconds = b.now().Sub(b.previous.At).Seconds()
 	}
 	if b.stale() {
 		s.Pressure = Unknown
+		s.PressureObservationError = ""
 		s.SwapoutRate = nil
 		s.SwapUsedBytes = nil
 	}

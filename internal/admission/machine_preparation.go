@@ -237,7 +237,7 @@ func (m *machineCapacity) promotePreparation(ref PreparationRef, contextID, orde
 			return false, errors.New("original preparation operator policy changed")
 		}
 		if original.PreparationPromoted {
-			if original.Source != claim.Source || original.MemoryBytes != claim.MemoryBytes || original.CPUs != claim.CPUs || state.Capacity == nil || *state.Capacity != claim.Policy {
+			if original.Source != claim.Source || original.MemoryBytes != claim.MemoryBytes || original.CPUs != claim.CPUs || state.Capacity == nil || !sameAdmissionCapacity(*state.Capacity, claim.Policy) {
 				return false, errors.New("original promoted worker resource source changed")
 			}
 			volumes := map[string]uint64{}
@@ -376,7 +376,7 @@ func (b *Budget) reservePreparation(source PreparationSource, claim ResourceClai
 			sample = *b.previous
 		}
 		normals := 0
-		if observed := b.resourceSources["original-native-preparation"]; observed != nil && observed.source == claim.Source && observed.policy == claim.Policy {
+		if observed := b.resourceSources["original-native-preparation"]; observed != nil && observed.source == claim.Source && sameAdmissionCapacity(observed.policy, claim.Policy) {
 			normals = observed.normals
 		}
 		if _, err = b.machine.reserve(state, id, "", "", "", claim, sample, b.rate, b.rateValid, normals, b.now()); err != nil {

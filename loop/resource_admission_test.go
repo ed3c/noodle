@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,7 +29,32 @@ func resourceBudget(l *Loop, max int) *admission.Budget {
 	return b
 }
 
-func loopMachineFixture(t *testing.T, l *Loop, machine, quota, owner string) *admission.Budget {
+func contendedDiskPeak(t *testing.T, root string) uint64 {
+	t.Helper()
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("native machine identity unsupported")
+	}
+	cmd := exec.Command("df", "-Pk", root)
+	cmd.Env = append(cmd.Environ(), "LC_ALL=C")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	fields := strings.Fields(lines[len(lines)-1])
+	if len(lines) < 2 || len(fields) < 6 {
+		t.Fatalf("disk availability missing: %q", output)
+	}
+	availableKiB, err := strconv.ParseUint(fields[3], 10, 54)
+	if err != nil || availableKiB == 0 {
+		t.Fatalf("invalid disk availability %q: %v", fields[3], err)
+	}
+	available := availableKiB * 1024
+	// One reservation fits with headroom. Two exceed available disk without writing large files.
+	return available - available/3
+}
+
+func loopMachineFixture(t *testing.T, l *Loop, machine, quota, owner string, diskPeak uint64) *admission.Budget {
 	t.Helper()
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" { t.Skip("native machine identity unsupported") }
 	b := resourceBudget(l, 9)
@@ -35,7 +63,7 @@ func loopMachineFixture(t *testing.T, l *Loop, machine, quota, owner string) *ad
 	diskRoot, err := filepath.EvalSymlinks(l.projectDir)
 	if err != nil { t.Fatal(err) }
 	b.BindResourceSource(l.projectDir, "process", func(string) (admission.ResourceClaim, error) {
-		return admission.ResourceClaim{Source: "isolated-original-owner-fixture", MemoryBytes: 1, CPUs: 1, DiskBytes: 1, DiskPaths: []string{diskRoot}, Policy: admission.CapacityPolicy{MemoryBytes: 1, CPUs: 10, DiskSafetyBytes: 1, RecoverySamples: 2}}, nil
+		return admission.ResourceClaim{Source: "isolated-original-owner-fixture", MemoryBytes: 1, CPUs: 1, DiskBytes: diskPeak, DiskPaths: []string{diskRoot}, Policy: admission.CapacityPolicy{MemoryBytes: 1, CPUs: 10, DiskSafetyBytes: 1, RecoverySamples: 2}}, nil
 	})
 	for i := 3; i >= 0; i-- {
 		b.Observe(admission.Sample{At: time.Now().Add(-time.Duration(i)*time.Second), Pressure: admission.Normal, TotalMemoryBytes: 100, CPUs: 10}, nil)
@@ -48,8 +76,9 @@ func TestMachineAdmissionOriginalLoopTwoHostsQueueBeforeWorktreeAndDispatch(t *t
 	if err != nil { t.Fatal(err) }
 	rt1, rt2 := newMockRuntime(), newMockRuntime()
 	first, second := newSteerTestLoop(t, rt1), newSteerTestLoop(t, rt2)
-	b1 := loopMachineFixture(t, first, filepath.Join(root, "machine"), filepath.Join(root, "host-a"), "host-a-old")
-	b2 := loopMachineFixture(t, second, filepath.Join(root, "machine"), filepath.Join(root, "host-b"), "host-b-current")
+	diskPeak := contendedDiskPeak(t, root)
+	b1 := loopMachineFixture(t, first, filepath.Join(root, "machine"), filepath.Join(root, "host-a"), "host-a-old", diskPeak)
+	b2 := loopMachineFixture(t, second, filepath.Join(root, "machine"), filepath.Join(root, "host-b"), "host-b-current", diskPeak)
 	reserved, err := b1.TryAcquireTask(first.projectDir, "first", "process")
 	if err != nil { t.Fatal(err) }
 	defer reserved.Release()
@@ -58,7 +87,10 @@ func TestMachineAdmissionOriginalLoopTwoHostsQueueBeforeWorktreeAndDispatch(t *t
 	candidate := dispatchCandidate{OrderID: order.ID, Stage: stage}
 	before := resourceTree(t, second.projectDir)
 	err = second.spawnCook(context.Background(), candidate, order, spawnOptions{})
-	if !errors.Is(err, admission.ErrDeferred) || len(rt2.calls) != 0 || !reflect.DeepEqual(before, resourceTree(t, second.projectDir)) || b2.Snapshot().Active != 0 { t.Fatal("machine resource shortage reached preparation or Dispatch", err) }
+	if !errors.Is(err, admission.ErrDeferred) || b2.Snapshot().MachineCapacity.Reason != "disk_reservation_capacity_insufficient" ||
+		len(rt2.calls) != 0 || !reflect.DeepEqual(before, resourceTree(t, second.projectDir)) || b2.Snapshot().Active != 0 {
+		t.Fatal("shared disk reservation did not queue before preparation or Dispatch", err)
+	}
 	reserved.Release()
 	if err = second.spawnCook(context.Background(), candidate, order, spawnOptions{}); err != nil { t.Fatal("safe return did not continue original Loop", err) }
 	if len(rt2.calls) != 1 || b2.Snapshot().Active != 1 { t.Fatal("original Loop did not dispatch exactly once") }
@@ -76,7 +108,7 @@ func TestMachineAdmissionOriginalLoopSampleAndSourceDeferrals(t *testing.T) {
 			if err != nil { t.Fatal(err) }
 			rt := newMockRuntime()
 			l := newSteerTestLoop(t, rt)
-			b := loopMachineFixture(t, l, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner")
+			b := loopMachineFixture(t, l, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner", 1)
 			switch condition {
 			case "missing": b.Observe(admission.Sample{}, nil)
 			case "stale": b.Observe(admission.Sample{At: time.Now().Add(-admission.MaxSampleAge-time.Second), Pressure: admission.Normal, TotalMemoryBytes: 100, CPUs: 10}, nil)
@@ -98,7 +130,7 @@ func TestMachineAdmissionAllOriginalSpawnEntrancesPreservePreparation(t *testing
 			if err != nil { t.Fatal(err) }
 			rt := newMockRuntime()
 			l := newSteerTestLoop(t, rt)
-			b := loopMachineFixture(t, l, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner")
+			b := loopMachineFixture(t, l, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner", contendedDiskPeak(t, root))
 			p, err := b.TryAcquireTask(l.projectDir, "occupied", "process")
 			if err != nil { t.Fatal(err) }
 			defer p.Release()
@@ -115,6 +147,9 @@ func TestMachineAdmissionAllOriginalSpawnEntrancesPreservePreparation(t *testing
 			}
 			if entry == "planned" { if err != nil { t.Fatal(err) }
 			} else if !errors.Is(err, admission.ErrDeferred) { t.Fatal("resource wait did not propagate", err) }
+			if b.Snapshot().MachineCapacity.Reason != "disk_reservation_capacity_insufficient" {
+				t.Fatal("dispatch did not preserve the original disk contention", b.Snapshot().MachineCapacity)
+			}
 			if len(rt.calls) != 0 || len(l.cooks.activeCooksByOrder) != 0 || l.bootstrapAttempts != 0 || !l.schedulePromoted || l.lastPromotionError != "retain" || l.scheduleDispatchDigest != "retain" || !reflect.DeepEqual(before, resourceTree(t, l.projectDir)) { t.Fatal("machine queue changed original preparation state") }
 		})
 	}
@@ -127,7 +162,7 @@ func TestMachineAdmissionNestedPermitReplacementAndUnknownRetention(t *testing.T
 			if err != nil { t.Fatal(err) }
 			rt := newMockRuntime()
 			l := newSteerTestLoop(t, rt)
-			b := loopMachineFixture(t, l, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner")
+			b := loopMachineFixture(t, l, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner", 1)
 			runtimeName := "process"
 			if unknown { runtimeName = "sprites"; rt.dispatchErr = errors.New("fixture remote ACK lost"); l.deps.Runtimes[runtimeName] = rt }
 			var session loopruntime.SessionHandle
@@ -160,7 +195,7 @@ func TestMachineAdmissionSteerDefersBeforeKillWithoutResourceRetirement(t *testi
 			if err != nil { t.Fatal(err) }
 			rt := newMockRuntime()
 			l := newControlTestLoop(t, &fakeWorktree{}, rt)
-			b := loopMachineFixture(t, l, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner")
+			b := loopMachineFixture(t, l, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner", 1)
 			stage := Stage{TaskKey: "execute", Skill: "execute", Status: StageStatusPending}
 			order := Order{ID: "42", Status: OrderStatusActive, Stages: []Stage{stage}}
 			if err = l.spawnCook(context.Background(), dispatchCandidate{OrderID: order.ID, Stage: stage}, order, spawnOptions{}); err != nil { t.Fatal(err) }
@@ -190,7 +225,7 @@ func TestMachineAdmissionSwapRecoveryBeforeWorktreeAndDispatch(t *testing.T) {
 			if err != nil { t.Fatal(err) }
 			rt := newMockRuntime()
 			l := newSteerTestLoop(t, rt)
-			b := loopMachineFixture(t, l, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner")
+			b := loopMachineFixture(t, l, filepath.Join(root, "machine"), filepath.Join(root, "quota"), "owner", 1)
 			now := time.Now().Add(-10 * time.Second)
 			var swapouts uint64
 			for range 4 {

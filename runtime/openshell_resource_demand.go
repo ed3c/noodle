@@ -35,7 +35,7 @@ type openShellResourceConfig struct {
 		ReturnTarMiB *int64 `toml:"return_tar_peak_mib"`
 		RestoreMiB *int64 `toml:"restore_peak_mib"`
 		MemoryBudgetMiB *int64 `toml:"memory_budget_mib"`
-		CPUBudget *int64 `toml:"cpu_budget"`
+		CPUBudget any `toml:"cpu_budget"`
 		DiskSafetyMiB *int64 `toml:"disk_safety_mib"`
 		MaxSwapUsedMiB *int64 `toml:"max_swap_used_mib"`
 		MaxSwapoutBytesPerSecond *int64 `toml:"max_swapout_bytes_per_second"`
@@ -100,16 +100,17 @@ func OpenShellWorkerResourceClaim(p OpenShellProfile, diskRoots ...string) (admi
 	claim.DiskBytes, err = resourceMiB(policy.DiskPeakMiB, "disk_peak_mib", false)
 	if err != nil { return claim, err }
 	if claim.DiskBytes < minimumDisk { return claim, errors.New("worker_disk_peak_below_native_and_return_restore_components") }
-	claim.Policy.MemoryBytes, err = resourceMiB(policy.MemoryBudgetMiB, "memory_budget_mib", false)
+	claim.Policy.MemoryBytes, err = resourceMiB(policy.MemoryBudgetMiB, "memory_budget_mib", true)
 	if err != nil { return claim, err }
 	claim.Policy.DiskSafetyBytes, err = resourceMiB(policy.DiskSafetyMiB, "disk_safety_mib", false)
 	if err != nil { return claim, err }
 	claim.Policy.MaxSwapUsedBytes, err = resourceMiB(policy.MaxSwapUsedMiB, "max_swap_used_mib", true)
 	if err != nil { return claim, err }
-	if policy.CPUBudget == nil || *policy.CPUBudget <= 0 || policy.MaxSwapoutBytesPerSecond == nil || *policy.MaxSwapoutBytesPerSecond < 0 || policy.RecoverySamples < 2 || policy.RecoverySamples > admission.MaxRecoverySamples {
+	if policy.MaxSwapoutBytesPerSecond == nil || *policy.MaxSwapoutBytesPerSecond < 0 || policy.RecoverySamples < 2 || policy.RecoverySamples > admission.MaxRecoverySamples {
 		return claim, errors.New("operator_machine_policy_missing_or_invalid")
 	}
-	claim.Policy.CPUs = uint64(*policy.CPUBudget)
+	// Global CPU count is legacy observation metadata. Only VM vCPUs above constrain geometry.
+	if cpus, ok := policy.CPUBudget.(int64); ok && cpus >= 0 { claim.Policy.CPUs = uint64(cpus) }
 	claim.Policy.MaxSwapoutBytesPerSecond = uint64(*policy.MaxSwapoutBytesPerSecond)
 	claim.Policy.RecoverySamples = policy.RecoverySamples
 	claim.Policy.RequireIOObservation = policy.RequireIOObservation

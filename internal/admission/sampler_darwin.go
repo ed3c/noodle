@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"os/exec"
@@ -27,17 +28,6 @@ func (darwinSampler) Read(ctx context.Context) (Sample, error) {
 	if err := ctx.Err(); err != nil {
 		return Sample{}, err
 	}
-	memory, err := unix.SysctlUint64("hw.memsize")
-	if err != nil {
-		return Sample{}, fmt.Errorf("read physical memory: %w", err)
-	}
-	cpus, err := unix.SysctlUint32("hw.logicalcpu")
-	if err != nil {
-		return Sample{}, fmt.Errorf("read logical CPUs: %w", err)
-	}
-	if memory == 0 || cpus == 0 || uint64(cpus) > uint64(^uint(0)>>1) {
-		return Sample{}, fmt.Errorf("invalid hardware capacity: memory=%d CPUs=%d", memory, cpus)
-	}
 	out, err := readVMStat(ctx, exec.CommandContext(ctx, "/usr/bin/vm_stat"))
 	if err != nil {
 		return Sample{}, err
@@ -54,18 +44,121 @@ func (darwinSampler) Read(ctx context.Context) (Sample, error) {
 	if err != nil {
 		return Sample{}, err
 	}
-	level, err := unix.SysctlUint32("kern.memorystatus_vm_pressure_level")
-	if err != nil {
-		return Sample{}, fmt.Errorf("read memory pressure: %w", err)
-	}
-	pressure, err := darwinPressure(level)
-	if err != nil {
-		return Sample{}, err
-	}
+	sample := Sample{At: time.Now(), Swapouts: swapouts, SwapUsedBytes: used}
+	observeDarwinPressure(&sample, func() (uint32, error) {
+		return unix.SysctlUint32("kern.memorystatus_vm_pressure_level")
+	})
+	observeDarwinMemory(&sample, func() (uint64, error) {
+		return unix.SysctlUint64("hw.memsize")
+	})
+	observeDarwinCPU(&sample, func() (uint32, error) {
+		return unix.SysctlUint32("hw.logicalcpu")
+	}, readDarwinCPUTicks)
 	if err := ctx.Err(); err != nil {
 		return Sample{}, err
 	}
-	return Sample{At: time.Now(), Pressure: pressure, Swapouts: swapouts, SwapUsedBytes: used, TotalMemoryBytes: memory, CPUs: int(cpus)}, nil
+	// Optional CPU readback must never discard an already valid Swap sample.
+	observeDarwinCPUInterval(ctx, &sample, readDarwinCPUInterval)
+	return sample, nil
+}
+
+func observeDarwinPressure(sample *Sample, readLevel func() (uint32, error)) {
+	level, err := readLevel()
+	if err != nil {
+		sample.Pressure = Unknown
+		sample.PressureObservationError = fmt.Sprintf("read memory pressure: %v", err)
+		return
+	}
+	sample.Pressure, err = darwinPressure(level)
+	if err != nil {
+		sample.PressureObservationError = err.Error()
+	}
+}
+
+func observeDarwinMemory(sample *Sample, readTotal func() (uint64, error)) {
+	total, err := readTotal()
+	switch {
+	case err != nil:
+		sample.MemoryObservationError = fmt.Sprintf("read physical memory: %v", err)
+	case total == 0:
+		sample.MemoryObservationError = "invalid physical memory capacity: 0"
+	default:
+		sample.TotalMemoryBytes = total
+	}
+}
+
+func observeDarwinCPU(sample *Sample, readCount func() (uint32, error), readTicks func() (*CPUCounters, error)) {
+	count, countErr := readCount()
+	if countErr == nil && (count == 0 || uint64(count) > uint64(^uint(0)>>1)) {
+		countErr = fmt.Errorf("invalid logical CPU count: %d", count)
+	}
+	if countErr == nil {
+		sample.CPUs = int(count)
+	} else {
+		sample.CPUs = 0
+		countErr = fmt.Errorf("logical CPU count unavailable: %w", countErr)
+	}
+	counters, ticksErr := readTicks()
+	if ticksErr != nil {
+		counters = nil
+	}
+	sample.CPUCounters = counters
+	if err := errors.Join(countErr, ticksErr); err != nil {
+		sample.CPUObservationError = err.Error()
+	} else {
+		sample.CPUObservationError = ""
+	}
+}
+
+func observeDarwinCPUInterval(ctx context.Context, sample *Sample, read func(context.Context) (float64, error)) {
+	if sample.CPUCounters != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, SampleTimeout)
+	defer cancel()
+	percent, err := read(ctx)
+	if err != nil {
+		sample.CPUObservationError = err.Error()
+		return
+	}
+	sample.CPUBusyPercent = &percent
+	sample.CPUObservationError = ""
+}
+
+func readDarwinCPUInterval(ctx context.Context) (float64, error) {
+	cmd := exec.CommandContext(ctx, "/usr/bin/top", "-l", "2", "-s", "0", "-n", "0", "-R", "-F", "-stats", "pid")
+	cmd.Dir = "/"
+	cmd.Env = []string{"LC_ALL=C", "LANG=C"}
+	cmd.WaitDelay = 100 * time.Millisecond
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("read interval CPU usage: %w", err)
+	}
+	return parseDarwinCPUInterval(string(output))
+}
+
+func parseDarwinCPUInterval(output string) (float64, error) {
+	const prefix = "CPU usage:"
+	var samples []string
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			samples = append(samples, strings.TrimPrefix(line, prefix))
+		}
+	}
+	// top's first report has no interval. Only the second reports the delta.
+	if len(samples) != 2 {
+		return 0, errors.New("expected two native CPU usage reports")
+	}
+	fields := strings.Fields(samples[1])
+	if len(fields) != 6 || fields[1] != "user," || fields[3] != "sys," || fields[5] != "idle" {
+		return 0, errors.New("invalid native CPU usage report")
+	}
+	idleText, ok := strings.CutSuffix(fields[4], "%")
+	idle, err := strconv.ParseFloat(idleText, 64)
+	if !ok || err != nil || math.IsNaN(idle) || idle < 0 || idle > 100 {
+		return 0, errors.New("invalid native idle percentage")
+	}
+	return 100 - idle, nil
 }
 
 func darwinPressure(level uint32) (Pressure, error) {
