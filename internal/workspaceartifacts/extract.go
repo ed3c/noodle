@@ -33,6 +33,42 @@ type archiveEntry struct {
 // inspection; callers must not Apply it. The archive and destination are owned
 // by the caller throughout this operation, not concurrent external writers.
 func Extract(ctx context.Context, archiveFile, destination string) error {
+	return extract(ctx, archiveFile, destination, nil)
+}
+
+// VerifiedArchiveManifest describes the bytes accepted by both extraction passes.
+type VerifiedArchiveManifest struct {
+	SHA256  string                          `json:"sha256"`
+	Entries map[string]VerifiedArchiveEntry `json:"entries"`
+}
+
+type VerifiedArchiveEntry struct {
+	Kind       string `json:"kind"`
+	Mode       int64  `json:"mode"`
+	Bytes      int64  `json:"bytes"`
+	SHA256     string `json:"sha256"`
+	LinkTarget string `json:"link_target,omitempty"`
+}
+
+func ExtractWithManifest(ctx context.Context, archiveFile, destination string) (manifest VerifiedArchiveManifest, err error) {
+	err = extract(ctx, archiveFile, destination, func(entries []archiveEntry, digest string) {
+		manifest.SHA256 = digest
+		manifest.Entries = make(map[string]VerifiedArchiveEntry, len(entries))
+		for _, entry := range entries {
+			kind := "regular"
+			switch entry.kind {
+			case tar.TypeDir:
+				kind = "directory"
+			case tar.TypeSymlink:
+				kind = "symlink"
+			}
+			manifest.Entries[entry.name] = VerifiedArchiveEntry{kind, entry.mode, entry.size, entry.digest, entry.link}
+		}
+	})
+	return manifest, err
+}
+
+func extract(ctx context.Context, archiveFile, destination string, verified func([]archiveEntry, string)) error {
 	info, err := os.Lstat(archiveFile)
 	if err != nil {
 		return fmt.Errorf("inspect artifact archive: %w", err)
@@ -88,6 +124,9 @@ func Extract(ctx context.Context, archiveFile, destination string) error {
 	}
 	if !finalInfo.Mode().IsRegular() || !os.SameFile(info, finalInfo) || finalInfo.Size() != info.Size() {
 		return fmt.Errorf("artifact archive identity or size changed during extraction")
+	}
+	if verified != nil {
+		verified(entries, after)
 	}
 	return nil
 }

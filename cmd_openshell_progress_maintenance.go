@@ -35,6 +35,7 @@ func newProgressMaintenanceCmd() *cobra.Command {
 		_ = prepare.MarkFlagRequired(name)
 	}
 	root.AddCommand(prepare)
+	root.AddCommand(newCaptureOpenShellWorkspaceCmd())
 	root.AddCommand(newRetireMaintenanceSuccessorCmd())
 	prepare.Flags().StringVar(&launcher, "launcher-intent", "", "Original Host launcher intent")
 	prepare.Flags().IntVar(&launcherSession, "launcher-session", 0, "Original launcher execution session identifier")
