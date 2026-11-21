@@ -30,6 +30,11 @@ func legacyPauseCapture(ctx context.Context, runtimeDir, intentPath string, reco
 		return false, err
 	}
 	defer lock.Close()
+	return legacyPauseCaptureLocked(runtimeDir, intentPath, recoverMissing)
+}
+
+// The caller holds the original Loop control lock across its owner preflight.
+func legacyPauseCaptureLocked(runtimeDir, intentPath string, recoverMissing bool) (bool, error) {
 	ackRaw, err := os.ReadFile(filepath.Join(runtimeDir, "control-ack.ndjson"))
 	if os.IsNotExist(err) {
 		ackRaw = nil

@@ -11,6 +11,8 @@ import (
 	"github.com/poteto/noodle/config"
 	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/reducer"
+	"github.com/poteto/noodle/internal/state"
+	"github.com/poteto/noodle/internal/workspaceartifacts"
 	"github.com/poteto/noodle/loop"
 	loopruntime "github.com/poteto/noodle/runtime"
 	"github.com/poteto/noodle/worktree"
@@ -69,50 +71,21 @@ func inspectOriginalWorkspaceCapture(ctx context.Context, ref loopruntime.Sessio
 	if err != nil {
 		return nil, err
 	}
-	runtimeDir := filepath.Join(binding.ProjectDir, ".noodle")
-	var snapshot reducer.DurableSnapshot
-	snapshotRef, err := loopruntime.ReadSessionReadbackFile(filepath.Join(runtimeDir, "state.snapshot.json"), &snapshot)
+	subject, err := readArchiveRecoveryScopeBinding(ctx, binding.ProjectDir, cfg, proof)
 	if err != nil {
 		return nil, err
 	}
-	scope, attempt, err := loop.ArchiveRecoveryScope(cfg, snapshot, proof.OrderID, proof.SessionID)
-	if err != nil {
-		return nil, err
-	}
-	var integration struct {
-		Branch string `json:"branch"`
-		Root   string `json:"root"`
-	}
-	integrationRef, err := loopruntime.ReadSessionReadbackFile(filepath.Join(runtimeDir, "integration-branch.json"), &integration)
-	if err != nil {
-		return nil, err
-	}
-	if integration.Branch == "" || integration.Root != binding.ProjectDir {
-		return nil, fmt.Errorf("archive inspection original integration binding differs")
-	}
-	scope.IntegrationBranch = integration.Branch
-	e, err := execution.New(binding.ProjectDir, os.Environ())
-	if err != nil {
-		return nil, err
-	}
-	if err = validateHostEnvironment(e); err != nil {
-		return nil, err
-	}
-	custody, err := worktree.ReadCustody(ctx, e, filepath.Join(binding.ProjectDir, ".worktrees", attempt.WorktreeName))
-	if err != nil {
-		return nil, err
-	}
-	session, err := filepath.EvalSymlinks(filepath.Join(runtimeDir, "sessions", attempt.SessionID))
+	session, err := filepath.EvalSymlinks(filepath.Join(binding.ProjectDir, ".noodle", "sessions", subject.Attempt.SessionID))
 	if err != nil {
 		return nil, err
 	}
 	p := loopruntime.ProgressMaintenance{Request: request, Profile: profileRef, HostDir: owner.HostRoot, ContextID: owner.Current.ContextID, SessionDirectory: session}
-	tree, err := loopruntime.InspectOpenShellWorkspaceCapture(ctx, ref, p, profile, binding.ProjectDir, custody.Physical, custody.CommonDir, scope)
+	tree, err := loopruntime.InspectOpenShellWorkspaceCapture(ctx, ref, p, profile, binding.ProjectDir, subject.Custody.Physical, subject.Custody.CommonDir, subject.Scope)
 	if err != nil {
 		return nil, err
 	}
 	sources := owner.Sources
-	sources["canonical_snapshot"], sources["integration_binding"] = snapshotRef, integrationRef
+	sources["canonical_snapshot"], sources["integration_binding"] = subject.Snapshot, subject.Integration
 	if err = loopruntime.VerifySessionReadbackFiles(sources); err != nil {
 		return nil, err
 	}
@@ -121,9 +94,50 @@ func inspectOriginalWorkspaceCapture(ctx context.Context, ref loopruntime.Sessio
 	}
 	return map[string]any{
 		"schema": 1, "status": "archive_recovery_review_evidence", "review_eligibility": "pending_owner_review", "original_return": "UNKNOWN",
-		"order_id": proof.OrderID, "attempt_id": attempt.AttemptID, "native_attempt_id": proof.NativeAttemptID, "session_id": attempt.SessionID,
+		"order_id": proof.OrderID, "attempt_id": subject.Attempt.AttemptID, "native_attempt_id": proof.NativeAttemptID, "session_id": subject.Attempt.SessionID,
 		"sandbox_id": proof.SandboxID, "main_process_instance_id": proof.MainProcessInstanceID, "capture": ref, "archive": proof.Archive,
 		"baseline_head": proof.BaselineHead, "baseline_index_sha256": proof.BaselineIndexSHA256, "baseline_source": proof.BaselineSource,
-		"tree": tree, "write_paths": scope.WritePaths, "sources": sources, "authorizes_landing": false, "effects": []string{}, "next": nil,
+		"tree": tree, "write_paths": subject.Scope.WritePaths, "sources": sources, "authorizes_landing": false, "effects": []string{}, "next": nil,
 	}, nil
+}
+
+type archiveRecoveryScopeBinding struct {
+	Scope                 workspaceartifacts.LocalTaskScope
+	Attempt               state.AttemptNode
+	Custody               worktree.Custody
+	Snapshot, Integration loopruntime.SessionReadbackFileRef
+}
+
+func readArchiveRecoveryScopeBinding(ctx context.Context, project string, cfg config.Config, proof loopruntime.OpenShellWorkspaceCapture) (b archiveRecoveryScopeBinding, err error) {
+	runtimeDir := filepath.Join(project, ".noodle")
+	var snapshot reducer.DurableSnapshot
+	b.Snapshot, err = loopruntime.ReadSessionReadbackFile(filepath.Join(runtimeDir, "state.snapshot.json"), &snapshot)
+	if err != nil {
+		return b, err
+	}
+	b.Scope, b.Attempt, err = loop.ArchiveRecoveryScope(cfg, snapshot, proof.OrderID, proof.SessionID)
+	if err != nil {
+		return b, err
+	}
+	var integration struct {
+		Branch string `json:"branch"`
+		Root   string `json:"root"`
+	}
+	b.Integration, err = loopruntime.ReadSessionReadbackFile(filepath.Join(runtimeDir, "integration-branch.json"), &integration)
+	if err != nil {
+		return b, err
+	}
+	if integration.Branch == "" || integration.Root != project {
+		return b, fmt.Errorf("archive inspection original integration binding differs")
+	}
+	b.Scope.IntegrationBranch = integration.Branch
+	e, err := execution.New(project, os.Environ())
+	if err != nil {
+		return b, err
+	}
+	if err = validateHostEnvironment(e); err != nil {
+		return b, err
+	}
+	b.Custody, err = worktree.ReadCustody(ctx, e, filepath.Join(project, ".worktrees", b.Attempt.WorktreeName))
+	return b, err
 }
