@@ -40,6 +40,7 @@ type archiveRecoveryCleanupPlan struct {
 	WorkerDrain           *loopruntime.SessionReadbackFileRef    `json:"worker_drain,omitempty"`
 	Reclamation           *loopruntime.SessionReadbackFileRef    `json:"reclamation,omitempty"`
 	HostRetirement        *archiveRecoveryHostRetirementReadback `json:"host_retirement,omitempty"`
+	HostActivation        *loopruntime.SessionReadbackFileRef    `json:"host_activation,omitempty"`
 	IndependentExit       *archiveRecoveryIndependentExit        `json:"independent_exit,omitempty"`
 	SettlementProblem     string                                 `json:"settlement_problem,omitempty"`
 	DispositionSHA256     string                                 `json:"disposition_sha256,omitempty"`

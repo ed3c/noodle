@@ -71,6 +71,7 @@ func planArchiveRecoveryReclaim(ctx context.Context, result *archiveRecoveryClea
 	if err != nil {
 		return err
 	}
+	result.HostActivation = observeArchiveRecoveryActivation(ref, d, request)
 	path := filepath.Join(filepath.Dir(ref.Path), loop.ArchiveRecoveryReclamationFile)
 	if _, err = os.Lstat(path); err == nil {
 		reclaimed, readErr := readOriginalArchiveRecoveryReclamation(ref, d)

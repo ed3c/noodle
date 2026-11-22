@@ -3,11 +3,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +43,8 @@ func TestSeedExitedArchiveCrossOwnerHost(t *testing.T) {
 		OrderID       string                   `json:"order_id"`
 		AttemptID     string                   `json:"attempt_id"`
 		Checkout      archive.CheckoutIdentity `json:"checkout"`
+		LivePID       int                      `json:"live_pid"`
+		LiveBinary    string                   `json:"live_binary"`
 	}
 	if _, err := loopruntime.ReadSessionReadbackFile(manifest, &input); err != nil {
 		t.Fatal(err)
@@ -89,6 +94,7 @@ func TestSeedExitedArchiveCrossOwnerHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	originalBinary := binary
 	profile, err := loopruntime.LoadOpenShellProfile(input.Profile)
 	if err != nil {
 		t.Fatal(err)
@@ -132,33 +138,48 @@ func TestSeedExitedArchiveCrossOwnerHost(t *testing.T) {
 		write(path, []byte("isolated original lock\n"))
 	}
 
-	// The recorded native executable really runs and exits in a separate local
-	// session, without serving a live Host, loading a key, or launching a VM.
-	leader := exec.CommandContext(t.Context(), binary.Path, "host", "capabilities")
-	leader.Dir = input.Root
-	detachHostProcess(leader)
-	started := time.Now().UTC()
-	if err = leader.Start(); err != nil {
-		t.Fatal(err)
-	}
-	process := procx.ProcessRecord{PID: leader.Process.Pid, SessionID: instance, StartedAt: started}
-	if err = leader.Wait(); err != nil {
-		t.Fatal(err)
-	}
-	if err = verifyOriginalArchiveHostKernelExit(process); err != nil {
-		t.Fatal(err)
+	process := procx.ProcessRecord{SessionID: instance, StartedAt: time.Now().UTC()}
+	if input.LivePID > 1 {
+		if input.LiveBinary != filepath.Join(input.Root, "original-controller") {
+			t.Fatal("original live executable escapes the fixture")
+		}
+		originalBinary, err = hostReadbackBinaryRef(input.LiveBinary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		actor, err := observeSessionActor(input.LivePID, originalBinary)
+		if err != nil || actor.Process.Group != input.LivePID {
+			t.Fatal("original live actor is unavailable or not a dedicated process group", err)
+		}
+		process.PID = input.LivePID
+		process.StartedAt = time.Unix(int64(actor.Process.StartSec), int64(actor.Process.StartUsec)*1000).UTC()
+	} else {
+		// The retained-archive control uses an actual exited native process.
+		leader := exec.CommandContext(t.Context(), binary.Path, "host", "capabilities")
+		leader.Dir = input.Root
+		detachHostProcess(leader)
+		if err = leader.Start(); err != nil {
+			t.Fatal(err)
+		}
+		process.PID = leader.Process.Pid
+		if err = leader.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		if err = verifyOriginalArchiveHostKernelExit(process); err != nil {
+			t.Fatal(err)
+		}
 	}
 	binding := hostRequestBinding{Schema: 1, RequestID: requestID, Operation: "attach", ProjectDir: input.FixtureRepo,
-		ConfigPath: config.Path, ConfigSHA256: config.SHA256, Mode: "manual", BinarySHA256: binary.SHA256,
+		ConfigPath: config.Path, ConfigSHA256: config.SHA256, Mode: "manual", BinarySHA256: originalBinary.SHA256,
 		EnvironmentSHA256: hostDigest(nil), Status: "accepted", HostDir: input.Host, RequiredHostInstanceID: instance, CleanupCompleted: true}
 	request := save(input.NativeRequest, binding)
 	receipt := hostReceipt{Schema: 1, Protocol: hostProtocol, HostPID: process.PID, HostInstanceID: instance, ContextID: input.ContextID,
 		ProjectDir: input.FixtureRepo, ContextState: "active", Mode: binding.Mode, ConfigPath: config.Path, ConfigSHA256: config.SHA256,
-		BinaryPath: binary.Path, BinarySHA256: binary.SHA256, RequestID: requestID, HostDir: input.Host, CleanupCompleted: true}
+		BinaryPath: originalBinary.Path, BinarySHA256: originalBinary.SHA256, RequestID: requestID, HostDir: input.Host, CleanupCompleted: true}
 	save(filepath.Join(generationDir, "receipts.json"), []hostReceipt{receipt})
 	if err = updateHostPool(input.Host, func(pool *hostPool) error {
 		pool.Active = instance
-		pool.Generations[instance] = hostGeneration{ID: instance, Directory: generationDir, Binary: binary.Path, SHA: binary.SHA256,
+		pool.Generations[instance] = hostGeneration{ID: instance, Directory: generationDir, Binary: originalBinary.Path, SHA: originalBinary.SHA256,
 			State: "active", Process: process}
 		pool.Owners[requestID] = hostTaskOwner{State: "owned", Original: receipt, Current: receipt, EnvironmentSHA: binding.EnvironmentSHA256}
 		return nil
@@ -178,7 +199,7 @@ func TestSeedExitedArchiveCrossOwnerHost(t *testing.T) {
 	prepSource := admission.PreparationSource{Purpose: "task-preparation", Bindings: map[string]string{
 		"task_path": task.Path, "task_sha256": task.SHA256, "goal_path": task.Path, "goal_sha256": task.SHA256,
 		"repository": input.FixtureRepo, "head": input.Checkout.Head, "control_root": input.FixtureRepo,
-		"host_root": input.Host, "profile": profile.SourceSHA256, "execution_binary": binary.Path + "/" + binary.SHA256,
+		"host_root": input.Host, "profile": profile.SourceSHA256, "execution_binary": originalBinary.Path + "/" + originalBinary.SHA256,
 		"storage": "isolated-fixture", "archive": policy.Path + "/" + policy.SHA256, "codec": codec.Path + "/" + codec.SHA256,
 		"planned_roots": string(encodedRoots),
 	}}
@@ -233,7 +254,173 @@ func TestSeedExitedArchiveCrossOwnerHost(t *testing.T) {
 	// Preserve native allocations after this seed process exits. The cross-owner
 	// path must release only the worker allocation and settle the same nonce.
 	save(filepath.Join(input.Root, "host-seed.json"), map[string]any{"request": request, "lease": leases[0], "hold": hold,
-		"host_instance_id": instance, "noodle": binary, "capacity_overlay": overlaySources, "exited_process": process})
+		"host_instance_id": instance, "noodle": binary, "capacity_overlay": overlaySources, "original_process": process})
+}
+
+func TestActivateIsolatedArchiveCrossOwnerHost(t *testing.T) {
+	manifest := os.Getenv("NOODLE_CROSS_OWNER_FIXTURE")
+	if manifest == "" {
+		t.Skip("driven by the isolated live cross-Owner fixture")
+	}
+	var input struct {
+		Root        string `json:"root"`
+		Noodle      string `json:"noodle"`
+		Disposition string `json:"disposition"`
+		LivePID     int    `json:"live_pid"`
+		LiveBinary  string `json:"live_binary"`
+		Rollback    bool   `json:"activation_rollback"`
+	}
+	if _, err := loopruntime.ReadSessionReadbackFile(manifest, &input); err != nil {
+		t.Fatal(err)
+	}
+	if canonical, err := filepath.EvalSymlinks(input.Root); err != nil || canonical != input.Root ||
+		filepath.Dir(input.Root) != "/private/tmp" || !strings.HasPrefix(filepath.Base(input.Root), "TestArchiveRecoveryCrossOwnerInactiveHost-") ||
+		input.Noodle != filepath.Join(input.Root, "noodle") || input.LiveBinary != filepath.Join(input.Root, "original-controller") ||
+		!strings.HasPrefix(input.Disposition, input.Root+string(filepath.Separator)) || input.LivePID <= 1 {
+		t.Fatal("successor activation test must use sacrificial fixture actors")
+	}
+	ref, err := loopruntime.ReadSessionReadbackFile(input.Disposition, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := readArchiveRecoveryExitInputs(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fence, err := readVerifiedArchiveRecoveryFence(ref, in)
+	if err != nil || fence.Generation.Process.PID != input.LivePID {
+		t.Fatal("same original live generation unavailable", err)
+	}
+	original, err := hostReadbackBinaryRef(input.LiveBinary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	successor, err := hostReadbackBinaryRef(input.Noodle)
+	if err != nil || successor == original {
+		t.Fatal("distinct verified successor required", err)
+	}
+	actor := func(pid int) hostOperatorActor {
+		t.Helper()
+		result, err := observeSessionActor(pid, original)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	surrogate := func(role string) hostOperatorActor {
+		t.Helper()
+		raw, err := os.ReadFile(filepath.Join(input.Root, role+"-pid"))
+		pid, parseErr := strconv.Atoi(string(raw))
+		if err != nil || parseErr != nil || pid <= 1 {
+			t.Fatal("isolated Gateway actor identity unavailable", role, err, parseErr)
+		}
+		return actor(pid)
+	}
+	scope := hostOperatorNativeScope{Schema: 1, Host: actor(input.LivePID), Gateway: surrogate("gateway"), Driver: surrogate("driver")}
+	plan := archiveRecoveryActivationPlan{Schema: 1, Disposition: ref, Request: fence.Scope.Request, Successor: successor, Scope: scope}
+	fresh := func() (*archiveRecoveryHostExitFence, error) {
+		result, err := readVerifiedArchiveRecoveryFence(ref, in)
+		if err != nil {
+			return nil, err
+		}
+		if !reflect.DeepEqual(result.Owner, fence.Owner) || result.Custody != fence.Custody {
+			return nil, fmt.Errorf("original fixture scope changed")
+		}
+		return result, nil
+	}
+	activation := archiveRecoveryActivation{
+		root: in.request.HostDir, session: in.session, plan: plan, generation: fence.Generation,
+		locks: []string{filepath.Join(in.runtimeDir, "control.lock"), filepath.Join(in.session, "maintenance.lock")},
+		validateOwner: func() error {
+			_, err := fresh()
+			return err
+		},
+		qualify: func(ctx context.Context) error {
+			bound, err := fresh()
+			if err != nil {
+				return err
+			}
+			_, err = prepareExitedArchiveReclamation(ctx, filepath.Join(input.Root, "machine"), bound)
+			if err != nil {
+				return err
+			}
+			exited := verifyOriginalArchiveHostKernelExit(bound.Generation.Process) == nil
+			if err = verifyArchiveRecoveryActivationGateway(scope, exited); err != nil {
+				return err
+			}
+			return observeArchiveRecoveryCheckoutActors(ctx, bound.Scope, &scope, exited)
+		},
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	status, effects, err := activation.run(ctx, false, false)
+	if err != nil || status != "archive_recovery_controller_fenced" ||
+		!reflect.DeepEqual(effects, []string{"original_archive_controller_suspended"}) {
+		t.Fatal("successor did not fence the same live generation", status, effects, err)
+	}
+	pending, err := hostMaintenancePending(in.request.HostDir)
+	if err != nil || !pending {
+		t.Fatal("fence must survive lock release and protect subsequent entry", err)
+	}
+	current, err := procx.ObserveNativeIdentity(scope.Host.Process.PID)
+	if err != nil || !current.SameGeneration(scope.Host.Process) || !current.Stopped {
+		t.Fatal("original controller must remain suspended across successor calls", err)
+	}
+	status, effects, err = activation.run(ctx, false, false)
+	if err != nil || status != "archive_recovery_controller_fenced" || len(effects) != 0 {
+		t.Fatal("readback repeated original controller suspension", status, effects, err)
+	}
+	if observed := observeArchiveRecoveryActivation(ref, fence.Scope, fence.Request); observed != nil {
+		t.Fatal("a suspended controller must not project completed activation", observed)
+	}
+	unsettled := filepath.Join(input.Root, "fixture-pending-gateway")
+	if err = os.WriteFile(unsettled, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, effects, err = activation.run(ctx, true, false); err == nil || len(effects) != 0 {
+		t.Fatal("unknown Gateway effect did not block original controller retirement", effects, err)
+	}
+	if _, err = os.Lstat(activation.controlPath("retire")); !os.IsNotExist(err) {
+		t.Fatal("successor offered retirement before Gateway qualification", err)
+	}
+	if input.Rollback {
+		command := exec.CommandContext(ctx, input.Noodle, "openshell", "progress-maintenance", archiveRecoveryActivationOperation,
+			"--disposition-file", ref.Path, "--expected-disposition-sha256", ref.SHA256, "--resume-original")
+		raw, err := command.CombinedOutput()
+		var result archiveRecoveryActivationResult
+		if err != nil || json.Unmarshal(raw, &result) != nil || result.Status != "archive_recovery_activation_reverted" ||
+			result.Disposition != ref || result.AttemptID != fence.Scope.AttemptID || result.Next != nil ||
+			!reflect.DeepEqual(result.Effects, []string{"original_archive_controller_resumed"}) {
+			t.Fatal("original actor could not be resumed while Gateway readback stayed unavailable", err, string(raw))
+		}
+		pending, err := hostMaintenancePending(in.request.HostDir)
+		if err != nil || pending {
+			t.Fatal("explicit rollback retained the temporary maintenance gate", err)
+		}
+		if _, effects, err = activation.run(ctx, true, false); err == nil || len(effects) != 0 {
+			t.Fatal("rolled-back activation epoch unexpectedly offered a retirement", effects, err)
+		}
+		if err = os.Remove(unsettled); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if err = os.Remove(unsettled); err != nil {
+		t.Fatal(err)
+	}
+	status, effects, err = activation.run(ctx, true, false)
+	if err != nil || status != "archive_recovery_controller_exited" ||
+		!reflect.DeepEqual(effects, []string{"original_archive_controller_retirement_offered"}) {
+		t.Fatal("qualified successor did not retire the exact original controller", status, effects, err)
+	}
+	status, effects, err = activation.run(ctx, true, false)
+	if err != nil || status != "archive_recovery_controller_exited" || len(effects) != 0 {
+		t.Fatal("successor repeated controller retirement after observed exit", status, effects, err)
+	}
+	bound, err := loopruntime.ReadSessionReadbackFile(filepath.Join(in.session, archiveRecoveryActivationFile), nil)
+	if observed := observeArchiveRecoveryActivation(ref, fence.Scope, fence.Request); err != nil || observed == nil || *observed != bound {
+		t.Fatal("original activation was not projected after confirmed exit", observed, err)
+	}
 }
 
 func buildIsolatedArchiveNoodle(t *testing.T, root, machine, binary string, write func(string, []byte) loopruntime.SessionReadbackFileRef) map[string]loopruntime.SessionReadbackFileRef {

@@ -10,15 +10,21 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
+	"time"
 
 	dm "github.com/NVIDIA/OpenShell/sdk/go/proto/datamodelv1"
 	pb "github.com/NVIDIA/OpenShell/sdk/go/proto/openshellv1"
 	"github.com/poteto/noodle/internal/admission"
+	"github.com/poteto/noodle/internal/lockfile"
+	"github.com/poteto/noodle/internal/procx"
 	"github.com/poteto/noodle/internal/workspaceartifacts"
 	"github.com/poteto/noodle/worktree/archive"
 	"google.golang.org/grpc/codes"
@@ -27,6 +33,10 @@ import (
 
 func TestArchiveRecoveryIsolatedCrossOwnerLoop(t *testing.T) {
 	driver, resultPath := os.Getenv("NOODLE_CROSS_OWNER_DRIVER"), os.Getenv("NOODLE_CROSS_OWNER_RESULT")
+	mode := os.Getenv("NOODLE_CROSS_OWNER_LIVE_ACTIVATION")
+	rollback := mode == "rollback"
+	packedStash := mode == "packed"
+	liveActivation := mode == "1" || rollback || packedStash
 	if driver == "" || resultPath == "" {
 		t.Skip("select the isolated Soodles fixture driver and compact result path")
 	}
@@ -94,6 +104,38 @@ func TestArchiveRecoveryIsolatedCrossOwnerLoop(t *testing.T) {
 		}
 		return ref(path)
 	}
+	var disabledEnvironment SessionReadbackFileRef
+	var sharedStashSources []SessionReadbackFileRef
+	if liveActivation {
+		git := func(args ...string) {
+			t.Helper()
+			command := app.Execution.Command(t.Context(), repo, "git", args...)
+			if out, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("fixture Git %q: %v\n%s", args, err, out)
+			}
+		}
+		git("config", "--local", "extensions.worktreeConfig", "true")
+		config := filepath.Join(checkout.Registration, "config.worktree")
+		if err = os.WriteFile(config, []byte("[codex]\n\tlocalEnvironmentConfigPath = __none__\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		disabledEnvironment = ref(config)
+		if err = os.WriteFile(filepath.Join(repo, "result.txt"), []byte("unrelated primary-worktree stash\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "stash", "push", "-m", "unrelated shared stash")
+		stashSource := "refs/stash"
+		if packedStash {
+			git("pack-refs", "--all")
+			if _, err = os.Lstat(filepath.Join(checkout.Repo, stashSource)); !os.IsNotExist(err) {
+				t.Fatal("original checkout shape must retain the stash only in packed-refs", err)
+			}
+			stashSource = "packed-refs"
+		}
+		for _, name := range []string{stashSource, "logs/refs/stash"} {
+			sharedStashSources = append(sharedStashSources, ref(filepath.Join(checkout.Repo, filepath.FromSlash(name))))
+		}
+	}
 	var stopped, absent atomic.Bool
 	var deleteCalls, stopCalls atomic.Int32
 	sandbox := func() *pb.Sandbox {
@@ -107,6 +149,9 @@ func TestArchiveRecoveryIsolatedCrossOwnerLoop(t *testing.T) {
 	}
 	server := &openShellNativeServer{
 		list: func(context.Context, *pb.ListSandboxesRequest) (*pb.ListSandboxesResponse, error) {
+			if _, err := os.Stat(filepath.Join(root, "fixture-pending-gateway")); err == nil {
+				return nil, status.Error(codes.Unavailable, "fixture Gateway effect awaiting readback")
+			}
 			if absent.Load() {
 				return &pb.ListSandboxesResponse{}, nil
 			}
@@ -172,13 +217,22 @@ func TestArchiveRecoveryIsolatedCrossOwnerLoop(t *testing.T) {
 	candidatePath := filepath.Join(session, "archive-recovery-candidate.json")
 	dispositionPath := filepath.Join(session, "archive-recovery-cleanup-disposition.json")
 	landingPath := filepath.Join(ownerDir, "archive-landing-proof.json")
-	manifest := write(filepath.Join(root, "fixture.json"), map[string]any{
+	manifestInput := map[string]any{
 		"root": root, "host": host, "noodle": filepath.Join(root, "noodle"), "profile": profilePath,
 		"fixture_repo": repo, "native_request": nativeRequest, "session_dir": session,
 		"order_id": task.OrderID, "attempt_id": attemptID, "context_id": contextID,
 		"head": checkout.Head, "checkout": checkout, "policy": policy.Path,
 		"candidate": candidatePath, "disposition": dispositionPath, "landing_proof": landingPath,
-	})
+	}
+	var originalActor procx.NativeIdentity
+	var exited <-chan error
+	if liveActivation {
+		originalActor, exited = startArchiveCrossOwnerController(t, root, host, runtimeDir, environment)
+		manifestInput["live_pid"] = originalActor.PID
+		manifestInput["live_binary"] = filepath.Join(root, "original-controller")
+		manifestInput["activation_rollback"] = rollback
+	}
+	manifest := write(filepath.Join(root, "fixture.json"), manifestInput)
 	command := exec.CommandContext(t.Context(), "go", "test", ".", "-run", "^TestSeedExitedArchiveCrossOwnerHost$", "-count=1", "-v")
 	command.Dir = ".."
 	command.Env = append(environment, "NOODLE_CROSS_OWNER_FIXTURE="+manifest.Path, "GOPROXY=off", "GOSUMDB=off")
@@ -282,6 +336,55 @@ func TestArchiveRecoveryIsolatedCrossOwnerLoop(t *testing.T) {
 		ContextID: contextID, OrderID: task.OrderID, AttemptID: attemptID, SessionID: sessionID, NativeAttemptID: task.AttemptID,
 		SandboxID: id, MainProcessInstanceID: main, Head: checkout.Head, Tree: tree.CandidateTree, OriginalReturn: "UNKNOWN"},
 		HostInstanceID: seed.HostInstanceID})
+	if liveActivation {
+		python("held")
+		current, err := procx.ObserveNativeIdentity(originalActor.PID)
+		if err != nil || !originalActor.SameGeneration(current) || current.Stopped || current.Zombie {
+			t.Fatal("original actor must still be alive before the successor takes control", err)
+		}
+		activation := exec.CommandContext(t.Context(), "go", "test", ".", "-run", "^TestActivateIsolatedArchiveCrossOwnerHost$", "-count=1", "-v")
+		activation.Dir = ".."
+		activation.Env = append(environment, "NOODLE_CROSS_OWNER_FIXTURE="+manifest.Path, "GOPROXY=off", "GOSUMDB=off")
+		if out, err := activation.CombinedOutput(); err != nil {
+			t.Fatalf("successor-led activation of disposable native Host: %v\n%s", err, out)
+		}
+		if rollback {
+			current, err := procx.ObserveNativeIdentity(originalActor.PID)
+			if err != nil || !originalActor.SameGeneration(current) || current.Stopped || current.Zombie {
+				t.Fatal("explicit rollback did not resume the same original actor", err)
+			}
+			if python("held")["live_original_controller_rejected"] != true || !stopped.Load() || deleteCalls.Load() != 0 {
+				t.Fatal("rollback changed the original VM or allowed a settlement effect")
+			}
+			return
+		}
+		select {
+		case err := <-exited:
+			killed, ok := err.(*exec.ExitError)
+			if !ok || killed.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
+				t.Fatal("successor did not retire only the original isolated controller", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("original isolated controller stayed present after handoff")
+		}
+		for _, role := range []string{"gateway", "driver"} {
+			bound, err := os.ReadFile(filepath.Join(root, role+"-pid"))
+			pid, parseErr := strconv.Atoi(string(bound))
+			actor, observeErr := procx.ObserveNativeIdentity(pid)
+			if err != nil || parseErr != nil || observeErr != nil || actor.Stopped || actor.Zombie {
+				t.Fatal("handoff affected a surviving Gateway-side actor", role, err, parseErr, observeErr)
+			}
+		}
+		conn, err := newOpenShellConnection(profile.Gateway.Binding.Gateway, profile.Gateway.TLS)
+		if err != nil {
+			t.Fatal("successor stopped the original gateway", err)
+		}
+		after, err := pb.NewOpenShellClient(conn).GetSandbox(t.Context(), &pb.GetSandboxRequest{Name: name, WorkspaceScope: create.WorkspaceScope})
+		if closeErr := conn.Close(); err != nil || closeErr != nil || after.GetSandbox().GetStatus().GetPhase() != pb.SandboxPhase_SANDBOX_PHASE_STOPPED ||
+			after.GetSandbox().GetMetadata().GetId() != id || deleteCalls.Load() != 0 {
+			t.Fatal("handoff changed original Gateway or VM before LoopManager settlement", err, closeErr)
+		}
+	}
 	evidence := python("run")
 	_, checkoutErr := os.Lstat(checkout.Path)
 	_, diskErr := os.Lstat(disk)
@@ -297,6 +400,25 @@ func TestArchiveRecoveryIsolatedCrossOwnerLoop(t *testing.T) {
 	after := packet.VerificationCopy.Entries[filepath.Join("checkout", "result.txt")].Hash
 	if before == "" || before != after {
 		t.Fatal("archived checkout result did not restore")
+	}
+	if liveActivation {
+		entry := packet.Source.AdminTree.Entries["config.worktree"]
+		restored := filepath.Join(root, "confirmed-checkout-restore")
+		if err = archive.RestoreCheckoutRecovery(packet, restored); err != nil {
+			t.Fatal("original checkout could not be restored after its verified removal", err)
+		}
+		restoredConfig := ref(filepath.Join(restored, "registration", "config.worktree"))
+		if entry.Hash != disabledEnvironment.SHA256 || restoredConfig.SHA256 != disabledEnvironment.SHA256 {
+			t.Fatal("same checkout's disabled Codex environment did not restore from the preserved bytes")
+		}
+		for _, saved := range sharedStashSources {
+			if ref(saved.Path) != saved {
+				t.Fatal("unrelated shared stash or reflog changed during same-attempt settlement", saved.Path)
+			}
+		}
+		evidence["archived_codex_config_preserved"] = true
+		evidence["shared_stash_preserved"] = true
+		evidence["shared_stash_packed"] = packedStash
 	}
 	checkoutProof, err := archive.ReadCheckoutReclamation(packet)
 	if err != nil {
@@ -318,6 +440,7 @@ func TestArchiveRecoveryIsolatedCrossOwnerLoop(t *testing.T) {
 	evidence["gateway_conditional_delete_calls"] = deleteCalls.Load()
 	evidence["gateway_stop_calls"] = stopCalls.Load()
 	evidence["loop_entry"] = "soodles loop inspect/run/inspect/run --request-file <isolated-request>"
+	evidence["live_original_controller"] = liveActivation
 	// Temporary paths refer to material that will be discarded. The compact
 	// artifact preserves digests and effects only.
 	for _, key := range []string{"request", "noodle", "disposition", "reclamation"} {
@@ -338,6 +461,155 @@ func TestArchiveRecoveryIsolatedCrossOwnerLoop(t *testing.T) {
 	if closeErr := output.Close(); writeErr != nil || closeErr != nil {
 		t.Fatal(writeErr, closeErr)
 	}
+}
+
+func TestArchiveCrossOwnerControllerChild(t *testing.T) {
+	root := os.Getenv("NOODLE_CROSS_OWNER_CONTROLLER_ROOT")
+	if root == "" {
+		return
+	}
+	if filepath.Dir(root) != "/private/tmp" || !strings.HasPrefix(filepath.Base(root), "TestArchiveRecoveryCrossOwnerInactiveHost-") {
+		t.Fatal("controller child must be isolated")
+	}
+	host, runtimeDir := os.Getenv("NOODLE_CROSS_OWNER_CONTROLLER_HOST"), os.Getenv("NOODLE_CROSS_OWNER_CONTROLLER_RUNTIME")
+	for _, directory := range []string{host, runtimeDir} {
+		canonical, err := filepath.EvalSymlinks(directory)
+		if err != nil || canonical != directory || !strings.HasPrefix(directory, root+string(filepath.Separator)) {
+			t.Fatal("controller child state escapes fixture", err)
+		}
+	}
+	role := os.Getenv("NOODLE_CROSS_OWNER_CONTROLLER_ROLE")
+	spawn := func(role string) *exec.Cmd {
+		t.Helper()
+		child := exec.Command(os.Args[0], "-test.run=^TestArchiveCrossOwnerControllerChild$")
+		env := slices.DeleteFunc(os.Environ(), func(entry string) bool {
+			return strings.HasPrefix(entry, "NOODLE_CROSS_OWNER_CONTROLLER_ROLE=")
+		})
+		child.Env = append(env, "NOODLE_CROSS_OWNER_CONTROLLER_ROLE="+role)
+		if role == "gateway" {
+			child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		}
+		if err := child.Start(); err != nil {
+			t.Fatal(err)
+		}
+		return child
+	}
+	if role == "gateway" || role == "driver" {
+		// Real actors retain the original kernel ancestry for activation
+		// controls. The runtime test owns the separate loopback RPC fixture.
+		var child *exec.Cmd
+		if role == "gateway" {
+			child = spawn("driver")
+			defer func() { _ = child.Wait() }()
+		}
+		if err := os.WriteFile(filepath.Join(root, role+"-pid"), []byte(strconv.Itoa(os.Getpid())), 0600); err != nil {
+			t.Fatal(err)
+		}
+		for deadline := time.Now().Add(2 * time.Minute); time.Now().Before(deadline); time.Sleep(25 * time.Millisecond) {
+			if _, err := os.Stat(filepath.Join(root, "fixture-finish")); err == nil {
+				return
+			}
+		}
+		return
+	}
+	if role != "controller" {
+		t.Fatal("unknown isolated actor", role)
+	}
+	hostLock, err := lockfile.TryLockShared(filepath.Join(host, "host.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hostLock.Close()
+	runtimeLock, err := lockfile.TryLock(filepath.Join(runtimeDir, "noodle.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtimeLock.Close()
+	// Model only the known frozen-controller property: normal shutdown
+	// cannot clear the runtime hold. A real generation holds these locks.
+	signal.Ignore(syscall.SIGTERM)
+	gateway := spawn("gateway")
+	go func() { _ = gateway.Wait() }()
+	for _, role := range []string{"gateway", "driver"} {
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+			if _, err = os.Stat(filepath.Join(root, role+"-pid")); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("isolated actor did not start", role, err)
+			}
+		}
+	}
+	if err = os.WriteFile(filepath.Join(root, "controller-ready"), []byte("locked\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		time.Sleep(time.Second)
+	}
+}
+
+func startArchiveCrossOwnerController(t *testing.T, root, host, runtimeDir string, environment []string) (procx.NativeIdentity, <-chan error) {
+	t.Helper()
+	image, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(root, "original-controller")
+	if err = os.WriteFile(binary, data, 0700); err != nil {
+		t.Fatal(err)
+	}
+	child := exec.Command(binary, "-test.run=^TestArchiveCrossOwnerControllerChild$")
+	child.Env = append(environment, "NOODLE_CROSS_OWNER_CONTROLLER_ROOT="+root,
+		"NOODLE_CROSS_OWNER_CONTROLLER_HOST="+host, "NOODLE_CROSS_OWNER_CONTROLLER_RUNTIME="+runtimeDir,
+		"NOODLE_CROSS_OWNER_CONTROLLER_ROLE=controller")
+	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err = child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		exited <- child.Wait()
+		close(done)
+	}()
+	t.Cleanup(func() {
+		_ = os.WriteFile(filepath.Join(root, "fixture-finish"), nil, 0600)
+		select {
+		case <-done:
+		default:
+			_ = child.Process.Kill()
+			<-done
+		}
+		for _, role := range []string{"driver", "gateway"} {
+			bound, err := os.ReadFile(filepath.Join(root, role+"-pid"))
+			pid, parseErr := strconv.Atoi(string(bound))
+			if err != nil || parseErr != nil {
+				continue
+			}
+			for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+				if _, err := procx.ObserveNativeIdentity(pid); err != nil {
+					break
+				}
+			}
+		}
+	})
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, err = os.Stat(filepath.Join(root, "controller-ready")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("isolated controller did not claim its locks", err)
+		}
+	}
+	identity, err := procx.ObserveNativeIdentity(child.Process.Pid)
+	if err != nil || identity.ParentPID != os.Getpid() || identity.Group != identity.PID || !identity.SameGeneration(identity) {
+		t.Fatal("isolated controller identity changed", err)
+	}
+	return identity, exited
 }
 
 func writeCrossOwnerProfile(t *testing.T, path, custody, vmRoot string, gateway OpenShellTarget, security OpenShellTLS) OpenShellProfile {

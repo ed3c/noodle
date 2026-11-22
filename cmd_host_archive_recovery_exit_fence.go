@@ -26,31 +26,39 @@ type archiveRecoveryHostExitFence struct {
 	CustodyLock *lockfile.Lock
 }
 
-func withOriginalArchiveHostExitFence(ctx context.Context, ref loopruntime.SessionReadbackFileRef, action func(*archiveRecoveryHostExitFence) error) error {
+type archiveRecoveryExitInputs struct {
+	scope                            archiveRecoveryCleanupDisposition
+	request                          hostRequestBinding
+	session, runtimeDir, custodyRoot string
+	capture                          loopruntime.OpenShellWorkspaceCapture
+	profile, captureRef              loopruntime.SessionReadbackFileRef
+}
+
+func readArchiveRecoveryExitInputs(ref loopruntime.SessionReadbackFileRef) (archiveRecoveryExitInputs, error) {
 	scope, request, err := readOriginalArchiveRecoveryDisposition(ref)
 	if err != nil {
-		return err
+		return archiveRecoveryExitInputs{}, err
 	}
 	session := filepath.Dir(ref.Path)
 	runtimeDir := filepath.Dir(filepath.Dir(session))
 	if scope.Candidate.Path != filepath.Join(session, "archive-recovery-candidate.json") {
-		return errors.New("original Host exit candidate is outside its session")
+		return archiveRecoveryExitInputs{}, errors.New("original Host exit candidate is outside its session")
 	}
 	var candidate struct {
 		Capture loopruntime.SessionReadbackFileRef `json:"capture"`
 	}
 	if err = readArchiveCleanupRef(scope.Candidate, &candidate); err != nil {
-		return err
+		return archiveRecoveryExitInputs{}, err
 	}
 	capture, err := loopruntime.ReadOpenShellWorkspaceCapture(candidate.Capture)
 	if err != nil {
-		return err
+		return archiveRecoveryExitInputs{}, err
 	}
 	if capture.OrderID != scope.OrderID || capture.SessionID != scope.SessionID || capture.NativeAttemptID != scope.NativeAttemptID ||
 		capture.SandboxID != scope.SandboxID || capture.MainProcessInstanceID != scope.MainProcessInstanceID ||
 		capture.Archive != scope.Archive || capture.Sources["request"] != scope.Request ||
 		capture.BaselineSource.Path != filepath.Join(session, "openshell-dispatch.json") {
-		return errors.New("original Host exit capture differs from disposition")
+		return archiveRecoveryExitInputs{}, errors.New("original Host exit capture differs from disposition")
 	}
 	profile := capture.Sources["profile"]
 	var profileBinding struct {
@@ -61,78 +69,102 @@ func withOriginalArchiveHostExitFence(ctx context.Context, ref loopruntime.Sessi
 		} `json:"gateway"`
 	}
 	if err = readArchiveCleanupRef(profile, &profileBinding); err != nil {
-		return err
+		return archiveRecoveryExitInputs{}, err
 	}
 	custodyRoot := profileBinding.Gateway.Binding.StateRoot
 	custodyPath := filepath.Join(custodyRoot, "owner.json")
 	if custodyPath != capture.Sources["custody"].Path {
-		return errors.New("original Host exit custody root differs from capture")
+		return archiveRecoveryExitInputs{}, errors.New("original Host exit custody root differs from capture")
 	}
 	for _, path := range []string{request.HostDir, runtimeDir, session, custodyRoot} {
 		if canonical, e := filepath.EvalSymlinks(path); e != nil || !filepath.IsAbs(path) || canonical != path {
-			return fmt.Errorf("original Host exit path is unavailable or indirect: %s", path)
+			return archiveRecoveryExitInputs{}, fmt.Errorf("original Host exit path is unavailable or indirect: %s", path)
 		}
 	}
-	return withArchiveRecoveryExitLocks(ctx, request.HostDir, runtimeDir, session, custodyRoot, func(custodyLock *lockfile.Lock) error {
-		owner, err := readHostOwnerBinding(scope.Request.Path)
+	return archiveRecoveryExitInputs{scope, request, session, runtimeDir, custodyRoot, capture, profile, candidate.Capture}, nil
+}
+
+func readArchiveRecoveryExitOwner(scope archiveRecoveryCleanupDisposition, request hostRequestBinding) (*hostOwnerBinding, hostPool, hostGeneration, error) {
+	owner, err := readHostOwnerBinding(scope.Request.Path)
+	if err != nil {
+		return nil, hostPool{}, hostGeneration{}, err
+	}
+	if owner.Request != scope.Request || owner.HostRoot != request.HostDir ||
+		owner.Current.HostInstanceID != scope.HostInstanceID || owner.Current.ContextID != scope.ContextID ||
+		owner.Current.RequestID != request.RequestID {
+		return nil, hostPool{}, hostGeneration{}, errors.New("original Host exit request or execution owner differs")
+	}
+	pool, err := readHostPool(owner.HostRoot)
+	if err != nil {
+		return nil, hostPool{}, hostGeneration{}, err
+	}
+	generation, err := archiveRecoveryExitGeneration(pool, owner)
+	if err != nil {
+		return nil, hostPool{}, hostGeneration{}, err
+	}
+	return owner, pool, generation, nil
+}
+
+func readVerifiedArchiveRecoveryFence(ref loopruntime.SessionReadbackFileRef, in archiveRecoveryExitInputs) (*archiveRecoveryHostExitFence, error) {
+	scope, request, runtimeDir, custodyRoot, capture, profile := in.scope, in.request, in.runtimeDir, in.custodyRoot, in.capture, in.profile
+	custodyPath := filepath.Join(custodyRoot, "owner.json")
+	owner, pool, generation, err := readArchiveRecoveryExitOwner(scope, request)
+	if err != nil {
+		return nil, err
+	}
+	hold, err := archiveRecoveryPaused(runtimeDir)
+	if err != nil || hold != scope.Hold {
+		return nil, fmt.Errorf("original Host exit lacks the preserved dispatch hold: %v", err)
+	}
+	var state loopruntime.OpenShellCustodyState
+	custody, err := loopruntime.ReadSessionReadbackFile(custodyPath, &state)
+	if err != nil {
+		return nil, err
+	}
+	if state.Binding.StateRoot != custodyRoot || state.ControlRoot != request.HostDir || state.Blocked != "" ||
+		len(state.PendingRetained) != 0 {
+		return nil, errors.New("original Host exit OpenShell custody differs or remains unresolved")
+	}
+	config := owner.Current.ConfigPath
+	if config == "" {
+		config = filepath.Join(owner.Current.ProjectDir, ".noodle.toml")
+	}
+	sources := map[string]loopruntime.SessionReadbackFileRef{
+		"archive_disposition": ref, "archive_candidate": scope.Candidate,
+		"archive_capture": in.captureRef, "archive_dispatch": capture.BaselineSource,
+		"archive_pause": hold.Acknowledgements, "archive_stop": scope.Stop, "archive_profile": profile,
+		"original_config": {Path: config, SHA256: owner.Current.ConfigSHA256}, "native_custody": custody,
+	}
+	for role, source := range owner.Sources {
+		sources[role] = source
+	}
+	if err = verifyArchiveRecoveryLanding(archiveRecoveryCleanupPlan{Candidate: scope.Candidate, LandingProof: scope.LandingProof,
+		Request: scope.Request, OrderID: scope.OrderID, AttemptID: scope.AttemptID, SessionID: scope.SessionID,
+		Head: scope.Head, Tree: scope.Tree, OriginalReturn: "UNKNOWN"}); err != nil {
+		return nil, err
+	}
+	if err = loopruntime.VerifySessionReadbackFiles(sources); err != nil {
+		return nil, err
+	}
+	return &archiveRecoveryHostExitFence{Disposition: ref, Scope: scope, Request: request, Owner: owner,
+		Generation: generation, Pool: pool, RuntimeDir: runtimeDir, Profile: profile, Custody: custody}, nil
+}
+
+func withOriginalArchiveHostExitFence(ctx context.Context, ref loopruntime.SessionReadbackFileRef, action func(*archiveRecoveryHostExitFence) error) error {
+	in, err := readArchiveRecoveryExitInputs(ref)
+	if err != nil {
+		return err
+	}
+	return withArchiveRecoveryExitLocks(ctx, in.request.HostDir, in.runtimeDir, in.session, in.custodyRoot, func(custodyLock *lockfile.Lock) error {
+		fence, err := readVerifiedArchiveRecoveryFence(ref, in)
 		if err != nil {
 			return err
 		}
-		if owner.Request != scope.Request || owner.HostRoot != request.HostDir ||
-			owner.Current.HostInstanceID != scope.HostInstanceID || owner.Current.ContextID != scope.ContextID ||
-			owner.Current.RequestID != request.RequestID {
-			return errors.New("original Host exit request or execution owner differs")
-		}
-		pool, err := readHostPool(owner.HostRoot)
-		if err != nil {
+		if err = verifyOriginalArchiveHostKernelExit(fence.Generation.Process); err != nil {
 			return err
 		}
-		generation, err := archiveRecoveryExitGeneration(pool, owner)
-		if err != nil {
-			return err
-		}
-		if err = verifyOriginalArchiveHostKernelExit(generation.Process); err != nil {
-			return err
-		}
-		hold, err := archiveRecoveryPaused(runtimeDir)
-		if err != nil || hold != scope.Hold {
-			return fmt.Errorf("original Host exit lacks the preserved dispatch hold: %v", err)
-		}
-		var state loopruntime.OpenShellCustodyState
-		custody, err := loopruntime.ReadSessionReadbackFile(custodyPath, &state)
-		if err != nil {
-			return err
-		}
-		if state.Binding.StateRoot != custodyRoot || state.ControlRoot != request.HostDir || state.Blocked != "" ||
-			len(state.PendingRetained) != 0 {
-			return errors.New("original Host exit OpenShell custody differs or remains unresolved")
-		}
-		config := owner.Current.ConfigPath
-		if config == "" {
-			config = filepath.Join(owner.Current.ProjectDir, ".noodle.toml")
-		}
-		sources := map[string]loopruntime.SessionReadbackFileRef{
-			"archive_disposition": ref, "archive_candidate": scope.Candidate,
-			"archive_capture": candidate.Capture, "archive_dispatch": capture.BaselineSource,
-			"archive_pause": hold.Acknowledgements, "archive_stop": scope.Stop, "archive_profile": profile,
-			"original_config": {Path: config, SHA256: owner.Current.ConfigSHA256}, "native_custody": custody,
-		}
-		for role, source := range owner.Sources {
-			sources[role] = source
-		}
-		if err = verifyArchiveRecoveryLanding(archiveRecoveryCleanupPlan{Candidate: scope.Candidate, LandingProof: scope.LandingProof,
-			Request: scope.Request, OrderID: scope.OrderID, AttemptID: scope.AttemptID, SessionID: scope.SessionID,
-			Head: scope.Head, Tree: scope.Tree, OriginalReturn: "UNKNOWN"}); err != nil {
-			return err
-		}
-		if err = loopruntime.VerifySessionReadbackFiles(sources); err != nil {
-			return err
-		}
-		if err = verifyOriginalArchiveHostKernelExit(generation.Process); err != nil {
-			return err
-		}
-		return action(&archiveRecoveryHostExitFence{Disposition: ref, Scope: scope, Request: request, Owner: owner,
-			Generation: generation, Pool: pool, RuntimeDir: runtimeDir, Profile: profile, Custody: custody, CustodyLock: custodyLock})
+		fence.CustodyLock = custodyLock
+		return action(fence)
 	})
 }
 

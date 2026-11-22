@@ -38,7 +38,7 @@ func newProgressMaintenanceCmd() *cobra.Command {
 	root.AddCommand(newCaptureOpenShellWorkspaceCmd())
 	root.AddCommand(newInspectOpenShellWorkspaceCaptureCmd())
 	root.AddCommand(newPlanOpenShellArchiveRecoveryCmd())
-	root.AddCommand(newArchiveRecoveryCleanupCmd(false), newArchiveRecoveryCleanupCmd(true), newArchiveRecoveryReclaimCmd())
+	root.AddCommand(newArchiveRecoveryCleanupCmd(false), newArchiveRecoveryCleanupCmd(true), newArchiveRecoveryReclaimCmd(), newArchiveRecoveryActivationCmd())
 	root.AddCommand(newRefreshOpenShellArchiveRecoveryCmd())
 	root.AddCommand(newStopOpenShellArchiveRecoveryCmd())
 	root.AddCommand(newPrepareOpenShellArchiveRecoveryPauseCmd())
