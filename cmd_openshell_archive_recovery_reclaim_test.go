@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/poteto/noodle/internal/admission"
+	"github.com/poteto/noodle/internal/procx"
 	loopruntime "github.com/poteto/noodle/runtime"
 	"github.com/poteto/noodle/worktree/archive"
 )
@@ -69,10 +70,17 @@ func TestArchiveRecoveryReclamationAdvertisesOnlyTheCurrentResident(t *testing.T
 	}
 	defer listener.Close()
 	matching := archiveRecoveryCleanupPlan{Disposition: &disposition, Effects: []string{}}
-	if err = planArchiveRecoveryReclaim(t.Context(), &matching); err != nil || matching.Next == nil || matching.WaitFor != "" ||
-		!reflect.DeepEqual(matching.Next.Argv[3:], []string{archiveRecoveryReclaimOperation,
-			"--disposition-file", path, "--expected-disposition-sha256", disposition.SHA256}) {
-		t.Fatalf("exact current actor has no reclamation continuation: %+v %v", matching, err)
+	if err = planArchiveRecoveryReclaim(t.Context(), &matching); err != nil {
+		t.Fatal(err)
+	}
+	if procx.NativeFixtureControlAvailable() {
+		if matching.Next == nil || matching.WaitFor != "" ||
+			!reflect.DeepEqual(matching.Next.Argv[3:], []string{archiveRecoveryReclaimOperation,
+				"--disposition-file", path, "--expected-disposition-sha256", disposition.SHA256}) {
+			t.Fatalf("exact current actor has no reclamation continuation: %+v", matching)
+		}
+	} else if matching.Next != nil || matching.WaitFor != "original_archive_recovery_host_handoff" {
+		t.Fatalf("resident without native identity readback yielded a mutation: %+v", matching)
 	}
 	binding.BinarySHA256 = strings.Repeat("e", 64)
 	d.Request = write(requestPath, binding)
