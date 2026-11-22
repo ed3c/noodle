@@ -537,6 +537,9 @@ func TestCheckoutPreservationReadbackCorruption(t *testing.T) {
 
 func TestCheckoutPreservationPartialRetainsSource(t *testing.T) {
 	r, c := checkoutFixture(t, "empty")
+	if err := VerifyCheckoutUnreserved(r); err != nil {
+		t.Fatal("fresh checkout was blocked", err)
+	}
 	// Block only the actual independent restore destination, after CAS/pool writes.
 	dir := filepath.Join(c.ArchiveRoot, "checkout-preservation", rootKey(r.Operation)+".recovery", "checkout")
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -553,12 +556,33 @@ func TestCheckoutPreservationPartialRetainsSource(t *testing.T) {
 	if _, err = os.Stat(filepath.Join(c.ArchiveRoot, "git-pools", rootKey(r.Identity.Repo)+".git")); err != nil {
 		t.Fatal("external data lost", err)
 	}
+	if _, err = ReadCheckoutPacket(r.Config, r.Operation); !os.IsNotExist(err) {
+		t.Fatal("partial archive unexpectedly published its final packet", err)
+	}
+	if err = VerifyCheckoutUnreserved(r); err == nil || !strings.Contains(err.Error(), "pending readback") {
+		t.Fatal("a missing packet masked the active archive reservation", err)
+	}
 	if _, err = PrepareCheckout(r); err == nil || !strings.Contains(err.Error(), "already reserved") {
 		t.Fatal("partial replay allowed", err)
 	}
 	r.Operation = "changed-operation"
+	if err = VerifyCheckoutUnreserved(r); err == nil || !strings.Contains(err.Error(), "pending readback") {
+		t.Fatal("another operation masked the original checkout reservation", err)
+	}
 	if _, err = PrepareCheckout(r); err == nil || !strings.Contains(err.Error(), "already reserved") {
 		t.Fatal("renamed replay allowed", err)
+	}
+}
+
+func TestCheckoutSourceRejectsPendingBranchRefWrite(t *testing.T) {
+	r, c := checkoutFixture(t, "empty")
+	before, err := InspectSource(c, r.Identity.Path)
+	if err != nil || before.Branch == "" {
+		t.Fatal("original linked branch unavailable", err)
+	}
+	fixtureWrite(t, filepath.Join(r.Identity.Repo, before.Branch+".lock"), []byte(before.Head+"\n"))
+	if _, err = InspectSource(c, r.Identity.Path); err == nil || !strings.Contains(err.Error(), "Git branch lock") {
+		t.Fatal("unchanged HEAD masked a pending branch update", err)
 	}
 }
 

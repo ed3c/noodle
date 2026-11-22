@@ -16,7 +16,16 @@ func TestCheckoutRemovalPreservesDriftedVerificationCopy(t *testing.T) {
 	if err = BeginCheckoutRemoval(p); err != nil {
 		t.Fatal(err)
 	}
+	if err = ObserveCheckoutRemovalBeforeReceipt(p); err == nil {
+		t.Fatal("pending request with a present checkout qualified as removed")
+	}
 	fixtureGit(t, r.Identity.Repo, "worktree", "remove", "--", r.Identity.Path)
+	if err = ObserveCheckoutRemovalBeforeReceipt(p); err != nil {
+		t.Fatalf("exact native removal could not be read after lost acknowledgement: %v", err)
+	}
+	if _, err = InspectCheckoutRemoval(p); !os.IsNotExist(err) {
+		t.Fatalf("read-only recovery wrote a removal receipt: %v", err)
+	}
 	if _, err = RecordCheckoutRemoval(p); err != nil {
 		t.Fatal(err)
 	}

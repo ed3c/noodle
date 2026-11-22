@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestApplyOpenShellArchiveRecovery(t *testing.T) {
-	for _, mode := range []string{"confirmed", "wrong VM", "changed archive", "missing stop ACK"} {
+	for _, mode := range []string{"confirmed", "credential refresh after Stop", "resident observed same Stop", "resident observed different compute", "wrong VM", "changed archive", "missing stop ACK after credential refresh", "current custody changed after qualification"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			root, err := filepath.EvalSymlinks(t.TempDir())
@@ -80,6 +81,9 @@ func TestApplyOpenShellArchiveRecovery(t *testing.T) {
 			sandbox := func() *pb.Sandbox {
 				s := custodySandbox(name, id, pb.SandboxPhase_SANDBOX_PHASE_READY)
 				s.Status.MainProcessInstanceId = main
+				if mode == "resident observed different compute" {
+					s.Status.AgentPod = "original-compute"
+				}
 				if stopped.Load() {
 					s.Status.Phase = pb.SandboxPhase_SANDBOX_PHASE_STOPPED
 				}
@@ -110,7 +114,10 @@ func TestApplyOpenShellArchiveRecovery(t *testing.T) {
 			record := OpenShellCustodyRecord{Name: name, MainProcessInstanceID: main, Spec: spec, Worker: OpenShellWorkerRecord{Identity: OpenShellIdentity{Sandbox: vm.Sandbox}}}
 			state := OpenShellCustodyState{Binding: OpenShellCustodyBinding{Workspace: vm.Sandbox.Workspace}, Records: []OpenShellCustodyRecord{record}}
 			in := storageFailureInputs{state: state, record: record}
-			capture := OpenShellWorkspaceCapture{OrderID: "original-order", NativeAttemptID: "native-attempt", SessionID: "original-session", SandboxID: id, MainProcessInstanceID: main, Archive: fileRef(archive), Sources: map[string]SessionReadbackFileRef{"workspace_manifest": manifestRef}}
+			custodyPath := filepath.Join(root, "owner.json")
+			historicalCustody := write(custodyPath, state)
+			currentCustody := historicalCustody
+			capture := OpenShellWorkspaceCapture{OrderID: "original-order", NativeAttemptID: "native-attempt", SessionID: "original-session", SandboxID: id, MainProcessInstanceID: main, Archive: fileRef(archive), Sources: map[string]SessionReadbackFileRef{"workspace_manifest": manifestRef, "custody": historicalCustody}}
 			captureRef := write(filepath.Join(root, "capture", "workspace-capture.json"), capture)
 			reviewRef := write(filepath.Join(root, "review.json"), map[string]any{"schema": 1, "status": "archive_recovery_review_evidence", "original_return": "UNKNOWN", "attempt_id": "logical-attempt", "capture": captureRef, "tree": tree, "authorizes_landing": false})
 			p := ProgressMaintenance{SessionDirectory: session, Request: write(filepath.Join(root, "request.json"), map[string]string{"identity": "original"})}
@@ -122,8 +129,35 @@ func TestApplyOpenShellArchiveRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			input := OpenShellArchiveRecoveryApplyInput{Review: reviewRef, Capture: captureRef, Stop: stop, AttemptID: "logical-attempt", DispatchHold: hold, Tree: tree, Scope: scope, Target: target}
+			refreshCredentials := func() {
+				t.Helper()
+				state.Credentials = append(state.Credentials, OpenShellCredentialDelivery{Provider: "renewed fixture"})
+				raw, err := json.Marshal(state)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(custodyPath, raw, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			var want string
 			switch mode {
+			case "credential refresh after Stop":
+				refreshCredentials()
+				currentCustody = fileRef(custodyPath)
+			case "resident observed same Stop", "resident observed different compute":
+				in.record.Stopped = openShellStoppedObservation(sandbox())
+				if mode == "resident observed different compute" {
+					in.record.Stopped.ComputeInstanceID = "foreign-compute"
+					want = "stopped compute instance differs from custody"
+				}
+				in.state.Records[0] = in.record
+				state.Records[0] = in.record
+				refreshCredentials()
+				currentCustody = fileRef(custodyPath)
+			case "current custody changed after qualification":
+				want = "maintenance source changed"
+				refreshCredentials()
 			case "wrong VM":
 				want = "sandbox identity changed"
 			case "changed archive":
@@ -131,7 +165,9 @@ func TestApplyOpenShellArchiveRecovery(t *testing.T) {
 				if err := os.WriteFile(archive, append(progressFixtureArchive(t, "noodle-result.tar"), make([]byte, 512)...), 0600); err != nil {
 					t.Fatal(err)
 				}
-			case "missing stop ACK":
+			case "missing stop ACK after credential refresh":
+				refreshCredentials()
+				currentCustody = fileRef(custodyPath)
 				want = "native-stop-ack.json"
 				if err = os.Remove(filepath.Join(stopDir, "native-stop-ack.json")); err != nil {
 					t.Fatal(err)
@@ -147,7 +183,7 @@ func TestApplyOpenShellArchiveRecovery(t *testing.T) {
 				return &pb.SandboxResponse{Sandbox: s}, nil
 			}
 			apply := func() (SessionReadbackFileRef, error) {
-				return applyOpenShellArchiveRecovery(ctx, p, input, capture, baseline, in, checkOwner, observe)
+				return applyOpenShellArchiveRecovery(ctx, p, input, capture, baseline, in, currentCustody, checkOwner, observe)
 			}
 			originalStop := fileRef(stop.Path)
 			result, err := apply()

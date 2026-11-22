@@ -86,6 +86,13 @@ func InspectSource(c Config, root string) (Source, error) {
 	if branchErr == nil {
 		s.Branch = strings.TrimSpace(branch)
 	}
+	if strings.HasPrefix(s.Branch, "refs/heads/") && safeRelative(s.Branch) {
+		if _, err := os.Lstat(filepath.Join(s.Common, s.Branch+".lock")); err == nil {
+			return s, fmt.Errorf("Git branch lock requires retention: %s", s.Branch)
+		} else if !os.IsNotExist(err) {
+			return s, err
+		}
+	}
 	for _, dir := range []string{s.Common, s.Admin} {
 		for _, name := range []string{"locked", "index.lock", "HEAD.lock", "config.lock", "packed-refs.lock", "shallow.lock", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "BISECT_LOG"} {
 			_, err := os.Lstat(filepath.Join(dir, name))

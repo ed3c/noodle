@@ -192,6 +192,25 @@ func verifyPoolClosure(p CheckoutPacket) error {
 	return nil
 }
 
+// ObserveCheckoutRemovalBeforeReceipt qualifies a lost removal acknowledgement
+// from the existing packet, without resending removal or writing its receipt.
+func ObserveCheckoutRemovalBeforeReceipt(p CheckoutPacket) error {
+	if _, err := inspectStoredCheckout(p); err != nil {
+		return err
+	}
+	if pending, err := CheckoutRemovalPending(p); err != nil || !pending {
+		return fmt.Errorf("original native checkout removal intent unavailable: %v", err)
+	}
+	if err := verifyRemovedSource(p); err != nil {
+		return err
+	}
+	c, err := checkoutConfig(p.Request)
+	if err != nil {
+		return err
+	}
+	return verifyRecovery(c, p)
+}
+
 // RecordCheckoutRemoval is called only after the native worktree owner observes
 // that removal completed and the original branch still names its exact commit.
 func RecordCheckoutRemoval(p CheckoutPacket) (CheckoutRemoval, error) {

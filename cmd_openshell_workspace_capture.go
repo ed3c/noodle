@@ -64,15 +64,9 @@ func captureOriginalOpenShellWorkspace(ctx context.Context, request, order, sess
 	if err != nil {
 		return ref, err
 	}
-	parent, err := filepath.EvalSymlinks(filepath.Dir(output))
+	parent, err := workspaceCapturePrivateParent(filepath.Dir(output), binding.ProjectDir, profile.Gateway.Binding.StateRoot, binding.HostDir)
 	if err != nil {
 		return ref, err
-	}
-	for _, root := range []string{binding.ProjectDir, profile.Gateway.Binding.StateRoot, binding.HostDir} {
-		rel, err := filepath.Rel(root, parent)
-		if err != nil || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
-			return ref, fmt.Errorf("workspace capture output must be outside original custody and project")
-		}
 	}
 	dir, err := filepath.EvalSymlinks(filepath.Join(binding.ProjectDir, ".noodle", "sessions", session))
 	if err != nil || filepath.Base(dir) != session {
@@ -102,6 +96,20 @@ func captureOriginalOpenShellWorkspace(ctx context.Context, request, order, sess
 	}
 	p := loopruntime.ProgressMaintenance{Request: requestRef, Profile: profileRef, ContextID: selected.Current.ContextID, SessionDirectory: dir}
 	return loopruntime.CaptureOpenShellWorkspace(ctx, p, profile, order, filepath.Join(parent, filepath.Base(output)), verify)
+}
+
+func workspaceCapturePrivateParent(parent string, protected ...string) (string, error) {
+	parent, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", err
+	}
+	for _, root := range protected {
+		rel, err := filepath.Rel(root, parent)
+		if err != nil || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
+			return "", fmt.Errorf("workspace capture output must be outside original custody and project")
+		}
+	}
+	return parent, nil
 }
 
 func readWorkspaceCaptureConfig(binding hostRequestBinding) ([]byte, error) {

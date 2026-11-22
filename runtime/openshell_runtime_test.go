@@ -704,6 +704,26 @@ func TestOpenShellRuntimeRetainsUnknownProgress(t *testing.T) {
 				time.Sleep(5 * time.Millisecond)
 			}
 			select {
+			case <-session.runExited:
+			case <-time.After(5 * time.Second):
+				t.Fatal("retained execution did not supply positive run exit")
+			}
+			path := filepath.Join(session.dir, "openshell-dispatch.json")
+			var frozen openShellDispatchReceipt
+			if _, err := ReadSessionReadbackFile(path, &frozen); err != nil {
+				t.Fatal(err)
+			}
+			proof := archiveRecoveryVMProof{
+				disposition: archiveRecoveryRetirementDisposition{SessionID: session.id},
+				request:     ProgressMaintenance{SessionDirectory: session.dir}, dispatch: frozen,
+			}
+			r.mu.Lock()
+			known, verifyErr := r.inertArchiveRecoveryHandle(proof)
+			r.mu.Unlock()
+			if verifyErr != nil || known != session {
+				t.Fatalf("retained exact worker did not qualify as inert: %v", verifyErr)
+			}
+			select {
 			case <-h.Done():
 				t.Fatal("unknown progress released original session")
 			default:

@@ -48,28 +48,8 @@ func StopOpenShellArchiveRecovery(ctx context.Context, p ProgressMaintenance, pr
 		return SessionReadbackFileRef{}, err
 	}
 	defer lock.Close()
-	capture, err := ReadOpenShellWorkspaceCapture(captureRef)
+	capture, in, err := archiveRecoveryStopInputs(p, profile, review, captureRef, false, false)
 	if err != nil {
-		return SessionReadbackFileRef{}, err
-	}
-	record, baseline, sources, err := workspaceCaptureInputs(p, profile, capture.OrderID)
-	if err != nil {
-		return SessionReadbackFileRef{}, err
-	}
-	sources["request"] = p.Request
-	for name, source := range sources {
-		if capture.Sources[name] != source {
-			return SessionReadbackFileRef{}, fmt.Errorf("archive recovery original source differs: %s", name)
-		}
-	}
-	if capture.SessionID != record.Task.SessionID || capture.NativeAttemptID != record.Task.AttemptID || capture.SandboxID != record.Worker.Identity.Sandbox.SandboxID || capture.MainProcessInstanceID != record.MainProcessInstanceID || capture.BaselineHead != baseline.Head || capture.BaselineIndexSHA256 != baseline.IndexSHA256 {
-		return SessionReadbackFileRef{}, fmt.Errorf("archive recovery candidate does not bind the original attempt")
-	}
-	var custody OpenShellCustodyState
-	if err = maintenanceVerify(sources["custody"], &custody); err != nil {
-		return SessionReadbackFileRef{}, err
-	}
-	if err = maintenanceVerify(review, nil); err != nil {
 		return SessionReadbackFileRef{}, err
 	}
 	conn, err := newOpenShellConnection(profile.Gateway.Binding.Gateway, profile.Gateway.TLS)
@@ -77,7 +57,7 @@ func StopOpenShellArchiveRecovery(ctx context.Context, p ProgressMaintenance, pr
 		return SessionReadbackFileRef{}, err
 	}
 	defer conn.Close()
-	return stopOpenShellArchiveRecovery(ctx, pb.NewOpenShellClient(conn), storageFailureInputs{state: custody, record: record}, p, review, captureRef, hold, output, func() error {
+	return stopOpenShellArchiveRecovery(ctx, pb.NewOpenShellClient(conn), in, p, review, captureRef, hold, output, func() error {
 		if err := VerifySessionReadbackFiles(capture.Sources); err != nil {
 			return err
 		}
@@ -87,20 +67,100 @@ func StopOpenShellArchiveRecovery(ctx context.Context, p ProgressMaintenance, pr
 		if err := maintenanceVerify(review, nil); err != nil {
 			return err
 		}
-		before, err := os.Lstat(capture.Archive.Path)
-		if err != nil || !before.Mode().IsRegular() {
-			return fmt.Errorf("archive recovery retained workspace is unavailable")
-		}
-		digest, err := pairingDigestFile(capture.Archive.Path)
-		if err != nil || digest != capture.Archive.SHA256 {
-			return fmt.Errorf("archive recovery retained workspace bytes changed")
-		}
-		after, err := os.Lstat(capture.Archive.Path)
-		if err != nil || !os.SameFile(before, after) || before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
-			return fmt.Errorf("archive recovery retained workspace changed during readback")
+		if err := verifyRetainedArchiveRecoveryBytes(capture.Archive); err != nil {
+			return err
 		}
 		return checkOwner()
 	})
+}
+
+// ObserveOpenShellArchiveRecovery checks the original VM identity and phase without sending Stop.
+// A Stopped phase still requires the original Stop intent and acknowledgement.
+func ObserveOpenShellArchiveRecovery(ctx context.Context, p ProgressMaintenance, profile OpenShellProfile, review, captureRef SessionReadbackFileRef, hold *ArchiveRecoveryDispatchHold) error {
+	// A confirmed Stop receipt witnessed the exact archive before the effect.
+	// Re-verify the current custody through that witness if its bytes moved.
+	return observeBoundOpenShellArchiveRecovery(ctx, p, profile, review, captureRef, hold, hold != nil)
+}
+
+// ObserveOpenShellArchiveRecapture checks the same original Ready VM. The
+// caller must separately compare the historical archive and its verified tree.
+func ObserveOpenShellArchiveRecapture(ctx context.Context, p ProgressMaintenance, profile OpenShellProfile, review, captureRef SessionReadbackFileRef) error {
+	return observeBoundOpenShellArchiveRecovery(ctx, p, profile, review, captureRef, nil, true)
+}
+
+func observeBoundOpenShellArchiveRecovery(ctx context.Context, p ProgressMaintenance, profile OpenShellProfile, review, captureRef SessionReadbackFileRef, hold *ArchiveRecoveryDispatchHold, historical bool) error {
+	_, in, err := archiveRecoveryStopInputs(p, profile, review, captureRef, historical, hold != nil)
+	if err != nil {
+		return err
+	}
+	conn, err := newOpenShellConnection(profile.Gateway.Binding.Gateway, profile.Gateway.TLS)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	return observeOpenShellArchiveRecovery(ctx, pb.NewOpenShellClient(conn), in, p, review, captureRef, hold)
+}
+
+func observeOpenShellArchiveRecovery(ctx context.Context, client pb.OpenShellClient, in storageFailureInputs, p ProgressMaintenance, review, captureRef SessionReadbackFileRef, hold *ArchiveRecoveryDispatchHold) error {
+	if hold != nil {
+		var intent OpenShellArchiveRecoveryStop
+		reservation, err := ReadSessionReadbackFile(filepath.Join(p.SessionDirectory, "archive-recovery-stop-intent.json"), &intent)
+		if err != nil {
+			return err
+		}
+		if intent.DispatchHold != *hold {
+			return fmt.Errorf("archive recovery Stop original dispatch hold differs")
+		}
+		if _, err := readArchiveRecoveryStop(in, p, review, captureRef, filepath.Join(p.SessionDirectory, "archive-recovery-stop"), reservation, intent); err != nil {
+			return err
+		}
+	}
+	scope := &dm.WorkspaceSelector{Selection: &dm.WorkspaceSelector_Workspace{Workspace: in.record.Worker.Identity.Sandbox.Workspace}}
+	response, err := client.GetSandbox(ctx, &pb.GetSandboxRequest{Name: in.record.Name, WorkspaceScope: scope})
+	if err != nil {
+		return err
+	}
+	if hold != nil {
+		return verifyArchiveRecoveryStopped(in.record, response)
+	}
+	if err := maintenanceNative(in.record, response.GetSandbox()); err != nil {
+		return err
+	}
+	if response.GetSandbox().GetStatus().GetPhase() != pb.SandboxPhase_SANDBOX_PHASE_READY {
+		return fmt.Errorf("archive recovery original VM phase %s is required", pb.SandboxPhase_SANDBOX_PHASE_READY)
+	}
+	return nil
+}
+
+func archiveRecoveryStopInputs(p ProgressMaintenance, profile OpenShellProfile, review, captureRef SessionReadbackFileRef, historical, afterArchiveStop bool) (OpenShellWorkspaceCapture, storageFailureInputs, error) {
+	capture, err := ReadOpenShellWorkspaceCapture(captureRef)
+	if err != nil {
+		return OpenShellWorkspaceCapture{}, storageFailureInputs{}, err
+	}
+	record, baseline, sources, err := workspaceCaptureInputs(p, profile, capture.OrderID, afterArchiveStop)
+	if err != nil {
+		return OpenShellWorkspaceCapture{}, storageFailureInputs{}, err
+	}
+	sources["request"] = p.Request
+	for name, source := range sources {
+		if historical && name == "custody" && capture.Sources[name].Path == source.Path && len(capture.Sources[name].SHA256) == 64 {
+			continue
+		}
+		if capture.Sources[name] != source {
+			return OpenShellWorkspaceCapture{}, storageFailureInputs{}, fmt.Errorf("archive recovery original source differs: %s", name)
+		}
+	}
+	if capture.SessionID != record.Task.SessionID || capture.NativeAttemptID != record.Task.AttemptID || capture.SandboxID != record.Worker.Identity.Sandbox.SandboxID || capture.MainProcessInstanceID != record.MainProcessInstanceID || capture.BaselineHead != baseline.Head || capture.BaselineIndexSHA256 != baseline.IndexSHA256 {
+		return OpenShellWorkspaceCapture{}, storageFailureInputs{}, fmt.Errorf("archive recovery candidate does not bind the original attempt")
+	}
+	var custody OpenShellCustodyState
+	if err = maintenanceVerify(sources["custody"], &custody); err != nil {
+		return OpenShellWorkspaceCapture{}, storageFailureInputs{}, err
+	}
+	if err = maintenanceVerify(review, nil); err != nil {
+		return OpenShellWorkspaceCapture{}, storageFailureInputs{}, err
+	}
+	return capture, storageFailureInputs{state: custody, record: record}, nil
 }
 
 func stopOpenShellArchiveRecovery(ctx context.Context, client pb.OpenShellClient, in storageFailureInputs, p ProgressMaintenance, review, capture SessionReadbackFileRef, hold ArchiveRecoveryDispatchHold, output string, checkOwner func() error) (SessionReadbackFileRef, error) {
@@ -218,8 +278,8 @@ func readArchiveRecoveryStop(in storageFailureInputs, p ProgressMaintenance, rev
 			return SessionReadbackFileRef{}, err
 		}
 	}
-	if stopped.GetSandbox().GetStatus().GetPhase() != pb.SandboxPhase_SANDBOX_PHASE_STOPPED {
-		return SessionReadbackFileRef{}, fmt.Errorf("archive recovery original Stopped evidence is missing")
+	if err := verifyArchiveRecoveryStopped(in.record, &stopped); err != nil {
+		return SessionReadbackFileRef{}, err
 	}
 	for _, check := range []struct {
 		source SessionReadbackFileRef

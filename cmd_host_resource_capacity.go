@@ -30,7 +30,11 @@ func (h *noodleHost) bindMachineCapacity() {
 		return
 	}
 	// No task or Host environment override can select a separate machine pool.
-	_ = h.budget.BindMachineCapacity(directory, root+"/generation/"+h.instanceID)
+	_ = h.budget.BindMachineCapacity(directory, hostMachineGenerationOwner(root, h.instanceID))
+}
+
+func hostMachineGenerationOwner(root, instanceID string) string {
+	return root + "/generation/" + instanceID
 }
 
 func (h *noodleHost) bindWorkerResourceSource(id, project, storage string, profile *loopruntime.OpenShellProfile, preparation *hostTaskPreparationPlan, preparedRoots ...string) {

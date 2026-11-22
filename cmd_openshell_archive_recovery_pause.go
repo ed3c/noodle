@@ -23,11 +23,14 @@ type archiveRecoveryPausePlan struct {
 }
 
 type archiveRecoveryPauseReadback struct {
-	Schema         int                                      `json:"schema"`
-	Status         string                                   `json:"status"`
-	Plan           loopruntime.SessionReadbackFileRef       `json:"plan"`
-	DispatchHold   *loopruntime.ArchiveRecoveryDispatchHold `json:"dispatch_hold"`
-	OriginalReturn string                                   `json:"original_return"`
+	Schema            int                                      `json:"schema"`
+	Status            string                                   `json:"status"`
+	Plan              loopruntime.SessionReadbackFileRef       `json:"plan"`
+	DispatchHold      *loopruntime.ArchiveRecoveryDispatchHold `json:"dispatch_hold"`
+	OriginalReturn    string                                   `json:"original_return"`
+	Review            loopruntime.SessionReadbackFileRef       `json:"review"`
+	AuthorizesLanding bool                                     `json:"authorizes_landing"`
+	archiveRecoveryContinuation
 }
 
 func newPrepareOpenShellArchiveRecoveryPauseCmd() *cobra.Command {
@@ -36,8 +39,18 @@ func newPrepareOpenShellArchiveRecoveryPauseCmd() *cobra.Command {
 		ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
 		defer cancel()
 		var pause archiveRecoveryPauseReadback
-		if _, err := runOriginalArchiveRecoveryControl(ctx, loopruntime.SessionReadbackFileRef{Path: review, SHA256: expected}, &pause, false); err != nil {
+		reviewRef := loopruntime.SessionReadbackFileRef{Path: review, SHA256: expected}
+		if _, err := runOriginalArchiveRecoveryControl(ctx, reviewRef, archiveRecoveryControl{pause: &pause}); err != nil {
 			return err
+		}
+		pause.Review = reviewRef
+		pause.WaitFor = "original_archive_recovery_pause_readback"
+		if pause.DispatchHold != nil {
+			continuation, err := archiveRecoveryOfferAfter(filepath.Dir(pause.Plan.Path), reviewRef, "stop", archiveStopOperation)
+			if err != nil {
+				return err
+			}
+			pause.archiveRecoveryContinuation = continuation
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(pause)
 	}}

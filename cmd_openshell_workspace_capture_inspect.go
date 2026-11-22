@@ -38,6 +38,12 @@ func newInspectOpenShellWorkspaceCaptureCmd() *cobra.Command {
 }
 
 func inspectOriginalWorkspaceCapture(ctx context.Context, ref loopruntime.SessionReadbackFileRef) (map[string]any, error) {
+	return inspectWorkspaceCaptureBound(ctx, ref, loopruntime.InspectOpenShellWorkspaceCapture)
+}
+
+type workspaceCaptureTreeInspector func(context.Context, loopruntime.SessionReadbackFileRef, loopruntime.ProgressMaintenance, loopruntime.OpenShellProfile, string, string, string, workspaceartifacts.LocalTaskScope) (workspaceartifacts.ArchiveCandidateTree, error)
+
+func inspectWorkspaceCaptureBound(ctx context.Context, ref loopruntime.SessionReadbackFileRef, inspect workspaceCaptureTreeInspector) (map[string]any, error) {
 	proof, err := loopruntime.ReadOpenShellWorkspaceCapture(ref)
 	if err != nil {
 		return nil, err
@@ -80,7 +86,7 @@ func inspectOriginalWorkspaceCapture(ctx context.Context, ref loopruntime.Sessio
 		return nil, err
 	}
 	p := loopruntime.ProgressMaintenance{Request: request, Profile: profileRef, HostDir: owner.HostRoot, ContextID: owner.Current.ContextID, SessionDirectory: session}
-	tree, err := loopruntime.InspectOpenShellWorkspaceCapture(ctx, ref, p, profile, binding.ProjectDir, subject.Custody.Physical, subject.Custody.CommonDir, subject.Scope)
+	tree, err := inspect(ctx, ref, p, profile, binding.ProjectDir, subject.Custody.Physical, subject.Custody.CommonDir, subject.Scope)
 	if err != nil {
 		return nil, err
 	}

@@ -71,14 +71,20 @@ func (l *Loop) reconcile(ctx context.Context) error {
 		)
 	}
 
-	if err := l.ensureScheduleOrderPresent(); err != nil {
-		return l.classifySystemHard(
-			"reconcile.ensure_schedule",
-			"reconcile ensure schedule order failed",
-			err,
-		)
+	archiveHeld, err := l.archiveRecoveryStartupOrders()
+	if err != nil {
+		return fmt.Errorf("archive recovery original startup ownership: %w", err)
 	}
-	if err := l.reconcileStaleDispatchStages(); err != nil {
+	if len(archiveHeld) == 0 {
+		if err := l.ensureScheduleOrderPresent(); err != nil {
+			return l.classifySystemHard(
+				"reconcile.ensure_schedule",
+				"reconcile ensure schedule order failed",
+				err,
+			)
+		}
+	}
+	if err := l.reconcileStaleDispatchStagesWithArchive(archiveHeld); err != nil {
 		return l.classifySystemHard(
 			"reconcile.stale_dispatch",
 			"reconcile stale dispatch stages failed",
@@ -281,13 +287,21 @@ func (l *Loop) ensureScheduleOrderPresent() error {
 }
 
 func (l *Loop) reconcileStaleDispatchStages() error {
+	archiveHeld, err := l.archiveRecoveryStartupOrders()
+	if err != nil {
+		return err
+	}
+	return l.reconcileStaleDispatchStagesWithArchive(archiveHeld)
+}
+
+func (l *Loop) reconcileStaleDispatchStagesWithArchive(archiveHeld map[string]bool) error {
 	changed := false
 	now := timeNowUTC(l.deps.Now)
 	for orderID, order := range l.canonical.Orders {
 		if order.Status.IsTerminal() {
 			continue
 		}
-		if _, adopted := l.cooks.adoptedTargets[orderID]; adopted {
+		if _, adopted := l.cooks.adoptedTargets[orderID]; adopted || archiveHeld[orderID] {
 			continue
 		}
 		orderChanged := false
@@ -329,11 +343,17 @@ func (l *Loop) reconcileStaleDispatchStages() error {
 	if !changed {
 		return nil
 	}
-	if err := l.mutateOrdersState(func(orders *OrdersFile) (bool, error) {
+	mutateOrders := l.mutateOrdersState
+	if len(archiveHeld) != 0 {
+		// Canonical transitions above are already authoritative. Writing the
+		// legacy mirror must not re-synthesize the preserved archive order.
+		mutateOrders = l.mutateProjectedMirrorState
+	}
+	if err := mutateOrders(func(orders *OrdersFile) (bool, error) {
 		ordersChanged := false
 		for oi := range orders.Orders {
 			order := &orders.Orders[oi]
-			if _, adopted := l.cooks.adoptedTargets[order.ID]; adopted {
+			if _, adopted := l.cooks.adoptedTargets[order.ID]; adopted || archiveHeld[order.ID] {
 				continue
 			}
 			for si := range order.Stages {

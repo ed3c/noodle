@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,23 +53,49 @@ func ReadOpenShellWorkspaceCapture(ref SessionReadbackFileRef) (OpenShellWorkspa
 	return capture, nil
 }
 
+var ErrWorkspaceCaptureCustodyChanged = errors.New("workspace capture original source differs: custody")
+
 // InspectOpenShellWorkspaceCapture verifies an existing capture and computes a
 // review tree in scratch space. It never contacts the original Host or Gateway.
 func InspectOpenShellWorkspaceCapture(ctx context.Context, ref SessionReadbackFileRef, p ProgressMaintenance, profile OpenShellProfile, project, target, gitCommonDir string, scope workspaceartifacts.LocalTaskScope) (workspaceartifacts.ArchiveCandidateTree, error) {
+	return inspectOpenShellWorkspaceCapture(ctx, ref, p, profile, project, target, gitCommonDir, scope, false, false)
+}
+
+// InspectHistoricalOpenShellWorkspaceTree compares retained archive bytes for
+// recapture only. It does not verify the old custody or authorize recovery effects.
+func InspectHistoricalOpenShellWorkspaceTree(ctx context.Context, ref SessionReadbackFileRef, p ProgressMaintenance, profile OpenShellProfile, project, target, gitCommonDir string, scope workspaceartifacts.LocalTaskScope) (workspaceartifacts.ArchiveCandidateTree, error) {
+	return inspectOpenShellWorkspaceCapture(ctx, ref, p, profile, project, target, gitCommonDir, scope, true, false)
+}
+
+// InspectStoppedOpenShellWorkspaceTree verifies the retained tree for a planned
+// Apply. The original Stop receipt and current VM phase need separate owner readback.
+func InspectStoppedOpenShellWorkspaceTree(ctx context.Context, ref SessionReadbackFileRef, p ProgressMaintenance, profile OpenShellProfile, project, target, gitCommonDir string, scope workspaceartifacts.LocalTaskScope) (workspaceartifacts.ArchiveCandidateTree, error) {
+	return inspectOpenShellWorkspaceCapture(ctx, ref, p, profile, project, target, gitCommonDir, scope, true, true)
+}
+
+func inspectOpenShellWorkspaceCapture(ctx context.Context, ref SessionReadbackFileRef, p ProgressMaintenance, profile OpenShellProfile, project, target, gitCommonDir string, scope workspaceartifacts.LocalTaskScope, historical, afterArchiveStop bool) (workspaceartifacts.ArchiveCandidateTree, error) {
 	var result workspaceartifacts.ArchiveCandidateTree
 	capture, err := ReadOpenShellWorkspaceCapture(ref)
 	if err != nil {
 		return result, err
 	}
-	record, baseline, original, err := workspaceCaptureInputs(p, profile, capture.OrderID)
+	record, baseline, original, err := workspaceCaptureInputs(p, profile, capture.OrderID, afterArchiveStop)
 	if err != nil {
 		return result, err
 	}
 	original["request"] = p.Request
 	for name, source := range original {
-		if capture.Sources[name] != source {
+		if name != "custody" && capture.Sources[name] != source {
 			return result, fmt.Errorf("workspace capture original source differs: %s", name)
 		}
+	}
+	oldCustody, currentCustody := capture.Sources["custody"], original["custody"]
+	if historical {
+		if oldCustody.Path != currentCustody.Path || len(oldCustody.SHA256) != 64 || (!afterArchiveStop && oldCustody == currentCustody) {
+			return result, fmt.Errorf("historical archive recapture requires the same changed original custody source")
+		}
+	} else if oldCustody != currentCustody {
+		return result, ErrWorkspaceCaptureCustodyChanged
 	}
 	if capture.SessionID != record.Task.SessionID || capture.NativeAttemptID != record.Task.AttemptID || capture.SandboxID != record.Worker.Identity.Sandbox.SandboxID || capture.MainProcessInstanceID != record.MainProcessInstanceID || capture.CaptureExecRequestID == "" || capture.CaptureExecRequestID == record.Exec.Command.RequestID || capture.BaselineHead != baseline.Head || capture.BaselineIndexSHA256 != baseline.IndexSHA256 {
 		return result, fmt.Errorf("workspace capture attempt, native identity, or baseline differs")
@@ -126,8 +153,18 @@ func InspectOpenShellWorkspaceCapture(ctx context.Context, ref SessionReadbackFi
 	if err != nil || !os.SameFile(before, after) || after.Size() != before.Size() || after.Mode() != before.Mode() || !after.ModTime().Equal(before.ModTime()) {
 		return result, fmt.Errorf("workspace capture archive changed during inspection")
 	}
-	if err = VerifySessionReadbackFiles(capture.Sources); err != nil {
-		return result, err
+	for name, source := range capture.Sources {
+		if historical && name == "custody" {
+			continue
+		}
+		if err = maintenanceVerify(source, nil); err != nil {
+			return result, err
+		}
+	}
+	if historical {
+		if err = maintenanceVerify(currentCustody, nil); err != nil {
+			return result, err
+		}
 	}
 	return result, maintenanceVerify(ref, nil)
 }

@@ -72,12 +72,18 @@ func ApplyOpenShellArchiveRecovery(ctx context.Context, p ProgressMaintenance, p
 	if err != nil {
 		return empty, err
 	}
-	record, baseline, sources, err := workspaceCaptureInputs(p, profile, capture.OrderID)
+	record, baseline, sources, err := workspaceCaptureInputs(p, profile, capture.OrderID, true)
 	if err != nil {
 		return empty, err
 	}
 	sources["request"] = p.Request
+	currentCustody := sources["custody"]
 	for name, source := range sources {
+		if name == "custody" && capture.Sources[name].Path == source.Path && len(capture.Sources[name].SHA256) == 64 {
+			// The confirmed original Stop witnesses historical custody. The
+			// current source remains bound independently until Apply reserves.
+			continue
+		}
 		if capture.Sources[name] != source {
 			return empty, fmt.Errorf("archive recovery original source differs: %s", name)
 		}
@@ -98,7 +104,7 @@ func ApplyOpenShellArchiveRecovery(ctx context.Context, p ProgressMaintenance, p
 		return empty, err
 	}
 	in := storageFailureInputs{state: custody, record: record}
-	return applyOpenShellArchiveRecovery(ctx, p, input, capture, baseline, in, checkOwner, func(ctx context.Context) (*pb.SandboxResponse, error) {
+	return applyOpenShellArchiveRecovery(ctx, p, input, capture, baseline, in, currentCustody, checkOwner, func(ctx context.Context) (*pb.SandboxResponse, error) {
 		conn, err := newOpenShellConnection(profile.Gateway.Binding.Gateway, profile.Gateway.TLS)
 		if err != nil {
 			return nil, err
@@ -109,7 +115,7 @@ func ApplyOpenShellArchiveRecovery(ctx context.Context, p ProgressMaintenance, p
 	})
 }
 
-func applyOpenShellArchiveRecovery(ctx context.Context, p ProgressMaintenance, input OpenShellArchiveRecoveryApplyInput, capture OpenShellWorkspaceCapture, baseline *workspaceartifacts.Baseline, in storageFailureInputs, checkOwner func() error, observe func(context.Context) (*pb.SandboxResponse, error)) (SessionReadbackFileRef, error) {
+func applyOpenShellArchiveRecovery(ctx context.Context, p ProgressMaintenance, input OpenShellArchiveRecoveryApplyInput, capture OpenShellWorkspaceCapture, baseline *workspaceartifacts.Baseline, in storageFailureInputs, currentCustody SessionReadbackFileRef, checkOwner func() error, observe func(context.Context) (*pb.SandboxResponse, error)) (SessionReadbackFileRef, error) {
 	var empty SessionReadbackFileRef
 	var reviewed struct {
 		Schema            int                                     `json:"schema"`
@@ -183,7 +189,7 @@ func applyOpenShellArchiveRecovery(ctx context.Context, p ProgressMaintenance, i
 	if err = os.RemoveAll(scratch); err != nil {
 		return empty, err
 	}
-	if err = VerifySessionReadbackFiles(capture.Sources); err != nil {
+	if err = verifyArchiveRecoveryApplySources(capture.Sources, currentCustody); err != nil {
 		return empty, err
 	}
 	if err = VerifySessionReadbackFiles(map[string]SessionReadbackFileRef{"capture": input.Capture, "review": input.Review}); err != nil {
@@ -211,6 +217,9 @@ func applyOpenShellArchiveRecovery(ctx context.Context, p ProgressMaintenance, i
 		return empty, err
 	}
 	if err = checkOwner(); err != nil {
+		return empty, err
+	}
+	if err := maintenanceVerify(currentCustody, nil); err != nil {
 		return empty, err
 	}
 	record := archiveRecoveryApplyRecord{archiveRecoveryApplyIntent: identity, Stopped: stoppedRef}
@@ -259,6 +268,20 @@ func applyOpenShellArchiveRecovery(ctx context.Context, p ProgressMaintenance, i
 	return ReadSessionReadbackFile(candidatePath, nil)
 }
 
+func verifyArchiveRecoveryApplySources(sources map[string]SessionReadbackFileRef, currentCustody SessionReadbackFileRef) error {
+	if sources["custody"].Path != currentCustody.Path || currentCustody.Path == "" {
+		return fmt.Errorf("archive recovery current custody source differs")
+	}
+	for name, source := range sources {
+		if name != "custody" {
+			if err := maintenanceVerify(source, nil); err != nil {
+				return err
+			}
+		}
+	}
+	return maintenanceVerify(currentCustody, nil)
+}
+
 func verifyArchiveRecoveryApplyStop(p ProgressMaintenance, input OpenShellArchiveRecoveryApplyInput, in storageFailureInputs) error {
 	stopDir := filepath.Join(p.SessionDirectory, "archive-recovery-stop")
 	if input.Stop.Path != filepath.Join(stopDir, "archive-recovery-stop.json") {
@@ -289,6 +312,11 @@ func verifyArchiveRecoveryStopped(record OpenShellCustodyRecord, response *pb.Sa
 	}
 	if sandbox.GetStatus().GetPhase() != pb.SandboxPhase_SANDBOX_PHASE_STOPPED {
 		return fmt.Errorf("archive recovery fresh original Stopped evidence is missing")
+	}
+	if observed := openShellStoppedObservation(sandbox); record.Stopped != nil &&
+		record.Stopped.ComputeInstanceID != "" && observed.ComputeInstanceID != "" &&
+		record.Stopped.ComputeInstanceID != observed.ComputeInstanceID {
+		return fmt.Errorf("archive recovery stopped compute instance differs from custody")
 	}
 	return nil
 }

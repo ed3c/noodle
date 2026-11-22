@@ -391,6 +391,29 @@ func packetPath(c Config, operation string) string {
 	return filepath.Join(c.ArchiveRoot, "checkout-preservation", rootKey(operation)+".json")
 }
 
+func checkoutSourceReservationPath(c Config, r CheckoutRequest) string {
+	return filepath.Join(filepath.Dir(packetPath(c, r.Operation)),
+		"source-"+rootKey(r.Identity.Path+"\x00"+r.Identity.Incarnation)+".reservation")
+}
+
+// VerifyCheckoutUnreserved distinguishes a missing packet from an operation
+// that has already reserved the original checkout but has no final receipt.
+func VerifyCheckoutUnreserved(r CheckoutRequest) error {
+	c, err := checkoutConfig(r)
+	if err != nil {
+		return err
+	}
+	packet := packetPath(c, r.Operation)
+	for _, path := range []string{checkoutSourceReservationPath(c, r), packet + ".reservation", packet, removalIntentPath(c, CheckoutPacket{Request: r})} {
+		if _, err = os.Lstat(path); err == nil {
+			return fmt.Errorf("original checkout archive or removal is pending readback: %s", filepath.Base(path))
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
 func sealPacket(c Config, p CheckoutPacket) (CheckoutPacket, error) {
 	p.Signature = ""
 	signature, err := authenticate(c, p)
@@ -468,7 +491,7 @@ func PrepareCheckout(r CheckoutRequest) (CheckoutPacket, error) {
 	}
 	// The reservation is permanent even on failure. It protects partial CAS/pool
 	// state from being mistaken for an absent operation.
-	sourceReservation := filepath.Join(dir, "source-"+rootKey(r.Identity.Path+"\x00"+r.Identity.Incarnation)+".reservation")
+	sourceReservation := checkoutSourceReservationPath(c, r)
 	if err = publishImmutable(sourceReservation, r); err != nil {
 		return p, fmt.Errorf("source already reserved; original operation readback/reconciliation required: %w", err)
 	}

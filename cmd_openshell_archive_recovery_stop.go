@@ -27,6 +27,7 @@ type archiveRecoveryReview struct {
 	AttemptID         string                                  `json:"attempt_id"`
 	Capture           loopruntime.SessionReadbackFileRef      `json:"capture"`
 	Tree              workspaceartifacts.ArchiveCandidateTree `json:"tree"`
+	WritePaths        []string                                `json:"write_paths"`
 	AuthorizesLanding bool                                    `json:"authorizes_landing"`
 }
 
@@ -35,11 +36,24 @@ func newStopOpenShellArchiveRecoveryCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "stop-workspace-capture", Short: "Stop the original OpenShell sandbox after the reviewed archive and paused Owner are verified", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
 		defer cancel()
-		ref, err := runOriginalArchiveRecoveryControl(ctx, loopruntime.SessionReadbackFileRef{Path: review, SHA256: expected}, nil, false)
+		ref, err := runOriginalArchiveRecoveryControl(ctx, loopruntime.SessionReadbackFileRef{Path: review, SHA256: expected}, archiveRecoveryControl{})
 		if err != nil {
 			return err
 		}
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"schema": 1, "status": "archive_recovery_stop_observed", "receipt": ref, "original_return": "UNKNOWN", "authorizes_landing": false, "next": nil})
+		reviewRef := loopruntime.SessionReadbackFileRef{Path: review, SHA256: expected}
+		continuation, err := archiveRecoveryOfferAfter(filepath.Dir(filepath.Dir(ref.Path)), reviewRef, "apply", archiveApplyOperation)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+			Schema            int                                `json:"schema"`
+			Status            string                             `json:"status"`
+			Receipt           loopruntime.SessionReadbackFileRef `json:"receipt"`
+			Review            loopruntime.SessionReadbackFileRef `json:"review"`
+			OriginalReturn    string                             `json:"original_return"`
+			AuthorizesLanding bool                               `json:"authorizes_landing"`
+			archiveRecoveryContinuation
+		}{1, "archive_recovery_stop_observed", ref, reviewRef, "UNKNOWN", false, continuation})
 	}}
 	cmd.Flags().StringVar(&review, "review-file", "", "Original archive recovery review evidence")
 	cmd.Flags().StringVar(&expected, "expected-sha256", "", "Exact reviewed FileRef SHA256")
@@ -48,7 +62,16 @@ func newStopOpenShellArchiveRecoveryCmd() *cobra.Command {
 	return cmd
 }
 
-func runOriginalArchiveRecoveryControl(ctx context.Context, reviewRef loopruntime.SessionReadbackFileRef, pause *archiveRecoveryPauseReadback, adopt bool) (loopruntime.SessionReadbackFileRef, error) {
+type archiveRecoveryControl struct {
+	pause           *archiveRecoveryPauseReadback
+	adopt           bool
+	plan            *archiveRecoveryPlanReadback
+	refresh         *archiveRecoveryRefreshReadback
+	cleanup         *archiveRecoveryCleanupPlan
+	cleanupExpected string
+}
+
+func runOriginalArchiveRecoveryControl(ctx context.Context, reviewRef loopruntime.SessionReadbackFileRef, action archiveRecoveryControl) (loopruntime.SessionReadbackFileRef, error) {
 	var empty loopruntime.SessionReadbackFileRef
 	var review archiveRecoveryReview
 	ref, err := loopruntime.ReadSessionReadbackFile(reviewRef.Path, &review)
@@ -99,25 +122,23 @@ func runOriginalArchiveRecoveryControl(ctx context.Context, reviewRef loopruntim
 	}
 	p := loopruntime.ProgressMaintenance{Request: request, Profile: capture.Sources["profile"], HostDir: owner.HostRoot, HostInstance: owner.Current.HostInstanceID, HostPID: owner.Current.HostPID, ContextID: owner.Current.ContextID, SessionDirectory: session}
 	runtimeDir := filepath.Dir(filepath.Dir(session))
-	lock, err := lockfile.TryLock(filepath.Join(runtimeDir, "control.lock"))
-	if err != nil {
-		return empty, err
+	if action.plan == nil && (action.cleanup == nil || action.cleanupExpected != "") {
+		lock, err := lockfile.TryLock(filepath.Join(runtimeDir, "control.lock"))
+		if err != nil {
+			return empty, err
+		}
+		defer lock.Close()
 	}
-	defer lock.Close()
 	var hold loopruntime.ArchiveRecoveryDispatchHold
-	if pause == nil {
+	if action.pause == nil && action.plan == nil && action.refresh == nil && action.cleanup == nil {
 		hold, err = archiveRecoveryPaused(runtimeDir)
 		if err != nil {
 			return empty, err
 		}
 	}
-	if !adopt {
-		fresh, err := inspectOriginalWorkspaceCapture(ctx, review.Capture)
-		if err != nil {
+	if !action.adopt && action.plan == nil && action.refresh == nil && action.cleanup == nil {
+		if err = verifyArchiveRecoveryReview(ctx, review); err != nil {
 			return empty, err
-		}
-		if fresh["attempt_id"] != review.AttemptID || !reflect.DeepEqual(fresh["tree"], review.Tree) {
-			return empty, fmt.Errorf("archive recovery reviewed original attempt or candidate tree changed")
 		}
 	}
 	if err = maintenanceOriginalAttempt(p); err != nil {
@@ -141,12 +162,23 @@ func runOriginalArchiveRecoveryControl(ctx context.Context, reviewRef loopruntim
 		}
 		return verifyArchiveRecoveryLeases(owner, frame, profile.Gateway, capture.OrderID)
 	}
-	if pause != nil {
+	if action.cleanup != nil {
+		return empty, inspectArchiveRecoveryCleanup(ctx, action.cleanup, p, owner, binding, cfg, profile, reviewRef, review, capture, action.cleanupExpected, verifyOwner)
+	}
+	if action.plan != nil {
+		*action.plan, err = inspectArchiveRecoveryPlan(ctx, p, profile, reviewRef, review, capture, verifyOwner)
+		return empty, err
+	}
+	if action.refresh != nil {
+		*action.refresh, err = refreshOriginalArchiveRecovery(ctx, p, profile, reviewRef, review, capture, verifyOwner)
+		return empty, err
+	}
+	if action.pause != nil {
 		if err = verifyOwner(); err != nil {
 			return empty, err
 		}
-		*pause, err = prepareArchiveRecoveryPauseLocked(p, reviewRef, review.Capture, review.AttemptID)
-		return pause.Plan, err
+		*action.pause, err = prepareArchiveRecoveryPauseLocked(p, reviewRef, review.Capture, review.AttemptID)
+		return action.pause.Plan, err
 	}
 	checkOwner := func() error {
 		latest, err := archiveRecoveryPaused(runtimeDir)
@@ -158,7 +190,7 @@ func runOriginalArchiveRecoveryControl(ctx context.Context, reviewRef loopruntim
 		}
 		return verifyOwner()
 	}
-	if adopt {
+	if action.adopt {
 		subject, err := readArchiveRecoveryScopeBinding(ctx, binding.ProjectDir, cfg, capture)
 		if err != nil {
 			return empty, err
@@ -175,6 +207,17 @@ func runOriginalArchiveRecoveryControl(ctx context.Context, reviewRef loopruntim
 		return loopruntime.ApplyOpenShellArchiveRecovery(ctx, p, profile, input, checkOwner)
 	}
 	return loopruntime.StopOpenShellArchiveRecovery(ctx, p, profile, ref, review.Capture, hold, filepath.Join(session, "archive-recovery-stop"), checkOwner)
+}
+
+func verifyArchiveRecoveryReview(ctx context.Context, review archiveRecoveryReview) error {
+	fresh, err := inspectOriginalWorkspaceCapture(ctx, review.Capture)
+	if err != nil {
+		return err
+	}
+	if fresh["attempt_id"] != review.AttemptID || !reflect.DeepEqual(fresh["tree"], review.Tree) {
+		return fmt.Errorf("archive recovery reviewed original attempt or candidate tree changed")
+	}
+	return nil
 }
 
 func archiveRecoveryPaused(runtimeDir string) (loopruntime.ArchiveRecoveryDispatchHold, error) {
@@ -265,6 +308,10 @@ func verifyArchiveRecoveryLeases(owner *hostOwnerBinding, frame hostSessionObser
 	if err != nil {
 		return err
 	}
+	return verifyArchiveRecoveryMachineLeases(filepath.Join(dir, "capacity.json"), owner, order)
+}
+
+func verifyArchiveRecoveryMachineLeases(path string, owner *hostOwnerBinding, order string) error {
 	var machine struct {
 		Policy string `json:"policy"`
 		Leases map[string]struct {
@@ -275,13 +322,14 @@ func verifyArchiveRecoveryLeases(owner *hostOwnerBinding, frame hostSessionObser
 			Settlement      json.RawMessage `json:"settlement"`
 		} `json:"leases"`
 	}
-	if _, err = loopruntime.ReadSessionReadbackFile(filepath.Join(dir, "capacity.json"), &machine); err != nil {
+	if _, err := loopruntime.ReadSessionReadbackFile(path, &machine); err != nil {
 		return err
 	}
 	workers, residents := 0, 0
+	workerOwner := hostMachineGenerationOwner(owner.HostRoot, owner.Current.HostInstanceID)
 	for _, lease := range machine.Leases {
 		switch lease.Owner {
-		case owner.GenerationDir:
+		case workerOwner:
 			if lease.OrderID != order || lease.ContextID != owner.Current.ContextID || !lease.EffectsPossible || (len(lease.Settlement) != 0 && string(lease.Settlement) != "null") {
 				return fmt.Errorf("archive recovery original machine worker lease differs")
 			}

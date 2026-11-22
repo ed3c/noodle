@@ -49,6 +49,16 @@ func (a *App) AcquireCheckoutUse(ctx context.Context, path string) (io.Closer, e
 // CompletedCheckout is called by the quiescent original Loop after it validates
 // Main's fixed disposition. This entry never commits, merges or deletes a ref.
 func (a *App) CompletedCheckout(ctx context.Context, name, operation string, expected CheckoutCandidate, policy archive.FileRef, apply bool) error {
+	return a.completedCheckout(ctx, name, operation, expected, policy, apply, nil)
+}
+
+// ReclaimArchiveCheckout uses the same reversible checkout protocol with the
+// original recovery disposition's stronger incarnation binding.
+func (a *App) ReclaimArchiveCheckout(ctx context.Context, name, operation string, expected CheckoutCandidate, policy archive.FileRef, original archive.CheckoutIdentity) error {
+	return a.completedCheckout(ctx, name, operation, expected, policy, true, &original)
+}
+
+func (a *App) completedCheckout(ctx context.Context, name, operation string, expected CheckoutCandidate, policy archive.FileRef, apply bool, original *archive.CheckoutIdentity) error {
 	if expected.Head == "" || expected.Tree == "" || !strings.HasPrefix(expected.Branch, "refs/heads/") {
 		return fmt.Errorf("original accepted checkout candidate is unavailable")
 	}
@@ -64,7 +74,8 @@ func (a *App) CompletedCheckout(ctx context.Context, name, operation string, exp
 		if readErr != nil {
 			return fmt.Errorf("checkout missing without original preservation evidence: %w", readErr)
 		}
-		if packet.Source.Head != expected.Head || packet.Source.Branch != expected.Branch {
+		if packet.Source.Head != expected.Head || packet.Source.Branch != expected.Branch ||
+			(original != nil && packet.Request.Identity != *original) {
 			return fmt.Errorf("removed checkout differs from original accepted candidate")
 		}
 		if packet.Request.Identity.Path == logical || packet.Source.Path == logical {
@@ -96,6 +107,9 @@ func (a *App) CompletedCheckout(ctx context.Context, name, operation string, exp
 	if err != nil {
 		return err
 	}
+	if original != nil && identity != *original {
+		return fmt.Errorf("original checkout incarnation changed")
+	}
 	foreign := filepath.Join(identity.Registration, "soodles-test-requests.noindex")
 	if _, err := os.Lstat(foreign); !os.IsNotExist(err) {
 		return fmt.Errorf("foreign Test namespace HOLD; original owner inventory required: %s (%v)", foreign, err)
@@ -117,16 +131,11 @@ func (a *App) CompletedCheckout(ctx context.Context, name, operation string, exp
 		}
 	} else if !os.IsNotExist(err) {
 		return err
-	} else if !apply {
-		// Read-only readiness never creates an archive, operation or restoration.
-		c, err := archive.LoadConfig(policy.Path)
-		if err != nil {
-			return err
-		}
-		_, err = archive.InspectSource(c, custody.Physical)
-		return err
 	} else {
 		request := archive.CheckoutRequest{Operation: operation, Identity: identity, Config: policy}
+		if err = archive.VerifyCheckoutUnreserved(request); err != nil {
+			return err
+		}
 		cfg, loadErr := archive.LoadConfig(policy.Path)
 		if loadErr != nil {
 			return loadErr
@@ -134,6 +143,9 @@ func (a *App) CompletedCheckout(ctx context.Context, name, operation string, exp
 		source, inspectErr := archive.InspectSource(cfg, custody.Physical)
 		if inspectErr != nil {
 			return inspectErr
+		}
+		if !apply {
+			return nil
 		}
 		tree, captureErr := archive.Capture(custody.Physical, source.Excluded)
 		if captureErr != nil {

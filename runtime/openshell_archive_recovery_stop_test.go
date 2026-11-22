@@ -78,7 +78,11 @@ func TestArchiveRecoveryStopUsesOriginalVMExactlyOnce(t *testing.T) {
 			review, capture := SessionReadbackFileRef{Path: "/test/review"}, SessionReadbackFileRef{Path: "/test/capture"}
 			hold := ArchiveRecoveryDispatchHold{PauseCommandID: "original-pause"}
 			output := filepath.Join(root, "archive-recovery-stop")
-			receipt, err := stopOpenShellArchiveRecovery(t.Context(), pb.NewOpenShellClient(conn), in, p, review, capture, hold, output, func() error { return nil })
+			client := pb.NewOpenShellClient(conn)
+			if err := observeOpenShellArchiveRecovery(t.Context(), client, in, p, review, capture, nil); (err != nil) != test.wrongIdentity || stopCalls.Load() != 0 {
+				t.Fatalf("read-only Ready proof differed or sent Stop: %v", err)
+			}
+			receipt, err := stopOpenShellArchiveRecovery(t.Context(), client, in, p, review, capture, hold, output, func() error { return nil })
 			if test.refusal != "" {
 				if err == nil || !strings.Contains(err.Error(), test.refusal) {
 					t.Fatalf("expected %q, got %v", test.refusal, err)
@@ -92,7 +96,12 @@ func TestArchiveRecoveryStopUsesOriginalVMExactlyOnce(t *testing.T) {
 				}
 				return
 			}
-			again, err := stopOpenShellArchiveRecovery(t.Context(), pb.NewOpenShellClient(conn), in, p, review, capture, hold, output, func() error { return nil })
+			in.record.Stopped = openShellStoppedObservation(sandbox())
+			in.state.Records[0] = in.record
+			if err := observeOpenShellArchiveRecovery(t.Context(), client, in, p, review, capture, &hold); (err != nil) != test.lostAck || stopCalls.Load() != 1 {
+				t.Fatalf("read-only Stopped proof differed or sent Stop: %v", err)
+			}
+			again, err := stopOpenShellArchiveRecovery(t.Context(), client, in, p, review, capture, hold, output, func() error { return nil })
 			if stopCalls.Load() != 1 {
 				t.Fatal("native Stop was replayed")
 			}
@@ -105,6 +114,33 @@ func TestArchiveRecoveryStopUsesOriginalVMExactlyOnce(t *testing.T) {
 				}
 			} else if err != nil || again != receipt {
 				t.Fatalf("confirmed Stop did not return the same receipt: %v", err)
+			}
+		})
+	}
+}
+
+func TestArchiveRecoveryPostStopCustodyObservation(t *testing.T) {
+	observed := OpenShellCustodyRecord{Stopped: &OpenShellStoppedObservation{}}
+	if !archiveCaptureHasConflictingStop(observed, false) {
+		t.Fatal("native Stopped observation still prohibits capture and a new Stop")
+	}
+	if archiveCaptureHasConflictingStop(observed, true) {
+		t.Fatal("custody observation alone is admissible after a separately verified Stop")
+	}
+	for _, change := range []struct {
+		name  string
+		apply func(*OpenShellCustodyRecord)
+	}{
+		{"another Stop request", func(r *OpenShellCustodyRecord) { r.StopRequestID = "other" }},
+		{"independent Stop ACK", func(r *OpenShellCustodyRecord) { r.StopAcknowledged = true }},
+		{"pending worker Stop", func(r *OpenShellCustodyRecord) { r.Worker.StopPending = true }},
+		{"progress Stop", func(r *OpenShellCustodyRecord) { r.ProgressStop = &OpenShellCustodyExec{} }},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			record := observed
+			change.apply(&record)
+			if !archiveCaptureHasConflictingStop(record, true) {
+				t.Fatal("post-Stop observation qualified another Stop effect")
 			}
 		})
 	}

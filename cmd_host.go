@@ -60,41 +60,42 @@ type hostResponse struct {
 }
 
 type hostRequest struct {
-	AdmissionTargetRoot    string                             `json:"admission_target_root"`
-	AdmissionConfigPath    string                             `json:"admission_config_path"`
-	ExpectedVersion        string                             `json:"expected_version"`
-	ReadbackOrderID        string                             `json:"readback_order_id"`
-	ReadbackSessionID      string                             `json:"readback_session_id"`
-	ReadbackRequest        loopruntime.SessionReadbackFileRef `json:"readback_request"`
-	Operation              string                             `json:"operation"`
-	ProjectDir             string                             `json:"project_dir"`
-	ContextID              string                             `json:"context_id"`
-	RequiredHostInstanceID string                             `json:"required_host_instance_id"`
-	InstanceID             string                             `json:"instance_id"`
-	ConfigPath             string                             `json:"config_path"`
-	ConfigSHA256           string                             `json:"config_sha256"`
-	Mode                   string                             `json:"mode"`
-	Environment            []string                           `json:"environment,omitempty"`
-	BinarySHA256           string                             `json:"binary_sha256"`
-	RequestID              string                             `json:"request_id"`
-	ResidentSpec           *admission.ResidentSpec            `json:"resident_spec,omitempty"`
-	ResidentID             string                             `json:"resident_id,omitempty"`
-	Apply                  bool                               `json:"apply,omitempty"`
-	CleanupCompleted       bool                               `json:"cleanup_completed,omitempty"`
-	RequestFile            string                             `json:"-"`
-	HostDir                string                             `json:"-"`
-	AdoptCurrentProfile    bool                               `json:"adopt_current_profile,omitempty"`
-	ControllerOnly         bool                               `json:"controller_only,omitempty"`
-	DispatchBlocked        string                             `json:"dispatch_blocked,omitempty"`
-	AdmissionSHA           string                             `json:"admission_binary_sha256,omitempty"`
-	AdmissionPath          string                             `json:"admission_binary_path,omitempty"`
-	RoundSource            string                             `json:"round_source,omitempty"`
-	RoundState             *loop.HostContinuation             `json:"round_state,omitempty"`
-	FixtureManifest        *admission.FixtureManifest         `json:"fixture_manifest,omitempty"`
-	NativeConsumer         bool                               `json:"native_consumer,omitempty"`
-	ConsumerLease          string                             `json:"consumer_lease,omitempty"`
-	peerPID                int
-	peerError              error
+	AdmissionTargetRoot        string                              `json:"admission_target_root"`
+	AdmissionConfigPath        string                              `json:"admission_config_path"`
+	ExpectedVersion            string                              `json:"expected_version"`
+	ReadbackOrderID            string                              `json:"readback_order_id"`
+	ReadbackSessionID          string                              `json:"readback_session_id"`
+	ReadbackRequest            loopruntime.SessionReadbackFileRef  `json:"readback_request"`
+	ArchiveRecoveryDisposition *loopruntime.SessionReadbackFileRef `json:"archive_recovery_disposition,omitempty"`
+	Operation                  string                              `json:"operation"`
+	ProjectDir                 string                              `json:"project_dir"`
+	ContextID                  string                              `json:"context_id"`
+	RequiredHostInstanceID     string                              `json:"required_host_instance_id"`
+	InstanceID                 string                              `json:"instance_id"`
+	ConfigPath                 string                              `json:"config_path"`
+	ConfigSHA256               string                              `json:"config_sha256"`
+	Mode                       string                              `json:"mode"`
+	Environment                []string                            `json:"environment,omitempty"`
+	BinarySHA256               string                              `json:"binary_sha256"`
+	RequestID                  string                              `json:"request_id"`
+	ResidentSpec               *admission.ResidentSpec             `json:"resident_spec,omitempty"`
+	ResidentID                 string                              `json:"resident_id,omitempty"`
+	Apply                      bool                                `json:"apply,omitempty"`
+	CleanupCompleted           bool                                `json:"cleanup_completed,omitempty"`
+	RequestFile                string                              `json:"-"`
+	HostDir                    string                              `json:"-"`
+	AdoptCurrentProfile        bool                                `json:"adopt_current_profile,omitempty"`
+	ControllerOnly             bool                                `json:"controller_only,omitempty"`
+	DispatchBlocked            string                              `json:"dispatch_blocked,omitempty"`
+	AdmissionSHA               string                              `json:"admission_binary_sha256,omitempty"`
+	AdmissionPath              string                              `json:"admission_binary_path,omitempty"`
+	RoundSource                string                              `json:"round_source,omitempty"`
+	RoundState                 *loop.HostContinuation              `json:"round_state,omitempty"`
+	FixtureManifest            *admission.FixtureManifest          `json:"fixture_manifest,omitempty"`
+	NativeConsumer             bool                                `json:"native_consumer,omitempty"`
+	ConsumerLease              string                              `json:"consumer_lease,omitempty"`
+	peerPID                    int
+	peerError                  error
 }
 
 type hostRuntime interface {
@@ -512,6 +513,9 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 					return
 				}
 				req.peerPID, req.peerError = procx.PeerPID(conn)
+				if req.Operation == archiveRecoveryReclaimRequest {
+					_ = conn.SetDeadline(time.Now().Add(archiveRecoveryReclaimTimeout))
+				}
 				c := call{req, make(chan any, 1)}
 				select {
 				case calls <- c:
@@ -610,6 +614,13 @@ func serveHostWithSampler(shutdownRequested context.Context, sampler admission.S
 			}
 			if call.request.Operation == "task_session_readback" {
 				call.reply <- h.sessionReadback(ctx, call.request)
+				continue
+			}
+			if call.request.Operation == archiveRecoveryReclaimRequest {
+				taskCtx, cancel := context.WithTimeout(ctx, archiveRecoveryReclaimTimeout)
+				result := h.reclaimArchiveRecovery(taskCtx, call.request)
+				cancel()
+				call.reply <- result
 				continue
 			}
 			for _, c := range h.contexts {

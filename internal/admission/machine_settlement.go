@@ -1,11 +1,14 @@
 package admission
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,7 +76,16 @@ func validateMachineReclamation(proof MachineReclamation) error {
 	if proof.CheckoutOperation == "" {
 		return errors.New("original checkout reclamation operation missing")
 	}
-	for _, role := range []string{"main_ack", "checkout_packet", "checkout_removal", "checkout_verification_release"} {
+	required := []string{"checkout_packet", "checkout_removal", "checkout_verification_release"}
+	if _, recovered := proof.Sources["archive_recovery_disposition"]; recovered {
+		if proof.Binding.Runtime != "openshell" {
+			return errors.New("archive recovery requires original OpenShell session settlement")
+		}
+		required = append(required, "archive_recovery_disposition", "archive_recovery_landing", "archive_recovery_stop", "native_custody")
+	} else {
+		required = append(required, "main_ack")
+	}
+	for _, role := range required {
 		ref := proof.Sources[role]
 		digest, err := hex.DecodeString(ref.SHA256)
 		if !filepath.IsAbs(ref.Path) || filepath.Clean(ref.Path) != ref.Path || len(digest) != sha256.Size || err != nil {
@@ -195,6 +207,251 @@ func (b *Budget) MachineSessionLeases(contextID, project string) ([]MachineSessi
 	return result, err
 }
 
+// VerifyArchiveRecoveryMachineLease observes the exact original worker nonce
+// before checkout or VM effects. A settled result names this same disposition.
+func (b *Budget) VerifyArchiveRecoveryMachineLease(original MachineSessionLease, disposition MachineSettlementFile) (bool, error) {
+	proof, err := b.ReadArchiveRecoverySettlement(original, disposition)
+	return proof != nil, err
+}
+
+// ReadArchiveRecoverySettlement returns only the recorded effect for the exact
+// original nonce and disposition. A still-held but qualified lease has no proof.
+func (b *Budget) ReadArchiveRecoverySettlement(original MachineSessionLease, disposition MachineSettlementFile) (proof *MachineReclamation, err error) {
+	return b.ReadArchiveRecoverySettlementForCleanup(original, disposition, nil)
+}
+
+// ReadArchiveRecoverySettlementForCleanup admits one exact retained in-memory
+// permit for the archive-only Stop/retirement path. Settlement itself still
+// requires the joined permit and its observable original shared quota return.
+func (b *Budget) ReadArchiveRecoverySettlementForCleanup(original MachineSessionLease, disposition MachineSettlementFile, permit *Permit) (proof *MachineReclamation, err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.machine == nil || original.Owner != b.machine.owner || !validArchiveRecoveryLeaseSelection(original, disposition) {
+		return nil, errors.New("original archive recovery machine owner or lease binding differs")
+	}
+	var retained *allocation
+	if permit != nil {
+		retained = permit.allocation
+		if retained == nil || retained.budget != b || retained.machineID != original.ID || retained.refs != 1 ||
+			!retained.effectsPossible || retained.resident || permit.released || permit.replacementReserved ||
+			b.machineAllocations[retained.machineKey] != retained {
+			return nil, errors.New("archive recovery retained permit differs from original lease")
+		}
+	}
+	for _, active := range b.machineAllocations {
+		if active.machineID == original.ID && active.refs > 0 {
+			if active != retained {
+				return nil, errors.New("original worker resource permit is still active")
+			}
+		}
+	}
+	if b.shared != nil {
+		if err = b.shared.access(0, false, func(state *quotaState) error {
+			found := false
+			for id, row := range state.Leases {
+				if row.Context != original.ContextID || row.Resident {
+					continue
+				}
+				if retained == nil || id != retained.sharedID || row.Owner != b.shared.owner {
+					return errors.New("original archive recovery shared worker quota has not returned")
+				}
+				found = true
+			}
+			if retained != nil && !found {
+				return errors.New("original archive recovery retained permit lost its shared quota binding")
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+	err = b.machine.access(false, func(state *machineState) (bool, error) {
+		lease, recorded, err := archiveRecoverySettlementIn(state, original, disposition)
+		if recorded != nil && retained != nil {
+			return false, errors.New("settled archive recovery cannot retain an active permit")
+		}
+		if err != nil || recorded != nil {
+			proof = recorded
+			return false, err
+		}
+		return false, b.verifyMachineSettlementSource(state, lease, *original.Binding)
+	})
+	return proof, err
+}
+
+// ReconcileExitedArchiveWorkerQuota is called only while the original Host
+// generation, request, runtime and custody are excluded. The caller must have
+// checked native Stop before offering cleanup and retirement before release.
+func (b *Budget) ReconcileExitedArchiveWorkerQuota(original MachineSessionLease, disposition MachineSettlementFile, generation string, release bool) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.machine == nil || b.shared == nil || generation == "" || b.shared.owner != generation ||
+		original.Owner != b.machine.owner || !validArchiveRecoveryLeaseSelection(original, disposition) {
+		return errors.New("original exited archive accounting owner differs")
+	}
+	if len(b.machineAllocations) != 0 || b.active != 0 {
+		return errors.New("exited archive accounting cannot carry active permits")
+	}
+	if err := b.machine.access(false, func(state *machineState) (bool, error) {
+		lease, settled, err := archiveRecoverySettlementIn(state, original, disposition)
+		if err != nil || settled != nil {
+			if err == nil {
+				err = errors.New("original exited archive lease is already settled; use terminal readback")
+			}
+			return false, err
+		}
+		for id, row := range state.Leases {
+			if id != original.ID && row.ContextID == original.ContextID && row.EffectsPossible && row.Settlement == nil && row.PreparationClosed == nil {
+				return false, errors.New("another unsettled lease shares the original exited archive context")
+			}
+		}
+		return false, b.verifyMachineSettlementSource(state, lease, *original.Binding)
+	}); err != nil {
+		return err
+	}
+	var selectedID string
+	if err := b.shared.access(0, false, func(state *quotaState) error {
+		for id, row := range state.Leases {
+			if row.Resident || (row.Owner != generation && row.Context != original.ContextID) {
+				continue
+			}
+			if row.Owner != generation || row.Context != original.ContextID || selectedID != "" {
+				return errors.New("original exited archive worker quota is foreign or ambiguous")
+			}
+			selectedID = id
+		}
+		return nil
+	}); err != nil || !release || selectedID == "" {
+		return err
+	}
+	return b.shared.update(0, func(state *quotaState) error {
+		for id, row := range state.Leases {
+			if row.Resident || (row.Owner != generation && row.Context != original.ContextID) {
+				continue
+			}
+			if id != selectedID || row.Owner != generation || row.Context != original.ContextID {
+				return errors.New("original exited archive worker quota changed before return")
+			}
+		}
+		if row, ok := state.Leases[selectedID]; ok {
+			if row.Resident || row.Owner != generation || row.Context != original.ContextID {
+				return errors.New("original exited archive worker quota identity changed before return")
+			}
+			delete(state.Leases, selectedID)
+		}
+		return nil
+	})
+}
+
+func validArchiveRecoveryLeaseSelection(original MachineSessionLease, disposition MachineSettlementFile) bool {
+	return original.Binding != nil && original.Binding.Runtime == "openshell" && original.ContextID == original.Binding.ContextID &&
+		original.ID != "" && original.Owner != "" && original.Source != "" && filepath.IsAbs(disposition.Path) && len(disposition.SHA256) == 64
+}
+
+func archiveRecoverySettlementIn(state *machineState, original MachineSessionLease, disposition MachineSettlementFile) (machineLease, *MachineReclamation, error) {
+	lease, exists := state.Leases[original.ID]
+	if !exists || lease.Owner != original.Owner || lease.Source != original.Source || lease.Binding == nil ||
+		*lease.Binding != *original.Binding || !lease.EffectsPossible {
+		return lease, nil, errors.New("original archive recovery machine lease differs or is missing")
+	}
+	for id, row := range state.Leases {
+		if id != original.ID && row.Owner == original.Owner && row.Binding != nil && *row.Binding == *original.Binding {
+			return lease, nil, errors.New("original archive recovery machine lease is ambiguous")
+		}
+	}
+	if err := validateMachineLeaseSettlement(lease); err != nil {
+		return lease, nil, err
+	}
+	if lease.Settlement == nil {
+		return lease, nil, nil
+	}
+	if lease.Settlement.Sources["archive_recovery_disposition"] != disposition {
+		return lease, nil, errors.New("original archive recovery machine lease was settled for a different disposition")
+	}
+	copy := *lease.Settlement
+	copy.Sources = maps.Clone(copy.Sources)
+	return lease, &copy, nil
+}
+
+// ReadArchivedArchiveRecoverySettlement observes a completed receipt without a
+// controller, lease or writable lock. A concurrently replaced ledger requires
+// fresh readback, even if the caller's remembered settlement looked valid.
+func ReadArchivedArchiveRecoverySettlement(directory string, original MachineSessionLease, disposition MachineSettlementFile) (*MachineReclamation, error) {
+	if !validArchiveRecoveryLeaseSelection(original, disposition) {
+		return nil, errors.New("original archive recovery machine owner or lease binding differs")
+	}
+	if err := canonicalCapacityPath(directory); err != nil {
+		return nil, err
+	}
+	if err := capacityFileIdentity(directory, true); err != nil {
+		return nil, err
+	}
+	if err := capacityFileIdentity(filepath.Join(directory, "capacity.lock"), false); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(directory, "capacity.json")
+	if err := capacityFileIdentity(path, false); err != nil {
+		return nil, err
+	}
+	before, err := os.Lstat(path)
+	if err != nil || !before.Mode().IsRegular() || before.Size() > 64<<20 {
+		return nil, errors.New("original archive recovery machine ledger is unavailable or unbounded")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	raw, readErr := io.ReadAll(io.LimitReader(file, (64<<20)+1))
+	after, statErr := file.Stat()
+	closeErr := file.Close()
+	current, currentErr := os.Lstat(path)
+	if err = errors.Join(readErr, statErr, closeErr, currentErr); err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) != before.Size() || !os.SameFile(before, after) || !os.SameFile(before, current) ||
+		before.Size() != after.Size() || before.Size() != current.Size() ||
+		!before.ModTime().Equal(after.ModTime()) || !before.ModTime().Equal(current.ModTime()) {
+		return nil, errors.New("original archive recovery machine ledger changed during readback")
+	}
+	if err = capacityFileIdentity(path, false); err != nil {
+		return nil, err
+	}
+	if err = uniqueCapacityJSON(json.NewDecoder(bytes.NewReader(raw))); err != nil {
+		return nil, err
+	}
+	var state machineState
+	reader := json.NewDecoder(bytes.NewReader(raw))
+	reader.DisallowUnknownFields()
+	if err = reader.Decode(&state); err != nil {
+		return nil, err
+	}
+	if err = reader.Decode(new(any)); err != io.EOF {
+		return nil, errors.New("original archive recovery machine ledger has trailing content")
+	}
+	identity, err := nativeMachineIdentity()
+	if err != nil {
+		return nil, err
+	}
+	if state.Schema != 1 || state.Identity != identity || state.Policy != MachineAdmissionPolicy || state.Capacity == nil ||
+		validateCapacityPolicy(*state.Capacity) != nil {
+		return nil, errors.New("original archive recovery machine ledger policy or identity differs")
+	}
+	_, proof, err := archiveRecoverySettlementIn(&state, original, disposition)
+	return proof, err
+}
+
+func (b *Budget) verifyMachineSettlementSource(state *machineState, lease machineLease, binding MachineSessionBinding) error {
+	source := b.resourceSources[binding.ContextID]
+	if source == nil || source.read == nil {
+		return errors.New("original machine profile source unavailable")
+	}
+	claim, err := source.read(binding.Runtime)
+	if err != nil || validateResourceClaim(claim) != nil || claim.Source != lease.Source || state.Capacity == nil || !sameAdmissionCapacity(claim.Policy, *state.Capacity) {
+		return errors.New("original machine profile source changed")
+	}
+	return nil
+}
+
 // SettleMachineSession updates the same original row. Its immutable settlement
 // serves as the release ACK, so a lost result is read back without a new nonce.
 func (b *Budget) SettleMachineSession(original MachineSessionLease, proof MachineReclamation) error {
@@ -217,13 +474,8 @@ func (b *Budget) SettleMachineSession(original MachineSessionLease, proof Machin
 		if lease.Settlement != nil {
 			return false, nil
 		}
-		source := b.resourceSources[proof.Binding.ContextID]
-		if source == nil || source.read == nil {
-			return false, errors.New("original machine profile source unavailable")
-		}
-		claim, err := source.read(proof.Binding.Runtime)
-		if err != nil || validateResourceClaim(claim) != nil || claim.Source != lease.Source || state.Capacity == nil || !sameAdmissionCapacity(claim.Policy, *state.Capacity) {
-			return false, errors.New("original machine profile source changed")
+		if err := b.verifyMachineSettlementSource(state, lease, proof.Binding); err != nil {
+			return false, err
 		}
 		if err := validateMachineReclamation(proof); err != nil {
 			return false, err

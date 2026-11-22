@@ -24,7 +24,7 @@ func CaptureOpenShellWorkspace(ctx context.Context, p ProgressMaintenance, profi
 		return SessionReadbackFileRef{}, err
 	}
 	defer lock.Close()
-	record, baseline, sources, err := workspaceCaptureInputs(p, profile, order)
+	record, baseline, sources, err := workspaceCaptureInputs(p, profile, order, false)
 	if err != nil {
 		return SessionReadbackFileRef{}, err
 	}
@@ -43,7 +43,7 @@ func CaptureOpenShellWorkspace(ctx context.Context, p ProgressMaintenance, profi
 	return captureWorkspaceArchive(ctx, pb.NewOpenShellClient(conn), record, baseline, output, sources, verifyOwner)
 }
 
-func workspaceCaptureInputs(p ProgressMaintenance, profile OpenShellProfile, order string) (record OpenShellCustodyRecord, baseline *workspaceartifacts.Baseline, sources map[string]SessionReadbackFileRef, err error) {
+func workspaceCaptureInputs(p ProgressMaintenance, profile OpenShellProfile, order string, afterArchiveStop bool) (record OpenShellCustodyRecord, baseline *workspaceartifacts.Baseline, sources map[string]SessionReadbackFileRef, err error) {
 	if err = VerifyOpenShellProfile(profile); err != nil {
 		return record, nil, nil, err
 	}
@@ -84,7 +84,7 @@ func workspaceCaptureInputs(p ProgressMaintenance, profile OpenShellProfile, ord
 			return record, nil, nil, fmt.Errorf("workspace capture requires exclusive original worker custody")
 		}
 	}
-	if record.Task != (OpenShellTask{order, d.AttemptID, session}) || !record.CreateAcknowledged || record.Retained || record.Stopped != nil || record.StopRequestID != "" || record.StopAcknowledged || record.Worker.StopPending || record.ProgressStop != nil || record.Retirement != nil || record.Exec == nil || record.MainProcessInstanceID == "" {
+	if record.Task != (OpenShellTask{order, d.AttemptID, session}) || !record.CreateAcknowledged || record.Retained || archiveCaptureHasConflictingStop(record, afterArchiveStop) || record.Exec == nil || record.MainProcessInstanceID == "" {
 		return record, nil, nil, fmt.Errorf("workspace capture original worker or execution binding differs")
 	}
 	e := record.Exec
@@ -108,6 +108,14 @@ func workspaceCaptureInputs(p ProgressMaintenance, profile OpenShellProfile, ord
 		return record, nil, nil, fmt.Errorf("workspace capture requires original supervisor archive ENOSPC evidence")
 	}
 	return record, d.Baseline, map[string]SessionReadbackFileRef{"dispatch": dispatch, "custody": owner, "stderr": stderr, "profile": p.Profile}, nil
+}
+
+// The original custody may observe the archive Stop through Get without its own
+// Stop RPC. Only post-Stop callers can use that history with the separate ACK.
+func archiveCaptureHasConflictingStop(record OpenShellCustodyRecord, afterArchiveStop bool) bool {
+	return (!afterArchiveStop && record.Stopped != nil) || record.StopRequestID != "" ||
+		record.StopAcknowledged || record.Worker.StopPending || record.ProgressStop != nil ||
+		record.Retirement != nil
 }
 
 func captureWorkspaceArchive(ctx context.Context, client pb.OpenShellClient, record OpenShellCustodyRecord, baseline *workspaceartifacts.Baseline, output string, sources map[string]SessionReadbackFileRef, verifyOwner func() error) (ref SessionReadbackFileRef, err error) {

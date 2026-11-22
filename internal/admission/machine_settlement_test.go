@@ -305,3 +305,139 @@ func TestMachineSessionBindingLostACKReadsSameOriginalPermit(t *testing.T) {
 		})
 	}
 }
+
+func TestArchiveRecoveryMachineLeaseSettlesOnlyExactRetainedDisposition(t *testing.T) {
+	b, _, lease, proof := settlementFixture(t)
+	delete(proof.Sources, "main_ack")
+	source := func(role string) MachineSettlementFile {
+		t.Helper()
+		path := filepath.Join(proof.Binding.ProjectDir, role+".json")
+		raw := []byte("original verified " + role)
+		if err := os.WriteFile(path, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		digest := sha256.Sum256(raw)
+		return MachineSettlementFile{Path: path, SHA256: hex.EncodeToString(digest[:])}
+	}
+	for _, role := range []string{"archive_recovery_disposition", "archive_recovery_landing", "archive_recovery_stop"} {
+		proof.Sources[role] = source(role)
+	}
+	disposition := proof.Sources["archive_recovery_disposition"]
+	if archived, err := ReadArchivedArchiveRecoverySettlement(b.machine.dir, lease, disposition); err != nil || archived != nil {
+		t.Fatalf("offline readback promoted a held lease: %+v %v", archived, err)
+	}
+	if settled, err := b.VerifyArchiveRecoveryMachineLease(lease, disposition); err != nil || settled {
+		t.Fatalf("held lease was not observed: %v %v", settled, err)
+	}
+	foreign := lease
+	foreign.ID = "foreign-nonce"
+	if _, err := b.VerifyArchiveRecoveryMachineLease(foreign, disposition); err == nil {
+		t.Fatal("missing original worker lease was accepted")
+	}
+	if err := b.SettleMachineSession(lease, proof); err == nil || b.Snapshot().MachineCapacity.Leases != 1 {
+		t.Fatal("lease settled without native retirement custody", err)
+	}
+	proof.Sources["native_custody"] = source("native_custody")
+	proof.NativeDeletionOutcome = "unknown"
+	writes := 0
+	b.machine.write = func(path string, data []byte) error {
+		writes++
+		return filex.WriteFileAtomicDurable(path, data)
+	}
+	for range 2 {
+		if err := b.SettleMachineSession(lease, proof); err != nil {
+			t.Fatal(err)
+		}
+		if settled, err := b.VerifyArchiveRecoveryMachineLease(lease, disposition); err != nil || !settled {
+			t.Fatalf("exact original settlement did not read back: %v %v", settled, err)
+		}
+	}
+	readback, err := b.ReadArchiveRecoverySettlement(lease, disposition)
+	if err != nil || !reflect.DeepEqual(readback, &proof) {
+		t.Fatalf("lost settlement result cannot read back exact durable evidence: %+v %v", readback, err)
+	}
+	delete(readback.Sources, "native_custody")
+	again, err := b.ReadArchiveRecoverySettlement(lease, disposition)
+	if err != nil || !reflect.DeepEqual(again, &proof) {
+		t.Fatalf("caller changed the original settlement evidence: %+v %v", again, err)
+	}
+	readExisting := func(name string) []byte {
+		t.Helper()
+		bytes, err := os.ReadFile(filepath.Join(b.machine.dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return bytes
+	}
+	ledgerBefore, lockBefore := readExisting("capacity.json"), readExisting("capacity.lock")
+	archived, err := ReadArchivedArchiveRecoverySettlement(b.machine.dir, lease, disposition)
+	if err != nil || !reflect.DeepEqual(archived, &proof) {
+		t.Fatalf("offline original settlement did not read back exact evidence: %+v %v", archived, err)
+	}
+	if !reflect.DeepEqual(ledgerBefore, readExisting("capacity.json")) || !reflect.DeepEqual(lockBefore, readExisting("capacity.lock")) {
+		t.Fatal("offline settlement readback rewrote original ledger or lock")
+	}
+	if _, err := ReadArchivedArchiveRecoverySettlement(b.machine.dir, lease, source("offline-foreign-disposition")); err == nil {
+		t.Fatal("offline readback promoted a foreign cleanup disposition")
+	}
+	if writes != 1 || b.Snapshot().MachineCapacity.Leases != 0 {
+		t.Fatalf("archive recovery released wrong number of leases or replayed: %d", writes)
+	}
+	if _, err := b.VerifyArchiveRecoveryMachineLease(lease, source("foreign-disposition")); err == nil {
+		t.Fatal("another disposition inherited a known settlement")
+	}
+}
+
+func TestExitedArchiveWorkerQuotaRequiresUniqueOriginalAndKeepsMachineLease(t *testing.T) {
+	b, _, lease, proof := settlementFixture(t)
+	disposition := proof.Sources["main_ack"]
+	generation := b.shared.owner
+	original := quotaLease{Owner: generation, Context: lease.ContextID}
+	resident := quotaLease{Owner: generation, Context: lease.ContextID, Resident: true, ResidentKey: "original-gateway"}
+	foreign := quotaLease{Owner: "other-generation", Context: lease.ContextID}
+	if err := b.shared.update(0, func(s *quotaState) error {
+		s.Leases["original-worker"], s.Leases["original-resident"], s.Leases["ambiguous-worker"] = original, resident, foreign
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ReconcileExitedArchiveWorkerQuota(lease, disposition, generation, true); err == nil {
+		t.Fatal("ambiguous native quota permitted original release")
+	}
+	if err := b.shared.update(0, func(s *quotaState) error {
+		if s.Leases["original-worker"] != original || s.Leases["original-resident"] != resident || s.Leases["ambiguous-worker"] != foreign {
+			t.Fatal("refusal changed original quota")
+		}
+		delete(s.Leases, "ambiguous-worker")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ReconcileExitedArchiveWorkerQuota(lease, disposition, generation, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.shared.access(0, false, func(s *quotaState) error {
+		if s.Leases["original-worker"] != original || s.Leases["original-resident"] != resident {
+			t.Fatal("qualification released native quota")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := b.ReconcileExitedArchiveWorkerQuota(lease, disposition, generation, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := b.shared.access(0, false, func(s *quotaState) error {
+		if len(s.Leases) != 1 || s.Leases["original-resident"] != resident {
+			t.Fatalf("original worker replay changed other capacity: %+v", s.Leases)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if settled, err := b.VerifyArchiveRecoveryMachineLease(lease, disposition); err != nil || settled {
+		t.Fatalf("quota return consumed the machine lease: %t %v", settled, err)
+	}
+}
