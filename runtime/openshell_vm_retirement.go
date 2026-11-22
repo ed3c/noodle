@@ -39,7 +39,16 @@ func validateVMRetirement(record OpenShellCustodyRecord) error {
 	if retirement == nil {
 		return nil
 	}
-	if err := validateProgressRecord(record, record.Worker.Identity); err != nil {
+	if retirement.Sources["archive_recovery_disposition"].Path != "" {
+		if err := validateArchiveRecoveryStoppedWorker(record); err != nil {
+			return err
+		}
+		if record.Stopped == nil || retirement.Sources["archive_recovery_stop"].Path == "" ||
+			retirement.Sources["checkout_packet"].Path == "" || retirement.Sources["checkout_removal"].Path == "" ||
+			retirement.Sources["checkout_verification_release"].Path == "" {
+			return fmt.Errorf("original archive recovery VM retirement evidence is incomplete")
+		}
+	} else if err := validateProgressRecord(record, record.Worker.Identity); err != nil {
 		return err
 	}
 	if retirement.ExpectedResourceVersion == 0 || retirement.RequestID == "" || retirement.Storage.Root == "" || retirement.Storage.Config.Path != record.Worker.Identity.ConfigSource || retirement.Storage.Config.SHA256 == "" || len(retirement.Sources) == 0 {
@@ -95,12 +104,12 @@ func (r *OpenShellRuntime) RetireCleanupSession(ctx context.Context, b Completed
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	result, err := custody.retireCleanupSession(ctx, OpenShellTask{b.OrderID, readback.Execution.NativeAttemptID, b.SessionID}, storage, readback.Execution.Sources)
+	result, err := custody.retireCleanupSession(ctx, OpenShellTask{b.OrderID, readback.Execution.NativeAttemptID, b.SessionID}, storage, readback.Execution.Sources, nil)
 	result.OutcomeStatus = expected
 	return result, err
 }
 
-func (c *OpenShellCustody) retireCleanupSession(ctx context.Context, task OpenShellTask, storage openShellVMStorage, sources map[string]SessionReadbackFileRef) (CleanupSessionRetirement, error) {
+func (c *OpenShellCustody) retireCleanupSession(ctx context.Context, task OpenShellTask, storage openShellVMStorage, sources map[string]SessionReadbackFileRef, recovery *archiveRecoveryVMProof) (CleanupSessionRetirement, error) {
 	if !c.mu.TryLock() {
 		return CleanupSessionRetirement{}, fmt.Errorf("original custody operation in progress")
 	}
@@ -120,11 +129,18 @@ func (c *OpenShellCustody) retireCleanupSession(ctx context.Context, task OpenSh
 	if record == nil {
 		return CleanupSessionRetirement{}, fmt.Errorf("original cleanup task is missing")
 	}
-	if err := validateProgressRecord(*record, record.Worker.Identity); err != nil {
+	if recovery != nil {
+		if err := recovery.verifyStop(c.state, *record); err != nil {
+			return CleanupSessionRetirement{}, err
+		}
+	} else if err := validateProgressRecord(*record, record.Worker.Identity); err != nil {
 		return CleanupSessionRetirement{}, err
 	}
 	if err := VerifySessionReadbackFiles(sources); err != nil {
 		return CleanupSessionRetirement{}, err
+	}
+	if record.Retirement != nil && recovery != nil && !maps.Equal(record.Retirement.Sources, sources) {
+		return CleanupSessionRetirement{}, fmt.Errorf("original archive recovery retirement disposition changed")
 	}
 	if record.Retirement == nil {
 		// Recheck the same stopped identity immediately before storing the
@@ -133,7 +149,11 @@ func (c *OpenShellCustody) retireCleanupSession(ctx context.Context, task OpenSh
 		if err != nil {
 			return CleanupSessionRetirement{}, err
 		}
-		if _, err := settledNativeObservation(*record, record.Worker.Identity, response.GetSandbox(), savedObservation); err != nil {
+		if recovery != nil {
+			if err := verifyArchiveRecoveryStopped(*record, response); err != nil {
+				return CleanupSessionRetirement{}, err
+			}
+		} else if _, err := settledNativeObservation(*record, record.Worker.Identity, response.GetSandbox(), savedObservation); err != nil {
 			return CleanupSessionRetirement{}, err
 		}
 		expectedVersion := response.GetSandbox().GetMetadata().GetResourceVersion()
@@ -157,6 +177,14 @@ func (c *OpenShellCustody) retireCleanupSession(ctx context.Context, task OpenSh
 		case openShellRetirementCustodyVersion, openShellCredentialRetirementCustodyVersion:
 		default:
 			return CleanupSessionRetirement{}, fmt.Errorf("original custody schema cannot retain VM retirement")
+		}
+		if recovery != nil {
+			if err := VerifySessionReadbackFiles(sources); err != nil {
+				return CleanupSessionRetirement{}, err
+			}
+			if record.Stopped == nil {
+				record.Stopped = openShellStoppedObservation(response.GetSandbox())
+			}
 		}
 		record.Retirement = &openShellVMRetirement{ExpectedResourceVersion: expectedVersion, RequestID: requestID, Storage: storage, Sources: retained}
 		if err := c.save(); err != nil {
@@ -182,6 +210,9 @@ func (c *OpenShellCustody) retireCleanupSession(ctx context.Context, task OpenSh
 	present, disk, err := c.readVMRetirement(ctx, *record)
 	if err != nil {
 		return retirementResult(*record), err
+	}
+	if record.Retirement.Retired && (present || disk) {
+		return retirementResult(*record), fmt.Errorf("original retired VM resource reappeared")
 	}
 	if !present && !disk && !record.Retirement.Retired {
 		record.Retirement.Retired = true

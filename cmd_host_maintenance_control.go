@@ -30,6 +30,11 @@ func legacyPauseCapture(ctx context.Context, runtimeDir, intentPath string, reco
 		return false, err
 	}
 	defer lock.Close()
+	return legacyPauseCaptureLocked(runtimeDir, intentPath, recoverMissing)
+}
+
+// The caller holds the original Loop control lock across its owner preflight.
+func legacyPauseCaptureLocked(runtimeDir, intentPath string, recoverMissing bool) (bool, error) {
 	ackRaw, err := os.ReadFile(filepath.Join(runtimeDir, "control-ack.ndjson"))
 	if os.IsNotExist(err) {
 		ackRaw = nil
@@ -91,6 +96,19 @@ func legacyPauseCapture(ctx context.Context, runtimeDir, intentPath string, reco
 	if err = json.Unmarshal(raw, &intent); err != nil {
 		return false, err
 	}
+	observed, err := legacyPauseObserved(runtimeDir, intent, ackRaw)
+	if err != nil || !observed || recoverMissing {
+		return observed, err
+	}
+	snapshot, err := reducer.ReadSnapshot(filepath.Join(runtimeDir, "state.snapshot.json"))
+	if err != nil {
+		return false, err
+	}
+	// Pause changes only dispatch. A new snapshot is not required.
+	return snapshot.EffectLedger != nil && !snapshot.GeneratedAt.IsZero(), nil
+}
+
+func legacyPauseObserved(runtimeDir string, intent legacyModeIntent, ackRaw []byte) (bool, error) {
 	if intent.Command.Action != "pause" || intent.Command.ID == "" || intent.Command.At.IsZero() || !bytes.HasPrefix(ackRaw, intent.ACKPrefix) {
 		return false, errors.New("original pause intent or ACK history changed")
 	}
@@ -100,7 +118,7 @@ func legacyPauseCapture(ctx context.Context, runtimeDir, intentPath string, reco
 			continue
 		}
 		var ack loop.ControlAck
-		if err = json.Unmarshal(line, &ack); err != nil {
+		if err := json.Unmarshal(line, &ack); err != nil {
 			return false, err
 		}
 		if matched != nil || ack.ID != intent.Command.ID || ack.Action != "pause" || ack.Status != "ok" || ack.DispatchState != loop.StatePaused || ack.At.Before(intent.Command.At) {
@@ -121,19 +139,6 @@ func legacyPauseCapture(ctx context.Context, runtimeDir, intentPath string, reco
 	}
 	if dispatch != string(loop.StatePaused) {
 		return false, errors.New("original status does not confirm paused dispatch")
-	}
-	if recoverMissing {
-		return true, nil
-	}
-	snapshot, err := reducer.ReadSnapshot(filepath.Join(runtimeDir, "state.snapshot.json"))
-	if err != nil {
-		return false, err
-	}
-	// Pause changes dispatch only. The following mode event checkpoints the
-	// actor's canonical state; waiting for a new snapshot here would deadlock
-	// an otherwise idle, correctly paused actor.
-	if snapshot.EffectLedger == nil || snapshot.GeneratedAt.IsZero() {
-		return false, nil
 	}
 	return true, nil
 }

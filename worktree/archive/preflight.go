@@ -1,6 +1,7 @@
 package archive
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -86,6 +87,13 @@ func InspectSource(c Config, root string) (Source, error) {
 	if branchErr == nil {
 		s.Branch = strings.TrimSpace(branch)
 	}
+	if strings.HasPrefix(s.Branch, "refs/heads/") && safeRelative(s.Branch) {
+		if _, err := os.Lstat(filepath.Join(s.Common, s.Branch+".lock")); err == nil {
+			return s, fmt.Errorf("Git branch lock requires retention: %s", s.Branch)
+		} else if !os.IsNotExist(err) {
+			return s, err
+		}
+	}
 	for _, dir := range []string{s.Common, s.Admin} {
 		for _, name := range []string{"locked", "index.lock", "HEAD.lock", "config.lock", "packed-refs.lock", "shallow.lock", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "BISECT_LOG"} {
 			_, err := os.Lstat(filepath.Join(dir, name))
@@ -97,19 +105,25 @@ func InspectSource(c Config, root string) (Source, error) {
 			}
 		}
 	}
-	for _, p := range []string{filepath.Join(s.Common, "shallow"), filepath.Join(s.Common, "objects", "info", "alternates"), filepath.Join(s.Admin, "config.worktree")} {
+	for _, p := range []string{filepath.Join(s.Common, "shallow"), filepath.Join(s.Common, "objects", "info", "alternates")} {
 		if _, err := os.Lstat(p); err == nil {
 			return s, fmt.Errorf("Git storage/configuration requires separate recovery: %s", p)
 		} else if !os.IsNotExist(err) {
 			return s, err
 		}
 	}
+	worktreeConfigDigest, err := inspectWorktreeConfig(s)
+	if err != nil {
+		return s, err
+	}
 	stash, err := git(root, "stash", "list")
 	if err != nil {
 		return s, err
 	}
 	if stash != "" {
-		return s, errors.New("shared repository stash requires retention")
+		if err := inspectSharedStash(s); err != nil {
+			return s, err
+		}
 	}
 	index, err := git(root, "ls-files", "-v", "-z")
 	if err != nil {
@@ -137,7 +151,7 @@ func InspectSource(c Config, root string) (Source, error) {
 	if err != nil {
 		return s, err
 	}
-	if s.AdminTree, err = inspectAdmin(s); err != nil {
+	if s.AdminTree, err = inspectAdmin(s, worktreeConfigDigest); err != nil {
 		return s, err
 	}
 	if status != "" {
@@ -189,9 +203,99 @@ func InspectSource(c Config, root string) (Source, error) {
 	return s, err
 }
 
-func inspectAdmin(source Source) (Tree, error) {
+func inspectWorktreeConfig(source Source) (string, error) {
+	path := filepath.Join(source.Admin, "config.worktree")
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", errors.New("Git worktree configuration is not a plain file: config.worktree")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	// Git normalizes the key when listing, and a full NUL-separated listing
+	// rejects any additional setting or duplicate. Parse the captured bytes.
+	list, err := gitInput(source.Path, strings.NewReader(string(raw)), "config", "--no-includes", "--file", "-", "--null", "--list")
+	if err != nil {
+		return "", fmt.Errorf("Git worktree configuration requires separate recovery: %w", err)
+	}
+	if strings.IndexByte(string(raw), 0) >= 0 || list != "codex.localenvironmentconfigpath\n__none__\x00" {
+		return "", errors.New("Git worktree configuration requires separate recovery: config.worktree")
+	}
+	hash := sha256.Sum256(raw)
+	return hex.EncodeToString(hash[:]), nil
+}
+
+func inspectSharedStash(source Source) error {
+	// Ordinary linked checkout removal retains the common repository. Only
+	// accept stashes whose ref and reflog both belong to that retained store.
+	if _, err := sharedStashFile(source, "logs/refs/stash"); err != nil {
+		return err
+	}
+	if _, err := sharedStashFile(source, "refs/stash"); !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	path, err := sharedStashFile(source, "packed-refs")
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var packed string
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Fields(line)
+		if strings.HasPrefix(line, "#") || len(fields) < 2 || fields[1] != "refs/stash" {
+			continue
+		}
+		oid := fields[0]
+		if packed != "" || len(fields) != 2 || line != oid+" refs/stash" || (len(oid) != 40 && len(oid) != 64) {
+			return errors.New("shared packed stash ref is invalid or ambiguous")
+		}
+		if _, err := hex.DecodeString(oid); err != nil {
+			return errors.New("shared packed stash ref has an invalid object ID")
+		}
+		packed = oid
+	}
+	current, err := git(source.Path, "show-ref", "--verify", "--hash", "refs/stash")
+	if err != nil {
+		return err
+	}
+	if packed == "" || strings.TrimSpace(current) != packed {
+		return errors.New("shared packed stash ref differs from the original Git readback")
+	}
+	return nil
+}
+
+func sharedStashFile(source Source, name string) (string, error) {
+	got, err := git(source.Path, "rev-parse", "--path-format=absolute", "--git-path", name)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(source.Common, filepath.FromSlash(name))
+	if strings.TrimSpace(got) != path || within(source.Admin, path) || within(source.Path, path) || canonical(filepath.Dir(path)) != nil {
+		return "", fmt.Errorf("shared stash ownership requires retention: %s", name)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", fmt.Errorf("shared stash file requires retention: %s: %w", name, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("shared stash ownership requires retention: %s", name)
+	}
+	return path, nil
+}
+
+func inspectAdmin(source Source, worktreeConfigDigest string) (Tree, error) {
 	excluded := []string{}
-	allowed := map[string]bool{"noodle-incarnation.json": true, "HEAD": true, "logs": true, "logs/HEAD": true, "ORIG_HEAD": true, "FETCH_HEAD": true, "index": true, "gitdir": true, "commondir": true}
+	allowed := map[string]bool{"noodle-incarnation.json": true, "HEAD": true, "logs": true, "logs/HEAD": true, "ORIG_HEAD": true, "FETCH_HEAD": true, "index": true, "gitdir": true, "commondir": true, "config.worktree": true}
 	refsObserved := false
 	err := filepath.WalkDir(source.Admin, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -307,6 +411,10 @@ func inspectAdmin(source Source) (Tree, error) {
 	_, refsCaptured := tree.Entries["refs"]
 	if refsObserved != refsCaptured {
 		return Tree{}, errors.New("Git registration refs presence changed during capture: refs")
+	}
+	config, configCaptured := tree.Entries["config.worktree"]
+	if configCaptured != (worktreeConfigDigest != "") || configCaptured && (config.Kind != "file" || config.Hash != worktreeConfigDigest) {
+		return Tree{}, errors.New("Git worktree configuration changed during capture: config.worktree")
 	}
 	for rel, entry := range tree.Entries {
 		if rel == "COMMIT_EDITMSG" && entry.Kind != "file" {

@@ -15,7 +15,8 @@ import (
 // Lock holds an open file descriptor with an exclusive advisory lock.
 // Close the lock to release it.
 type Lock struct {
-	file *os.File
+	file              *os.File
+	existingExclusive bool
 }
 
 // TryLock attempts a non-blocking exclusive lock on path. It creates the
@@ -48,6 +49,47 @@ func TryLock(path string) (*Lock, error) {
 	_ = f.Sync()
 
 	return &Lock{file: f}, nil
+}
+
+// TryLockExisting fences an existing owner without changing its lock file.
+func TryLockExisting(path string) (*Lock, error) {
+	before, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !before.Mode().IsRegular() {
+		return nil, fmt.Errorf("original lock file is not regular: %s", path)
+	}
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return nil, err
+	}
+	locked, err := tryFlock(f.Fd())
+	if err != nil || !locked {
+		f.Close()
+		if err != nil {
+			return nil, fmt.Errorf("original owner flock %s: %w", path, err)
+		}
+		return nil, &AlreadyLockedError{Path: path}
+	}
+	opened, openErr := f.Stat()
+	current, currentErr := os.Lstat(path)
+	if openErr != nil || currentErr != nil || !current.Mode().IsRegular() ||
+		!os.SameFile(before, opened) || !os.SameFile(opened, current) {
+		f.Close()
+		return nil, fmt.Errorf("original lock file changed: %s", path)
+	}
+	return &Lock{file: f, existingExclusive: true}, nil
+}
+
+// HoldsExisting reports whether this live descriptor still guards the named inode.
+func (l *Lock) HoldsExisting(path string) bool {
+	if l == nil || l.file == nil || !l.existingExclusive {
+		return false
+	}
+	opened, openErr := l.file.Stat()
+	current, currentErr := os.Lstat(path)
+	return openErr == nil && currentErr == nil && current.Mode().IsRegular() && os.SameFile(opened, current)
 }
 
 // Close releases the advisory lock and closes the file.

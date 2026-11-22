@@ -17,6 +17,7 @@ type hostTaskClientBinding struct {
 	Request                           hostRequest
 	RequestRef, ReceiptRef, BinaryRef loopruntime.SessionReadbackFileRef
 	Executable, HostDir               string
+	HostPID                           int
 	Sources                           map[string]loopruntime.SessionReadbackFileRef
 }
 
@@ -61,7 +62,7 @@ func originalHostTaskClient(project, requestFile, orderID, sessionID, operation 
 			ReadbackOrderID: orderID, ReadbackSessionID: sessionID, ReadbackRequest: requestRef,
 			InstanceID: r.HostInstanceID, ContextID: r.ContextID}
 		return hostTaskClientBinding{Request: req, RequestRef: requestRef, ReceiptRef: selected.Sources["host_receipts"],
-			BinaryRef: binaryRef, Executable: executable, HostDir: selected.GenerationDir, Sources: selected.Sources}, nil
+			BinaryRef: binaryRef, Executable: executable, HostDir: selected.GenerationDir, HostPID: r.HostPID, Sources: selected.Sources}, nil
 	} else if !os.IsNotExist(statErr) {
 		return bound, statErr
 	}
@@ -86,7 +87,7 @@ func originalHostTaskClient(project, requestFile, orderID, sessionID, operation 
 	if count != 1 || req.InstanceID == "" || req.ContextID == "" {
 		return bound, fmt.Errorf("original active Host receipt missing or ambiguous")
 	}
-	return hostTaskClientBinding{Request: req, RequestRef: requestRef, ReceiptRef: receiptRef, BinaryRef: binaryRef, Executable: executable, HostDir: binding.HostDir}, nil
+	return hostTaskClientBinding{Request: req, RequestRef: requestRef, ReceiptRef: receiptRef, BinaryRef: binaryRef, Executable: executable, HostDir: binding.HostDir, HostPID: original.HostPID}, nil
 }
 
 func (b hostTaskClientBinding) exchange(ctx context.Context, result any) (sent bool, err error) {
@@ -96,6 +97,9 @@ func (b hostTaskClientBinding) exchange(ctx context.Context, result any) (sent b
 	}
 	defer conn.Close()
 	deadline := time.Now().Add(15 * time.Second)
+	if b.Request.Operation == archiveRecoveryReclaimRequest {
+		deadline = time.Now().Add(archiveRecoveryReclaimTimeout)
+	}
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,6 +103,10 @@ func (c Config) Managed(path string) bool {
 func rootKey(path string) string { h := sha256.Sum256([]byte(path)); return hex.EncodeToString(h[:]) }
 
 func git(root string, args ...string) (string, error) {
+	return gitInput(root, nil, args...)
+}
+
+func gitInput(root string, input io.Reader, args ...string) (string, error) {
 	cmd, cancel := timedCommand(30*time.Second, "git", append([]string{"--no-optional-locks", "-c", "core.fsync=all", "-c", "core.hooksPath=" + os.DevNull, "-C", root}, args...)...)
 	defer cancel()
 	var out, stderr strings.Builder
@@ -112,6 +117,7 @@ func git(root string, args ...string) (string, error) {
 		}
 	}
 	cmd.Env = append(cmd.Env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+	cmd.Stdin = input
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

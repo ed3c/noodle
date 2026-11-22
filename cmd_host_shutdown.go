@@ -129,6 +129,8 @@ func (h *noodleHost) handleShutdownCall(req hostRequest, reply chan any) bool {
 		reply <- result
 	case "task_session_readback":
 		reply <- hostSessionReadback{SchemaVersion: 1, Status: "refused", Error: "Host shutdown is draining the original Loop", HostInstanceID: h.instanceID, ContextID: req.ContextID, RequestID: req.RequestID, Effects: []string{}}
+	case archiveRecoveryReclaimRequest:
+		reply <- archiveRecoveryReclaimWaiting(req, "Host shutdown is draining the original Loop")
 	default:
 		reply <- hostError("refused", errors.New("Host shutdown in progress; new work and context mutations refused"))
 	}

@@ -184,10 +184,11 @@ type openShellSession struct {
 	boundaryError         error
 	done                  chan struct{}
 	doneOnce              sync.Once
+	runExited             chan struct{}
 }
 
 func newOpenShellSession(r *OpenShellRuntime, id, dir string) *openShellSession {
-	return &openShellSession{owner: r, id: id, dir: dir, stopRequested: make(chan struct{}), progressStopDone: make(chan struct{}), boundaryDone: make(chan struct{}), done: make(chan struct{})}
+	return &openShellSession{owner: r, id: id, dir: dir, stopRequested: make(chan struct{}), progressStopDone: make(chan struct{}), boundaryDone: make(chan struct{}), done: make(chan struct{}), runExited: make(chan struct{})}
 }
 func (s *openShellSession) ID() string            { return s.id }
 func (s *openShellSession) Done() <-chan struct{} { return s.done }
@@ -253,7 +254,16 @@ func (s *openShellSession) fail(err error) {
 	}
 }
 func (s *openShellSession) complete() {
-	s.doneOnce.Do(func() { s.owner.mu.Lock(); delete(s.owner.active, s.id); s.owner.mu.Unlock(); close(s.done) })
+	s.owner.mu.Lock()
+	defer s.owner.mu.Unlock()
+	s.completeLocked()
+}
+
+func (s *openShellSession) completeLocked() {
+	s.doneOnce.Do(func() {
+		delete(s.owner.active, s.id)
+		close(s.done)
+	})
 }
 func (s *openShellSession) phase(phase string) error {
 	s.mu.Lock()
@@ -263,6 +273,9 @@ func (s *openShellSession) phase(phase string) error {
 }
 
 func (s *openShellSession) run(ctx context.Context, plan *dispatcher.RemoteHarness, req DispatchRequest, route OpenShellRoute) {
+	// A retained dispatch may stay active after the actual execution returns.
+	// A reconstructed handle has no corresponding run-exit observation.
+	defer close(s.runExited)
 	// Cancellation requests the original VM stop. It never substitutes a local
 	// stream cancellation for proof that the remote worker stopped.
 	go func() {
@@ -596,6 +609,17 @@ func (r *OpenShellRuntime) Recover(ctx context.Context) ([]RecoveredSession, err
 	if err != nil {
 		return nil, err
 	}
+	unresolved := paths[:0]
+	for _, path := range paths {
+		disposition, err := r.archiveRecoveryRetiredAtStartup(path)
+		if err != nil {
+			return nil, err
+		}
+		if disposition == nil {
+			unresolved = append(unresolved, path)
+		}
+	}
+	paths = unresolved
 	if len(paths) == 0 {
 		return nil, nil
 	}

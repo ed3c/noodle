@@ -124,7 +124,7 @@ func readOfflineHostRequest(project, requestFile, machineDir string) hostOffline
 	if resident.Source.Purpose != "host-resident" || resident.Owner != owner.HostRoot+"/resident" || resident.ContextID != "" ||
 		resident.Source.Bindings["host_root"] != owner.HostRoot ||
 		resident.Source.Bindings["binary_path"] != g.Binary || resident.Source.Bindings["binary_sha256"] != g.SHA ||
-		task.Owner != owner.HostRoot+"/generation/"+g.ID || task.ContextID != result.ContextID ||
+		task.Owner != hostMachineGenerationOwner(owner.HostRoot, g.ID) || task.ContextID != result.ContextID ||
 		task.OrderID != result.OrderID || task.Runtime != "openshell" ||
 		task.Source.Purpose != "task-preparation" || task.Source.Bindings["host_root"] != owner.HostRoot ||
 		task.Source.Bindings["control_root"] != project || task.Source.Bindings["task_path"] != taskRef.Path ||

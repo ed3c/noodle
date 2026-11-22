@@ -201,6 +201,73 @@ func TestCheckoutPreservationIndependentRestore(t *testing.T) {
 	}
 }
 
+const disabledCodexWorktreeEnvironment = "[codex]\n\tlocalEnvironmentConfigPath = __none__\n"
+
+func TestCheckoutPreservationDisabledCodexWorktreeConfig(t *testing.T) {
+	r, _ := checkoutFixture(t, "absent")
+	fixtureGit(t, r.Identity.Path, "config", "--local", "extensions.worktreeConfig", "true")
+	path := filepath.Join(r.Identity.Registration, "config.worktree")
+	fixtureWrite(t, path, []byte(disabledCodexWorktreeEnvironment))
+
+	packet, err := PrepareCheckout(r)
+	if err != nil {
+		t.Fatal("disabled Codex environment setting requires preservation", err)
+	}
+	entry, ok := packet.Source.AdminTree.Entries["config.worktree"]
+	if !ok || entry.Kind != "file" || entry.Hash != fixtureRef(t, path).SHA256 {
+		t.Fatal("original worktree config bytes are absent from registration manifest")
+	}
+	destination := filepath.Join(filepath.Dir(r.Config.Path), "codex-config-recovery")
+	if err := RestoreCheckoutRecovery(packet, destination); err != nil {
+		t.Fatal(err)
+	}
+	for _, registration := range []string{packet.RegistrationRecovery, filepath.Join(destination, "registration")} {
+		if err := VerifyTree(registration, packet.Source.AdminTree); err != nil {
+			t.Fatal("restored registration differs", err)
+		}
+		got, err := os.ReadFile(filepath.Join(registration, "config.worktree"))
+		if err != nil || string(got) != disabledCodexWorktreeEnvironment {
+			t.Fatal("restored worktree config does not preserve the original bytes", err)
+		}
+	}
+}
+
+func TestCheckoutPreservationWorktreeConfigRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data string
+	}{
+		{"extra-setting", disabledCodexWorktreeEnvironment + "[core]\n\tignoreCase = true\n"},
+		{"duplicate", disabledCodexWorktreeEnvironment + "\tlocalEnvironmentConfigPath = __none__\n"},
+		{"active-environment", "[codex]\n\tlocalEnvironmentConfigPath = .codex/environments/custom.toml\n"},
+		{"include", disabledCodexWorktreeEnvironment + "[include]\n\tpath = missing.toml\n"},
+		{"symlink", ""},
+		{"directory", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, c := checkoutFixture(t, "absent")
+			path := filepath.Join(r.Identity.Registration, "config.worktree")
+			switch tc.name {
+			case "symlink":
+				target := filepath.Join(filepath.Dir(r.Config.Path), "source-config")
+				fixtureWrite(t, target, []byte(disabledCodexWorktreeEnvironment))
+				if err := os.Symlink(target, path); err != nil {
+					t.Fatal(err)
+				}
+			case "directory":
+				if err := os.Mkdir(path, 0700); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				fixtureWrite(t, path, []byte(tc.data))
+			}
+			if _, err := InspectSource(c, r.Identity.Path); err == nil || !strings.Contains(err.Error(), "config.worktree") {
+				t.Fatalf("foreign worktree configuration must require retention, got %v", err)
+			}
+		})
+	}
+}
+
 func fixtureCommitRecord(t *testing.T, r *CheckoutRequest) string {
 	t.Helper()
 	fixtureWrite(t, filepath.Join(r.Identity.Path, "code.txt"), []byte("later committed code\n"))
@@ -537,6 +604,9 @@ func TestCheckoutPreservationReadbackCorruption(t *testing.T) {
 
 func TestCheckoutPreservationPartialRetainsSource(t *testing.T) {
 	r, c := checkoutFixture(t, "empty")
+	if err := VerifyCheckoutUnreserved(r); err != nil {
+		t.Fatal("fresh checkout was blocked", err)
+	}
 	// Block only the actual independent restore destination, after CAS/pool writes.
 	dir := filepath.Join(c.ArchiveRoot, "checkout-preservation", rootKey(r.Operation)+".recovery", "checkout")
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -553,12 +623,33 @@ func TestCheckoutPreservationPartialRetainsSource(t *testing.T) {
 	if _, err = os.Stat(filepath.Join(c.ArchiveRoot, "git-pools", rootKey(r.Identity.Repo)+".git")); err != nil {
 		t.Fatal("external data lost", err)
 	}
+	if _, err = ReadCheckoutPacket(r.Config, r.Operation); !os.IsNotExist(err) {
+		t.Fatal("partial archive unexpectedly published its final packet", err)
+	}
+	if err = VerifyCheckoutUnreserved(r); err == nil || !strings.Contains(err.Error(), "pending readback") {
+		t.Fatal("a missing packet masked the active archive reservation", err)
+	}
 	if _, err = PrepareCheckout(r); err == nil || !strings.Contains(err.Error(), "already reserved") {
 		t.Fatal("partial replay allowed", err)
 	}
 	r.Operation = "changed-operation"
+	if err = VerifyCheckoutUnreserved(r); err == nil || !strings.Contains(err.Error(), "pending readback") {
+		t.Fatal("another operation masked the original checkout reservation", err)
+	}
 	if _, err = PrepareCheckout(r); err == nil || !strings.Contains(err.Error(), "already reserved") {
 		t.Fatal("renamed replay allowed", err)
+	}
+}
+
+func TestCheckoutSourceRejectsPendingBranchRefWrite(t *testing.T) {
+	r, c := checkoutFixture(t, "empty")
+	before, err := InspectSource(c, r.Identity.Path)
+	if err != nil || before.Branch == "" {
+		t.Fatal("original linked branch unavailable", err)
+	}
+	fixtureWrite(t, filepath.Join(r.Identity.Repo, before.Branch+".lock"), []byte(before.Head+"\n"))
+	if _, err = InspectSource(c, r.Identity.Path); err == nil || !strings.Contains(err.Error(), "Git branch lock") {
+		t.Fatal("unchanged HEAD masked a pending branch update", err)
 	}
 }
 

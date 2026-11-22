@@ -436,7 +436,9 @@ func (l *Loop) Run(ctx context.Context) error {
 		case request := <-l.releaseRequests:
 			err := request.ctx.Err()
 			if err == nil {
-				if request.automatic {
+				if request.archiveRecovery != nil {
+					request.archiveRecovery.result, err = l.reclaimArchiveRecovery(request.ctx, request.archiveRecovery.input)
+				} else if request.automatic {
 					err = l.cleanupAutomatic()
 				} else if request.cleanup {
 					err = l.cleanupCompleted(request.apply)

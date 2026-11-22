@@ -28,12 +28,13 @@ type HostContinuation struct {
 }
 
 type releaseRequest struct {
-	continuation *HostContinuation
-	ctx          context.Context
-	reply        chan error
-	cleanup      bool
-	automatic    bool
-	apply        bool
+	continuation    *HostContinuation
+	archiveRecovery *archiveRecoveryRelease
+	ctx             context.Context
+	reply           chan error
+	cleanup         bool
+	automatic       bool
+	apply           bool
 }
 
 func (l *Loop) Ready() <-chan struct{} { return l.runReady }

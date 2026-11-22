@@ -84,7 +84,13 @@ func StopProgressMaintenance(ctx context.Context, planRef SessionReadbackFileRef
 	if err := maintenanceWrite(filepath.Join(directory, "stop-intent.json"), intent); err != nil {
 		return SessionReadbackFileRef{}, fmt.Errorf("maintenance stop already attempted or intent unavailable: %w", err)
 	}
-	ack, err := client.StopSandbox(ctx, &pb.StopSandboxRequest{Name: record.Name, WorkspaceScope: scope, RequestId: id})
+	return recordMaintenanceNativeStop(ctx, client, record, directory, intent)
+}
+
+// The caller must hold original control and record its one-shot intent first.
+func recordMaintenanceNativeStop(ctx context.Context, client pb.OpenShellClient, record OpenShellCustodyRecord, directory string, intent ProgressMaintenanceStop) (SessionReadbackFileRef, error) {
+	scope := &dm.WorkspaceSelector{Selection: &dm.WorkspaceSelector_Workspace{Workspace: record.Worker.Identity.Sandbox.Workspace}}
+	ack, err := client.StopSandbox(ctx, &pb.StopSandboxRequest{Name: record.Name, WorkspaceScope: scope, RequestId: intent.RequestID})
 	if err != nil {
 		return SessionReadbackFileRef{}, fmt.Errorf("maintenance stop acknowledgement unresolved; never replay: %w", err)
 	}
