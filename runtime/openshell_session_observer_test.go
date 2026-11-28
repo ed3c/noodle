@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +16,52 @@ import (
 	pb "github.com/NVIDIA/OpenShell/sdk/go/proto/openshellv1"
 	"google.golang.org/protobuf/proto"
 )
+
+func TestRetainedOpenShellCompletedEvidencePreservesPriorHead(t *testing.T) {
+	r, binding, fixture := completedReadbackFixture(t)
+	profile := r.config.Profile
+	profile.Gateway.ControlRoot = r.config.Gateway.custody.state.ControlRoot
+	before, err := ReadOpenShellCompletedEvidence(t.Context(), profile, r.config.RuntimeDir, r.config.ContextID, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", binding.WorktreePath}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("fixture Git: %v %s", err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("commit", "--allow-empty", "-m", "a later revision")
+	current := git("rev-parse", "HEAD")
+	if current == before.CandidateHead {
+		t.Fatal("fixture did not advance the shared checkout")
+	}
+	nativeEvents, err := os.ReadFile(filepath.Join(fixture.root, "events"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = ReadOpenShellCompletedEvidence(t.Context(), profile, r.config.RuntimeDir, r.config.ContextID, binding); err == nil || !strings.Contains(err.Error(), "candidate HEAD drifted") {
+		t.Fatalf("current candidate verification accepted replaced HEAD: %v", err)
+	}
+	retained, err := ReadOpenShellRetainedCompletedEvidence(t.Context(), profile, r.config.RuntimeDir, r.config.ContextID, binding, binding.WorktreePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retained.CandidateHead != before.CandidateHead || retained.NativeAttemptID != before.NativeAttemptID ||
+		retained.NativePhase != "Stopped" || !retained.StopAcknowledged || git("rev-parse", "HEAD") != current {
+		t.Fatal("retained observation changed the original attempt or current checkout")
+	}
+	if err := VerifyCompletedSessionReadback(retained, profile, r.config.ContextID, binding.OrderID, binding.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(filepath.Join(fixture.root, "events"))
+	if err != nil || string(after[len(nativeEvents):]) != "get\n" {
+		t.Fatalf("historical observer must use only native Get: %v", err)
+	}
+}
 
 func TestOpenShellCompletedEvidenceObserverUsesOnlyGetWithoutOwner(t *testing.T) {
 	r, b, f := completedReadbackFixture(t)

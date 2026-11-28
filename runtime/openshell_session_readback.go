@@ -309,7 +309,7 @@ func (r openShellSessionEvidenceReader) read(ctx context.Context, b CompletedSes
 	}
 	var before completionCustodySnapshot
 	if r.selectedCustody {
-		if progress || retained != nil {
+		if progress {
 			return result, fmt.Errorf("selected custody qualification is not a completed standalone read")
 		}
 		before, err = readCompletionCustody(r.spec, SessionCustodySubject{r.contextID, b.OrderID, b.SessionID, receipt.AttemptID}, &identity)
@@ -328,7 +328,7 @@ func (r openShellSessionEvidenceReader) read(ctx context.Context, b CompletedSes
 		return result, err
 	}
 	validPhase := observed.Phase == "Stopped" && observed.Retirement == nil
-	if retained != nil && observed.Retirement != nil {
+	if !r.selectedCustody && retained != nil && observed.Retirement != nil {
 		retirement := observed.Retirement
 		validPhase = retirement.SessionID == b.SessionID && retirement.NativeAttemptID == receipt.AttemptID && retirement.SandboxID == identity.Sandbox.SandboxID && ((observed.Phase == "Retired" && retirement.State == CleanupSessionRetired) || (observed.Phase == "Retiring" && retirement.State != CleanupSessionRetired))
 	}

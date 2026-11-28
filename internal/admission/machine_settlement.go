@@ -187,28 +187,63 @@ func (b *Budget) MachineSessionLeases(contextID, project string) ([]MachineSessi
 	}
 	var result []MachineSessionLease
 	err := b.machine.access(false, func(state *machineState) (bool, error) {
-		for id, lease := range state.Leases {
-			if lease.Owner != b.machine.owner || lease.Settlement != nil {
-				continue
-			}
-			row := MachineSessionLease{ContextID: lease.ContextID, ID: id, Owner: lease.Owner, Source: lease.Source, State: "held"}
-			if lease.Binding == nil {
-				if lease.ContextID != "" && lease.ContextID != contextID {
-					continue
-				}
-				row.HoldReason = "original_machine_session_binding_missing"
-			} else {
-				if lease.Binding.ContextID != contextID || lease.Binding.ProjectDir != project {
-					continue
-				}
-				binding := *lease.Binding
-				row.Binding = &binding
-			}
-			result = append(result, row)
-		}
+		result = selectMachineSessionLeases(*state, b.machine.owner, contextID, project)
 		return false, nil
 	})
 	return result, err
+}
+
+// ReadMachineSessionLeases observes the original held rows without creating a
+// Budget, initializing a machine ledger or binding a replacement lease. An
+// omitted row cannot establish prior settlement or absence of native effects.
+func ReadMachineSessionLeases(directory, owner, contextID, project string) ([]MachineSessionLease, error) {
+	if owner == "" || contextID == "" || !filepath.IsAbs(project) || filepath.Clean(project) != project {
+		return nil, errors.New("original machine session scope missing")
+	}
+	state, err := readArchivedMachineJournal(directory)
+	if err != nil {
+		return nil, err
+	}
+	result := selectMachineSessionLeases(state, owner, contextID, project)
+	for _, selected := range result {
+		row := state.Leases[selected.ID]
+		if selected.ID == "" || row.Source == "" || row.MemoryBytes == 0 || row.CPUs == 0 || len(row.Disks) == 0 {
+			return nil, errors.New("original selected machine lease is incomplete")
+		}
+		for volume, size := range row.Disks {
+			if volume == "" || size == 0 {
+				return nil, errors.New("original selected machine disk lease is incomplete")
+			}
+		}
+		if err := errors.Join(validateMachinePreparation(row), validateMachineLeaseSettlement(row)); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func selectMachineSessionLeases(state machineState, owner, contextID, project string) []MachineSessionLease {
+	var result []MachineSessionLease
+	for id, lease := range state.Leases {
+		if lease.Owner != owner || lease.Settlement != nil {
+			continue
+		}
+		row := MachineSessionLease{ContextID: lease.ContextID, ID: id, Owner: lease.Owner, Source: lease.Source, State: "held"}
+		if lease.Binding == nil {
+			if lease.ContextID != "" && lease.ContextID != contextID {
+				continue
+			}
+			row.HoldReason = "original_machine_session_binding_missing"
+		} else {
+			if lease.Binding.ContextID != contextID || lease.Binding.ProjectDir != project {
+				continue
+			}
+			binding := *lease.Binding
+			row.Binding = &binding
+		}
+		result = append(result, row)
+	}
+	return result
 }
 
 // VerifyArchiveRecoveryMachineLease observes the exact original worker nonce
@@ -384,64 +419,75 @@ func ReadArchivedArchiveRecoverySettlement(directory string, original MachineSes
 	if !validArchiveRecoveryLeaseSelection(original, disposition) {
 		return nil, errors.New("original archive recovery machine owner or lease binding differs")
 	}
-	if err := canonicalCapacityPath(directory); err != nil {
+	state, err := readArchivedMachineJournal(directory)
+	if err != nil {
 		return nil, err
+	}
+	_, proof, err := archiveRecoverySettlementIn(&state, original, disposition)
+	return proof, err
+}
+
+// The immutable snapshot path verifies the machine identity and original inode
+// window without taking the machine writer lock. Scoped observations must
+// validate their selected row. Effectful admission still validates all rows.
+func readArchivedMachineJournal(directory string) (machineState, error) {
+	var state machineState
+	if err := canonicalCapacityPath(directory); err != nil {
+		return state, fmt.Errorf("original machine capacity directory %s: %w", directory, err)
 	}
 	if err := capacityFileIdentity(directory, true); err != nil {
-		return nil, err
+		return state, err
 	}
 	if err := capacityFileIdentity(filepath.Join(directory, "capacity.lock"), false); err != nil {
-		return nil, err
+		return state, err
 	}
 	path := filepath.Join(directory, "capacity.json")
 	if err := capacityFileIdentity(path, false); err != nil {
-		return nil, err
+		return state, err
 	}
 	before, err := os.Lstat(path)
 	if err != nil || !before.Mode().IsRegular() || before.Size() > 64<<20 {
-		return nil, errors.New("original archive recovery machine ledger is unavailable or unbounded")
+		return state, errors.New("original machine ledger is unavailable or unbounded")
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return state, err
 	}
 	raw, readErr := io.ReadAll(io.LimitReader(file, (64<<20)+1))
 	after, statErr := file.Stat()
 	closeErr := file.Close()
 	current, currentErr := os.Lstat(path)
 	if err = errors.Join(readErr, statErr, closeErr, currentErr); err != nil {
-		return nil, err
+		return state, err
 	}
 	if int64(len(raw)) != before.Size() || !os.SameFile(before, after) || !os.SameFile(before, current) ||
 		before.Size() != after.Size() || before.Size() != current.Size() ||
 		!before.ModTime().Equal(after.ModTime()) || !before.ModTime().Equal(current.ModTime()) {
-		return nil, errors.New("original archive recovery machine ledger changed during readback")
+		return state, errors.New("original machine ledger changed during readback")
 	}
 	if err = capacityFileIdentity(path, false); err != nil {
-		return nil, err
+		return state, err
 	}
 	if err = uniqueCapacityJSON(json.NewDecoder(bytes.NewReader(raw))); err != nil {
-		return nil, err
+		return state, err
 	}
-	var state machineState
 	reader := json.NewDecoder(bytes.NewReader(raw))
 	reader.DisallowUnknownFields()
 	if err = reader.Decode(&state); err != nil {
-		return nil, err
+		return machineState{}, err
 	}
 	if err = reader.Decode(new(any)); err != io.EOF {
-		return nil, errors.New("original archive recovery machine ledger has trailing content")
+		return machineState{}, errors.New("original machine ledger has trailing content")
 	}
 	identity, err := nativeMachineIdentity()
 	if err != nil {
-		return nil, err
+		return machineState{}, err
 	}
 	if state.Schema != 1 || state.Identity != identity || state.Policy != MachineAdmissionPolicy || state.Capacity == nil ||
-		validateCapacityPolicy(*state.Capacity) != nil {
-		return nil, errors.New("original archive recovery machine ledger policy or identity differs")
+		state.Leases == nil || validateCapacityPolicy(*state.Capacity) != nil {
+		return machineState{}, errors.New("original machine ledger policy or identity differs")
 	}
-	_, proof, err := archiveRecoverySettlementIn(&state, original, disposition)
-	return proof, err
+	return state, nil
 }
 
 func (b *Budget) verifyMachineSettlementSource(state *machineState, lease machineLease, binding MachineSessionBinding) error {

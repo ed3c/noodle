@@ -207,9 +207,35 @@ func observeHostSession(ctx context.Context, project, requestFile, orderID, sess
 	return observeHostSessionWithReads(ctx, project, requestFile, orderID, sessionID, owner, binary, sessionObserverReads{readSessionObserverFrame, loop.ReadOpenShellSessionEvidence, loopruntime.VerifyCompletedSessionReadback})
 }
 
-func observeHostSessionWithReads(ctx context.Context, project, requestFile, orderID, sessionID string, owner *hostOwnerBinding, binary loopruntime.SessionReadbackFileRef, reads sessionObserverReads) (result hostSessionReadback, err error) {
+func observeHostSessionWithReads(ctx context.Context, project, requestFile, orderID, sessionID string, owner *hostOwnerBinding, binary loopruntime.SessionReadbackFileRef, reads sessionObserverReads) (hostSessionReadback, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
+	var observation loop.SessionReadback
+	result, err := observeBoundHostSessions(ctx, project, requestFile, orderID, owner, binary, reads.frame,
+		func(ctx context.Context, project string, profile loopruntime.OpenShellProfile) (func() error, error) {
+			var err error
+			observation, err = reads.session(ctx, project, filepath.Join(project, ".noodle"), owner.Current.ContextID, profile, orderID, sessionID)
+			if err != nil {
+				return nil, err
+			}
+			return func() error {
+				if observation.Execution.CustodyProjection == nil {
+					return fmt.Errorf("original standalone completion custody proof missing")
+				}
+				return reads.completion(observation.Execution, profile, owner.Current.ContextID, orderID, sessionID)
+			}, nil
+		})
+	if err == nil {
+		result.Observation = &observation
+	}
+	return result, err
+}
+
+// The original actor's before/after frames scope all selected reads. Each
+// reader supplies its own fresh custody verification after the second frame.
+func observeBoundHostSessions(ctx context.Context, project, requestFile, orderID string, owner *hostOwnerBinding, binary loopruntime.SessionReadbackFileRef,
+	frame func(context.Context, *hostOwnerBinding, string, loopruntime.OpenShellGatewaySpec) (hostSessionObserverFrame, error),
+	observe func(context.Context, string, loopruntime.OpenShellProfile) (func() error, error)) (result hostSessionReadback, err error) {
 	result = hostSessionReadback{SchemaVersion: 2, Status: "refused", HostInstanceID: owner.Current.HostInstanceID, ContextID: owner.Current.ContextID, RequestID: owner.Current.RequestID, Sources: owner.Sources, Effects: []string{}}
 	defer func() {
 		if err != nil {
@@ -268,7 +294,7 @@ func observeHostSessionWithReads(ctx context.Context, project, requestFile, orde
 	if err != nil {
 		return result, err
 	}
-	before, err := reads.frame(ctx, owner, requestFile, spec)
+	before, err := frame(ctx, owner, requestFile, spec)
 	if err != nil {
 		return result, err
 	}
@@ -277,11 +303,11 @@ func observeHostSessionWithReads(ctx context.Context, project, requestFile, orde
 	}
 	observer := &hostSessionObserver{Binary: binary, ExecutionBinary: owner.ExecutionBinary, InactiveScope: loopruntime.SelectedSessionStopped, Before: before}
 	result.Observer = observer
-	observation, err := reads.session(ctx, project, filepath.Join(project, ".noodle"), owner.Current.ContextID, profile, orderID, sessionID)
+	verify, err := observe(ctx, project, profile)
 	if err != nil {
 		return result, err
 	}
-	after, err := reads.frame(ctx, owner, requestFile, spec)
+	after, err := frame(ctx, owner, requestFile, spec)
 	if err != nil {
 		return result, err
 	}
@@ -295,10 +321,7 @@ func observeHostSessionWithReads(ctx context.Context, project, requestFile, orde
 	if err = loopruntime.VerifySessionReadbackFiles(result.Sources); err != nil {
 		return result, err
 	}
-	if observation.Execution.CustodyProjection == nil {
-		return result, fmt.Errorf("original standalone completion custody proof missing")
-	}
-	if err = reads.completion(observation.Execution, profile, owner.Current.ContextID, orderID, sessionID); err != nil {
+	if err = verify(); err != nil {
 		return result, err
 	}
 	afterRoot, rootErr := filepath.EvalSymlinks(profile.Gateway.Binding.StateRoot)
@@ -306,7 +329,6 @@ func observeHostSessionWithReads(ctx context.Context, project, requestFile, orde
 		return result, fmt.Errorf("original observer custody root changed")
 	}
 	result.Status = "observed"
-	result.Observation = &observation
 	return result, nil
 }
 

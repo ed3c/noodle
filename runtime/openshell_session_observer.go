@@ -7,6 +7,7 @@ import (
 
 	dm "github.com/NVIDIA/OpenShell/sdk/go/proto/datamodelv1"
 	pb "github.com/NVIDIA/OpenShell/sdk/go/proto/openshellv1"
+	"github.com/poteto/noodle/internal/workspaceartifacts"
 )
 
 // ReadOpenShellCompletedEvidence verifies the original completed evidence using
@@ -14,6 +15,20 @@ import (
 // between authoritative original actor and context-lease frames.
 // No gateway owner, resident, custody reservation, or Runtime is constructed.
 func ReadOpenShellCompletedEvidence(ctx context.Context, profile OpenShellProfile, runtimeDir, contextID string, b CompletedSessionBinding) (CompletedSessionReadback, error) {
+	return readOpenShellCompletedEvidence(ctx, profile, runtimeDir, contextID, b, "")
+}
+
+// ReadOpenShellRetainedCompletedEvidence verifies an original prior publication
+// after a later attempt has advanced the same checkout. The caller must
+// establish the original rejection and requeue before selecting this read.
+func ReadOpenShellRetainedCompletedEvidence(ctx context.Context, profile OpenShellProfile, runtimeDir, contextID string, b CompletedSessionBinding, repository string) (CompletedSessionReadback, error) {
+	if !filepath.IsAbs(repository) {
+		return CompletedSessionReadback{}, fmt.Errorf("original retained publication repository missing")
+	}
+	return readOpenShellCompletedEvidence(ctx, profile, runtimeDir, contextID, b, repository)
+}
+
+func readOpenShellCompletedEvidence(ctx context.Context, profile OpenShellProfile, runtimeDir, contextID string, b CompletedSessionBinding, repository string) (CompletedSessionReadback, error) {
 	if !filepath.IsAbs(runtimeDir) || contextID == "" {
 		return CompletedSessionReadback{}, fmt.Errorf("original observer runtime/context missing")
 	}
@@ -57,7 +72,13 @@ func ReadOpenShellCompletedEvidence(ctx context.Context, profile OpenShellProfil
 		}
 		return settledNativeObservation(record, expected, response.GetSandbox(), completedObservation)
 	}
-	result, err := reader.read(ctx, b, observe, false, nil)
+	var retained func(context.Context, openShellDispatchReceipt, string) error
+	if repository != "" {
+		retained = func(ctx context.Context, receipt openShellDispatchReceipt, head string) error {
+			return workspaceartifacts.VerifyRetainedPublication(ctx, repository, receipt.Baseline, receipt.Delivery, head)
+		}
+	}
+	result, err := reader.read(ctx, b, observe, false, retained)
 	if err != nil {
 		return result.completed, err
 	}
