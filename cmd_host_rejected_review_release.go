@@ -61,6 +61,7 @@ type rejectedReviewRoundRelease struct {
 	Maintenance        *loopruntime.SessionReadbackFileRef `json:"maintenance_receipt,omitempty"`
 	SourceExit         *loopruntime.SessionReadbackFileRef `json:"source_exit,omitempty"`
 	SuccessorHost      string                              `json:"successor_host_instance_id,omitempty"`
+	SuccessorContext   string                              `json:"successor_context_id,omitempty"`
 	SourceProcessCount *int                                `json:"source_process_count,omitempty"`
 	SourceRSS          *int64                              `json:"source_rss_bytes,omitempty"`
 	SourceDisk         *int64                              `json:"source_generated_disk_bytes,omitempty"`
@@ -90,6 +91,8 @@ func (p rejectedReviewReleasePlan) next(mode, digest string) *rejectedReviewRele
 		operation = "original_native_retained_review_retirement"
 	case "finish":
 		operation = "original_native_retired_source_switch"
+	case "adopt":
+		operation = "original_native_host_transfer"
 	}
 	return &rejectedReviewReleaseNext{Kind: "executable", Owner: "Noodle", Operation: operation,
 		Argv: []string{p.Successor.Path, "--project-dir", p.OwnerBefore.Current.ProjectDir, "host", "rejected-review-handoff",
@@ -105,7 +108,7 @@ func runRejectedReviewRoundRelease(ctx context.Context, project, requestFile, or
 		if digest != "" {
 			return result, errors.New("release planning takes no expected-plan")
 		}
-	case "release", "reconcile", "rollback", "retire", "finish":
+	case "release", "reconcile", "rollback", "retire", "finish", "adopt":
 		if raw, err := hex.DecodeString(digest); err != nil || len(raw) != 32 {
 			return result, errors.New("original release plan digest required")
 		}
@@ -148,7 +151,7 @@ func runRejectedReviewRoundRelease(ctx context.Context, project, requestFile, or
 			return result, err
 		}
 	}
-	if mode == "release" || mode == "rollback" || mode == "retire" || mode == "finish" {
+	if mode == "release" || mode == "rollback" || mode == "retire" || mode == "finish" || mode == "adopt" {
 		guard, err := lockfile.TryLock(filepath.Join(runtimeDir, "rejected-review-round-release.lock"))
 		if err != nil {
 			return result, err
@@ -194,6 +197,9 @@ func runRejectedReviewRoundRelease(ctx context.Context, project, requestFile, or
 	}
 	if mode == "finish" {
 		return finishRejectedReviewSource(ctx, plan, intent, result)
+	}
+	if mode == "adopt" {
+		return adoptRejectedReviewSuccessor(ctx, plan, intent, result)
 	}
 	result, err = applyRejectedReviewRoundRelease(ctx, plan, intent, result)
 	if err == nil && result.Status == "source_round_released" {

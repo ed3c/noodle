@@ -77,7 +77,7 @@ func newHostRejectedReviewHandoffCmd(app *App) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&request, "request-file", "", "Original accepted native admission request")
 	cmd.Flags().StringVar(&order, "order-id", "", "Original canonical failed order")
-	cmd.Flags().StringVar(&mode, "mode", "readback", "Native handoff boundary: readback, plan, release, retire, finish, reconcile or rollback")
+	cmd.Flags().StringVar(&mode, "mode", "readback", "Native handoff boundary: readback, plan, release, retire, finish, adopt, reconcile or rollback")
 	cmd.Flags().StringVar(&expectedPlan, "expected-plan", "", "Original rejected review release plan digest")
 	_ = cmd.MarkFlagRequired("request-file")
 	_ = cmd.MarkFlagRequired("order-id")

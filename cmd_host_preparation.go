@@ -17,12 +17,13 @@ import (
 )
 
 type hostTaskPreparationPlan struct {
-	Source  admission.PreparationSource
-	Claim   admission.ResourceClaim
-	Storage hostStoragePlan
-	Archive hostArchivePlan
-	Profile loopruntime.OpenShellProfile
-	Sources map[string]loopruntime.SessionReadbackFileRef
+	OriginalControlPreparation admission.PreparationRef
+	Source                     admission.PreparationSource
+	Claim                      admission.ResourceClaim
+	Storage                    hostStoragePlan
+	Archive                    hostArchivePlan
+	Profile                    loopruntime.OpenShellProfile
+	Sources                    map[string]loopruntime.SessionReadbackFileRef
 }
 
 type hostPreparationReader func(context.Context, hostRequest, []byte) (worktree.TaskControl, hostTaskPreparationPlan, error)
@@ -216,7 +217,11 @@ func (h *noodleHost) taskPreparation(ctx context.Context, req hostRequest, data 
 	if control.Schema != 2 || control.Status != "prepared" || control.ControlRoot != req.ProjectDir || filepath.Dir(filepath.Dir(req.ProjectDir)) != filepath.Join(h.controlRoot(), "controls") {
 		return control, plan, fmt.Errorf("%w: original task control preparation missing", admission.ErrDeferred)
 	}
-	plan, err = taskPreparationPlan(ctx, h.controlRoot(), control, req.Environment, loopruntime.SessionReadbackFileRef{Path: h.binaryPath, SHA256: h.binarySHA})
+	if req.RejectedReviewAdoption != nil {
+		control, plan, err = h.readRejectedReviewTaskPreparation(ctx, req, control, cfg.Runtime.AdmittedOrders[0])
+	} else {
+		plan, err = taskPreparationPlan(ctx, h.controlRoot(), control, req.Environment, loopruntime.SessionReadbackFileRef{Path: h.binaryPath, SHA256: h.binarySHA})
+	}
 	if err != nil {
 		return control, plan, err
 	}

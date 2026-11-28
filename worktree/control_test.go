@@ -66,6 +66,23 @@ func TestPrepareTaskControlPreservesSourceAndReusesOriginal(t *testing.T) {
 	if err != nil || first != second || second.Status != "prepared" {
 		t.Fatalf("original control differs: %+v %+v %v", first, second, err)
 	}
+	controlPath := filepath.Join(filepath.Dir(first.ControlRoot), "control.json")
+	saved, err := os.ReadFile(controlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyPreparedTaskControl(t.Context(), first); err != nil {
+		t.Fatal("the retained original checkout was not verified", err)
+	}
+	if observed, err := os.ReadFile(controlPath); err != nil || string(observed) != string(saved) {
+		t.Fatal("readback changed the native original control", err)
+	}
+	foreign := first
+	foreign.Repository = t.TempDir()
+	git(foreign.Repository, "init", "-b", "main")
+	if err := VerifyPreparedTaskControl(t.Context(), foreign); err == nil {
+		t.Fatal("readback accepted a different Git repository")
+	}
 	if got := git(root, "status", "--porcelain=v1", "-b"); got != before {
 		t.Fatalf("source tree changed: %s", got)
 	}

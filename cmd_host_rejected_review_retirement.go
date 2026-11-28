@@ -448,6 +448,17 @@ func finishRejectedReviewSource(ctx context.Context, p rejectedReviewReleasePlan
 
 func reconcileRejectedReviewHandoff(ctx context.Context, p rejectedReviewReleasePlan, intent loopruntime.SessionReadbackFileRef,
 	result rejectedReviewRoundRelease) (rejectedReviewRoundRelease, error) {
+	if _, err := os.Lstat(intent.Path + ".successor-start"); !os.IsNotExist(err) {
+		return readRejectedReviewSuccessor(ctx, p, intent, result)
+	}
+	if preparation, err := readRejectedReviewSuccessorPreparationIntent(p, intent); !os.IsNotExist(err) {
+		if err != nil {
+			return result, err
+		}
+		result.Status, result.Next = "successor_admission_pending", p.next("adopt", intent.SHA256)
+		result.HostZero, result.Storage = "ZERO", &preparation.SourceZero
+		return result, nil
+	}
 	var receipt rejectedReviewMaintenanceReceipt
 	ref, err := loopruntime.ReadSessionReadbackFile(intent.Path+".maintenance-exit", &receipt)
 	if os.IsNotExist(err) {
@@ -599,6 +610,6 @@ func readRejectedReviewSourceStorage(ctx context.Context, p rejectedReviewReleas
 	}
 	zero := int64(0)
 	result.Status, result.HostZero, result.SourceDisk, result.Storage = "source_host_zero", "ZERO", &zero, &saved
-	result.Next = &rejectedReviewReleaseNext{Kind: "input", Owner: "Noodle", Required: []string{"original_native_host_transfer_readback"}}
+	result.Next = p.next("adopt", intent.SHA256)
 	return result, nil
 }
