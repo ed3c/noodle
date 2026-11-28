@@ -18,6 +18,7 @@ import (
 )
 
 type hostRejectedReviewHandoff struct {
+	observer                 *hostSessionObserver
 	Schema                   int                                           `json:"schema"`
 	Owner                    string                                        `json:"owner"`
 	Status                   string                                        `json:"status"`
@@ -53,10 +54,20 @@ type hostRejectedReviewNext struct {
 }
 
 func newHostRejectedReviewHandoffCmd(app *App) *cobra.Command {
-	var request, order string
+	var request, order, mode, expectedPlan string
 	cmd := &cobra.Command{
 		Use: "rejected-review-handoff", Short: "Observe the original failed review attempts for cross-version handoff", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if mode != "readback" {
+				result, err := runRejectedReviewRoundRelease(cmd.Context(), app.projectDir, request, order, mode, expectedPlan)
+				if err != nil {
+					result.Error = err.Error()
+				}
+				return errors.Join(err, json.NewEncoder(cmd.OutOrStdout()).Encode(result))
+			}
+			if expectedPlan != "" {
+				return errors.New("expected-plan requires an exact rejected review release continuation")
+			}
 			report, err := readHostRejectedReviewHandoff(cmd.Context(), app.projectDir, request, order)
 			if err != nil {
 				report.Error = err.Error()
@@ -66,6 +77,8 @@ func newHostRejectedReviewHandoffCmd(app *App) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&request, "request-file", "", "Original accepted native admission request")
 	cmd.Flags().StringVar(&order, "order-id", "", "Original canonical failed order")
+	cmd.Flags().StringVar(&mode, "mode", "readback", "Native handoff boundary: readback, plan, release, retire, finish, reconcile or rollback")
+	cmd.Flags().StringVar(&expectedPlan, "expected-plan", "", "Original rejected review release plan digest")
 	_ = cmd.MarkFlagRequired("request-file")
 	_ = cmd.MarkFlagRequired("order-id")
 	return cmd
@@ -160,6 +173,7 @@ func readHostRejectedReviewHandoff(ctx context.Context, project, requestFile, or
 		result.WorkerLeaseReadbackError = err.Error()
 	}
 	result.Status, result.Attempts, result.Sources = "observed", attempts, sources
+	result.observer = observed.Observer
 	result.Retention = reducer.TaskDataRetention
 	result.Next = &hostRejectedReviewNext{"input", "Noodle", []string{"original_native_host_transfer_readback"}}
 	return result, nil
