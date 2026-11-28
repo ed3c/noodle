@@ -65,7 +65,13 @@ func projectCredentialSourceProfile(profile *pb.ProviderProfile, provider *dm.Pr
 		return nil, errors.New("openshell Codex source access refresh ownership unavailable")
 	}
 	projected := proto.Clone(profile).(*pb.ProviderProfile)
+	refreshName := projected.Credentials[dormant].GetName()
 	projected.Credentials = slices.Delete(projected.Credentials, dormant, dormant+1)
+	if projected.Discovery != nil {
+		projected.Discovery.Credentials = slices.DeleteFunc(projected.Discovery.Credentials, func(name string) bool {
+			return name == refreshName
+		})
+	}
 	return projected, nil
 }
 

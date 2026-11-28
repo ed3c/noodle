@@ -28,6 +28,7 @@ func useCodexCredentialProfile(source *credentialNative) {
 func TestOpenShellCredentialCodexProjectsDormantRefreshAlias(t *testing.T) {
 	o, source, target, now := credentialFixture(t)
 	useCodexCredentialProfile(source)
+	source.profile.Discovery = &pb.ProviderProfileDiscovery{Credentials: []string{"access_token", "refresh_token", "account_id"}}
 	if err := credentialDeliver(t, o); err != nil {
 		t.Fatal(err)
 	}
@@ -38,6 +39,10 @@ func TestOpenShellCredentialCodexProjectsDormantRefreshAlias(t *testing.T) {
 	if len(source.profile.Credentials) != 4 || !slices.Equal(source.profile.Credentials[1].EnvVars, []string{codexRefreshKey}) ||
 		len(target.profile.Credentials) != 3 || target.profile.Credentials[1].GetHeaderName() != "chatgpt-account-id" {
 		t.Fatal("source profile was changed or account header was lost")
+	}
+	if !slices.Equal(source.profile.GetDiscovery().GetCredentials(), []string{"access_token", "refresh_token", "account_id"}) ||
+		!slices.Equal(target.profile.GetDiscovery().GetCredentials(), []string{"access_token", "account_id"}) {
+		t.Fatal("projected discovery must retain only credentials present at the target without changing the source")
 	}
 	for _, credential := range target.profile.Credentials {
 		if credential.Refresh != nil || slices.Contains(credential.EnvVars, codexRefreshKey) {
