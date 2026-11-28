@@ -486,7 +486,12 @@ func (o *OpenShellGateway) deliverCredentialRow(ctx context.Context, r *OpenShel
 	if err != nil {
 		return credentialFailure("source profile", err)
 	}
-	profile, _, err := externalOpenShellProfile(profileResponse.GetProfile())
+	original := profileResponse.GetProfile()
+	sourceProfile, err := projectCredentialSourceProfile(original, p)
+	if err != nil {
+		return err
+	}
+	profile, _, err := externalOpenShellProfile(sourceProfile)
 	if err != nil {
 		return err
 	}
@@ -494,19 +499,22 @@ func (o *OpenShellGateway) deliverCredentialRow(ctx context.Context, r *OpenShel
 		return fmt.Errorf("openshell credential source profile changed")
 	}
 	var refreshReadback *pb.GetProviderRefreshStatusResponse
-	if r.SourceReadPending || credentialProfileHasRefresh(profileResponse.GetProfile()) {
+	if r.SourceReadPending || credentialProfileHasRefresh(sourceProfile) {
 		refreshReadback, err = o.credentialClient.GetProviderRefreshStatus(ctx, &pb.GetProviderRefreshStatusRequest{WorkspaceScope: scope, Provider: provider})
 		if err != nil {
 			return credentialFailure("source refresh readback", err)
 		}
 	}
-	selection, ownedKeys, err := credentialSourceKeys(profileResponse.GetProfile(), p, refreshReadback, o.credentialTime())
+	if err := confirmCredentialSourceProjection(original, sourceProfile, p, refreshReadback, o.credentialTime()); err != nil {
+		return err
+	}
+	selection, ownedKeys, err := credentialSourceKeys(sourceProfile, p, refreshReadback, o.credentialTime())
 	if err != nil {
 		return err
 	}
 	keys := selection.Keys
 	if r.SourceReadPending && len(keys) > 0 {
-		if err := credentialSourceReadbackSettled(profileResponse.GetProfile(), r.SourceRead, provider, r.SourceProviderID, refreshReadback, o.credentialTime()); err != nil {
+		if err := credentialSourceReadbackSettled(sourceProfile, r.SourceRead, provider, r.SourceProviderID, refreshReadback, o.credentialTime()); err != nil {
 			return err
 		}
 	}
@@ -555,7 +563,7 @@ func (o *OpenShellGateway) deliverCredentialRow(ctx context.Context, r *OpenShel
 	if current.GetMetadata().GetId() != r.SourceProviderID || current.GetType() != p.GetType() || current.GetProfileWorkspace() != p.GetProfileWorkspace() || !maps.Equal(current.GetConfig(), p.GetConfig()) {
 		return fmt.Errorf("openshell credential source changed during retrieval")
 	}
-	if !credentialSourceKeySnapshotMatches(p, current, ownedKeys) {
+	if !credentialSourceKeySnapshotMatches(p, current, ownedKeys) || sourceProfile != original && publishesCodexRefreshCredential(current) {
 		return credentialWaiting("openshell credential source key selection changed during retrieval")
 	}
 	target, err := o.custody.client.GetProvider(ctx, &pb.GetProviderRequest{WorkspaceScope: o.custody.scope(), Name: provider})

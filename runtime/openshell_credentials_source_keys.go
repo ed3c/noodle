@@ -1,12 +1,93 @@
 package runtime
 
 import (
+	"errors"
 	"slices"
 	"time"
 
 	dm "github.com/NVIDIA/OpenShell/sdk/go/proto/datamodelv1"
 	pb "github.com/NVIDIA/OpenShell/sdk/go/proto/openshellv1"
+	"google.golang.org/protobuf/proto"
 )
+
+const (
+	codexAccessKey  = "CODEX_AUTH_ACCESS_TOKEN"
+	codexRefreshKey = "CODEX_AUTH_REFRESH_TOKEN"
+	codexOAuth      = pb.ProviderCredentialRefreshStrategy_PROVIDER_CREDENTIAL_REFRESH_STRATEGY_OAUTH2_REFRESH_TOKEN
+)
+
+// OpenShell's Codex profile also documents a client-held refresh token. A
+// Gateway-managed OAuth provider that has no such runtime credential can
+// omit this declaration from its source selection and external projection.
+func projectCredentialSourceProfile(profile *pb.ProviderProfile, provider *dm.Provider) (*pb.ProviderProfile, error) {
+	if profile.GetId() != "codex" || provider.GetType() != "codex" {
+		return profile, nil
+	}
+	dormant := -1
+	for i, credential := range profile.GetCredentials() {
+		if !slices.Contains(credential.GetEnvVars(), codexRefreshKey) {
+			continue
+		}
+		if dormant >= 0 || credential.GetName() != "refresh_token" || len(credential.GetEnvVars()) != 1 ||
+			credential.GetRequired() || credential.GetRefresh() != nil || credential.GetTokenGrant() != nil ||
+			credential.GetAuthStyle() != "" || credential.GetHeaderName() != "" || credential.GetQueryParam() != "" ||
+			credential.GetPathTemplate() != "" || credential.GetStablePlaceholder() ||
+			len(credential.GetTokenGrantOwners()) != 0 || len(credential.ProtoReflect().GetUnknown()) != 0 {
+			return nil, errors.New("openshell Codex refresh authorization export refused")
+		}
+		dormant = i
+	}
+	if dormant < 0 {
+		return profile, nil
+	}
+	if publishesCodexRefreshCredential(provider) {
+		return nil, errors.New("openshell Codex refresh authorization export refused")
+	}
+	accessOwners := 0
+	for i, credential := range profile.GetCredentials() {
+		if i != dormant && credential.GetName() == "refresh_token" {
+			return nil, errors.New("openshell Codex refresh declaration is ambiguous")
+		}
+		if slices.Contains(credential.GetEnvVars(), codexAccessKey) {
+			if credential.GetName() != "access_token" || len(credential.GetEnvVars()) != 1 ||
+				!credential.GetRequired() || credential.GetRefresh().GetStrategy() != codexOAuth || credential.GetTokenGrant() != nil {
+				return nil, errors.New("openshell Codex source access refresh ownership differs")
+			}
+			accessOwners++
+		}
+		for _, output := range credential.GetRefresh().GetAdditionalOutputs() {
+			if output.GetCredential() == "refresh_token" {
+				return nil, errors.New("openshell Codex refresh authorization is a source refresh output")
+			}
+		}
+	}
+	if accessOwners != 1 {
+		return nil, errors.New("openshell Codex source access refresh ownership unavailable")
+	}
+	projected := proto.Clone(profile).(*pb.ProviderProfile)
+	projected.Credentials = slices.Delete(projected.Credentials, dormant, dormant+1)
+	return projected, nil
+}
+
+func publishesCodexRefreshCredential(provider *dm.Provider) bool {
+	_, stored := provider.GetCredentials()[codexRefreshKey]
+	_, handle := provider.GetCredentialHandles()[codexRefreshKey]
+	_, expiry := provider.GetCredentialExpirationTimes()[codexRefreshKey]
+	return stored || handle || expiry
+}
+
+func confirmCredentialSourceProjection(original, projected *pb.ProviderProfile, provider *dm.Provider, response *pb.GetProviderRefreshStatusResponse, now time.Time) error {
+	if original == projected {
+		return nil
+	}
+	// Require the observed Gateway owner and reject a separate refresh-token
+	// runtime owner, even when the provider metadata does not publish a value.
+	selection := &OpenShellCredentialSourceRead{
+		Keys:   []string{codexAccessKey},
+		Owners: map[string]pb.ProviderCredentialRefreshStrategy{codexAccessKey: codexOAuth},
+	}
+	return credentialSourceReadbackSettled(projected, selection, provider.GetMetadata().GetName(), provider.GetMetadata().GetId(), response, now)
+}
 
 func credentialProfileHasRefresh(profile *pb.ProviderProfile) bool {
 	for _, credential := range profile.GetCredentials() {
