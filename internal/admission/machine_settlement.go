@@ -77,7 +77,12 @@ func validateMachineReclamation(proof MachineReclamation) error {
 		return errors.New("original checkout reclamation operation missing")
 	}
 	required := []string{"checkout_packet", "checkout_removal", "checkout_verification_release"}
-	if _, recovered := proof.Sources["archive_recovery_disposition"]; recovered {
+	if proof.CheckoutOperation == RetainedRejectedReviewCheckout {
+		if proof.Binding.Runtime != "openshell" {
+			return errors.New("rejected review requires original OpenShell session settlement")
+		}
+		required = []string{"canonical_snapshot", "rejected_review_events", "rejected_review_release", "native_custody"}
+	} else if _, recovered := proof.Sources["archive_recovery_disposition"]; recovered {
 		if proof.Binding.Runtime != "openshell" {
 			return errors.New("archive recovery requires original OpenShell session settlement")
 		}
@@ -515,13 +520,37 @@ func (b *Budget) SettleMachineSession(original MachineSessionLease, proof Machin
 			return errors.New("original worker resource permit is still active")
 		}
 	}
+	if proof.CheckoutOperation == RetainedRejectedReviewCheckout {
+		if b.shared == nil {
+			return errors.New("original rejected review shared quota unavailable")
+		}
+		if err := b.shared.access(0, false, func(state *quotaState) error {
+			for _, row := range state.Leases {
+				if row.Context == original.ContextID {
+					return errors.New("original rejected review shared quota has not returned")
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
 	return b.machine.access(false, func(state *machineState) (bool, error) {
 		lease, exists := state.Leases[original.ID]
 		if !exists || lease.Owner != original.Owner || lease.Source != original.Source || lease.Binding == nil ||
 			*lease.Binding != proof.Binding || !lease.EffectsPossible {
 			return false, errors.New("original machine settlement lease differs")
 		}
+		if proof.CheckoutOperation == RetainedRejectedReviewCheckout {
+			recorded, err := rejectedReviewSettlementIn(state, original, proof.Sources["rejected_review_release"])
+			if err != nil || recorded != nil {
+				return false, err
+			}
+		}
 		if lease.Settlement != nil {
+			if lease.Settlement.CheckoutOperation == RetainedRejectedReviewCheckout {
+				return false, errors.New("original machine lease was settled for retained rejected review")
+			}
 			return false, nil
 		}
 		if err := b.verifyMachineSettlementSource(state, lease, proof.Binding); err != nil {

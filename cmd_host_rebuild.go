@@ -318,6 +318,9 @@ func (h *noodleHost) prepareRollingRebuild(ctx context.Context, req hostRequest)
 }
 
 func (h *noodleHost) rebuildRollingContext(ctx context.Context, req hostRequest) hostResponse {
+	if req.RejectedReviewAdoption != nil {
+		return h.adoptRetiredRejectedReview(ctx, req)
+	}
 	if h.rolling == nil {
 		return hostError("refused", errors.New("original native version owner is unavailable"))
 	}

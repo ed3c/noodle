@@ -260,13 +260,17 @@ func (h *noodleHost) joinRolling() error {
 }
 
 func (h *noodleHost) attachRolling(ctx context.Context, req hostRequest, state *loop.HostContinuation) hostResponse {
+	return h.attachRollingFromHold(ctx, req, state, "")
+}
+
+func (h *noodleHost) attachRollingFromHold(ctx context.Context, req hostRequest, state *loop.HostContinuation, hold string) hostResponse {
 	if h.rolling != nil {
 		if err := updateHostPool(h.rolling.root, func(p *hostPool) error {
 			owner, exists := p.Owners[req.RequestID]
 			if exists && (owner.State == "transfer-prepared" || owner.State == "transferred-unaccepted") {
 				return errors.New("original unaccepted admission has a fixed transfer; use its successor readback")
 			}
-			if exists && owner.MaintenanceHold != "" {
+			if exists && owner.MaintenanceHold != hold {
 				return errors.New("original task is held by restricted maintenance; business admission is disabled")
 			}
 			if exists && owner.Current.HostInstanceID != h.instanceID && owner.State != "ready" {
@@ -332,6 +336,9 @@ func (h *noodleHost) attachRolling(ctx context.Context, req hostRequest, state *
 		owner, exists := p.Owners[req.RequestID]
 		if exists && owner.Current.HostInstanceID != h.instanceID && owner.State != "ready" && owner.State != "admitting" {
 			return errors.New("original task still belongs to another live generation")
+		}
+		if hold != "" && (!exists || owner.MaintenanceHold != hold) {
+			return errors.New("original maintenance handoff changed during context readiness")
 		}
 		if !exists || (owner.Original.ContextID == "" && !owner.AdmissionOnly) {
 			owner.Original = response.hostReceipt

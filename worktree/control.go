@@ -171,20 +171,47 @@ func PrepareTaskControlWithAdmission(ctx context.Context, hostRoot, taskFile str
 			return result, err
 		}
 	}
-	root, err := taskControlGit(ctx, result.ControlRoot, "rev-parse", "--show-toplevel")
-	if err != nil || root != result.ControlRoot {
-		return result, errors.New("original control creation requires Git readback; no creation replayed")
-	}
-	branch, err := taskControlGit(ctx, result.ControlRoot, "symbolic-ref", "--short", "HEAD")
-	if err != nil || branch != result.Branch {
-		return result, errors.New("original control branch changed")
-	}
-	if _, err = taskControlGit(ctx, result.ControlRoot, "merge-base", "--is-ancestor", result.Head, "HEAD"); err != nil {
-		return result, errors.New("original control source ancestry changed")
+	if err := verifyTaskControlCheckout(ctx, result); err != nil {
+		return result, err
 	}
 	if result.Status == "prepared" {
 		return result, nil
 	}
 	result.Status = "prepared"
 	return result, save()
+}
+
+// VerifyPreparedTaskControl checks a retained checkout without running the
+// creating producer or changing the original control journal.
+func VerifyPreparedTaskControl(ctx context.Context, control TaskControl) error {
+	if control.Schema != 2 || control.Status != "prepared" || control.Head == "" || !filepath.IsAbs(control.ControlRoot) || !filepath.IsAbs(control.Repository) {
+		return errors.New("original prepared control is incomplete")
+	}
+	if err := verifyTaskControlCheckout(ctx, control); err != nil {
+		return err
+	}
+	repository, err := taskControlGit(ctx, control.Repository, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return err
+	}
+	checkout, err := taskControlGit(ctx, control.ControlRoot, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil || checkout != repository {
+		return errors.New("original control checkout belongs to another repository")
+	}
+	return nil
+}
+
+func verifyTaskControlCheckout(ctx context.Context, control TaskControl) error {
+	root, err := taskControlGit(ctx, control.ControlRoot, "rev-parse", "--show-toplevel")
+	if err != nil || root != control.ControlRoot {
+		return errors.New("original control creation requires Git readback; no creation replayed")
+	}
+	branch, err := taskControlGit(ctx, control.ControlRoot, "symbolic-ref", "--short", "HEAD")
+	if err != nil || branch != control.Branch {
+		return errors.New("original control branch changed")
+	}
+	if _, err = taskControlGit(ctx, control.ControlRoot, "merge-base", "--is-ancestor", control.Head, "HEAD"); err != nil {
+		return errors.New("original control source ancestry changed")
+	}
+	return nil
 }

@@ -183,7 +183,6 @@ type openShellSession struct {
 	boundaryDone          chan struct{}
 	boundaryError         error
 	done                  chan struct{}
-	doneOnce              sync.Once
 	runExited             chan struct{}
 }
 
@@ -255,15 +254,21 @@ func (s *openShellSession) fail(err error) {
 }
 func (s *openShellSession) complete() {
 	s.owner.mu.Lock()
-	defer s.owner.mu.Unlock()
-	s.completeLocked()
+	removed := s.removeActiveLocked()
+	s.owner.mu.Unlock()
+	if removed {
+		close(s.done)
+	}
 }
 
-func (s *openShellSession) completeLocked() {
-	s.doneOnce.Do(func() {
-		delete(s.owner.active, s.id)
-		close(s.done)
-	})
+// The caller that removes the registered handle publishes Done after releasing
+// its owner locks, so completion observers can immediately attempt readback.
+func (s *openShellSession) removeActiveLocked() bool {
+	if s.owner.active[s.id] != s {
+		return false
+	}
+	delete(s.owner.active, s.id)
+	return true
 }
 func (s *openShellSession) phase(phase string) error {
 	s.mu.Lock()

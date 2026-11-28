@@ -160,28 +160,30 @@ func TestArchiveRecoveryVMRetirementUsesOriginalStopAndReadsBackDiskWithoutRepla
 				close(session.runExited)
 				close(session.progressStopDone)
 				runtime.active[session.id] = session
-				release := func() error {
+				release := func() (*openShellSession, error) {
 					runtime.mu.Lock()
 					defer runtime.mu.Unlock()
 					if _, err := runtime.inertArchiveRecoveryHandle(proof); err != nil {
-						return err
+						return nil, err
 					}
-					return runtime.observeArchiveRecoveryStoppedVM(ctx, owner, proof, storage, true)
+					completed, err := runtime.observeArchiveRecoveryStoppedVM(ctx, owner, proof, storage, true)
+					select {
+					case <-session.Done():
+						t.Fatal("archive release published completion with the runtime locked")
+					default:
+					}
+					return completed, err
 				}
 				stopped.Store(false)
-				if err := release(); err == nil || len(runtime.active) != 1 {
+				if completed, err := release(); err == nil || completed != nil || len(runtime.active) != 1 {
 					t.Fatal("fresh native stopped mismatch released original runtime handle", err)
 				}
 				stopped.Store(true)
-				for range 2 {
-					if err := release(); err != nil {
-						t.Fatalf("confirmed stopped VM did not release original runtime handle: %v", err)
-					}
+				if completed, err := release(); err != nil || completed != session {
+					t.Fatalf("confirmed stopped VM did not release original runtime handle: %v", err)
 				}
-				select {
-				case <-session.Done():
-				default:
-					t.Fatal("original local handle stayed live after confirmed stop")
+				if completed, err := release(); err != nil || completed != nil {
+					t.Fatalf("archive release repeated completion of the same handle: %v", err)
 				}
 				if len(runtime.active) != 0 || deleteCalls.Load() != 0 ||
 					fileRef(dispatch.Path) != dispatch || session.Outcome().Status != StatusFailed {

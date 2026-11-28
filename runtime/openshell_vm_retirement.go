@@ -48,6 +48,13 @@ func validateVMRetirement(record OpenShellCustodyRecord) error {
 			retirement.Sources["checkout_verification_release"].Path == "" {
 			return fmt.Errorf("original archive recovery VM retirement evidence is incomplete")
 		}
+	} else if retirement.Sources["rejected_review_release"].Path != "" {
+		if err := validateCompletedRecord(record, record.Worker.Identity); err != nil {
+			return err
+		}
+		if retirement.Sources["canonical_snapshot"].Path == "" || retirement.Sources["rejected_review_events"].Path == "" {
+			return fmt.Errorf("original rejected review VM retirement evidence is incomplete")
+		}
 	} else if err := validateProgressRecord(record, record.Worker.Identity); err != nil {
 		return err
 	}
@@ -139,8 +146,12 @@ func (c *OpenShellCustody) retireCleanupSession(ctx context.Context, task OpenSh
 	if err := VerifySessionReadbackFiles(sources); err != nil {
 		return CleanupSessionRetirement{}, err
 	}
-	if record.Retirement != nil && recovery != nil && !maps.Equal(record.Retirement.Sources, sources) {
-		return CleanupSessionRetirement{}, fmt.Errorf("original archive recovery retirement disposition changed")
+	if record.Retirement != nil {
+		originalReview := record.Retirement.Sources["rejected_review_release"].Path != ""
+		requestedReview := sources["rejected_review_release"].Path != ""
+		if (recovery != nil || originalReview || requestedReview) && !maps.Equal(record.Retirement.Sources, sources) {
+			return CleanupSessionRetirement{}, fmt.Errorf("original VM retirement disposition changed")
+		}
 	}
 	if record.Retirement == nil {
 		// Recheck the same stopped identity immediately before storing the

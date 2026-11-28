@@ -22,6 +22,10 @@ type hostOwnerBinding struct {
 }
 
 func readHostOwnerBinding(requestFile string) (*hostOwnerBinding, error) {
+	return readHostOwnerBindingWithHold(requestFile, "")
+}
+
+func readHostOwnerBindingWithHold(requestFile, hold string) (*hostOwnerBinding, error) {
 	var b hostRequestBinding
 	request, err := loopruntime.ReadSessionReadbackFile(requestFile, &b)
 	if err != nil {
@@ -41,7 +45,7 @@ func readHostOwnerBinding(requestFile string) (*hostOwnerBinding, error) {
 	o, ok := p.Owners[b.RequestID]
 	req := hostRequest{ProjectDir: b.ProjectDir, RequestID: b.RequestID, ConfigPath: b.ConfigPath,
 		ConfigSHA256: b.ConfigSHA256, Mode: b.Mode, CleanupCompleted: b.CleanupCompleted}
-	if !ok || o.MaintenanceHold != "" || !hostReceiptMatches(req, o.Original) ||
+	if !ok || o.MaintenanceHold != hold || !hostReceiptMatches(req, o.Original) ||
 		o.Original.HostDir != b.HostDir || o.Original.BinarySHA256 != b.BinarySHA256 || o.EnvironmentSHA != b.EnvironmentSHA256 {
 		return nil, fmt.Errorf("original admission differs from pool owner")
 	}

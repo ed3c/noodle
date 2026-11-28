@@ -35,7 +35,14 @@ func (h *noodleHost) preparationReady(control worktree.TaskControl, plan hostTas
 		if err != nil {
 			return nil, err
 		}
-		if current != control {
+		expected := control
+		if plan.OriginalControlPreparation.ID != "" {
+			expected.Preparation = plan.OriginalControlPreparation
+			if ref != plan.Sources["original_control"] {
+				return nil, errors.New("original rejected review control evidence changed before readiness")
+			}
+		}
+		if current != expected {
 			return nil, errors.New("original preparation control changed before readiness")
 		}
 		files["control"] = admission.MachineSettlementFile{Path: ref.Path, SHA256: ref.SHA256}

@@ -56,6 +56,7 @@ type OpenShellGateway struct {
 	resident             admission.Resident
 	attempted            bool
 	serviceOnly          bool
+	retirementOnly       bool
 	ready                bool
 	closed               bool
 	diagnostic           error
@@ -208,8 +209,8 @@ func (o *OpenShellGateway) Acquire(ctx context.Context, contextID string) (*Open
 		return nil, fmt.Errorf("openshell gateway operation in progress")
 	}
 	defer o.mu.Unlock()
-	if o.serviceOnly {
-		return nil, fmt.Errorf("Source service owner cannot yield worker custody")
+	if o.serviceOnly || o.retirementOnly {
+		return nil, fmt.Errorf("openshell maintenance owner cannot yield worker custody")
 	}
 	first, err := o.acquireResidentLocked(ctx, contextID)
 	if err != nil {
@@ -323,8 +324,8 @@ func (o *OpenShellGateway) Readback(ctx context.Context) (*OpenShellCustody, err
 		return nil, fmt.Errorf("openshell gateway operation in progress")
 	}
 	defer o.mu.Unlock()
-	if o.serviceOnly {
-		return nil, fmt.Errorf("Source service owner cannot yield worker custody")
+	if o.serviceOnly || o.retirementOnly {
+		return nil, fmt.Errorf("openshell maintenance owner cannot yield worker custody")
 	}
 	if o.closed || o.generation == nil {
 		return nil, fmt.Errorf("openshell original gateway generation unavailable")
@@ -364,6 +365,9 @@ func (o *OpenShellGateway) readback(ctx context.Context) (*OpenShellCustody, err
 		return nil, o.diagnostic
 	}
 	o.ready = true
+	if o.retirementOnly {
+		return c, nil
+	}
 	// Recovered native obligations continue token delivery without requiring a
 	// new worker/session to register first.
 	o.credentialMu.Lock()
