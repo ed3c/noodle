@@ -169,6 +169,8 @@ detach 在呼叫前持久保存原意圖。後續呼叫只查同一 context 的 
 
 單一 Host 不代表單一 worker，也不代表可以無上限啟動 worker。
 每個 worker 及其準備工作都可能使用記憶體與磁碟。因此 worker 派發在準備 worktree、安裝依賴或啟動程序前，先取得共享額度；`host control` 的 admission checkout 準備另屬原 control owner。
+準備租約只移交給第一次原生派發。退修與重試沿原 order 和工作樹續行，
+每次新 attempt 都須依同一容量政策取得自己的機器租約，並保存前一筆原生綁定供結算。
 每個 Loop 原有的並行設定仍有效；共享額度是額外的全 Host 限制。每個 Host 最多 9 個 worker；rolling 兩代合計共用這 9 個名額。
 OpenShell gateway resident 另列 allocation，不扣 worker 名額。它仍有原生程序、租約與退出讀回責任。
 

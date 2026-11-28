@@ -155,6 +155,10 @@ func (p *Permit) BindSession(binding MachineSessionBinding) error {
 	if err := validateMachineSession(binding); err != nil {
 		return err
 	}
+	if attempt := p.allocation.machineAttempt; attempt != nil &&
+		(attempt.StageIndex != binding.StageIndex || attempt.RetryCount != binding.RetryCount) {
+		return errors.New("original machine session attempt differs from admission")
+	}
 	return b.machine.access(false, func(state *machineState) (bool, error) {
 		lease, ok := state.Leases[p.allocation.machineID]
 		if !ok || lease.Owner != b.machine.owner || !lease.EffectsPossible || lease.Settlement != nil ||

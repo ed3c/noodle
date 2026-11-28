@@ -331,10 +331,10 @@ func (l *Loop) controlRetrySavedProgress(cmd ControlCommand) error {
 	if err = l.requireAdmittedOrder(cmd.OrderID); err != nil {
 		return err
 	}
-	return l.withAdmission(ctx, "openshell", cmd.OrderID, func(ctx context.Context) error {
+	next := len(snapshot.State.Orders[cmd.OrderID].Stages[0].Attempts)
+	return l.withWorkerAdmission(ctx, "openshell", cmd.OrderID, &admission.MachineAttempt{RetryCount: next}, func(ctx context.Context) error {
 		node := l.canonical.Orders[cmd.OrderID]
 		s := node.Stages[0]
-		next := len(s.Attempts)
 		var grants []savedProgressAttempt
 		if raw := s.Extra[savedProgressAttemptsKey]; len(raw) > 0 {
 			if err := json.Unmarshal(raw, &grants); err != nil {
