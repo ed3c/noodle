@@ -38,11 +38,12 @@ type emptyHostRetirementJournal struct {
 }
 
 type emptyHostRetirementNative struct {
-	rpc     func(context.Context, string, hostRequest) (json.RawMessage, error)
-	observe func(int) (procx.NativeIdentity, error)
-	budget  func(string) (*admission.Budget, error)
-	absent  func(procx.ProcessRecord) (bool, error)
-	verify  func(map[string]loopruntime.SessionReadbackFileRef) error
+	expectedInstance string
+	rpc              func(context.Context, string, hostRequest) (json.RawMessage, error)
+	observe          func(int) (procx.NativeIdentity, error)
+	budget           func(string) (*admission.Budget, error)
+	absent           func(procx.ProcessRecord) (bool, error)
+	verify           func(map[string]loopruntime.SessionReadbackFileRef) error
 }
 
 func nativeEmptyHostRetirement() emptyHostRetirementNative {
@@ -61,21 +62,27 @@ func nativeEmptyHostRetirement() emptyHostRetirementNative {
 }
 
 func newHostEmptyRetirementCmd() *cobra.Command {
-	var goal string
+	var goal, expected string
 	var apply bool
 	cmd := &cobra.Command{Use: "retire-empty", Short: "Retire one proven unused Goal Host and return its original resident reservation", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if cmd.Flags().Changed("expected-host-instance") && expected == "" {
+				return errors.New("original Host instance is missing")
+			}
 			cache, err := os.UserCacheDir()
 			if err != nil {
 				return err
 			}
-			result, err := retireEmptyGoalHost(cmd.Context(), filepath.Join(cache, "noodle"), goal, apply, nativeEmptyHostRetirement())
+			native := nativeEmptyHostRetirement()
+			native.expectedInstance = expected
+			result, err := retireEmptyGoalHost(cmd.Context(), filepath.Join(cache, "noodle"), goal, apply, native)
 			if encodeErr := json.NewEncoder(cmd.OutOrStdout()).Encode(result); encodeErr != nil {
 				return encodeErr
 			}
 			return err
 		}}
 	cmd.Flags().StringVar(&goal, "goal-file", "", "Original immutable Goal source")
+	cmd.Flags().StringVar(&expected, "expected-host-instance", "", "Original Host instance returned by readback")
 	cmd.Flags().BoolVar(&apply, "apply", false, "Continue this original empty Host retirement; unknown effects are read back")
 	_ = cmd.MarkFlagRequired("goal-file")
 	return cmd
@@ -217,6 +224,9 @@ func residentRetirementResources(ctx context.Context, root string, generation ho
 func retireEmptyGoalHost(ctx context.Context, ownerRoot, goalFile string, apply bool, native emptyHostRetirementNative) (map[string]any, error) {
 	result := map[string]any{"schema": 1, "owner": "Noodle.Host", "status": "refused", "effects": []string{}}
 	fail := func(err error) (map[string]any, error) { result["error"] = err.Error(); return result, err }
+	if native.expectedInstance != "" && !validPoolID(native.expectedInstance) {
+		return fail(errors.New("original Host instance is invalid"))
+	}
 	goal, err := loopruntime.ReadSessionReadbackFile(goalFile, nil)
 	if err != nil {
 		return fail(err)
@@ -234,7 +244,11 @@ func retireEmptyGoalHost(ctx context.Context, ownerRoot, goalFile string, apply 
 		return fail(errors.New("original empty Host root is not canonical"))
 	}
 	result["goal"], result["host_root"] = goal, root
-	result["next"] = map[string]any{"owner": "Noodle.Host", "operation": "empty_host_retirement", "argv": []string{os.Args[0], "host", "retire-empty", "--goal-file", goal.Path, "--apply"}}
+	next := []string{os.Args[0], "host", "retire-empty", "--goal-file", goal.Path, "--apply"}
+	if native.expectedInstance != "" {
+		next = append(next, "--expected-host-instance", native.expectedInstance)
+	}
+	result["next"] = map[string]any{"owner": "Noodle.Host", "operation": "empty_host_retirement", "argv": next}
 	journalPath, intentPath := filepath.Join(root, "empty-retirement.json"), filepath.Join(root, "empty-retirement-intent.json")
 	var journal emptyHostRetirementJournal
 	_, journalErr := loopruntime.ReadSessionReadbackFile(journalPath, &journal)
@@ -247,6 +261,10 @@ func retireEmptyGoalHost(ctx context.Context, ownerRoot, goalFile string, apply 
 		if e != nil || ref != journal.Intent || journal.Schema != 1 || savedIntent.Schema != 1 || savedIntent.Goal != goal || savedIntent.Selected.Root != root || journal.Phase != "prepared" && journal.Phase != "fenced" && journal.Phase != "retired" {
 			return fail(errors.New("original empty retirement intent is missing, foreign or changed"))
 		}
+		if native.expectedInstance != "" && savedIntent.Generation.ID != native.expectedInstance {
+			return fail(errors.New("original Host retirement generation changed"))
+		}
+		result["host_pid"], result["host_instance_id"] = savedIntent.Generation.Process.PID, savedIntent.Generation.ID
 		original, e := os.ReadFile(savedIntent.Selection.Path)
 		current, currentErr := os.ReadFile(selectionPath)
 		if e != nil || currentErr != nil || hostDigest(original) != savedIntent.Selection.SHA256 || !sameEmptyRetirementSelection(original, current) {
@@ -276,6 +294,10 @@ func retireEmptyGoalHost(ctx context.Context, ownerRoot, goalFile string, apply 
 		if e != nil || pool.Active != generation.ID || generation.State != "active" {
 			return fail(errors.New("original empty Host is not an active unused generation"))
 		}
+		if native.expectedInstance != "" && generation.ID != native.expectedInstance {
+			return fail(errors.New("original Host retirement generation changed"))
+		}
+		result["host_pid"], result["host_instance_id"] = generation.Process.PID, generation.ID
 		if _, _, e = emptyRetirementResources(ctx, root, generation, native); e != nil {
 			return fail(e)
 		}
@@ -308,6 +330,9 @@ func retireEmptyGoalHost(ctx context.Context, ownerRoot, goalFile string, apply 
 		if e != nil {
 			return fail(e)
 		}
+		if native.expectedInstance != "" && initialGeneration.ID != native.expectedInstance {
+			return fail(errors.New("original Host retirement generation changed"))
+		}
 		initialResources, initialIdentity, e = emptyRetirementResources(ctx, root, initialGeneration, native)
 		if e != nil {
 			return fail(e)
@@ -327,6 +352,10 @@ func retireEmptyGoalHost(ctx context.Context, ownerRoot, goalFile string, apply 
 	if err != nil {
 		return fail(err)
 	}
+	if native.expectedInstance != "" && generation.ID != native.expectedInstance {
+		return fail(errors.New("original Host retirement generation changed"))
+	}
+	result["host_pid"], result["host_instance_id"] = generation.Process.PID, generation.ID
 	budget, err := native.budget(root)
 	if err != nil {
 		return fail(err)

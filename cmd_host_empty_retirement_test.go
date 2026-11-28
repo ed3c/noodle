@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -149,6 +150,43 @@ func TestEmptyHostRetirementOriginalActorWitnessReturnsSameRow(t *testing.T) {
 				t.Fatal("retirement deleted original profile", err)
 			}
 		})
+	}
+}
+
+func TestEmptyHostRetirementBindsExpectedInstance(t *testing.T) {
+	owner, goal, budget, host, native := emptyRetirementControllerFixture(t, "none")
+	ctx := context.Background()
+	native.expectedInstance = host.instanceID
+	result, err := retireEmptyGoalHost(ctx, owner, goal, false, native)
+	if err != nil || result["status"] != "empty_actor_observed" || result["host_instance_id"] != host.instanceID {
+		t.Fatal("original instance unavailable", result, err)
+	}
+	next, _ := result["next"].(map[string]any)
+	argv, _ := next["argv"].([]string)
+	if want := []string{os.Args[0], "host", "retire-empty", "--goal-file", goal, "--apply", "--expected-host-instance", host.instanceID}; !slices.Equal(argv, want) {
+		t.Fatal("original continuation lost its generation", argv)
+	}
+
+	foreign := native
+	foreign.expectedInstance = strings.Repeat("c", 32)
+	foreign.rpc = func(context.Context, string, hostRequest) (json.RawMessage, error) {
+		t.Fatal("foreign generation received a native request")
+		return nil, nil
+	}
+	result, err = retireEmptyGoalHost(ctx, owner, goal, true, foreign)
+	if err == nil || !strings.Contains(err.Error(), "generation changed") || result["status"] != "refused" {
+		t.Fatal("foreign generation was not refused", result, err)
+	}
+	if _, err = os.Stat(filepath.Join(host.controlRoot(), "empty-retirement.json")); !os.IsNotExist(err) || budget.Snapshot().MachineCapacity.Leases != 1 {
+		t.Fatal("foreign request changed the original journal or resident lease", err)
+	}
+	result, err = retireEmptyGoalHost(ctx, owner, goal, true, native)
+	if err != nil || result["status"] != "retired" || result["host_instance_id"] != host.instanceID {
+		t.Fatal("matching generation could not retire", result, err)
+	}
+	result, err = retireEmptyGoalHost(ctx, owner, goal, false, native)
+	if err != nil || result["status"] != "retired" || result["host_instance_id"] != host.instanceID {
+		t.Fatal("original native retirement proof lost its generation", result, err)
 	}
 }
 
