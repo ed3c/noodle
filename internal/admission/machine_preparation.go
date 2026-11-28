@@ -295,9 +295,6 @@ func (m *machineCapacity) acquirePreparedSuccessor(ref PreparationRef, nonce, co
 			original.Preparation.Claim.Policy != claim.Policy || original.Source != claim.Source || original.MemoryBytes != claim.MemoryBytes || original.CPUs != claim.CPUs {
 			return false, errors.New("original prepared attempt lineage differs")
 		}
-		if err := refuseRetiringTaskPreparation(original.Preparation.Source); err != nil {
-			return false, err
-		}
 		if err := refuseRetiredPreparationHost(state, original.Preparation.Source); err != nil {
 			return false, err
 		}

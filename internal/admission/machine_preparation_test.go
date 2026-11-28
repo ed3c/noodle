@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -310,7 +311,7 @@ func TestMachinePreparedRevisionReservesFreshAttemptAndPreservesPriorBinding(t *
 	}
 	probe := worker.machine.probe
 	worker.machine.probe = func(string) (diskCapacity, error) { return diskCapacity{}, errors.New("missing fixture disk") }
-	if _, err = worker.TryAcquireTaskAttempt(name, order, runtime, revision); !errors.Is(err, ErrDeferred) || !strings.Contains(err.Error(), "disk_volume_identity_unavailable") {
+	if _, err = worker.TryAcquireTaskAttempt(name, order, runtime, revision); !errors.Is(err, ErrDeferred) || !strings.Contains(err.Error(), "disk_observation_unavailable") {
 		t.Fatal("successor ignored the native disk probe", err)
 	}
 	worker.machine.probe = probe
@@ -346,13 +347,15 @@ func TestMachinePreparedRevisionReservesFreshAttemptAndPreservesPriorBinding(t *
 		t.Fatal(err)
 	}
 	next.Release()
-	for _, row := range []struct {
-		id      string
-		binding MachineSessionBinding
-	}{{ref.ID, original}, {nonce, bound}} {
-		readback, err := ReadMachineSession(machine, name, row.binding)
-		if err != nil || readback.Lease.ID != row.id || readback.Lease.State != "held" {
-			t.Fatalf("original attempt evidence was overwritten: %+v, %v", readback, err)
+	wantBindings := map[string]MachineSessionBinding{ref.ID: original, nonce: bound}
+	leases, err := worker.MachineSessionLeases(name, root)
+	if err != nil || len(leases) != len(wantBindings) {
+		t.Fatalf("original attempt leases disappeared: %+v, %v", leases, err)
+	}
+	for _, lease := range leases {
+		want, exists := wantBindings[lease.ID]
+		if !exists || lease.State != "held" || lease.Binding == nil || *lease.Binding != want {
+			t.Fatalf("original attempt evidence was overwritten: %+v", lease)
 		}
 	}
 
