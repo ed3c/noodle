@@ -103,29 +103,36 @@ func (r *OpenShellRuntime) archiveRecoveryStoppedVM(ctx context.Context, disposi
 	if err != nil {
 		return err
 	}
-	return r.withArchiveRecoveryCustody(proof, func(c *OpenShellCustody, storage openShellVMStorage) error {
-		return r.observeArchiveRecoveryStoppedVM(ctx, c, proof, storage, release)
+	var completed *openShellSession
+	err = r.withArchiveRecoveryCustody(proof, func(c *OpenShellCustody, storage openShellVMStorage) error {
+		var err error
+		completed, err = r.observeArchiveRecoveryStoppedVM(ctx, c, proof, storage, release)
+		return err
 	})
+	if completed != nil {
+		close(completed.done)
+	}
+	return err
 }
 
 // Called with the original runtime and gateway owners locked.
-func (r *OpenShellRuntime) observeArchiveRecoveryStoppedVM(ctx context.Context, c *OpenShellCustody, proof archiveRecoveryVMProof, storage openShellVMStorage, release bool) error {
+func (r *OpenShellRuntime) observeArchiveRecoveryStoppedVM(ctx context.Context, c *OpenShellCustody, proof archiveRecoveryVMProof, storage openShellVMStorage, release bool) (*openShellSession, error) {
 	if !c.mu.TryLock() {
-		return fmt.Errorf("original custody operation in progress")
+		return nil, fmt.Errorf("original custody operation in progress")
 	}
 	defer c.mu.Unlock()
 	if err := c.mutable(); err != nil {
-		return err
+		return nil, err
 	}
 	if err := proof.observeStoppedVM(ctx, c.state, c.client, storage); err != nil {
-		return err
+		return nil, err
 	}
 	if release {
-		if session := r.active[proof.disposition.SessionID]; session != nil {
-			session.completeLocked()
+		if session := r.active[proof.disposition.SessionID]; session != nil && session.removeActiveLocked() {
+			return session, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // ObserveOpenShellArchiveRecoveryStopped reads the exact original VM without

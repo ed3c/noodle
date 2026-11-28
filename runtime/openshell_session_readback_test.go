@@ -284,3 +284,26 @@ func TestOpenShellSessionReadbackUnchangedCandidate(t *testing.T) {
 		t.Fatalf("unverified unchanged candidate: observed=%+v delivery=%+v", observed, receipt.Delivery)
 	}
 }
+
+func TestOpenShellSessionDonePermitsImmediateReadback(t *testing.T) {
+	deadline := time.After(5 * time.Second)
+	for range 1024 {
+		r := &OpenShellRuntime{active: make(map[string]*openShellSession)}
+		session := newOpenShellSession(r, "completed", "")
+		r.active[session.ID()] = session
+		go session.complete()
+		select {
+		case <-session.Done():
+		case <-deadline:
+			t.Fatal("session completion was not published")
+		}
+		if !r.mu.TryLock() {
+			t.Fatal("session completion was published with the runtime locked")
+		}
+		active := len(r.active)
+		r.mu.Unlock()
+		if active != 0 {
+			t.Fatal("completed session still holds an active runtime slot")
+		}
+	}
+}
