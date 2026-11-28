@@ -192,11 +192,6 @@ func (b *Budget) BindPreparation(ref PreparationRef, contextID, orderID, runtime
 		return errors.New("original worker preparation reference changed")
 	}
 	err := b.machine.access(false, func(state *machineState) (bool, error) {
-		for id, existing := range state.Leases {
-			if id != ref.ID && existing.Owner == b.machine.owner && existing.ContextID == contextID && existing.OrderID == orderID && existing.Settlement == nil {
-				return false, errors.New("original worker already has a different machine lifetime")
-			}
-		}
 		lease, exists := state.Leases[ref.ID]
 		if !exists || lease.Preparation == nil || lease.Preparation.SHA256 != ref.SHA256 || lease.Preparation.Source.Purpose != "task-preparation" || !lease.EffectsPossible || lease.Settlement != nil {
 			return false, errors.New("original task preparation missing or unresolved")
@@ -208,6 +203,16 @@ func (b *Budget) BindPreparation(ref PreparationRef, contextID, orderID, runtime
 			if lease.Owner != b.machine.owner || lease.ContextID != contextID || lease.OrderID != orderID || lease.Runtime != runtime {
 				return false, errors.New("original preparation already belongs to another worker")
 			}
+			if lease.Binding != nil {
+				return false, nil // The exact first attempt can coexist with later leases.
+			}
+		}
+		for id, existing := range state.Leases {
+			if id != ref.ID && existing.Owner == b.machine.owner && existing.ContextID == contextID && existing.OrderID == orderID && existing.Settlement == nil {
+				return false, errors.New("original worker already has a different machine lifetime")
+			}
+		}
+		if lease.ContextID != "" {
 			return false, nil
 		}
 		lease.Owner, lease.ContextID, lease.OrderID, lease.Runtime = b.machine.owner, contextID, orderID, runtime
@@ -224,7 +229,15 @@ func (b *Budget) BindPreparation(ref PreparationRef, contextID, orderID, runtime
 	return nil
 }
 
-func (m *machineCapacity) promotePreparation(ref PreparationRef, contextID, orderID, runtime string, claim ResourceClaim, sample Sample, rate float64, rateValid bool, normals int, now time.Time) error {
+// MachineAttempt identifies the original Loop position before a session exists.
+type MachineAttempt struct {
+	StageIndex int
+	RetryCount int
+}
+
+var errPreparationDispatched = errors.New("original preparation already has a dispatched attempt")
+
+func (m *machineCapacity) promotePreparation(ref PreparationRef, contextID, orderID, runtime string, claim ResourceClaim, sample Sample, rate float64, rateValid bool, normals int, now time.Time, reconcile bool) error {
 	if err := validateResourceClaim(claim); err != nil {
 		return err
 	}
@@ -237,6 +250,12 @@ func (m *machineCapacity) promotePreparation(ref PreparationRef, contextID, orde
 			return false, errors.New("original preparation operator policy changed")
 		}
 		if original.PreparationPromoted {
+			if original.Binding != nil {
+				return false, errPreparationDispatched
+			}
+			if !reconcile {
+				return false, errors.New("original promoted preparation requires dispatch readback")
+			}
 			if original.Source != claim.Source || original.MemoryBytes != claim.MemoryBytes || original.CPUs != claim.CPUs || state.Capacity == nil || !sameAdmissionCapacity(*state.Capacity, claim.Policy) {
 				return false, errors.New("original promoted worker resource source changed")
 			}
@@ -263,6 +282,39 @@ func (m *machineCapacity) promotePreparation(ref PreparationRef, contextID, orde
 		promoted.Preparation, promoted.PreparationPromoted, promoted.EffectsPossible = original.Preparation, true, true
 		state.Leases[ref.ID] = promoted
 		return true, nil
+	})
+}
+
+// Once a preparation is assigned, reserve a different worker lease under the
+// same journal lock. An existing attempt or an unknown binding cannot qualify.
+func (m *machineCapacity) acquirePreparedSuccessor(ref PreparationRef, nonce, contextID, orderID, runtime string, attempt MachineAttempt, claim ResourceClaim, sample Sample, rate float64, rateValid bool, normals int, now time.Time) error {
+	return m.access(false, func(state *machineState) (bool, error) {
+		original := state.Leases[ref.ID]
+		if nonce == ref.ID || original.Owner != m.owner || original.ContextID != contextID || original.OrderID != orderID || original.Runtime != runtime ||
+			original.Preparation == nil || original.Preparation.SHA256 != ref.SHA256 || !original.PreparationPromoted || original.Binding == nil || original.Settlement != nil ||
+			original.Preparation.Claim.Policy != claim.Policy || original.Source != claim.Source || original.MemoryBytes != claim.MemoryBytes || original.CPUs != claim.CPUs {
+			return false, errors.New("original prepared attempt lineage differs")
+		}
+		if err := refuseRetiringTaskPreparation(original.Preparation.Source); err != nil {
+			return false, err
+		}
+		if err := refuseRetiredPreparationHost(state, original.Preparation.Source); err != nil {
+			return false, err
+		}
+		for id, lease := range state.Leases {
+			if id == nonce || lease.ContextID != contextID || lease.OrderID != orderID {
+				continue
+			}
+			bound := lease.Binding
+			if lease.Owner != m.owner || lease.Runtime != runtime || !lease.EffectsPossible || bound == nil || validateMachineSession(*bound) != nil ||
+				bound.ContextID != contextID || bound.OrderID != orderID || bound.Runtime != runtime || bound.ProjectDir != original.Binding.ProjectDir {
+				return false, errors.New("original prepared attempt requires session binding readback")
+			}
+			if attempt.StageIndex < bound.StageIndex || attempt.StageIndex == bound.StageIndex && attempt.RetryCount <= bound.RetryCount {
+				return false, errors.New("original prepared attempt already dispatched or stale")
+			}
+		}
+		return m.reserve(state, nonce, contextID, orderID, runtime, claim, sample, rate, rateValid, normals, now)
 	})
 }
 

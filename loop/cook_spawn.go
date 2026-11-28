@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/poteto/noodle/internal/admission"
 	"github.com/poteto/noodle/internal/execution"
 	"github.com/poteto/noodle/internal/ingest"
 	"github.com/poteto/noodle/internal/stringx"
@@ -47,14 +48,16 @@ func (l *Loop) atMaxConcurrency() bool {
 func (l *Loop) spawnCook(ctx context.Context, cand dispatchCandidate, order Order, opts spawnOptions) error {
 	runtimeName := nonEmpty(cand.Stage.Runtime, "process")
 	admissionOrder := cand.OrderID
+	attempt := &admission.MachineAttempt{StageIndex: cand.StageIndex, RetryCount: opts.attempt}
 	if isScheduleStage(cand.Stage) {
 		runtimeName = l.config.Runtime.Default
 		admissionOrder = ""
+		attempt = nil
 	}
 	if err := l.requireAdmittedOrder(cand.OrderID); err != nil {
 		return err
 	}
-	return l.withAdmission(ctx, runtimeName, admissionOrder, func(ctx context.Context) error { return l.spawnCookAdmitted(ctx, cand, order, opts) })
+	return l.withWorkerAdmission(ctx, runtimeName, admissionOrder, attempt, func(ctx context.Context) error { return l.spawnCookAdmitted(ctx, cand, order, opts) })
 }
 
 func (l *Loop) spawnCookAdmitted(ctx context.Context, cand dispatchCandidate, order Order, opts spawnOptions) error {

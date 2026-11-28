@@ -19,6 +19,10 @@ type launchAdmission struct {
 }
 
 func (l *Loop) withAdmission(ctx context.Context, runtimeName, orderID string, launch func(context.Context) error) error {
+	return l.withWorkerAdmission(ctx, runtimeName, orderID, nil, launch)
+}
+
+func (l *Loop) withWorkerAdmission(ctx context.Context, runtimeName, orderID string, attempt *admission.MachineAttempt, launch func(context.Context) error) error {
 	if l.resourceUnknown != nil {
 		return l.resourceUnknown
 	}
@@ -35,7 +39,13 @@ func (l *Loop) withAdmission(ctx context.Context, runtimeName, orderID string, l
 	if rt, ok := l.deps.Runtimes[runtimeName].(interface{ CapacityAvailable() bool }); ok && !rt.CapacityAvailable() {
 		return admission.ErrDeferred
 	}
-	permit, err := l.deps.Admission.TryAcquireTask(l.deps.AdmissionContext, orderID, runtimeName)
+	var permit *admission.Permit
+	var err error
+	if attempt == nil {
+		permit, err = l.deps.Admission.TryAcquireTask(l.deps.AdmissionContext, orderID, runtimeName)
+	} else {
+		permit, err = l.deps.Admission.TryAcquireTaskAttempt(l.deps.AdmissionContext, orderID, runtimeName, *attempt)
+	}
 	if err != nil {
 		return err
 	}

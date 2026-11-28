@@ -133,6 +133,7 @@ func (b *Budget) HoldForSwitch() {
 type allocation struct {
 	machineID string
 	machineKey string
+	machineAttempt *MachineAttempt
 	effectsPossible bool
 	sharedID string
 	budget   *Budget
@@ -232,12 +233,18 @@ func (b *Budget) TryAcquire(id string) (*Permit, error) { return b.tryAcquire(id
 func (b *Budget) TryAcquireTask(id, order string, runtime ...string) (*Permit, error) {
 	name := ""
 	if len(runtime) == 1 { name = runtime[0] }
-	return b.tryAcquireRuntime(id, false, "", order, name)
+	return b.tryAcquireRuntime(id, false, "", order, name, nil)
 }
+
+// TryAcquireTaskAttempt admits one attempt selected by the original Loop order.
+func (b *Budget) TryAcquireTaskAttempt(id, order, runtime string, attempt MachineAttempt) (*Permit, error) {
+	return b.tryAcquireRuntime(id, false, "", order, runtime, &attempt)
+}
+
 func (b *Budget) tryAcquire(id string, resident bool, residentKey, order string) (*Permit, error) {
-	return b.tryAcquireRuntime(id, resident, residentKey, order, "")
+	return b.tryAcquireRuntime(id, resident, residentKey, order, "", nil)
 }
-func (b *Budget) tryAcquireRuntime(id string, resident bool, residentKey, order, runtime string) (*Permit, error) {
+func (b *Budget) tryAcquireRuntime(id string, resident bool, residentKey, order, runtime string, attempt *MachineAttempt) (*Permit, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if len(b.pendingSharedReturns) != 0 || !b.contexts[id] || b.unresolvedResidents != 0 || (b.switching && (!resident || b.shared == nil || !b.shared.workerContext(id))) {
@@ -247,7 +254,7 @@ func (b *Budget) tryAcquireRuntime(id string, resident bool, residentKey, order,
 		return nil, ErrDeferred
 	}
 	if !resident && b.machineRequired {
-		return b.acquireMachineTask(id, order, runtime)
+		return b.acquireMachineTask(id, order, runtime, attempt)
 	}
 	sharedID := ""
 	if b.shared != nil {

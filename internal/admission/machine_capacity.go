@@ -128,6 +128,7 @@ type machinePending struct {
 	id, sharedID string
 	claim ResourceClaim
 	preparation *PreparationRef
+	attempt *MachineAttempt
 }
 
 func canonicalCapacityPath(path string) error {
@@ -463,12 +464,15 @@ func machineNonce() (string, error) {
 
 // Caller holds the original Budget mutex. The quota and machine journals have
 // separate locks; an uncertain machine acquire retains its original quota nonce.
-func (b *Budget) acquireMachineTask(contextID, order, runtime string) (*Permit, error) {
+func (b *Budget) acquireMachineTask(contextID, order, runtime string, attempt *MachineAttempt) (*Permit, error) {
 	deferReason := func(reason string) (*Permit, error) {
 		b.machineReason = reason
 		return nil, fmt.Errorf("%w: %s", ErrDeferred, reason)
 	}
 	if b.machineFault != "" { return deferReason(b.machineFault) }
+	if attempt != nil && (attempt.StageIndex < 0 || attempt.RetryCount < 0 || order == "") {
+		return deferReason("original_machine_attempt_identity_missing")
+	}
 	if len(b.pendingMachineReturns) != 0 { return deferReason("machine_unstarted_return_readback_required") }
 	if b.machine == nil { return deferReason("machine_owner_unavailable: " + b.machineReason) }
 	source := b.resourceSources[contextID]
@@ -484,9 +488,12 @@ func (b *Budget) acquireMachineTask(contextID, order, runtime string) (*Permit, 
 	if b.machineAllocations[key] != nil { return deferReason("original_machine_allocation_active") }
 	pending, exists := b.pendingMachineAcquires[key]
 	if !exists && len(b.pendingMachineAcquires) != 0 { return deferReason("original_machine_acquire_readback_required") }
-	if exists && !reflect.DeepEqual(pending.claim, claim) { return deferReason("original_machine_acquire_source_changed") }
+	if exists && (!reflect.DeepEqual(pending.claim, claim) || !reflect.DeepEqual(pending.attempt, attempt)) {
+		return deferReason("original_machine_acquire_source_changed")
+	}
 	if !exists {
 		pending.claim = claim
+		pending.attempt = attempt
 		if prepared, ok := b.preparedMachine[key]; ok {
 			pending.id, pending.preparation = prepared.ID, &prepared
 		} else {
@@ -508,10 +515,21 @@ func (b *Budget) acquireMachineTask(contextID, order, runtime string) (*Permit, 
 	if b.previous != nil { sample = *b.previous }
 	normals := 0
 	if source.source == claim.Source && sameAdmissionCapacity(source.policy, claim.Policy) { normals = source.normals }
-	if pending.preparation != nil {
-		err = b.machine.promotePreparation(*pending.preparation, contextID, order, runtime, claim, sample, b.rate, b.rateValid, normals, b.now())
-	} else {
+	if pending.preparation == nil {
 		err = b.machine.acquire(pending.id, contextID, order, runtime, claim, sample, b.rate, b.rateValid, normals, b.now())
+	} else {
+		if pending.id == pending.preparation.ID {
+			err = b.machine.promotePreparation(*pending.preparation, contextID, order, runtime, claim, sample, b.rate, b.rateValid, normals, b.now(), exists)
+			if !exists && attempt != nil && errors.Is(err, errPreparationDispatched) {
+				pending.id, err = machineNonce()
+				if err == nil && pending.id == pending.preparation.ID {
+					err = errors.New("successor acquired the original preparation nonce")
+				}
+			}
+		}
+		if err == nil && pending.id != pending.preparation.ID {
+			err = b.machine.acquirePreparedSuccessor(*pending.preparation, pending.id, contextID, order, runtime, *pending.attempt, claim, sample, b.rate, b.rateValid, normals, b.now())
+		}
 	}
 	if err != nil {
 		var uncertain *machineWriteUncertain
@@ -523,7 +541,8 @@ func (b *Budget) acquireMachineTask(contextID, order, runtime string) (*Permit, 
 	}
 	delete(b.pendingMachineAcquires, key)
 	if b.machineAllocations == nil { b.machineAllocations = make(map[string]*allocation) }
-	a := &allocation{budget: b, refs: 1, sharedID: pending.sharedID, machineID: pending.id, machineKey: key, effectsPossible: pending.preparation != nil}
+	a := &allocation{budget: b, refs: 1, sharedID: pending.sharedID, machineID: pending.id, machineKey: key,
+		machineAttempt: pending.attempt, effectsPossible: pending.preparation != nil && pending.preparation.ID == pending.id}
 	b.machineAllocations[key] = a
 	b.active++
 	b.machineReason = "admitted"
