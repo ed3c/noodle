@@ -153,6 +153,50 @@ func TestEmptyResidentRetirementLostFenceACKReadsOnce(t *testing.T) {
 	}
 }
 
+func TestEmptyResidentRetirementArchivedFilesDoNotBlockUnrelatedPreparation(t *testing.T) {
+	for _, closed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "pending", true: "closed"}[closed], func(t *testing.T) {
+			b, ref, fence, _ := emptyRetirementFixture(t)
+			if err := b.FenceEmptyResidentPreparation(ref, fence, func(PreparationSource) error { return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if closed {
+				exit := emptyRetirementFile(t, filepath.Join(fence.HostRoot, "original-exit.json"), []byte("original Actor exit fixture"))
+				err := b.CloseResidentPreparation(ref, func(PreparationSource) (map[string]MachineSettlementFile, error) {
+					return map[string]MachineSettlementFile{"resident_exit": exit}, nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Remove(fence.Inventory.Path); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := b.ReadEmptyResidentRetirement(ref, fence); err == nil {
+				t.Fatal("exact retirement readback accepted missing inventory")
+			}
+			if err := b.FenceEmptyResidentPreparation(ref, fence, func(PreparationSource) error {
+				return errors.New("old retirement must never replay")
+			}); err == nil {
+				t.Fatal("exact original fence accepted missing inventory")
+			}
+			root := filepath.Dir(fence.HostRoot)
+			claim := capacityFixtureClaim(root)
+			next := preparationFixtureSource(root)
+			next.Bindings["host_root"] = filepath.Join(root, "different-host")
+			if _, err := b.reservePreparation(next, claim); (err == nil) != closed {
+				t.Fatalf("unrelated machine admission after closing=%t: %v", closed, err)
+			}
+			if closed {
+				next.Bindings["host_root"] = fence.HostRoot
+				if _, err := b.reservePreparation(next, claim); err == nil || !strings.Contains(err.Error(), "fenced") {
+					t.Fatal("the old Host became eligible after archiving", err)
+				}
+			}
+		})
+	}
+}
+
 func TestEmptyResidentRetirementRefusesTaskOrDriftingInventory(t *testing.T) {
 	for _, fault := range []string{"task", "inventory", "foreign"} {
 		t.Run(fault, func(t *testing.T) {

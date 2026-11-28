@@ -160,6 +160,9 @@ func (b *Budget) CloseResidentPreparation(ref PreparationRef, readback func(Prep
 			return false, errors.New("original resident lifetime differs")
 		}
 		if lease.PreparationClosed != nil {
+			if lease.EmptyRetirement != nil {
+				return false, verifyEmptyResidentRetirementFiles(*lease.EmptyRetirement)
+			}
 			return false, nil
 		}
 		refs, err := readback(lease.Preparation.Source)

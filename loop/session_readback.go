@@ -55,11 +55,25 @@ func (l *Loop) SessionReadback(ctx context.Context, orderID, sessionID string) (
 // physical worktree through a Get-only observer. It makes no inactivity claim;
 // only the Host caller can add the original actor's authoritative frames.
 func ReadOpenShellSessionEvidence(ctx context.Context, project, runtimeDir, contextID string, profile loopruntime.OpenShellProfile, orderID, sessionID string) (SessionReadback, error) {
+	return readOpenShellSessionEvidence(ctx, project, runtimeDir, contextID, profile, orderID, sessionID, false)
+}
+
+// ReadRetainedOpenShellSessionEvidence is for a prior rejected attempt selected
+// by canonical requeue history. It verifies the prior published Git object in
+// the same repository while the checkout remains at a later revision.
+func ReadRetainedOpenShellSessionEvidence(ctx context.Context, project, runtimeDir, contextID string, profile loopruntime.OpenShellProfile, orderID, sessionID string) (SessionReadback, error) {
+	return readOpenShellSessionEvidence(ctx, project, runtimeDir, contextID, profile, orderID, sessionID, true)
+}
+
+func readOpenShellSessionEvidence(ctx context.Context, project, runtimeDir, contextID string, profile loopruntime.OpenShellProfile, orderID, sessionID string, retained bool) (SessionReadback, error) {
 	physical := func(target string) (string, error) {
 		owner, err := worktree.ReadCustody(ctx, execution.Capture(project), target)
 		return owner.Physical, err
 	}
 	read := func(ctx context.Context, b loopruntime.CompletedSessionBinding) (loopruntime.CompletedSessionReadback, error) {
+		if retained {
+			return loopruntime.ReadOpenShellRetainedCompletedEvidence(ctx, profile, runtimeDir, contextID, b, project)
+		}
 		return loopruntime.ReadOpenShellCompletedEvidence(ctx, profile, runtimeDir, contextID, b)
 	}
 	verify := func(e loopruntime.CompletedSessionReadback) error {

@@ -1,6 +1,7 @@
 package admission
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -12,6 +13,35 @@ import (
 
 	"github.com/poteto/noodle/internal/filex"
 )
+
+func TestReadMachineSessionLeasesDoesNotInitializeOrRebind(t *testing.T) {
+	b, _, lease, proof := settlementFixture(t)
+	path := filepath.Join(b.machine.dir, "capacity.json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, owner := range []string{lease.Owner, "different-generation"} {
+		rows, err := ReadMachineSessionLeases(b.machine.dir, owner, proof.Binding.ContextID, proof.Binding.ProjectDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if owner == lease.Owner && !reflect.DeepEqual(rows, []MachineSessionLease{lease}) || owner != lease.Owner && len(rows) != 0 {
+			t.Fatalf("original lease selection differs: %v", rows)
+		}
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("readback changed original machine ledger", err)
+	}
+	absent := filepath.Join(t.TempDir(), "uninitialized-machine")
+	if _, err := ReadMachineSessionLeases(absent, lease.Owner, proof.Binding.ContextID, proof.Binding.ProjectDir); err == nil {
+		t.Fatal("readback accepted an uninitialized ledger")
+	}
+	if _, err := os.Lstat(absent); !os.IsNotExist(err) {
+		t.Fatal("readback initialized the machine directory", err)
+	}
+}
 
 func settlementFixture(t *testing.T) (*Budget, *Permit, MachineSessionLease, MachineReclamation) {
 	t.Helper()
