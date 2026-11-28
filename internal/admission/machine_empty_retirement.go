@@ -2,7 +2,7 @@ package admission
 
 import (
 	"bytes"
-	"encoding/hex"
+	"crypto/sha256"
 	"errors"
 	"os"
 	"path/filepath"
@@ -27,9 +27,20 @@ func validateEmptyResidentRetirement(lease machineLease) error {
 	if lease.Preparation == nil || lease.Preparation.Source.Purpose != "host-resident" || !lease.EffectsPossible || lease.ContextID != "" || lease.PreparationPromoted || fence.HostRoot != lease.Preparation.Source.Bindings["host_root"] || !filepath.IsAbs(fence.HostRoot) || filepath.Clean(fence.HostRoot) != fence.HostRoot {
 		return errors.New("empty resident retirement subject differs")
 	}
-	if id, err := hex.DecodeString(fence.Generation); err != nil || len(id) != 16 || fence.Intent.Path != filepath.Join(fence.HostRoot, "empty-retirement-intent.json") || fence.Inventory.Path != filepath.Join(fence.HostRoot, "empty-retirement-machine-before.json") {
+	if !managedSwitchHex(fence.Generation, 16) || fence.Intent.Path != filepath.Join(fence.HostRoot, "empty-retirement-intent.json") ||
+		fence.Inventory.Path != filepath.Join(fence.HostRoot, "empty-retirement-machine-before.json") ||
+		!managedSwitchHex(fence.Intent.SHA256, sha256.Size) || !managedSwitchHex(fence.Inventory.SHA256, sha256.Size) {
 		return errors.New("empty resident retirement source differs")
 	}
+	// Unrelated admissions can rely on the persisted closure. Its original
+	// fence stays in the ledger even after the owner archives local evidence.
+	if lease.PreparationClosed != nil {
+		return nil
+	}
+	return verifyEmptyResidentRetirementFiles(*fence)
+}
+
+func verifyEmptyResidentRetirementFiles(fence EmptyResidentRetirementFence) error {
 	return verifyMachineSettlementFiles(map[string]MachineSettlementFile{"intent": fence.Intent, "inventory": fence.Inventory})
 }
 
@@ -82,7 +93,7 @@ func (b *Budget) FenceEmptyResidentPreparation(ref PreparationRef, fence EmptyRe
 			if !reflect.DeepEqual(*row.EmptyRetirement, fence) {
 				return false, errors.New("original empty resident retirement fence changed")
 			}
-			return false, nil
+			return false, verifyEmptyResidentRetirementFiles(fence)
 		}
 		if row.PreparationClosed != nil {
 			return false, errors.New("original resident was closed outside empty retirement")
@@ -119,6 +130,9 @@ func (b *Budget) ReadEmptyResidentRetirement(ref PreparationRef, fence EmptyResi
 		row, exists := state.Leases[ref.ID]
 		if !exists || row.Owner != b.machine.owner || row.Preparation == nil || row.Preparation.SHA256 != ref.SHA256 || row.EmptyRetirement == nil || !reflect.DeepEqual(*row.EmptyRetirement, fence) {
 			return false, errors.New("original empty resident fence is missing or changed")
+		}
+		if err := verifyEmptyResidentRetirementFiles(fence); err != nil {
+			return false, err
 		}
 		closed = row.PreparationClosed != nil
 		return false, emptyResidentRows(state, fence.HostRoot, ref.ID)
